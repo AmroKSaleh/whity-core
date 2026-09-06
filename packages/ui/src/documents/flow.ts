@@ -32,7 +32,78 @@
 /** Levels the renderer accepts; anything else is refused with a 422. */
 export type FlowHeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
-export interface FlowHeadingBlock {
+/**
+ * Per-block LAYOUT: the space around a block, how it behaves at a page
+ * boundary, and how wide it is (#1186).
+ *
+ * Mirrors what `render-service/src/flow/document.js` validates, key for key.
+ * These are not editor conveniences applied on top of the printed result —
+ * every one of them is read by the renderer, and a key it does not read has no
+ * business being here.
+ *
+ * WHY THESE ARE NOT ON EVERY BLOCK. `pageBreak` and `spacer` deliberately do
+ * NOT extend this, and the renderer refuses the keys on them rather than
+ * ignoring them: a page break is a boundary rather than a thing on the page,
+ * and a spacer already IS vertical space. Keeping that out of the type means
+ * the editor cannot offer a control the printer would reject.
+ */
+export interface FlowBlockLayout {
+  /** Millimetres of space above the block. Absent means the type's own. */
+  spaceBeforeMm?: number;
+  /** Millimetres of space below the block. */
+  spaceAfterMm?: number;
+  /** Start this block on a fresh page. */
+  breakBefore?: boolean;
+  /** Do not let a page break fall between this block and the next. */
+  keepWithNext?: boolean;
+  /** Do not let a page break fall inside this block. */
+  keepTogether?: boolean;
+  /**
+   * Width as a percentage of the content column.
+   *
+   * A PERCENTAGE, not millimetres, and that is the answer to "how should this
+   * behave on narrower paper": the column is derived from the page box, so 50%
+   * is half a column on A4 and half a column on A5 with nothing restated. A
+   * millimetre width would need re-authoring per paper size and would silently
+   * overflow the ones nobody re-authored it for.
+   */
+  widthPercent?: number;
+}
+
+/**
+ * The largest space a block may ask for, in mm — half of A4's height.
+ *
+ * Mirrors `RENDER_FLOW_MAX_BLOCK_SPACE_MM`. Past this a "space" is a page break
+ * expressed badly, and the renderer says so with a message pointing at the
+ * thing that says it exactly.
+ */
+export const MAX_BLOCK_SPACE_MM = 148;
+
+/** The narrowest a block may be made, as a percentage of the content column. */
+export const MIN_BLOCK_WIDTH_PERCENT = 20;
+
+/** The blocks that carry a box, and so accept {@link FlowBlockLayout}. */
+export type FlowBoxedBlock =
+  | FlowHeadingBlock
+  | FlowParagraphBlock
+  | FlowTableBlock
+  | FlowFigureBlock;
+
+/**
+ * Does this block carry a box, and so accept layout?
+ *
+ * A TYPE PREDICATE rather than a boolean, so a caller that has checked cannot
+ * then read `spaceBeforeMm` off a page break. Written as a plain boolean first,
+ * it compiled at the call site and TypeScript refused every property access
+ * after it — which is the check doing its job: the renderer refuses those keys
+ * too, and a UI that could reach them would be offering settings the printer
+ * rejects.
+ */
+export function blockAcceptsLayout(block: FlowBlock): block is FlowBoxedBlock {
+  return block.type !== 'pageBreak' && block.type !== 'spacer';
+}
+
+export interface FlowHeadingBlock extends FlowBlockLayout {
   type: 'heading';
   level: FlowHeadingLevel;
   text: string;
@@ -42,7 +113,7 @@ export interface FlowHeadingBlock {
   unnumbered?: boolean;
 }
 
-export interface FlowParagraphBlock {
+export interface FlowParagraphBlock extends FlowBlockLayout {
   type: 'paragraph';
   text: string;
   /**
@@ -53,7 +124,7 @@ export interface FlowParagraphBlock {
   align?: 'center' | 'end';
 }
 
-export interface FlowTableBlock {
+export interface FlowTableBlock extends FlowBlockLayout {
   type: 'table';
   /** Header cells. Absent means the first row is data, not headings. */
   columns?: string[];
@@ -61,7 +132,7 @@ export interface FlowTableBlock {
   caption?: string;
 }
 
-export interface FlowFigureBlock {
+export interface FlowFigureBlock extends FlowBlockLayout {
   type: 'figure';
   /** A data URI. The renderer refuses a remote source — see its own note. */
   dataUri: string;
