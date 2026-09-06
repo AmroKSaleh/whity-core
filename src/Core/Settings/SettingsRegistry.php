@@ -162,6 +162,21 @@ final class SettingsRegistry
     public const BILLING_ENFORCEMENT_DEFAULT = 'billing.enforcement_default';
     public const BILLING_GRACE_DAYS = 'billing.grace_days';
 
+    // SEATS (#seats). A tenant buys seats for its people; `members.max` (an
+    // ENTITLEMENT, so a plan sets it per tenant) is how many. These two say how
+    // the instance treats that number, because instances differ on both:
+    //
+    //   - seats.enforcement: what happens when the tenant is at its limit.
+    //     'off' does not count at all, 'warn' counts and reports but never
+    //     refuses, 'block' refuses the addition. Per-tenant overridable.
+    //   - seats.count_invited: does an outstanding INVITATION hold a seat?
+    //     True is the honest default — an invitation is a seat somebody has
+    //     been promised, and not counting it lets a tenant invite a thousand
+    //     people past a limit of ten and reach it the moment they accept.
+    //     Instances that treat a seat as "someone actually working" set it off.
+    public const SEATS_ENFORCEMENT = 'seats.enforcement';
+    public const SEATS_COUNT_INVITED = 'seats.count_invited';
+
     // Plugin marketplace (WC plugin-store): comma-separated allowlist of trusted
     // store HOSTS the install-from-store endpoint may fetch packages from. EMPTY
     // (default) = the feature is OFF — no store is trusted. This is the PRIMARY
@@ -561,6 +576,8 @@ final class SettingsRegistry
         self::MAIL_FOOTER_TEXT,
         self::BILLING_ENFORCEMENT_DEFAULT,
         self::BILLING_GRACE_DAYS,
+        self::SEATS_ENFORCEMENT,
+        self::SEATS_COUNT_INVITED,
         self::PLUGINS_STORE_ALLOWED_HOSTS,
         self::PLUGINS_STORE_ENABLED,
         // Master on/off switch for the render tier: infrastructure-level (is the
@@ -672,6 +689,10 @@ final class SettingsRegistry
         // the safe global default (never blocks); the operator raises it globally
         // or per-tenant. Kept in sync with SubscriptionService enforcement modes.
         self::BILLING_ENFORCEMENT_DEFAULT => ['off', 'warn', 'block_writes', 'block_all'],
+        // Seat strictness. Three levels rather than the wall's four: a seat
+        // limit is only ever consulted when something is being ADDED, so
+        // "block writes" and "block everything" would be the same rule.
+        self::SEATS_ENFORCEMENT => ['off', 'warn', 'block'],
         // What a STRANGER holding a printed document is told when they scan it
         // (#1036). Two levels rather than a boolean because the second one adds
         // two distinct disclosures — the routing verb, and telling a withdrawn
@@ -759,6 +780,12 @@ final class SettingsRegistry
         // per-tenant. A past_due tenant keeps access for grace_days days.
         self::BILLING_ENFORCEMENT_DEFAULT => 'warn',
         self::BILLING_GRACE_DAYS => '7',
+        // Seats default SAFE, for the reason the payment wall does: an instance
+        // that never sold a seat must not start refusing members because a
+        // limit it never set has a default. 'warn' counts and reports without
+        // refusing; an operator opts into 'block'.
+        self::SEATS_ENFORCEMENT => 'warn',
+        self::SEATS_COUNT_INVITED => 'true',
         // Empty = install-from-store OFF (no trusted store); operator opts in.
         self::PLUGINS_STORE_ALLOWED_HOSTS => '',
         // Master switch default TRUE (opt-out): the allowlist above is already
@@ -1132,6 +1159,8 @@ final class SettingsRegistry
             self::MAIL_EVENT_PASSWORD_RESET => self::validateBoolean($value, $key),
             self::BILLING_ENFORCEMENT_DEFAULT => self::validateEnum($key, $value),
             self::BILLING_GRACE_DAYS => self::validateGraceDays($value),
+            self::SEATS_ENFORCEMENT => self::validateEnum($key, $value),
+            self::SEATS_COUNT_INVITED => self::validateBoolean($value, self::SEATS_COUNT_INVITED),
             self::MAIL_BRAND_COLOR => self::validateHexColor($value),
             self::MAIL_SMTP_HOST,
             self::MAIL_SMTP_USERNAME,
