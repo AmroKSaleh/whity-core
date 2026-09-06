@@ -4173,6 +4173,31 @@ final class CoreApiSchemas
                     'additionalProperties' => ['oneOf' => [['type' => 'boolean'], ['type' => 'integer']]],
                 ],
             ], ['id', 'plan_key', 'name', 'is_active', 'sort_order', 'created_at', 'updated_at', 'entitlements']),
+            // What a plan COSTS on particular terms (#billing). Amounts are
+            // MINOR UNITS on the wire exactly as in the database: a boundary
+            // accepting "49.00" would have to decide how many decimal places the
+            // currency has, and that belongs to the currency rather than to an
+            // HTTP handler.
+            'PlanPrice' => self::object([
+                'id' => self::int(),
+                'plan_id' => self::int(),
+                'currency' => self::str(),
+                'unit_amount' => self::int(),
+                'billing_period' => ['type' => 'string', 'enum' => ['month', 'year', 'once']],
+                'is_per_seat' => self::bool(),
+                'is_active' => self::bool(),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'plan_id', 'currency', 'unit_amount', 'billing_period', 'is_per_seat', 'is_active']),
+            'PlanPriceListResponse' => self::listEnvelope('PlanPrice'),
+            'PlanPriceResponse' => self::dataEnvelope(SchemaBuilder::ref('PlanPrice')),
+            'PlanPriceCreateRequest' => self::object([
+                'currency' => self::str(),
+                'unit_amount' => self::int(),
+                'billing_period' => ['type' => 'string', 'enum' => ['month', 'year', 'once']],
+                'is_per_seat' => self::bool(),
+            ], ['currency', 'unit_amount', 'billing_period']),
+
             'PlanListResponse' => self::listEnvelope('PlanSummary'),
             'PlanResponse' => self::dataEnvelope(SchemaBuilder::ref('Plan')),
             'PlanCreateRequest' => self::object([
@@ -8666,6 +8691,50 @@ final class CoreApiSchemas
     private static function planRoutes(): array
     {
         return [
+            self::permissionRoute('GET', '/api/plans/{id:\d+}/prices', 'plans:manage', [
+                'summary' => 'What this plan costs, on every set of terms (operator)',
+                'description' =>
+                    'Includes RETIRED prices. A list of only the live ones cannot explain a charge '
+                    . 'somebody is querying, and that is the question this screen is opened to answer. '
+                    . 'Amounts are minor units — 4900 is 49.00 in a two-decimal currency.',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('Every price this plan has carried', 'PlanPriceListResponse'),
+                    404 => self::errorResponse('No such plan'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/plans/{id:\d+}/prices', 'plans:manage', [
+                'summary' => 'Price this plan on a set of terms (operator)',
+                'description' =>
+                    'A plan may carry many prices — one per currency, billing period and seat basis — '
+                    . 'but only ONE LIVE price per combination of those. A second live price for the '
+                    . 'same terms is refused with 409 rather than accepted, because two of them would '
+                    . 'make the checkout, the invoice and the price list each pick differently and '
+                    . 'somebody be charged an amount no screen displayed. Retire the existing one first. '
+                    . '`unit_amount` must be an integer of minor units; a decimal is refused with 422, '
+                    . 'since 49.9 truncating to 49 is a hundredfold error that looks like a real price.',
+                'tags' => ['plans'],
+                'request' => 'PlanPriceCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The new price', 'PlanPriceResponse'),
+                    404 => self::errorResponse('No such plan'),
+                    409 => self::errorResponse('This plan already has a live price on those terms'),
+                    422 => self::errorResponse('The currency, amount or period cannot be billed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/plans/{id:\d+}/prices/{priceId:\d+}', 'plans:manage', [
+                'summary' => 'Retire a price (operator)',
+                'description' =>
+                    'RETIRES rather than destroys, and returns the retired row. The price is what a past '
+                    . 'charge was made against, so deleting it would throw away the record of what '
+                    . 'somebody was charged; the partial unique index frees its slot the moment it stops '
+                    . 'being active, so a replacement can be created immediately.',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('The retired price', 'PlanPriceResponse'),
+                    404 => self::errorResponse('No such price on this plan'),
+                ] + self::authErrors(),
+            ]),
             self::permissionRoute('GET', '/api/plans', 'plans:manage', [
                 'summary' => 'List subscription plans (operator)',
                 'tags' => ['plans'],
