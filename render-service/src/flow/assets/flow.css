@@ -90,6 +90,52 @@ body {
 }
 
 /*
+ * PER-BLOCK LAYOUT (#1186): the space an author asked for around a block, and
+ * how wide they asked for it to be.
+ *
+ * Applied through custom properties set inline rather than as inline margins,
+ * because the rule directly above must keep winning. An inline `margin-top`
+ * outranks any class selector, so an author's leading space would override the
+ * first-child reset and every page that happened to begin with a spaced block
+ * would start lower than every other page — a defect that appears only on the
+ * pages where the break falls, which is the hardest kind to notice.
+ *
+ * These selectors are single classes, so `.flow-page-content > :first-child`
+ * (a class plus a pseudo-class) still takes precedence. The paginator measures
+ * with all of it in force.
+ */
+.flow-space-before {
+  margin-top: var(--flow-space-before, 0);
+}
+
+.flow-space-after {
+  margin-bottom: var(--flow-space-after, 0);
+}
+
+/*
+ * A narrowed block. The width is a PERCENTAGE of the content column, and the
+ * column comes from the page box, so the same figure is half a column on A4
+ * and half a column on A5 with nothing restated.
+ *
+ * Centring a narrowed block needs auto margins — `text-align` moves the words
+ * inside a box, not the box — so alignment is honoured here as well as in the
+ * type rules. Logical margins, so an Arabic document puts an end-aligned block
+ * where an Arabic reader expects it.
+ */
+.flow-width {
+  width: var(--flow-width, 100%);
+}
+
+.flow-width.flow-align-center {
+  margin-inline: auto;
+}
+
+.flow-width.flow-align-end {
+  margin-inline-start: auto;
+  margin-inline-end: 0;
+}
+
+/*
  * Running header / footer bands. They sit INSIDE the page margin — above the
  * content box and below it — which is what a running head is. Both are laid
  * out as a three-part flex row so the start/centre/end slots land where the

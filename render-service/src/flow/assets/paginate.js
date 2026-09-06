@@ -135,6 +135,14 @@
       return el.getBoundingClientRect().bottom;
     }
 
+    /* A per-block layout hint (#1186), read off the unit the HTML emitted.
+     * Attributes rather than CSS because THIS function decides pages: it
+     * measures every unit and packs the boxes itself, so `break-inside: avoid`
+     * is advice Chromium is never asked for. */
+    function hint(el, name) {
+      return !!(el && el.getAttribute && el.getAttribute(name) === '1');
+    }
+
     openPage();
 
     var queue = units.slice();
@@ -161,6 +169,14 @@
         continue;
       }
 
+      /* "Start this block on a new page." No `continue`: the page is opened
+       * and the SAME unit is then placed on it. Opening a page that is already
+       * empty would emit a blank one, so a block asking to start a page it is
+       * already starting costs nothing. */
+      if (hint(node, 'data-break-before') && current.content.firstChild) {
+        openPage();
+      }
+
       current.content.appendChild(node);
       var overflows = bottomOf(node) > limit + FIT_EPSILON;
 
@@ -176,6 +192,31 @@
             continue;
           }
         }
+        /* "Keep this with what follows." The heading rule above is the fixed
+         * version of this — two body lines of room — and this is the authored
+         * one: the NEXT unit is measured for real rather than approximated,
+         * because "keep this heading with its table" is a promise about a
+         * table, whose height nothing can guess.
+         *
+         * The unit is only moved when it is not alone on the page. A block that
+         * is first and whose successor still will not fit cannot be helped by
+         * another page break, and moving it would loop forever. */
+        if (hint(node, 'data-keep-with-next') && index + 1 < queue.length) {
+          var follower = queue[index + 1];
+          var followerIsBreak =
+            follower.getAttribute && follower.getAttribute('data-flow-unit') === 'pageBreak';
+          if (!followerIsBreak) {
+            current.content.appendChild(follower);
+            var followerFits = bottomOf(follower) <= limit + FIT_EPSILON;
+            current.content.removeChild(follower);
+            if (!followerFits && current.content.firstChild !== node) {
+              current.content.removeChild(node);
+              openPage();
+              continue;
+            }
+          }
+        }
+
         index += 1;
         continue;
       }
@@ -185,10 +226,17 @@
       var isFirstOnPage = !current.content.firstChild;
       var tail = null;
 
-      if (node.getAttribute && node.getAttribute('data-flow-unit') === 'paragraph') {
-        tail = splitParagraph(node, current.content, limit);
-      } else if (node.getAttribute && node.getAttribute('data-flow-unit') === 'table') {
-        tail = splitTable(node, current.content, limit);
+      /* "Do not let a page break fall inside this." The unit moves whole to the
+       * next page instead of being split. If it is already alone on the page
+       * and still does not fit, the block below places it anyway and records
+       * the overflow — a promise that cannot be kept is reported rather than
+       * quietly broken. */
+      if (!hint(node, 'data-keep-together')) {
+        if (node.getAttribute && node.getAttribute('data-flow-unit') === 'paragraph') {
+          tail = splitParagraph(node, current.content, limit);
+        } else if (node.getAttribute && node.getAttribute('data-flow-unit') === 'table') {
+          tail = splitTable(node, current.content, limit);
+        }
       }
 
       if (tail) {
