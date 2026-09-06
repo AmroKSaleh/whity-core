@@ -5162,6 +5162,20 @@ final class CoreApiSchemas
             // ous:read's job and this route is gated on documents:read, so a
             // client that cannot read units renders the id rather than being
             // handed a name this endpoint had no authority to look up.
+            // The FEATURE catalogue (#feature-flags). Three booleans per row on
+            // purpose: "off" is not one condition, and an operator switch and a
+            // missing entitlement need different actions from different people.
+            'Feature' => self::object([
+                'key' => self::str(),
+                'label' => self::str(),
+                'description' => self::str(),
+                'enabled' => self::bool(),
+                'operator_enabled' => self::bool(),
+                'entitlement' => self::str(true),
+                'entitled' => self::bool(),
+            ], ['key', 'label', 'description', 'enabled', 'operator_enabled', 'entitlement', 'entitled']),
+            'FeatureListResponse' => self::listEnvelope('Feature'),
+
             'DocumentBlockUsage' => self::object([
                 'block_id' => self::int(),
                 'total' => self::int(),
@@ -9977,6 +9991,20 @@ final class CoreApiSchemas
             // Listed after GET /{id} and before the write routes purely for
             // readability; `usage` is not a digit, so it could never have matched
             // the /{id:\d+} constraint either way.
+            self::permissionRoute('GET', '/api/features', 'settings:read', [
+                'summary' => 'Which major subsystems this instance has, and whether each is available here',
+                'description' =>
+                    'Reports the tenant making the request. Each row carries three booleans rather than '
+                    . 'one, because "off" is not a single condition: `operator_enabled` is the instance '
+                    . 'switch (the same settings key the subsystem itself reads), `entitled` is whether '
+                    . 'the plan includes it where a commercial gate is declared, and `enabled` is both. '
+                    . 'A single flag would send whoever is looking to the wrong place, since an operator '
+                    . 'setting cannot be fixed by changing a plan and a plan cannot be fixed in settings.',
+                'tags' => ['settings'],
+                'responses' => [
+                    200 => self::jsonResponse('The feature catalogue for this tenant', 'FeatureListResponse'),
+                ] + self::authErrors(),
+            ]),
             self::permissionRoute('GET', '/api/document-blocks/{id:\d+}/usage', 'documents:read', [
                 'summary' => 'What would break if this block changed: the templates and blocks that instance it',
                 'description' =>
