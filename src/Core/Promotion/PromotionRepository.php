@@ -293,9 +293,22 @@ final class PromotionRepository
         return (int) $this->db->lastInsertId();
     }
 
-    /** How many times a promotion has been taken, by anyone. */
+    /**
+     * How many times a promotion has been taken, BY ANYONE.
+     *
+     * Deliberately cross-tenant: `max_redemptions` means "how many times in
+     * total may this be taken", which is the early bird's defining limit —
+     * the first fifty customers, across every tenant there is. Scoping this to
+     * one tenant would make an allocation of fifty mean fifty EACH, and the
+     * cap would never be reached.
+     *
+     * The per-tenant question is {@see self::redemptionCountForTenant()}, and
+     * the two are separate methods precisely so neither can be mistaken for the
+     * other at a call site.
+     */
     public function redemptionCount(int $promotionId): int
     {
+        // @tenant-guard-ignore: the GLOBAL allocation count — an early bird's cap spans tenants by definition; the per-tenant count is redemptionCountForTenant() below and binds tenant_id
         $stmt = $this->db->prepare('SELECT COUNT(*) FROM promotion_redemptions WHERE promotion_id = :id');
         $stmt->execute([':id' => $promotionId]);
 
