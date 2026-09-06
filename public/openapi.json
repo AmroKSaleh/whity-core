@@ -11271,6 +11271,83 @@
                 ]
             }
         },
+        "/api/v1/features": {
+            "get": {
+                "operationId": "get_api_v1_features",
+                "summary": "Feature flags composed with the tenant plan: what this tenant can actually use",
+                "tags": [
+                    "settings"
+                ],
+                "description": "The curated feature flags, keyed by their settings key, resolved for the tenant making the request. The settings console already edits the operator half and is global and system-tenant-only; this composes it with the tenant PLAN, which that surface knows nothing about. Each row carries three booleans rather than one, because \"off\" is not a single condition: `operator_enabled` is the instance switch, `entitled` is whether the plan includes it where a commercial gate is declared, and `enabled` is both. One flag would send whoever is looking to the wrong place, since an operator setting cannot be fixed by changing a plan, nor a plan in settings.",
+                "responses": {
+                    "200": {
+                        "description": "The feature catalogue for this tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/FeatureListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/form-fields": {
             "get": {
                 "operationId": "get_api_v1_form_fields",
@@ -37160,6 +37237,48 @@
                 },
                 "required": [
                     "error"
+                ]
+            },
+            "Feature": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string"
+                    },
+                    "enabled": {
+                        "type": "boolean"
+                    },
+                    "operator_enabled": {
+                        "type": "boolean"
+                    },
+                    "entitlement": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "entitled": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "key",
+                    "enabled",
+                    "operator_enabled",
+                    "entitlement",
+                    "entitled"
+                ]
+            },
+            "FeatureListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Feature"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "ForceResetRequest": {

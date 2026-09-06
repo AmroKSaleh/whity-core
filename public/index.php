@@ -2249,6 +2249,17 @@ $tenantEntitlementsHandler = new \Whity\Api\TenantEntitlementsApiHandler(
     $entitlementService,
     $roleChecker
 );
+// 13a-quater. The FEATURE catalogue (#feature-flags): which major subsystems
+// this build has, and whether each is available to the CALLER'S tenant.
+//
+// Keeps no state. Every answer is composed from the settings switch the
+// subsystem itself reads and, where one is declared, the tenant's entitlement —
+// so a flag can never disagree with the thing it describes. Built after
+// $entitlementService above because it needs it, and PHP does not hoist.
+$featureService = new \Whity\Core\Feature\FeatureService($settingsService, $entitlementService);
+$featuresHandler = new \Whity\Api\FeaturesApiHandler($featureService);
+$router->register('GET', '/api/features', [$featuresHandler, 'list'], null, null, CorePermissions::SETTINGS_READ);
+
 $router->register('GET',   '/api/tenants/{id:\d+}/entitlements', [$tenantEntitlementsHandler, 'get'],   null, null, CorePermissions::ENTITLEMENTS_MANAGE);
 $router->register('PATCH', '/api/tenants/{id:\d+}/entitlements', [$tenantEntitlementsHandler, 'patch'], null, null, CorePermissions::ENTITLEMENTS_MANAGE);
 
