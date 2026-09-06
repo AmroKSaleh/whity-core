@@ -406,7 +406,15 @@ final class DocumentRenderApiHandlerRealEngineTest extends TestCase
         // The FLOW endpoint, not the canvas one.
         self::assertCount(1, $this->fakeRender->flowCalls);
         $payload = $this->fakeRender->flowCalls[0];
-        self::assertSame([['type' => 'paragraph', 'text' => 'Printed at last']], $payload['content']);
+        // Field by field, NOT assertSame on the whole array. The template's
+        // `data` round-trips through the database, and on PostgreSQL that
+        // column is jsonb — which does not preserve key order, while SQLite's
+        // TEXT does. An identical-arrays assertion therefore passes on the
+        // default engine and fails on the real one, over a difference that
+        // means nothing: JSON object key order is not semantic.
+        self::assertCount(1, $payload['content']);
+        self::assertSame('paragraph', $payload['content'][0]['type']);
+        self::assertSame('Printed at last', $payload['content'][0]['text']);
         // And nothing from the canvas body came with it.
         self::assertArrayNotHasKey('template', $payload);
     }
