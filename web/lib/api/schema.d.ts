@@ -1546,8 +1546,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Which major subsystems this instance has, and whether each is available here
-         * @description Reports the tenant making the request. Each row carries three booleans rather than one, because "off" is not a single condition: `operator_enabled` is the instance switch (the same settings key the subsystem itself reads), `entitled` is whether the plan includes it where a commercial gate is declared, and `enabled` is both. A single flag would send whoever is looking to the wrong place, since an operator setting cannot be fixed by changing a plan and a plan cannot be fixed in settings.
+         * Feature flags composed with the tenant plan: what this tenant can actually use
+         * @description The curated feature flags, keyed by their settings key, resolved for the tenant making the request. The settings console already edits the operator half and is global and system-tenant-only; this composes it with the tenant PLAN, which that surface knows nothing about. Each row carries three booleans rather than one, because "off" is not a single condition: `operator_enabled` is the instance switch, `entitled` is whether the plan includes it where a commercial gate is declared, and `enabled` is both. One flag would send whoever is looking to the wrong place, since an operator setting cannot be fixed by changing a plan, nor a plan in settings.
          */
         get: operations["get_api_v1_features"];
         put?: never;
@@ -5437,8 +5437,6 @@ export interface components {
         };
         Feature: {
             key: string;
-            label: string;
-            description: string;
             enabled: boolean;
             operator_enabled: boolean;
             entitlement: string | null;

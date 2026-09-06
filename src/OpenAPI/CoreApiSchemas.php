@@ -5166,14 +5166,14 @@ final class CoreApiSchemas
             // purpose: "off" is not one condition, and an operator switch and a
             // missing entitlement need different actions from different people.
             'Feature' => self::object([
+                // The settings key itself, so a client can join this straight to
+                // the settings catalogue rather than to a second vocabulary.
                 'key' => self::str(),
-                'label' => self::str(),
-                'description' => self::str(),
                 'enabled' => self::bool(),
                 'operator_enabled' => self::bool(),
                 'entitlement' => self::str(true),
                 'entitled' => self::bool(),
-            ], ['key', 'label', 'description', 'enabled', 'operator_enabled', 'entitlement', 'entitled']),
+            ], ['key', 'enabled', 'operator_enabled', 'entitlement', 'entitled']),
             'FeatureListResponse' => self::listEnvelope('Feature'),
 
             'DocumentBlockUsage' => self::object([
@@ -9992,14 +9992,16 @@ final class CoreApiSchemas
             // readability; `usage` is not a digit, so it could never have matched
             // the /{id:\d+} constraint either way.
             self::permissionRoute('GET', '/api/features', 'settings:read', [
-                'summary' => 'Which major subsystems this instance has, and whether each is available here',
+                'summary' => 'Feature flags composed with the tenant plan: what this tenant can actually use',
                 'description' =>
-                    'Reports the tenant making the request. Each row carries three booleans rather than '
-                    . 'one, because "off" is not a single condition: `operator_enabled` is the instance '
-                    . 'switch (the same settings key the subsystem itself reads), `entitled` is whether '
-                    . 'the plan includes it where a commercial gate is declared, and `enabled` is both. '
-                    . 'A single flag would send whoever is looking to the wrong place, since an operator '
-                    . 'setting cannot be fixed by changing a plan and a plan cannot be fixed in settings.',
+                    'The curated feature flags, keyed by their settings key, resolved for the tenant '
+                    . 'making the request. The settings console already edits the operator half and is '
+                    . 'global and system-tenant-only; this composes it with the tenant PLAN, which that '
+                    . 'surface knows nothing about. Each row carries three booleans rather than one, '
+                    . 'because "off" is not a single condition: `operator_enabled` is the instance switch, '
+                    . '`entitled` is whether the plan includes it where a commercial gate is declared, and '
+                    . '`enabled` is both. One flag would send whoever is looking to the wrong place, since '
+                    . 'an operator setting cannot be fixed by changing a plan, nor a plan in settings.',
                 'tags' => ['settings'],
                 'responses' => [
                     200 => self::jsonResponse('The feature catalogue for this tenant', 'FeatureListResponse'),

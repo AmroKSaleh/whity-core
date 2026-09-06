@@ -18,19 +18,19 @@ use Whity\Core\Settings\SettingsService;
 use Whity\Core\Settings\TenantSettingsRepository;
 
 /**
- * Whether a major subsystem is available to a tenant.
+ * Whether a feature-flagged subsystem is available to a tenant.
+ *
+ * THE FLAGS ARE NOT REDECLARED. `SettingsRegistry` already curates them and the
+ * admin Feature Flags tab already renders them; this layer adds only the half
+ * that existed nowhere — the tenant's PLAN. The first version of this class
+ * kept its own catalogue of eight against the registry's eleven and was wrong
+ * within an hour, so the first test below walks the registry's list rather than
+ * any list of its own.
  *
  * THE POINT OF THE LAYER is that "off" is not one condition. An operator can
- * switch a subsystem off for the whole instance or for one tenant; a tenant's
- * plan can fail to include it. Those are different failures, owned by different
- * people, and a single boolean sends whoever is looking to the wrong place — so
- * the two halves are resolved separately and reported separately.
- *
- * IT KEEPS NO STATE. Every answer comes from the settings and entitlements that
- * already existed, and a feature reads the SAME key its subsystem has always
- * read. The tests below lean on that: they set `documents.render_enabled` and
- * expect the `documents.render` feature to move, because a flag that could
- * disagree with the switch its subsystem consults would be worse than no flag.
+ * switch a subsystem off; a tenant's plan can fail to include it. Those are
+ * different failures owned by different people, and one boolean sends whoever
+ * is looking to the wrong place.
  */
 final class FeatureServiceRealEngineTest extends TestCase
 {
@@ -60,22 +60,22 @@ final class FeatureServiceRealEngineTest extends TestCase
     // ── the catalogue ────────────────────────────────────────────────────────
 
     /**
-     * Every feature must name a settings key that EXISTS, or the switch it
-     * claims to read is not a switch at all — it would resolve to "absent",
-     * report the subsystem off, and be unfixable from any admin screen.
+     * The list IS the settings registry's curated one — not a copy that can
+     * drift from it. This is the assertion that would have caught the first
+     * version of this class, which hand-listed eight of the eleven.
      */
-    public function testEveryFeatureNamesAKnownSetting(): void
+    public function testTheListIsTheSettingsRegistrysOwn(): void
     {
+        self::assertSame(SettingsRegistry::featureFlagKeys(), FeatureRegistry::keys());
+        self::assertNotSame([], FeatureRegistry::keys());
+
         foreach (FeatureRegistry::keys() as $key) {
-            $setting = FeatureRegistry::settingFor($key);
-            self::assertTrue(
-                SettingsRegistry::isKnown($setting),
-                "Feature {$key} points at unknown setting {$setting}"
-            );
+            self::assertTrue(SettingsRegistry::isKnown($key), "Flag {$key} is not a known setting");
+            self::assertTrue(SettingsRegistry::isFeatureFlag($key), "Flag {$key} is not curated as one");
         }
     }
 
-    /** Same for the commercial gate, where one is declared. */
+    /** Every declared commercial gate must name an entitlement that exists. */
     public function testEveryDeclaredEntitlementIsKnown(): void
     {
         foreach (FeatureRegistry::keys() as $key) {
@@ -85,7 +85,7 @@ final class FeatureServiceRealEngineTest extends TestCase
             }
             self::assertTrue(
                 EntitlementRegistry::isKnown($entitlement),
-                "Feature {$key} points at unknown entitlement {$entitlement}"
+                "Flag {$key} points at unknown entitlement {$entitlement}"
             );
         }
     }
@@ -95,7 +95,7 @@ final class FeatureServiceRealEngineTest extends TestCase
         // Loud on purpose. A typo answering "false" would silently disable a
         // subsystem; one answering "true" would silently expose one.
         $this->expectException(\InvalidArgumentException::class);
-        $this->features->isEnabled('documents.rendr', self::TENANT);
+        $this->features->isEnabled('documents.render_enabld', self::TENANT);
     }
 
     // ── the operator half ────────────────────────────────────────────────────
@@ -103,10 +103,10 @@ final class FeatureServiceRealEngineTest extends TestCase
     public function testAFeatureFollowsItsOwnSubsystemSwitch(): void
     {
         $this->settings->setGlobal(SettingsRegistry::DOCUMENTS_RENDER_ENABLED, 'true');
-        self::assertTrue($this->features->isEnabled(FeatureRegistry::DOCUMENTS_RENDER, self::TENANT));
+        self::assertTrue($this->features->isEnabled(SettingsRegistry::DOCUMENTS_RENDER_ENABLED, self::TENANT));
 
         $this->settings->setGlobal(SettingsRegistry::DOCUMENTS_RENDER_ENABLED, 'false');
-        self::assertFalse($this->features->isEnabled(FeatureRegistry::DOCUMENTS_RENDER, self::TENANT));
+        self::assertFalse($this->features->isEnabled(SettingsRegistry::DOCUMENTS_RENDER_ENABLED, self::TENANT));
     }
 
     public function testATenantOverrideBeatsTheGlobalSwitch(): void
@@ -114,9 +114,9 @@ final class FeatureServiceRealEngineTest extends TestCase
         $this->settings->setGlobal(SettingsRegistry::DOCUMENTS_RENDER_ENABLED, 'false');
         $this->settings->setTenant(self::TENANT, SettingsRegistry::DOCUMENTS_RENDER_ENABLED, 'true');
 
-        self::assertTrue($this->features->isEnabled(FeatureRegistry::DOCUMENTS_RENDER, self::TENANT));
+        self::assertTrue($this->features->isEnabled(SettingsRegistry::DOCUMENTS_RENDER_ENABLED, self::TENANT));
         // And only for that tenant.
-        self::assertFalse($this->features->isEnabled(FeatureRegistry::DOCUMENTS_RENDER, self::OTHER_TENANT));
+        self::assertFalse($this->features->isEnabled(SettingsRegistry::DOCUMENTS_RENDER_ENABLED, self::OTHER_TENANT));
     }
 
     /**
@@ -146,7 +146,7 @@ final class FeatureServiceRealEngineTest extends TestCase
         foreach (['1', 'yes', 'TRUE', '', 'on'] as $value) {
             $raw->set(SettingsRegistry::DOCUMENTS_RENDER_ENABLED, $value);
             self::assertFalse(
-                $this->features->isEnabled(FeatureRegistry::DOCUMENTS_RENDER, self::TENANT),
+                $this->features->isEnabled(SettingsRegistry::DOCUMENTS_RENDER_ENABLED, self::TENANT),
                 "value {$value} must not enable a feature"
             );
         }
@@ -162,12 +162,12 @@ final class FeatureServiceRealEngineTest extends TestCase
     {
         $this->settings->setGlobal(SettingsRegistry::SSO_ENABLED, 'true');
         self::assertFalse(
-            $this->features->isEnabled(FeatureRegistry::SSO, self::TENANT),
+            $this->features->isEnabled(SettingsRegistry::SSO_ENABLED, self::TENANT),
             'the operator switch alone must not grant an entitled feature'
         );
 
         $this->entitlements->set(self::TENANT, EntitlementRegistry::SSO_TENANT_IDP, 'true');
-        self::assertTrue($this->features->isEnabled(FeatureRegistry::SSO, self::TENANT));
+        self::assertTrue($this->features->isEnabled(SettingsRegistry::SSO_ENABLED, self::TENANT));
     }
 
     /**
@@ -180,7 +180,7 @@ final class FeatureServiceRealEngineTest extends TestCase
         $this->entitlements->set(self::TENANT, EntitlementRegistry::SSO_TENANT_IDP, 'true');
         $this->settings->setGlobal(SettingsRegistry::SSO_ENABLED, 'false');
 
-        self::assertFalse($this->features->isEnabled(FeatureRegistry::SSO, self::TENANT));
+        self::assertFalse($this->features->isEnabled(SettingsRegistry::SSO_ENABLED, self::TENANT));
     }
 
     // ── the operator listing ─────────────────────────────────────────────────
@@ -201,7 +201,7 @@ final class FeatureServiceRealEngineTest extends TestCase
     {
         $this->settings->setGlobal(SettingsRegistry::SSO_ENABLED, 'true');
         // Operator: yes. Plan: no.
-        $row = $this->rowFor($this->features->all(self::TENANT), FeatureRegistry::SSO);
+        $row = $this->rowFor($this->features->all(self::TENANT), SettingsRegistry::SSO_ENABLED);
 
         self::assertFalse($row['enabled']);
         self::assertTrue($row['operator_enabled'], 'the operator half is on and must say so');
@@ -211,17 +211,24 @@ final class FeatureServiceRealEngineTest extends TestCase
 
     public function testAFeatureWithNoCommercialGateIsAlwaysEntitled(): void
     {
-        $row = $this->rowFor($this->features->all(self::TENANT), FeatureRegistry::MCP);
+        $row = $this->rowFor($this->features->all(self::TENANT), SettingsRegistry::MCP_ENABLED);
 
         self::assertNull($row['entitlement']);
         self::assertTrue($row['entitled'], 'a feature with no entitlement must not read as unentitled');
     }
 
-    public function testTheListingCarriesSomethingAScreenCanShow(): void
+    /**
+     * No labels or descriptions here on purpose. The settings catalogue already
+     * carries the copy the Feature Flags tab renders, and a second set would be
+     * the one that goes stale.
+     */
+    public function testTheListingCarriesOnlyStateNotCopy(): void
     {
         foreach ($this->features->all(self::TENANT) as $row) {
-            self::assertNotSame('', $row['label'], "{$row['key']} has no label");
-            self::assertNotSame('', $row['description'], "{$row['key']} has no description");
+            self::assertSame(
+                ['key', 'enabled', 'operator_enabled', 'entitlement', 'entitled'],
+                array_keys($row)
+            );
         }
     }
 

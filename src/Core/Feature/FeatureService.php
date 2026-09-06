@@ -8,24 +8,23 @@ use Whity\Core\Entitlement\EntitlementService;
 use Whity\Core\Settings\SettingsService;
 
 /**
- * Is a major subsystem available to this tenant?
+ * Is a feature-flagged subsystem available TO THIS TENANT?
  *
  * Two questions, both of which must say yes:
  *
- *   1. has the OPERATOR switched the subsystem on (per-tenant override, else
- *      the global value, else the registry default — the resolution
- *      {@see SettingsService::effective()} already performs), and
- *   2. where the feature declares one, does the tenant's plan grant the
+ *   1. has the OPERATOR switched the flag on — the curated setting the admin
+ *      Feature Flags tab already edits, resolved per-tenant then global then
+ *      default by {@see SettingsService::effective()}; and
+ *   2. where the flag declares one, does the tenant's plan grant the
  *      ENTITLEMENT?
  *
- * Kept apart because they fail differently and are owned by different people.
- * Folding them into one value would mean either a plan that can override an
- * operator's kill switch, or a paid feature an operator cannot turn off during
- * an incident.
- *
- * NO STATE OF ITS OWN. Every answer is computed from the settings and
- * entitlements that already exist, so a feature and the subsystem's own switch
- * cannot drift apart — they are the same key.
+ * WHY THIS EXISTS BESIDE THE SETTINGS TAB rather than replacing it. That tab is
+ * global-only and system-tenant-only: it answers "what has the operator turned
+ * on for the instance". It cannot answer "what can THIS tenant use", because it
+ * knows nothing about plans — so a subsystem could be on instance-wide and
+ * unavailable to a tenant with nothing saying why. This joins the two halves and
+ * keeps no state of its own; the flags are the same keys the subsystems
+ * themselves read.
  */
 final class FeatureService
 {
@@ -36,41 +35,34 @@ final class FeatureService
     }
 
     /**
-     * Is `$feature` available to `$tenantId`?
-     *
-     * @throws \InvalidArgumentException When the feature is not in the catalogue.
-     *         Deliberately loud: a typo'd feature key that answered "false"
-     *         would silently disable a subsystem, and a typo that answered
-     *         "true" would silently expose one.
+     * @throws \InvalidArgumentException When the key is not a curated flag.
+     *         Deliberately loud: a typo answering "false" would silently
+     *         disable a subsystem, and one answering "true" would silently
+     *         expose one.
      */
-    public function isEnabled(string $feature, int $tenantId): bool
+    public function isEnabled(string $flag, int $tenantId): bool
     {
-        $setting = FeatureRegistry::settingFor($feature);
+        $entitlement = FeatureRegistry::entitlementFor($flag); // also validates the key
         $effective = $this->settings->effective($tenantId);
 
-        if (($effective[$setting] ?? 'false') !== 'true') {
+        if (($effective[$flag] ?? 'false') !== 'true') {
             return false;
         }
 
-        $entitlement = FeatureRegistry::entitlementFor($feature);
-        if ($entitlement === null) {
-            return true;
-        }
-
-        return $this->entitlements->isGranted($tenantId, $entitlement);
+        return $entitlement === null || $this->entitlements->isGranted($tenantId, $entitlement);
     }
 
     /**
-     * Every feature and its state for this tenant, for an operator screen.
+     * Every feature flag and its state for this tenant.
      *
-     * Reports the two halves SEPARATELY as well as the answer. "Off" is not one
-     * condition: a subsystem the operator disabled and a subsystem the tenant's
+     * Reports the two halves SEPARATELY as well as the answer, because "off" is
+     * not one condition: a subsystem the operator disabled and one the tenant's
      * plan does not include need different actions from different people, and a
      * single boolean sends whoever is looking to the wrong place.
      *
      * @return list<array{
-     *     key: string, label: string, description: string,
-     *     enabled: bool, operator_enabled: bool, entitlement: string|null, entitled: bool
+     *     key: string, enabled: bool, operator_enabled: bool,
+     *     entitlement: string|null, entitled: bool
      * }>
      */
     public function all(int $tenantId): array
@@ -78,19 +70,17 @@ final class FeatureService
         $effective = $this->settings->effective($tenantId);
         $out = [];
 
-        foreach (FeatureRegistry::keys() as $key) {
-            $meta = FeatureRegistry::describe($key);
-            $operatorOn = ($effective[$meta['setting']] ?? 'false') === 'true';
-            $entitled = $meta['entitlement'] === null
-                || $this->entitlements->isGranted($tenantId, $meta['entitlement']);
+        foreach (FeatureRegistry::keys() as $flag) {
+            $entitlement = FeatureRegistry::entitlementFor($flag);
+            $operatorOn = ($effective[$flag] ?? 'false') === 'true';
+            $entitled = $entitlement === null
+                || $this->entitlements->isGranted($tenantId, $entitlement);
 
             $out[] = [
-                'key' => $key,
-                'label' => $meta['label'],
-                'description' => $meta['description'],
+                'key' => $flag,
                 'enabled' => $operatorOn && $entitled,
                 'operator_enabled' => $operatorOn,
-                'entitlement' => $meta['entitlement'],
+                'entitlement' => $entitlement,
                 'entitled' => $entitled,
             ];
         }
