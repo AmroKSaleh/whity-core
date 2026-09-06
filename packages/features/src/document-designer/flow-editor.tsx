@@ -254,20 +254,81 @@ function BlockBody({
             onChange={(e) => onChange({ ...block, text: e.target.value })}
             className="border-transparent bg-transparent text-lg font-semibold hover:border-input focus-visible:border-ring"
           />
+          {/* Numbering and the contents list. Both are honoured by the renderer
+              (`document.js` assigns 2.3.1 and builds the contents front matter)
+              and neither could be set from here, so a front-matter title or a
+              running sub-head was unreachable however the document was
+              authored. */}
+          <label className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              data-testid={`flow-heading-numbered-${index}`}
+              checked={!block.unnumbered}
+              onChange={(e) => onChange({ ...block, unnumbered: e.target.checked ? undefined : true })}
+            />
+            {t('flow.headingNumbered', 'Numbered')}
+          </label>
+          {/* THE DEPENDENCY IS SHOWN, NOT HIDDEN. The renderer lists a heading
+              only when `inContents !== false && !unnumbered`, so an unnumbered
+              heading is never listed whatever this says. Leaving it live would
+              be a control that silently does nothing. */}
+          <label
+            className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground"
+            title={
+              block.unnumbered
+                ? t('flow.headingContentsBlocked', 'An unnumbered heading is never listed in the contents')
+                : undefined
+            }
+          >
+            <input
+              type="checkbox"
+              data-testid={`flow-heading-contents-${index}`}
+              disabled={block.unnumbered === true}
+              checked={block.inContents !== false && !block.unnumbered}
+              onChange={(e) => onChange({ ...block, inContents: e.target.checked ? undefined : false })}
+            />
+            {t('flow.headingInContents', 'In contents')}
+          </label>
         </div>
       );
 
     case 'paragraph':
       return (
-        <Textarea
-          value={block.text}
-          aria-label={t('flow.paragraphText', 'Paragraph text')}
-          data-testid={`flow-input-${index}`}
-          placeholder={t('flow.paragraphPlaceholder', 'Write something…')}
-          rows={3}
-          onChange={(e) => onChange({ ...block, text: e.target.value })}
-          className="resize-y border-transparent bg-transparent hover:border-input focus-visible:border-ring"
-        />
+        <div className="flex flex-col gap-1">
+          <Textarea
+            value={block.text}
+            aria-label={t('flow.paragraphText', 'Paragraph text')}
+            data-testid={`flow-input-${index}`}
+            placeholder={t('flow.paragraphPlaceholder', 'Write something…')}
+            rows={3}
+            onChange={(e) => onChange({ ...block, text: e.target.value })}
+            className="resize-y border-transparent bg-transparent hover:border-input focus-visible:border-ring"
+          />
+          {/* LOGICAL, not left/right. `flow-align-end` is the end of the
+              reading direction, so a centred or end-aligned paragraph stays
+              correct when the document is Arabic — which naming these "left"
+              and "right" would quietly break. */}
+          <select
+            aria-label={t('flow.paragraphAlign', 'Paragraph alignment')}
+            data-testid={`flow-paragraph-align-${index}`}
+            className="h-7 w-fit self-start rounded-md border border-input bg-transparent px-1 text-xs"
+            value={block.align ?? 'start'}
+            onChange={(e) => {
+              const value = e.target.value;
+              onChange({
+                ...block,
+                // `undefined` rather than 'start': the renderer emits a class
+                // only for center/end, so storing a third value would put a
+                // key in the document that means the same as its absence.
+                align: value === 'center' || value === 'end' ? value : undefined,
+              });
+            }}
+          >
+            <option value="start">{t('flow.alignStart', 'Aligned to the start')}</option>
+            <option value="center">{t('flow.alignCenter', 'Centred')}</option>
+            <option value="end">{t('flow.alignEnd', 'Aligned to the end')}</option>
+          </select>
+        </div>
       );
 
     case 'table':
@@ -381,6 +442,19 @@ function TableBody({
           ))}
         </tbody>
       </table>
+      {/* The caption. Honoured by the renderer twice over — printed under the
+          table and collected into the "list of tables" front matter — and
+          unreachable until now. `flowToCanvas` even READS it to represent a
+          table on the canvas, so a converted table always fell back to its
+          "N x M" summary because nothing could ever set one. */}
+      <Input
+        value={block.caption ?? ''}
+        aria-label={t('flow.tableCaption', 'Table caption')}
+        data-testid={`flow-table-caption-${index}`}
+        placeholder={t('flow.tableCaptionPlaceholder', 'Caption (also used in the list of tables)')}
+        className="mt-1"
+        onChange={(e) => onChange({ ...block, caption: e.target.value || undefined })}
+      />
       <div className="flex flex-wrap items-center gap-2 pt-1">
         <Button
           type="button"
