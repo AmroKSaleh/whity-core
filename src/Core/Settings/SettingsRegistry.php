@@ -979,6 +979,21 @@ final class SettingsRegistry
     }
 
     /**
+     * The curated feature-flag keys, in registry order.
+     *
+     * Exposed so a caller can enumerate the flags rather than only ask about one
+     * at a time. {@see \Whity\Core\Feature\FeatureService} composes this list
+     * with the tenant's entitlements; without an accessor it would have to keep
+     * its own copy, and a second list of the same thing is a list that drifts.
+     *
+     * @return list<string>
+     */
+    public static function featureFlagKeys(): array
+    {
+        return self::FEATURE_FLAG_KEYS;
+    }
+
+    /**
      * Whether the key is a curated FEATURE FLAG — a capability toggle an
      * operator would recognise as a "feature flag" (see {@see FEATURE_FLAG_KEYS}
      * for the selection rationale). Drives the admin Feature Flags settings tab;

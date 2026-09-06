@@ -1538,6 +1538,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Feature flags composed with the tenant plan: what this tenant can actually use
+         * @description The curated feature flags, keyed by their settings key, resolved for the tenant making the request. The settings console already edits the operator half and is global and system-tenant-only; this composes it with the tenant PLAN, which that surface knows nothing about. Each row carries three booleans rather than one, because "off" is not a single condition: `operator_enabled` is the instance switch, `entitled` is whether the plan includes it where a commercial gate is declared, and `enabled` is both. One flag would send whoever is looking to the wrong place, since an operator setting cannot be fixed by changing a plan, nor a plan in settings.
+         */
+        get: operations["get_api_v1_features"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/form-fields": {
         parameters: {
             query?: never;
@@ -5414,6 +5434,16 @@ export interface components {
         Error: {
             error: string;
             details?: Record<string, never>;
+        };
+        Feature: {
+            key: string;
+            enabled: boolean;
+            operator_enabled: boolean;
+            entitlement: string | null;
+            entitled: boolean;
+        };
+        FeatureListResponse: {
+            data: components["schemas"]["Feature"][];
         };
         ForceResetRequest: {
             profile_id: number;
@@ -16549,6 +16579,71 @@ export interface operations {
                 };
             };
             /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_features: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The feature catalogue for this tenant */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
             403: {
                 headers: {
                     [name: string]: unknown;
