@@ -41,9 +41,32 @@ const withBlock = (block) => ({ content: [{ type: 'paragraph', text: 'body' }, b
  * Stripping them first is what makes the negative assertions mean anything.
  */
 function html(block) {
-  return rawHtml(block)
-    .replace(/<style[\s\S]*?<\/style>/g, '')
-    .replace(/<script[\s\S]*?<\/script>/g, '');
+  return stripSections(stripSections(rawHtml(block), 'style'), 'script');
+}
+
+/**
+ * Remove every `<tag>...</tag>` section, by INDEX rather than by regex.
+ *
+ * The regex version of this is a textbook bad tag filter, and CodeQL flags it
+ * as one — correctly, since that pattern is the classic broken HTML sanitiser.
+ * It was only ever trimming known output inside a test, but keeping it meant
+ * either a high-severity alert standing on the branch or a suppression comment,
+ * and a suppression is a habit worth not starting over a helper this small.
+ */
+function stripSections(source, tag) {
+  const open = `<${tag}`;
+  const close = `</${tag}>`;
+  let out = source;
+
+  for (;;) {
+    const start = out.indexOf(open);
+    if (start === -1) break;
+    const end = out.indexOf(close, start);
+    if (end === -1) break;
+    out = out.slice(0, start) + out.slice(end + close.length);
+  }
+
+  return out;
 }
 
 function rawHtml(block) {
