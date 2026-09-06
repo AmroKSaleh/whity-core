@@ -36,6 +36,16 @@ const MAX_TABLE_ROWS = Number(process.env.RENDER_FLOW_MAX_TABLE_ROWS || 5000);
  * with its own message first, and a caller sent a figure too many would be
  * told "payload too large" by a layer that knows nothing about figures. */
 const MAX_PAYLOAD_BYTES = Number(process.env.RENDER_FLOW_MAX_BYTES || 20 * 1024 * 1024);
+/* The largest space a block may ask for above or below itself, in mm.
+ * Half of A4's height. Past that a "space" is not spacing, it is a page break
+ * expressed badly — and one that the paginator would have to fragment around
+ * on every page it touched. A caller that wants the next block on a fresh page
+ * has `breakBefore` and the `pageBreak` block to say so exactly. */
+const MAX_BLOCK_SPACE_MM = Number(process.env.RENDER_FLOW_MAX_BLOCK_SPACE_MM || 148);
+/* The narrowest a block may be made, as a percentage of the content column.
+ * Below about a fifth a paragraph is a column of single words, and a table is
+ * unreadable rather than merely small. */
+const MIN_BLOCK_WIDTH_PERCENT = Number(process.env.RENDER_FLOW_MIN_BLOCK_WIDTH_PERCENT || 20);
 
 /** Page presets, in mm. A caller may also give explicit widthMm/heightMm. */
 const PAGE_PRESETS = {
@@ -144,6 +154,73 @@ function asFiniteNumber(value) {
  * @param {unknown} payload
  * @returns {string|null}
  */
+/**
+ * Blocks that carry no box of their own, so the LAYOUT keys are meaningless on
+ * them.
+ *
+ * A page break is a boundary, not a thing on the page; a spacer IS vertical
+ * space, so asking for space around it is asking the same question twice.
+ * Refused rather than accepted-and-ignored: an editor that offers a margin
+ * control on a page break and a renderer that quietly drops it produce a
+ * setting somebody can change forever with no effect.
+ */
+const BOXLESS_BLOCK_TYPES = new Set(['pageBreak', 'spacer']);
+
+/**
+ * Per-block LAYOUT: the space around it, how it behaves at a page boundary,
+ * and how wide it is (#1186).
+ *
+ * These are the properties an author reaches for after the words are right —
+ * "keep this heading with its table", "this figure is half a column wide",
+ * "start the appendix on a new page". None of them existed: spacing was fixed
+ * per block TYPE in the stylesheet, break behaviour was fixed in the
+ * paginator, and width was always the full column.
+ *
+ * WIDTH IS A PERCENTAGE, and that is the whole of the answer to "how should it
+ * behave on narrower paper". The content column is derived from the page box,
+ * so a block set to 50% is half a column on A4 and half a column on A5 without
+ * anybody restating it. A millimetre width would have to be re-authored for
+ * every paper size and would silently overflow the ones it was not written
+ * for.
+ *
+ * @returns {string|null} An error message, or null when the block is fine.
+ */
+function validateBlockLayout(block, i) {
+  const boxless = BOXLESS_BLOCK_TYPES.has(block.type);
+
+  for (const key of ['spaceBeforeMm', 'spaceAfterMm']) {
+    if (block[key] === undefined) continue;
+    if (boxless) {
+      return `"content[${i}].${key}" has no meaning on a ${block.type} block`;
+    }
+    const mm = asFiniteNumber(block[key]);
+    if (mm === null || mm < 0) {
+      return `"content[${i}].${key}" must be a number of millimetres, zero or more`;
+    }
+    if (mm > MAX_BLOCK_SPACE_MM) {
+      return `"content[${i}].${key}" exceeds ${MAX_BLOCK_SPACE_MM}mm; use a page break to start further down`;
+    }
+  }
+
+  for (const key of ['breakBefore', 'keepWithNext', 'keepTogether']) {
+    if (block[key] !== undefined && typeof block[key] !== 'boolean') {
+      return `"content[${i}].${key}" must be true or false`;
+    }
+  }
+
+  if (block.widthPercent !== undefined) {
+    if (boxless) {
+      return `"content[${i}].widthPercent" has no meaning on a ${block.type} block`;
+    }
+    const pct = asFiniteNumber(block.widthPercent);
+    if (pct === null || pct < MIN_BLOCK_WIDTH_PERCENT || pct > 100) {
+      return `"content[${i}].widthPercent" must be between ${MIN_BLOCK_WIDTH_PERCENT} and 100`;
+    }
+  }
+
+  return null;
+}
+
 function validateFlowPayload(payload) {
   if (!isPlainObject(payload)) {
     return 'Request body must be a JSON object';
@@ -189,6 +266,10 @@ function validateFlowPayload(payload) {
     }
     if (!BLOCK_TYPES.has(block.type)) {
       return `"content[${i}].type" must be one of: ${[...BLOCK_TYPES].join(', ')}`;
+    }
+    const layoutError = validateBlockLayout(block, i);
+    if (layoutError !== null) {
+      return layoutError;
     }
     if (block.type === 'heading') {
       const level = asFiniteNumber(block.level);

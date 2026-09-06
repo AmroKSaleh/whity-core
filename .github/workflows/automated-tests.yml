@@ -1362,6 +1362,37 @@ jobs:
           test "${front}" -ge 5
           echo "FLOW_PAGES=${pages}" >> "$GITHUB_ENV"
 
+      # Per-block LAYOUT, proved by a PAIR (#1186). The paginator packs page
+      # boxes itself inside a real browser, so nothing in the Jest suite can
+      # show it honoured `breakBefore`. Two documents with identical content
+      # and nothing different but the hint can: the same three short
+      # paragraphs, one page without the hints and three pages with them.
+      # A single document would report a number a reader has to trust; the
+      # DIFFERENCE is the evidence, because only the hint can explain it.
+      - name: Flowing render honours per-block layout hints
+        run: |
+          node render-service/scripts/generate-flow-layout-fixture.js --variant plain  --out /tmp/flow-plain.json
+          node render-service/scripts/generate-flow-layout-fixture.js --variant hinted --out /tmp/flow-hinted.json
+
+          render_pages () {
+            curl -fsS -X POST http://127.0.0.1:18130/render/flow -H 'Content-Type: application/json' -H 'X-Render-Secret: ci_render_shared_secret_min_32_chars_zz' --data @"$1" -D "$2" -o "$3"
+            test -s "$3"
+            head -c 5 "$3" | grep -q '%PDF-'
+            # Digits only, so a CRLF header line needs no unescaping here.
+            grep -i '^x-render-page-count:' "$2" | grep -o '[0-9][0-9]*' | head -1
+          }
+
+          plain=$(render_pages /tmp/flow-plain.json /tmp/flow-plain.headers /tmp/flow-plain.pdf)
+          hinted=$(render_pages /tmp/flow-hinted.json /tmp/flow-hinted.headers /tmp/flow-hinted.pdf)
+          echo "pages without hints ${plain} - with breakBefore on two blocks ${hinted}"
+
+          # Three short paragraphs share one page when nothing asks otherwise.
+          # If this stops being 1 the fixture has grown and the comparison
+          # below stops meaning anything.
+          test "${plain}" -eq 1
+          # And each breakBefore claims a page of its own.
+          test "${hinted}" -eq 3
+
       - name: Flowing render round-trip (LTR)
         run: |
           curl -fsS -X POST http://127.0.0.1:18130/render/flow \
