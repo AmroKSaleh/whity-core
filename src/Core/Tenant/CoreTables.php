@@ -110,6 +110,7 @@ final class CoreTables
         'permissions' => '002_create_permissions.php',
         'persons' => '018_create_persons.php',
         'plan_entitlements' => '055_create_plans.php',
+        'plan_prices' => '140_create_plan_prices.php',
         'plans' => '055_create_plans.php',
         'profile_emails' => '029_create_profile_emails.php',
         'profiles' => '028_create_profiles.php',
