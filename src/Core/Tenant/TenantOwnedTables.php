@@ -112,6 +112,18 @@ final class TenantOwnedTables
         // unregistered like `permissions`.)
         'tenant_plan' => '055_create_plans.php',
 
+        // Promotions — who took which early bird, offer or promo code, and what
+        // it was worth (migration 141). The LEDGER is tenant-owned and every
+        // query binds tenant_id; `promotions` and `promotion_plans` are global
+        // catalogues with no tenant_id, unregistered for the same reason
+        // `plans` and `plan_entitlements` are.
+        //
+        // Registering it is not bookkeeping: this table answers "why is this
+        // tenant paying less than list price", and a query that forgot its
+        // tenant predicate would answer it with somebody else's commercial
+        // terms.
+        'promotion_redemptions' => '141_create_promotions.php',
+
         // WC-docdesigner — document/label designer persistence (migration 059).
         // Saved templates and reusable blocks; the client object is stored as JSON
         // in `data`. Tenant-scoped + RBAC-gated visibility; every query binds
