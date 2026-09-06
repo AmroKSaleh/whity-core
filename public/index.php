@@ -2422,44 +2422,6 @@ $router->register('DELETE', '/api/document-blocks/{id:\d+}', [$documentBlocksHan
 // makes the client report itself unusable and every render 503s cleanly rather
 // than calling out with no auth.
 //
-// #947 item 1 split the render MECHANICS out into DocumentRenderer (ceilings,
-// dataRows normalisation, blockInstance resolution, the internal call) so the
-// re-render route below runs the same code rather than a second copy of it, and
-// added the optional `persist` flag that turns a render into a document record.
-$documentRenderer = new \Whity\Core\Document\Render\DocumentRenderer(
-    $documentBlockRepository,
-    $settingsService,
-    new \Whity\Core\Document\Render\RenderServiceClient(
-        (string) ($_ENV['RENDER_SERVICE_URL'] ?? 'http://render:8130'),
-        (string) ($_ENV['RENDER_SHARED_SECRET'] ?? ''),
-        (int) ($_ENV['RENDER_TIMEOUT_SECONDS'] ?? 30)
-    )
-);
-$documentRepository = new \Whity\Core\Document\DocumentRepository($db->getPdo());
-$documentArtifactRepository = new \Whity\Core\Document\DocumentArtifactRepository($db->getPdo());
-// The SAME per-tenant routing driver branding uses (built in 13a-storage above):
-// an entitled tenant's documents land in its own bucket, everyone else's on the
-// platform default, and there is exactly one storage story to keep correct.
-$documentArtifactStore = new \Whity\Core\Document\DocumentArtifactStore($storageDriver);
-// EXPOSED TO PLUGINS, and the reason is a defect visible in this repository
-// own consumers. Storing a file is a platform concern: it has to honour the
-// per-tenant routing above, the immutability rule the store enforces, and the
-// content-type-at-write-time constraint that no read-time lookup can repair.
-// None of that was reachable from a plugin, so a plugin needing to keep an
-// uploaded file did the only thing left to it and shipped its OWN storage
-// client, reading its own environment variables and bypassing per-tenant
-// storage configuration entirely. That is not a plugin author mistake; it is
-// what a missing seam produces. Registering these under their class names
-// makes the platform's storage the path of least resistance again.
-\Whity\register_service(\Whity\Core\Document\DocumentArtifactStore::class, $documentArtifactStore); // @phpstan-ignore-line
-\Whity\register_service(\Whity\Core\Document\DocumentArtifactRepository::class, $documentArtifactRepository); // @phpstan-ignore-line
-\Whity\register_service(\Whity\Storage\StorageDriverInterface::class, $storageDriver); // @phpstan-ignore-line
-$documentIssuer = new \Whity\Core\Document\DocumentIssuer(
-    $db->getPdo(),
-    $documentRepository,
-    $documentArtifactRepository,
-    $documentArtifactStore
-);
 // The FLOWING render mode (#1072) and the SDK seam in front of it.
 //
 // The fixed-canvas renderer above prints one PDF page per designed template
@@ -2491,6 +2453,49 @@ $flowDocumentRenderer = new \Whity\Core\Document\Render\FlowDocumentRenderer(
         (string) ($_ENV['RENDER_SHARED_SECRET'] ?? ''),
         (int) ($_ENV['RENDER_TIMEOUT_SECONDS'] ?? 30)
     )
+);
+
+// #947 item 1 split the render MECHANICS out into DocumentRenderer (ceilings,
+// dataRows normalisation, blockInstance resolution, the internal call) so the
+// re-render route below runs the same code rather than a second copy of it, and
+// added the optional `persist` flag that turns a render into a document record.
+$documentRenderer = new \Whity\Core\Document\Render\DocumentRenderer(
+    $documentBlockRepository,
+    $settingsService,
+    new \Whity\Core\Document\Render\RenderServiceClient(
+        (string) ($_ENV['RENDER_SERVICE_URL'] ?? 'http://render:8130'),
+        (string) ($_ENV['RENDER_SHARED_SECRET'] ?? ''),
+        (int) ($_ENV['RENDER_TIMEOUT_SECONDS'] ?? 30)
+    ),
+    // #1186: a template in DOCUMENT MODE goes to the flowing renderer instead.
+    // Built above rather than below for this line — PHP does not hoist, and
+    // without it a flow document silently printed its unused canvas pages.
+    $flowDocumentRenderer
+);
+$documentRepository = new \Whity\Core\Document\DocumentRepository($db->getPdo());
+$documentArtifactRepository = new \Whity\Core\Document\DocumentArtifactRepository($db->getPdo());
+// The SAME per-tenant routing driver branding uses (built in 13a-storage above):
+// an entitled tenant's documents land in its own bucket, everyone else's on the
+// platform default, and there is exactly one storage story to keep correct.
+$documentArtifactStore = new \Whity\Core\Document\DocumentArtifactStore($storageDriver);
+// EXPOSED TO PLUGINS, and the reason is a defect visible in this repository
+// own consumers. Storing a file is a platform concern: it has to honour the
+// per-tenant routing above, the immutability rule the store enforces, and the
+// content-type-at-write-time constraint that no read-time lookup can repair.
+// None of that was reachable from a plugin, so a plugin needing to keep an
+// uploaded file did the only thing left to it and shipped its OWN storage
+// client, reading its own environment variables and bypassing per-tenant
+// storage configuration entirely. That is not a plugin author mistake; it is
+// what a missing seam produces. Registering these under their class names
+// makes the platform's storage the path of least resistance again.
+\Whity\register_service(\Whity\Core\Document\DocumentArtifactStore::class, $documentArtifactStore); // @phpstan-ignore-line
+\Whity\register_service(\Whity\Core\Document\DocumentArtifactRepository::class, $documentArtifactRepository); // @phpstan-ignore-line
+\Whity\register_service(\Whity\Storage\StorageDriverInterface::class, $storageDriver); // @phpstan-ignore-line
+$documentIssuer = new \Whity\Core\Document\DocumentIssuer(
+    $db->getPdo(),
+    $documentRepository,
+    $documentArtifactRepository,
+    $documentArtifactStore
 );
 $documentRenderHandler = new \Whity\Api\DocumentRenderApiHandler(
     $documentTemplateRepository,

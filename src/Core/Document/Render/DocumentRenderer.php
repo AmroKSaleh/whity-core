@@ -45,6 +45,17 @@ final class DocumentRenderer
         private readonly DocumentBlockRepository $blocks,
         private readonly SettingsService $settings,
         private readonly RenderServiceClientInterface $renderService,
+        /**
+         * The flowing renderer, for templates in document mode (#1186).
+         *
+         * NULLABLE so an existing construction of this class keeps working —
+         * every test that builds one, and any host that wires it by hand. A
+         * null one is not a silent downgrade: a flow template refuses with a
+         * message naming the missing wiring, because printing its canvas pages
+         * instead would produce the blank document this whole seam exists to
+         * stop.
+         */
+        private readonly ?FlowDocumentRenderer $flow = null,
     ) {
     }
 
@@ -71,6 +82,21 @@ final class DocumentRenderer
         mixed $rawSheet,
         ?DocumentQrStamp $qr = null,
     ): string {
+        // DOCUMENT MODE TAKES A DIFFERENT ROAD ENTIRELY (#1186).
+        //
+        // Everything below this branch is the fixed-canvas path: it measures a
+        // `pages` tree, resolves block instances into it, and asks the service
+        // to print one PDF page per template page. A flow template's content
+        // does not live in `pages` — it lives in `flow` — so running it through
+        // any of that would print the canvas the author never used, which for a
+        // document built entirely in flow mode is a blank starting page.
+        //
+        // That is what happened before this branch existed: the document was
+        // authored, saved, and printed as nothing, with no error anywhere.
+        if (FlowTemplatePayload::isFlowMode($templateData)) {
+            return $this->renderFlow($tenantId, $templateData);
+        }
+
         $effective = $this->settings->effective($tenantId);
 
         // BEFORE the size ceiling, deliberately. Composition can ADD elements —
@@ -144,6 +170,34 @@ final class DocumentRenderer
         ];
 
         return $this->renderService->render($payload);
+    }
+
+    /**
+     * Render a document-mode template through the flowing service.
+     *
+     * The ceilings, the enablement check and the call itself already belong to
+     * {@see FlowDocumentRenderer} — it is what the SDK's `FlowDocument` path
+     * uses — so this only has to build the payload and hand it over. Two
+     * renderers applying two sets of limits to the same service is how one of
+     * them ends up enforcing a bound the other does not.
+     *
+     * @param array<string, mixed> $templateData
+     *
+     * @throws DocumentRenderRejectedException   Empty content, or a ceiling.
+     * @throws RenderServiceUnavailableException The service could not do it.
+     */
+    private function renderFlow(int $tenantId, array $templateData): string
+    {
+        if ($this->flow === null) {
+            // Named rather than silently falling through to the canvas path.
+            // Falling through would print a blank page and report success,
+            // which is the failure this branch was added to remove.
+            throw DocumentRenderRejectedException::because(
+                'This document is in document mode, which this instance cannot render'
+            );
+        }
+
+        return $this->flow->render($tenantId, FlowTemplatePayload::build($templateData))->bytes;
     }
 
     /**
