@@ -22843,6 +22843,313 @@
                 ]
             }
         },
+        "/api/v1/plans/{id}/prices": {
+            "get": {
+                "operationId": "get_api_v1_plans_id_prices",
+                "summary": "What this plan costs, on every set of terms (operator)",
+                "tags": [
+                    "plans"
+                ],
+                "description": "Includes RETIRED prices. A list of only the live ones cannot explain a charge somebody is querying, and that is the question this screen is opened to answer. Amounts are minor units \u2014 4900 is 49.00 in a two-decimal currency.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Every price this plan has carried",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PlanPriceListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such plan",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_v1_plans_id_prices",
+                "summary": "Price this plan on a set of terms (operator)",
+                "tags": [
+                    "plans"
+                ],
+                "description": "A plan may carry many prices \u2014 one per currency, billing period and seat basis \u2014 but only ONE LIVE price per combination of those. A second live price for the same terms is refused with 409 rather than accepted, because two of them would make the checkout, the invoice and the price list each pick differently and somebody be charged an amount no screen displayed. Retire the existing one first. `unit_amount` must be an integer of minor units; a decimal is refused with 422, since 49.9 truncating to 49 is a hundredfold error that looks like a real price.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PlanPriceCreateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The new price",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PlanPriceResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such plan",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "This plan already has a live price on those terms",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "The currency, amount or period cannot be billed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/plans/{id}/prices/{priceId}": {
+            "delete": {
+                "operationId": "delete_api_v1_plans_id_prices_priceid",
+                "summary": "Retire a price (operator)",
+                "tags": [
+                    "plans"
+                ],
+                "description": "RETIRES rather than destroys, and returns the retired row. The price is what a past charge was made against, so deleting it would throw away the record of what somebody was charged; the partial unique index frees its slot the moment it stops being active, so a replacement can be created immediately.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "priceId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The retired price",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PlanPriceResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such price on this plan",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/platform/version": {
             "get": {
                 "operationId": "get_api_v1_platform_version",
@@ -41811,6 +42118,104 @@
                         "items": {
                             "$ref": "#/components/schemas/PlanSummary"
                         }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "PlanPrice": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "plan_id": {
+                        "type": "integer"
+                    },
+                    "currency": {
+                        "type": "string"
+                    },
+                    "unit_amount": {
+                        "type": "integer"
+                    },
+                    "billing_period": {
+                        "type": "string",
+                        "enum": [
+                            "month",
+                            "year",
+                            "once"
+                        ]
+                    },
+                    "is_per_seat": {
+                        "type": "boolean"
+                    },
+                    "is_active": {
+                        "type": "boolean"
+                    },
+                    "created_at": {
+                        "type": "string"
+                    },
+                    "updated_at": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "id",
+                    "plan_id",
+                    "currency",
+                    "unit_amount",
+                    "billing_period",
+                    "is_per_seat",
+                    "is_active"
+                ]
+            },
+            "PlanPriceCreateRequest": {
+                "type": "object",
+                "properties": {
+                    "currency": {
+                        "type": "string"
+                    },
+                    "unit_amount": {
+                        "type": "integer"
+                    },
+                    "billing_period": {
+                        "type": "string",
+                        "enum": [
+                            "month",
+                            "year",
+                            "once"
+                        ]
+                    },
+                    "is_per_seat": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "currency",
+                    "unit_amount",
+                    "billing_period"
+                ]
+            },
+            "PlanPriceListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PlanPrice"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "PlanPriceResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/PlanPrice"
                     }
                 },
                 "required": [

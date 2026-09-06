@@ -799,6 +799,21 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::TENANTS_READ,
     ];
     $items[] = [
+        'id' => 'billing',
+        'label' => 'Plans & pricing',
+        'href' => '/admin/billing',
+        'icon' => 'receipt',
+        'group' => 'access',
+        'order' => 6,
+        // Mirrors GET /api/plans, which gates on plans:manage. The ROUTE
+        // additionally requires the system tenant, and the screen shows
+        // read-only without that — a nav item cannot express "and the system
+        // tenant", so it follows the permission its API declares and the server
+        // refuses the writes regardless. Showing the catalogue to a tenant admin
+        // who cannot change it is better than a link that 403s.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::PLANS_MANAGE,
+    ];
+    $items[] = [
         'id' => 'user-groups',
         'label' => 'User Groups',
         'href' => '/admin/user-groups',
@@ -2311,6 +2326,23 @@ $router->register('GET',    '/api/plans/{id:\d+}',              [$plansHandler, 
 $router->register('PATCH',  '/api/plans/{id:\d+}',              [$plansHandler, 'update'],          null, null, CorePermissions::PLANS_MANAGE);
 $router->register('DELETE', '/api/plans/{id:\d+}',              [$plansHandler, 'destroy'],         null, null, CorePermissions::PLANS_MANAGE);
 $router->register('PUT',    '/api/plans/{id:\d+}/entitlements', [$plansHandler, 'setEntitlements'], null, null, CorePermissions::PLANS_MANAGE);
+
+// What each plan COSTS. Same gate as the catalogue above — `plans:manage` AND
+// the system tenant — because a price is a platform-wide commercial fact, and a
+// tenant admin holding the permission through the global admin role would
+// otherwise be able to reprice the product for everybody.
+//
+// DELETE retires rather than destroys: the row is what a past charge was made
+// against, and the partial unique index frees its slot the moment it stops being
+// active.
+$planPricesHandler = new \Whity\Api\PlanPricesApiHandler(
+    new \Whity\Core\Plan\PlanPriceRepository($db->getPdo()),
+    new \Whity\Core\Plan\PlanRepository($db->getPdo()),
+    $roleChecker
+);
+$router->register('GET',    '/api/plans/{id:\d+}/prices',                  [$planPricesHandler, 'list'],   null, null, CorePermissions::PLANS_MANAGE);
+$router->register('POST',   '/api/plans/{id:\d+}/prices',                  [$planPricesHandler, 'create'], null, null, CorePermissions::PLANS_MANAGE);
+$router->register('DELETE', '/api/plans/{id:\d+}/prices/{priceId:\d+}',    [$planPricesHandler, 'retire'], null, null, CorePermissions::PLANS_MANAGE);
 $router->register('POST',   '/api/tenants/{id:\d+}/plan',       [$plansHandler, 'applyToTenant'],   null, null, CorePermissions::PLANS_MANAGE);
 $router->register('GET',    '/api/tenants/{id:\d+}/plan',       [$plansHandler, 'getTenantPlan'],   null, null, CorePermissions::PLANS_MANAGE);
 

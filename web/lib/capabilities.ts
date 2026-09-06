@@ -48,6 +48,17 @@ export const TAGS_READ = 'tags:read';
 export const TAGS_MANAGE = 'tags:manage';
 
 /**
+ * The subscription plan CATALOGUE and its prices (#billing).
+ *
+ * A PLATFORM capability: holding it is necessary but not sufficient, because
+ * the endpoints additionally require the caller to be acting in the system
+ * tenant. A regular tenant admin holds it through the global admin role and
+ * would otherwise be able to reprice the product for everybody, so the screen
+ * shows read-only for them and the server refuses the write regardless.
+ */
+export const PLANS_MANAGE = 'plans:manage';
+
+/**
  * i18n admin management (WC-583). LANGUAGES_MANAGE is a PLATFORM capability —
  * the backend additionally requires the caller to be acting in the SYSTEM
  * tenant (id 0), since languages carry no tenant_id column at all. A regular

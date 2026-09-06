@@ -3222,6 +3222,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/plans/{id}/prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What this plan costs, on every set of terms (operator)
+         * @description Includes RETIRED prices. A list of only the live ones cannot explain a charge somebody is querying, and that is the question this screen is opened to answer. Amounts are minor units — 4900 is 49.00 in a two-decimal currency.
+         */
+        get: operations["get_api_v1_plans_id_prices"];
+        put?: never;
+        /**
+         * Price this plan on a set of terms (operator)
+         * @description A plan may carry many prices — one per currency, billing period and seat basis — but only ONE LIVE price per combination of those. A second live price for the same terms is refused with 409 rather than accepted, because two of them would make the checkout, the invoice and the price list each pick differently and somebody be charged an amount no screen displayed. Retire the existing one first. `unit_amount` must be an integer of minor units; a decimal is refused with 422, since 49.9 truncating to 49 is a hundredfold error that looks like a real price.
+         */
+        post: operations["post_api_v1_plans_id_prices"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plans/{id}/prices/{priceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Retire a price (operator)
+         * @description RETIRES rather than destroys, and returns the retired row. The price is what a past charge was made against, so deleting it would throw away the record of what somebody was charged; the partial unique index frees its slot the moment it stops being active, so a replacement can be created immediately.
+         */
+        delete: operations["delete_api_v1_plans_id_prices_priceid"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/platform/version": {
         parameters: {
             query?: never;
@@ -6573,6 +6617,31 @@ export interface components {
         };
         PlanListResponse: {
             data: components["schemas"]["PlanSummary"][];
+        };
+        PlanPrice: {
+            id: number;
+            plan_id: number;
+            currency: string;
+            unit_amount: number;
+            /** @enum {string} */
+            billing_period: "month" | "year" | "once";
+            is_per_seat: boolean;
+            is_active: boolean;
+            created_at?: string;
+            updated_at?: string;
+        };
+        PlanPriceCreateRequest: {
+            currency: string;
+            unit_amount: number;
+            /** @enum {string} */
+            billing_period: "month" | "year" | "once";
+            is_per_seat?: boolean;
+        };
+        PlanPriceListResponse: {
+            data: components["schemas"]["PlanPrice"][];
+        };
+        PlanPriceResponse: {
+            data: components["schemas"]["PlanPrice"];
         };
         PlanRef: {
             id: number;
@@ -25837,6 +25906,239 @@ export interface operations {
             };
             /** @description Validation failed */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_plans_id_prices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every price this plan has carried */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanPriceListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such plan */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_plans_id_prices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanPriceCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The new price */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanPriceResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such plan */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description This plan already has a live price on those terms */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The currency, amount or period cannot be billed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_plans_id_prices_priceid: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                priceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The retired price */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanPriceResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such price on this plan */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
