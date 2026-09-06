@@ -35,6 +35,7 @@ final class SettingsRegistryTest extends TestCase
              'mail.events.deletion_enabled', 'mail.events.password_reset_enabled',
              'mail.brand_color', 'mail.footer_text',
              'billing.enforcement_default', 'billing.grace_days',
+             'seats.enforcement', 'seats.count_invited',
              'plugins.store_allowed_hosts', 'plugins.store_enabled',
              'documents.render_enabled', 'documents.render_max_rows',
              'documents.render_max_pages', 'documents.render_max_template_bytes',
@@ -355,7 +356,8 @@ final class SettingsRegistryTest extends TestCase
         // 61 since #1054 added documents.routing_notification_channels.
         // 62 since #1068 added ui.hide_dates.
         // 65 since #1072 added the three documents.flow_max_* ceilings.
-        self::assertCount(65, $describe);
+        // 67 since seats added seats.enforcement + seats.count_invited.
+        self::assertCount(67, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]
