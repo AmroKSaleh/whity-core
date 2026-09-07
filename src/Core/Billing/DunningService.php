@@ -151,11 +151,7 @@ final class DunningService
             return false;
         }
 
-        foreach ($this->invoices->overdueOpen($now) as $invoice) {
-            if ((int) $invoice['tenant_id'] !== $tenantId) {
-                continue;
-            }
-
+        foreach ($this->invoices->overdueOpenForTenant($tenantId, $now) as $invoice) {
             $balance = (int) $invoice['total_minor']
                 - $this->ledger->amountSettledMinor($tenantId, (int) $invoice['id']);
 

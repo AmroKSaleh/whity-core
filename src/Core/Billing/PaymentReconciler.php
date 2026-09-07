@@ -135,6 +135,16 @@ final class PaymentReconciler
     }
 
     /**
+     * Which tenant owns an invoice — public, because the webhook handler needs
+     * it to decide whose access to restore, and duplicating the lookup there
+     * would mean two answers to one question.
+     */
+    public function tenantForInvoice(int $invoiceId): ?int
+    {
+        return $this->tenantOwning($invoiceId);
+    }
+
+    /**
      * Which tenant owns an invoice.
      *
      * A deliberate cross-tenant read, and the only one here: a webhook arrives
@@ -146,6 +156,9 @@ final class PaymentReconciler
      */
     private function tenantOwning(int $invoiceId): ?int
     {
+        // @tenant-guard-ignore: this is the lookup that ESTABLISHES the tenant.
+        // A webhook arrives with no tenant context at all, and every statement
+        // after this one binds the tenant it returns.
         $statement = $this->pdo->prepare('SELECT tenant_id FROM invoices WHERE id = :id');
         $statement->execute([':id' => $invoiceId]);
         $tenantId = $statement->fetchColumn();

@@ -108,7 +108,7 @@ final class InvoiceRepository
         $taxable = $subtotal - $discountMinor;
         $tax = intdiv($taxable * $taxRateBp + 5000, 10000);
 
-        $position = $this->nextPosition($invoiceId);
+        $position = $this->nextPosition($tenantId, $invoiceId);
 
         $statement = $this->pdo->prepare(
             'INSERT INTO invoice_lines (invoice_id, tenant_id, position, description, quantity,
@@ -371,12 +371,54 @@ final class InvoiceRepository
     }
 
     /**
-     * The open invoices that fell due before a moment — what dunning walks.
+     * One tenant's overdue open invoices.
+     *
+     * THE SCOPED FORM IS THE DEFAULT, and {@see self::overdueOpenAcrossTenants()}
+     * is the exception, because the question "does this tenant still owe
+     * anything" is asked far more often than "who owes anything" — every time a
+     * payment lands, in fact. An earlier version answered it by sweeping every
+     * tenant and filtering in PHP, which is both wasteful and the exact shape of
+     * cross-tenant read the predicate guard exists to catch.
      *
      * @return list<array<string, mixed>>
      */
-    public function overdueOpen(DateTimeImmutable $asOf, int $limit = 500): array
+    public function overdueOpenForTenant(int $tenantId, DateTimeImmutable $asOf, int $limit = 500): array
     {
+        $statement = $this->pdo->prepare(
+            'SELECT * FROM invoices
+              WHERE tenant_id = :tenant_id
+                AND status = :open AND due_at IS NOT NULL AND due_at <= :as_of
+              ORDER BY due_at ASC, id ASC
+              LIMIT :limit'
+        );
+        $statement->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+        $statement->bindValue(':open', self::STATUS_OPEN);
+        $statement->bindValue(':as_of', $asOf->format('Y-m-d H:i:s'));
+        $statement->bindValue(':limit', max(1, min($limit, 1000)), PDO::PARAM_INT);
+        $statement->execute();
+
+        /** @var list<array<string, mixed>> $rows */
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+
+        return array_map(self::normalize(...), $rows);
+    }
+
+    /**
+     * Every tenant's overdue open invoices — the dunning sweep.
+     *
+     * DELIBERATELY CROSS-TENANT, and named so that calling it is a decision. A
+     * scheduled job that chases unpaid invoices has to see all of them; there
+     * is no tenant context at that moment, and inventing one would mean running
+     * the sweep once per tenant to answer a question the database answers once.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function overdueOpenAcrossTenants(DateTimeImmutable $asOf, int $limit = 500): array
+    {
+        // The dunning sweep runs with no tenant context by design: it is the
+        // job that FINDS which tenants are overdue, so there is no tenant to
+        // bind yet. Every read that follows binds the one this returns.
+        // @tenant-guard-ignore: cross-tenant by design — the dunning sweep.
         $statement = $this->pdo->prepare(
             'SELECT * FROM invoices
               WHERE status = :open AND due_at IS NOT NULL AND due_at <= :as_of
@@ -438,12 +480,23 @@ final class InvoiceRepository
         }
     }
 
-    private function nextPosition(int $invoiceId): int
+    /**
+     * The next free position on an invoice.
+     *
+     * Binds the tenant as well as the invoice even though `invoice_id` alone
+     * looks sufficient. It is not: `invoice_lines.tenant_id` is denormalised
+     * precisely so a read can be policed without trusting the join, and a query
+     * here that skipped it would be the one place in this class where the
+     * denormalisation bought nothing.
+     */
+    private function nextPosition(int $tenantId, int $invoiceId): int
     {
         $statement = $this->pdo->prepare(
-            'SELECT COALESCE(MAX(position), -1) + 1 FROM invoice_lines WHERE invoice_id = :invoice_id'
+            'SELECT COALESCE(MAX(position), -1) + 1
+               FROM invoice_lines
+              WHERE tenant_id = :tenant_id AND invoice_id = :invoice_id'
         );
-        $statement->execute([':invoice_id' => $invoiceId]);
+        $statement->execute([':tenant_id' => $tenantId, ':invoice_id' => $invoiceId]);
 
         return (int) $statement->fetchColumn();
     }
