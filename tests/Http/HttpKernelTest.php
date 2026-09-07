@@ -676,7 +676,26 @@ class HttpKernelTest extends TestCase
     public function testMemoryLimitStressTest(): void
     {
         $oldLimit = $_ENV['WORKER_MEMORY_LIMIT_MB'] ?? null;
-        $_ENV['WORKER_MEMORY_LIMIT_MB'] = '512'; // 512 MB, safe limit
+
+        // THE CEILING IS RELATIVE TO WHAT THIS PROCESS HAS ALREADY ALLOCATED.
+        //
+        // HttpKernel::checkMemoryLimit() reads memory_get_usage(), which is
+        // process-wide, so a fixed ceiling here is not a statement about the
+        // kernel at all — it is a statement about how much every other test in
+        // the shard, plus coverage instrumentation, happened to allocate first.
+        // The previous absolute 512 MB duly failed the day the schema grew by
+        // two tables, reporting a kernel memory leak that did not exist.
+        //
+        // What this test actually claims is RELATIVE: across a hundred requests
+        // that each allocate and free, the kernel neither trips its own limit
+        // nor grows. So the limit is pinned a fixed distance above current
+        // usage, and the claim survives whatever the process was already
+        // holding. The 0.9 divisor mirrors the kernel's own threshold factor,
+        // so HEADROOM_MB is real headroom rather than nine tenths of it.
+        $headroomBytes = 64 * 1024 * 1024;
+        $_ENV['WORKER_MEMORY_LIMIT_MB'] = (string) (int) ceil(
+            (memory_get_usage() + $headroomBytes) / (1024 * 1024) / 0.9
+        );
         
         try {
             $handler = static function(Request $request): Response {
