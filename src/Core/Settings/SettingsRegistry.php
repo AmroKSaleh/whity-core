@@ -177,6 +177,48 @@ final class SettingsRegistry
     public const SEATS_ENFORCEMENT = 'seats.enforcement';
     public const SEATS_COUNT_INVITED = 'seats.count_invited';
 
+    // INVOICING (#billing). Every one of these differs per deployment, which
+    // is exactly why none of them is a constant in the invoicing code.
+    //
+    // Tax is a RATE IN BASIS POINTS: 16% is 1600 and 7.5% is 750, so a rate
+    // is an integer and never a float. It defaults to ZERO rather than to any
+    // country's rate, because charging tax an operator is not registered to
+    // collect is a worse failure than not charging it, and a default that is
+    // wrong for everyone outside one jurisdiction gets shipped unnoticed.
+    // `tax_label` is what the invoice calls it ('VAT', 'GST', 'Sales Tax').
+    //
+    // `tax_inclusive` says whether quoted prices already contain the tax.
+    // Either way the invoice stores its subtotal NET, so the arithmetic
+    // invariant holds; this only decides how a price is decomposed.
+    //
+    // The SELLER is whoever the invoice is from. Per-tenant overridable, for
+    // white-label deployments where each tenant invoices as itself.
+    public const BILLING_DEFAULT_CURRENCY = 'billing.default_currency';
+    public const BILLING_TAX_RATE_BP = 'billing.tax_rate_bp';
+    public const BILLING_TAX_LABEL = 'billing.tax_label';
+    public const BILLING_TAX_INCLUSIVE = 'billing.tax_inclusive';
+    public const BILLING_PAYMENT_TERMS_DAYS = 'billing.payment_terms_days';
+    public const BILLING_SELLER_NAME = 'billing.seller_name';
+    public const BILLING_SELLER_ADDRESS = 'billing.seller_address';
+    public const BILLING_SELLER_TAX_ID = 'billing.seller_tax_id';
+
+    // NUMBERING is GLOBAL-ONLY, unlike everything above. A per-tenant
+    // override would make the meaning of the (series, number) uniqueness
+    // index depend on a setting a tenant admin can change, which is how a
+    // sequence quietly starts issuing duplicates.
+    //
+    //   format : placeholders {YYYY}, {YY}, {MM} and {SEQ:n} (zero-padded
+    //            to n digits). Anything else is literal.
+    //   scope  : 'shared'     — one sequence for the whole platform, which
+    //                           is correct when the operator is the seller.
+    //            'per_tenant' — one per tenant, for resale deployments where
+    //                           each tenant issues as its own legal seller.
+    //   reset  : when the counter restarts. Most tax authorities expect a
+    //            yearly sequence; 'never' is the safest and least common.
+    public const BILLING_INVOICE_NUMBER_FORMAT = 'billing.invoice_number_format';
+    public const BILLING_INVOICE_NUMBER_SCOPE = 'billing.invoice_number_scope';
+    public const BILLING_INVOICE_NUMBER_RESET = 'billing.invoice_number_reset';
+
     // Plugin marketplace (WC plugin-store): comma-separated allowlist of trusted
     // store HOSTS the install-from-store endpoint may fetch packages from. EMPTY
     // (default) = the feature is OFF — no store is trusted. This is the PRIMARY
@@ -576,6 +618,9 @@ final class SettingsRegistry
         self::MAIL_FOOTER_TEXT,
         self::BILLING_ENFORCEMENT_DEFAULT,
         self::BILLING_GRACE_DAYS,
+        self::BILLING_INVOICE_NUMBER_FORMAT,
+        self::BILLING_INVOICE_NUMBER_SCOPE,
+        self::BILLING_INVOICE_NUMBER_RESET,
         self::SEATS_ENFORCEMENT,
         self::SEATS_COUNT_INVITED,
         self::PLUGINS_STORE_ALLOWED_HOSTS,
@@ -622,6 +667,7 @@ final class SettingsRegistry
         self::DOCUMENTS_QR_ENABLED,
         self::I18N_ENABLED,
         self::UI_HIDE_DATES,
+        self::BILLING_TAX_INCLUSIVE,
     ];
 
     /**
@@ -693,6 +739,8 @@ final class SettingsRegistry
         // limit is only ever consulted when something is being ADDED, so
         // "block writes" and "block everything" would be the same rule.
         self::SEATS_ENFORCEMENT => ['off', 'warn', 'block'],
+        self::BILLING_INVOICE_NUMBER_SCOPE => ['shared', 'per_tenant'],
+        self::BILLING_INVOICE_NUMBER_RESET => ['never', 'yearly', 'monthly'],
         // What a STRANGER holding a printed document is told when they scan it
         // (#1036). Two levels rather than a boolean because the second one adds
         // two distinct disclosures — the routing verb, and telling a withdrawn
@@ -786,6 +834,19 @@ final class SettingsRegistry
         // refusing; an operator opts into 'block'.
         self::SEATS_ENFORCEMENT => 'warn',
         self::SEATS_COUNT_INVITED => 'true',
+        // Zero tax until an operator says otherwise — see the constant.
+        self::BILLING_DEFAULT_CURRENCY => 'JOD',
+        self::BILLING_TAX_RATE_BP => '0',
+        self::BILLING_TAX_LABEL => '',
+        self::BILLING_TAX_INCLUSIVE => 'false',
+        // Two weeks, the commonest commercial term. Zero means due on issue.
+        self::BILLING_PAYMENT_TERMS_DAYS => '14',
+        self::BILLING_SELLER_NAME => '',
+        self::BILLING_SELLER_ADDRESS => '',
+        self::BILLING_SELLER_TAX_ID => '',
+        self::BILLING_INVOICE_NUMBER_FORMAT => 'INV-{YYYY}-{SEQ:5}',
+        self::BILLING_INVOICE_NUMBER_SCOPE => 'shared',
+        self::BILLING_INVOICE_NUMBER_RESET => 'yearly',
         // Empty = install-from-store OFF (no trusted store); operator opts in.
         self::PLUGINS_STORE_ALLOWED_HOSTS => '',
         // Master switch default TRUE (opt-out): the allowlist above is already
@@ -1160,6 +1221,13 @@ final class SettingsRegistry
             self::BILLING_ENFORCEMENT_DEFAULT => self::validateEnum($key, $value),
             self::BILLING_GRACE_DAYS => self::validateGraceDays($value),
             self::SEATS_ENFORCEMENT => self::validateEnum($key, $value),
+            self::BILLING_DEFAULT_CURRENCY => self::validateCurrencyCode($value),
+            self::BILLING_TAX_RATE_BP => self::validateTaxRateBasisPoints($value),
+            self::BILLING_TAX_INCLUSIVE => self::validateBoolean($value, self::BILLING_TAX_INCLUSIVE),
+            self::BILLING_PAYMENT_TERMS_DAYS => self::validatePaymentTermsDays($value),
+            self::BILLING_INVOICE_NUMBER_FORMAT => self::validateInvoiceNumberFormat($value),
+            self::BILLING_INVOICE_NUMBER_SCOPE => self::validateEnum($key, $value),
+            self::BILLING_INVOICE_NUMBER_RESET => self::validateEnum($key, $value),
             self::SEATS_COUNT_INVITED => self::validateBoolean($value, self::SEATS_COUNT_INVITED),
             self::MAIL_BRAND_COLOR => self::validateHexColor($value),
             self::MAIL_SMTP_HOST,
@@ -1380,6 +1448,70 @@ final class SettingsRegistry
      * @param string $value The validated candidate value.
      * @return string The canonical value to persist.
      */
+    /**
+     * A three-letter ISO 4217 code. Format only: refusing a code we hold no
+     * exponent for would stop an operator selling in an ordinary two-decimal
+     * currency for no reason, and the exponent table's safe default covers it.
+     */
+    private static function validateCurrencyCode(string $value): ?string
+    {
+        return preg_match('/^[A-Z]{3}$/', strtoupper(trim($value))) === 1
+            ? null
+            : 'must be a three-letter ISO 4217 currency code, such as JOD';
+    }
+
+    /**
+     * Basis points, 0-10000. A rate above 100% is always a units mistake —
+     * somebody typed 16 meaning sixteen per cent and got 0.16%, then corrected
+     * it to 1600% — and both directions are worth catching loudly.
+     */
+    private static function validateTaxRateBasisPoints(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', trim($value)) !== 1) {
+            return 'must be a whole number of basis points (1600 = 16%)';
+        }
+
+        return (int) $value <= 10000
+            ? null
+            : 'must be at most 10000 basis points (100%)';
+    }
+
+    /** Days from issue to due. Zero is legitimate: due on receipt. */
+    private static function validatePaymentTermsDays(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', trim($value)) !== 1) {
+            return 'must be a whole number of days';
+        }
+
+        return (int) $value <= 365 ? null : 'must be at most 365 days';
+    }
+
+    /**
+     * The format must contain a sequence placeholder, or every invoice in a
+     * series gets the same number and the uniqueness index rejects the second
+     * one — at issue time, on a customer's invoice, which is the worst possible
+     * moment to discover a settings typo.
+     */
+    private static function validateInvoiceNumberFormat(string $value): ?string
+    {
+        $trimmed = trim($value);
+
+        if ($trimmed === '') {
+            return 'must not be empty';
+        }
+
+        if (preg_match('/\{SEQ(?::\d+)?\}/', $trimmed) !== 1) {
+            return 'must contain {SEQ} or {SEQ:n}, or every invoice in a series '
+                . 'would be numbered the same';
+        }
+
+        if (strlen($trimmed) > 64) {
+            return 'must fit the 64-character invoice number column';
+        }
+
+        return null;
+    }
+
     public static function normalize(string $key, string $value): string
     {
         return match ($key) {

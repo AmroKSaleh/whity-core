@@ -139,7 +139,8 @@ final class SettingsApiRealEngineTest extends TestCase
         // idea tenants exist. The instance-wide documents.render_enabled switch
         // above them stays global-only, because whether a whole
         // browser-bearing container runs is an operator's decision.
-        self::assertCount(23, $data['registry']);
+        // 31 since #billing: eight invoicing keys are tenant-overridable.
+        self::assertCount(31, $data['registry']);
         self::assertArrayNotHasKey('auth.self_registration_enabled', $data['effective']);
         self::assertSame([], $data['overridden']);
     }
