@@ -35,6 +35,7 @@ final class PromotionsApiHandlerRealEngineTest extends TestCase
 
     private const SYSTEM_TENANT = 0;
     private const OTHER_TENANT = 1;
+    private const THIRD_TENANT = 2;
 
     private PDO $pdo;
     private PromotionsApiHandler $handler;
@@ -46,7 +47,13 @@ final class PromotionsApiHandlerRealEngineTest extends TestCase
         $this->pdo = SchemaFromMigrations::make(true);
 
         $this->pdo->exec("INSERT OR IGNORE INTO tenants (id, name, slug) VALUES (0, 'system', 'system')");
+        // Two non-system tenants, because "this early bird was taken twice" is
+        // only representable with two distinct takers. Both are real rows: the
+        // redemption ledger has a real foreign key, and SQLite does not enforce
+        // one unless asked, so a fabricated tenant id passes locally and fails
+        // on the PostgreSQL dialect shard.
         $this->pdo->exec("INSERT INTO tenants (id, name, slug) VALUES (1, 'other', 'other')");
+        $this->pdo->exec("INSERT INTO tenants (id, name, slug) VALUES (2, 'third', 'third')");
         $this->pdo->exec("INSERT OR IGNORE INTO roles (id, name, description, tenant_id, created_at) VALUES (1, 'admin', '', NULL, datetime('now'))");
         $this->pdo->exec("
             INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at) VALUES
@@ -207,7 +214,7 @@ final class PromotionsApiHandlerRealEngineTest extends TestCase
         ])->getBody(), true)['data'];
 
         $this->promotions->recordRedemption($row['id'], self::OTHER_TENANT);
-        $this->promotions->recordRedemption($row['id'], 2);
+        $this->promotions->recordRedemption($row['id'], self::THIRD_TENANT);
 
         $listed = json_decode(
             (string) $this->handler->list($this->actAs(self::OPERATOR, self::SYSTEM_TENANT))->getBody(),
