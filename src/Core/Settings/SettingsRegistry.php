@@ -219,6 +219,40 @@ final class SettingsRegistry
     public const BILLING_INVOICE_NUMBER_SCOPE = 'billing.invoice_number_scope';
     public const BILLING_INVOICE_NUMBER_RESET = 'billing.invoice_number_reset';
 
+    // PAYMENT RAILS (#billing). Which rails this instance offers, and how the
+    // one real rail is addressed.
+    //
+    // CliQ is Jordan's instant transfer network: the payer pushes money from
+    // their own bank app to an alias and types a reference. So the alias and
+    // the bank name are shown to a customer, and the reference prefix is what
+    // they will see on their statement.
+    //
+    // THE WEBHOOK SECRET IS NOT HERE, deliberately. It follows the SMTP
+    // password's pattern — an `app_settings` key that is NOT a registry key,
+    // encrypted at rest, and therefore never surfaced by GET /settings, which
+    // only iterates registry keys. A shared secret that can be read back over
+    // the settings API is not a shared secret.
+    //
+    // `payments.mock_enabled` exists so a deployment can exercise the whole
+    // lifecycle without a bank. It defaults OFF and is global-only: a tenant
+    // able to turn on a rail that settles its own invoices for free is the
+    // sharpest possible version of a privilege escalation.
+    public const PAYMENTS_CLIQ_ENABLED = 'payments.cliq_enabled';
+    public const PAYMENTS_CLIQ_ALIAS = 'payments.cliq_alias';
+    public const PAYMENTS_CLIQ_BANK_NAME = 'payments.cliq_bank_name';
+    public const PAYMENTS_CLIQ_REFERENCE_PREFIX = 'payments.cliq_reference_prefix';
+    public const PAYMENTS_MOCK_ENABLED = 'payments.mock_enabled';
+
+    // DUNNING (#billing). One setting says the whole retry policy: a list of
+    // day offsets FROM THE DUE DATE, so "1,3,7" is three attempts on days 1,
+    // 3 and 7 rather than 1, 4 and 11. Locking is separate from the last
+    // retry because running out of attempts and losing access are different
+    // events, and the gap between them is where a human still has time to
+    // pay. Both are per-tenant overridable: a deployment will want to chase
+    // its enterprise customers differently from its self-service ones.
+    public const DUNNING_RETRY_SCHEDULE_DAYS = 'dunning.retry_schedule_days';
+    public const DUNNING_LOCK_AFTER_DAYS = 'dunning.lock_after_days';
+
     // Plugin marketplace (WC plugin-store): comma-separated allowlist of trusted
     // store HOSTS the install-from-store endpoint may fetch packages from. EMPTY
     // (default) = the feature is OFF — no store is trusted. This is the PRIMARY
@@ -621,6 +655,11 @@ final class SettingsRegistry
         self::BILLING_INVOICE_NUMBER_FORMAT,
         self::BILLING_INVOICE_NUMBER_SCOPE,
         self::BILLING_INVOICE_NUMBER_RESET,
+        self::PAYMENTS_CLIQ_ENABLED,
+        self::PAYMENTS_CLIQ_ALIAS,
+        self::PAYMENTS_CLIQ_BANK_NAME,
+        self::PAYMENTS_CLIQ_REFERENCE_PREFIX,
+        self::PAYMENTS_MOCK_ENABLED,
         self::SEATS_ENFORCEMENT,
         self::SEATS_COUNT_INVITED,
         self::PLUGINS_STORE_ALLOWED_HOSTS,
@@ -668,6 +707,8 @@ final class SettingsRegistry
         self::I18N_ENABLED,
         self::UI_HIDE_DATES,
         self::BILLING_TAX_INCLUSIVE,
+        self::PAYMENTS_CLIQ_ENABLED,
+        self::PAYMENTS_MOCK_ENABLED,
     ];
 
     /**
@@ -709,6 +750,7 @@ final class SettingsRegistry
      * @var list<string>
      */
     private const FEATURE_FLAG_KEYS = [
+        self::PAYMENTS_CLIQ_ENABLED,
         self::ERROR_TRACKING_ENABLED,
         self::MCP_ENABLED,
         self::SELF_REGISTRATION_ENABLED,
@@ -847,6 +889,16 @@ final class SettingsRegistry
         self::BILLING_INVOICE_NUMBER_FORMAT => 'INV-{YYYY}-{SEQ:5}',
         self::BILLING_INVOICE_NUMBER_SCOPE => 'shared',
         self::BILLING_INVOICE_NUMBER_RESET => 'yearly',
+        // Every rail OFF until an operator configures one. A payment rail
+        // that is on by default is one that can take money before anybody
+        // decided it should.
+        self::PAYMENTS_CLIQ_ENABLED => 'false',
+        self::PAYMENTS_CLIQ_ALIAS => '',
+        self::PAYMENTS_CLIQ_BANK_NAME => '',
+        self::PAYMENTS_CLIQ_REFERENCE_PREFIX => 'WHT-',
+        self::PAYMENTS_MOCK_ENABLED => 'false',
+        self::DUNNING_RETRY_SCHEDULE_DAYS => '1,3,7',
+        self::DUNNING_LOCK_AFTER_DAYS => '14',
         // Empty = install-from-store OFF (no trusted store); operator opts in.
         self::PLUGINS_STORE_ALLOWED_HOSTS => '',
         // Master switch default TRUE (opt-out): the allowlist above is already
@@ -1228,6 +1280,11 @@ final class SettingsRegistry
             self::BILLING_INVOICE_NUMBER_FORMAT => self::validateInvoiceNumberFormat($value),
             self::BILLING_INVOICE_NUMBER_SCOPE => self::validateEnum($key, $value),
             self::BILLING_INVOICE_NUMBER_RESET => self::validateEnum($key, $value),
+            self::PAYMENTS_CLIQ_ENABLED => self::validateBoolean($value, self::PAYMENTS_CLIQ_ENABLED),
+            self::PAYMENTS_MOCK_ENABLED => self::validateBoolean($value, self::PAYMENTS_MOCK_ENABLED),
+            self::PAYMENTS_CLIQ_REFERENCE_PREFIX => self::validateCliqReferencePrefix($value),
+            self::DUNNING_RETRY_SCHEDULE_DAYS => \Whity\Core\Billing\DunningSchedule::parseProblem($value),
+            self::DUNNING_LOCK_AFTER_DAYS => self::validateLockAfterDays($value),
             self::SEATS_COUNT_INVITED => self::validateBoolean($value, self::SEATS_COUNT_INVITED),
             self::MAIL_BRAND_COLOR => self::validateHexColor($value),
             self::MAIL_SMTP_HOST,
@@ -1453,6 +1510,32 @@ final class SettingsRegistry
      * exponent for would stop an operator selling in an ordinary two-decimal
      * currency for no reason, and the exponent table's safe default covers it.
      */
+    /**
+     * The prefix a payer sees, and types back. Letters only, because digits and
+     * punctuation invite exactly the transcription mistakes the reference's
+     * check characters exist to catch.
+     */
+    private static function validateCliqReferencePrefix(string $value): ?string
+    {
+        return preg_match('/^[A-Za-z]{2,8}-?$/', trim($value)) === 1
+            ? null
+            : 'must be two to eight letters, optionally followed by a hyphen (e.g. "WHT-")';
+    }
+
+    /**
+     * The day access is withdrawn. Zero is legitimate — due on receipt, locked
+     * the moment it lapses — and somebody's deliberate choice rather than
+     * something to refuse.
+     */
+    private static function validateLockAfterDays(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', trim($value)) !== 1) {
+            return 'must be a whole number of days after the due date';
+        }
+
+        return (int) $value <= 365 ? null : 'must be at most 365 days';
+    }
+
     private static function validateCurrencyCode(string $value): ?string
     {
         return preg_match('/^[A-Z]{3}$/', strtoupper(trim($value))) === 1

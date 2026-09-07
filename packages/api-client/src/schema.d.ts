@@ -485,6 +485,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/billing/invoices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * This tenant's invoices
+         * @description Newest first, drafts included — a tenant admin building next month's bill needs to see it. Every amount arrives BOTH as minor units and preformatted: 5000 JOD is 5.000, and a client that divides by 100 shows a customer ten times what they owe. How many decimal places a currency has is not something a client can work out for itself.
+         */
+        get: operations["get_api_v1_billing_invoices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/invoices/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One invoice, its lines and every movement against it
+         * @description The payment history includes FAILED and PENDING attempts, not only successful ones: "why does it say I have not paid" is answered by the attempt that failed, never by its absence.
+         */
+        get: operations["get_api_v1_billing_invoices_id"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/invoices/{id}/pay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Begin paying an invoice, by any rail
+         * @description ONE ENDPOINT FOR EVERY RAIL. Name a provider; the response carries a `kind` the client branches on once — send the browser to `redirect_url`, show `reference` and `display`, or report it already settled. A per-rail endpoint would work today and mean a second endpoint, a second client path and a second screen the day a card provider is added. THE ATTEMPT IS RECORDED BEFORE THE PAYER IS SENT ANYWHERE, so a customer who pays and closes the tab has not moved money the platform has no row for. THIS DOES NOT SETTLE ANYTHING: only a verified provider callback marks an invoice paid, because an endpoint that settled on a button press would be taking the customer's word for it.
+         */
+        post: operations["post_api_v1_billing_invoices_id_pay"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Which payment rails this instance can actually take money with
+         * @description CONFIGURED rails only. Offering one that cannot take money produces a button whose only outcome is an error the customer cannot act on. Each row says what the rail can do — in particular whether it can charge unattended, which is the difference between a subscription that renews itself and one where the customer must push the money every period.
+         */
+        get: operations["get_api_v1_billing_methods"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/branding": {
         parameters: {
             query?: never;
@@ -3088,6 +3168,26 @@ export interface paths {
         put?: never;
         /** Discard the staged password (tenant-scoped) */
         post: operations["post_api_v1_password_resets_id_reject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/payments/webhook/{provider}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A payment provider reports that money moved (PUBLIC, signature-verified)
+         * @description UNAUTHENTICATED BY NECESSITY — a bank cannot hold a session. What makes it safe is that verification happens inside the adapter BEFORE anything is parsed, and there is no way to obtain events from a payload without it: the interface has no separate verify step to forget. IT IS ALSO OUTSIDE THE PAYMENT WALL, deliberately. The wall answers 402 for a tenant that has not paid, so guarding this route would mean the payment that lifts the wall can never be recorded — a locked tenant would stay locked forever having paid. A REDELIVERY ANSWERS 200: providers retry until they get a success, and a duplicate is the system working, not an error. So does a verified callback carrying nothing we act on.
+         */
+        post: operations["post_api_v1_payments_webhook_provider"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6012,6 +6112,49 @@ export interface components {
                 status: "revoked";
             };
         };
+        Invoice: {
+            id: number;
+            number?: string | null;
+            status: string;
+            currency: string;
+            subtotal_minor?: number;
+            discount_minor?: number;
+            tax_minor?: number;
+            tax_rate_bp?: number;
+            tax_label?: string;
+            total_minor: number;
+            amount_paid_minor?: number;
+            balance_minor: number;
+            total_formatted: string;
+            balance_formatted?: string;
+            issued_at?: string | null;
+            due_at?: string | null;
+            paid_at?: string | null;
+            seller_name?: string;
+            buyer_name?: string;
+        };
+        InvoiceDetail: {
+            lines?: components["schemas"]["InvoiceLine"][];
+            payments?: components["schemas"]["PaymentTransaction"][];
+        };
+        InvoiceLine: {
+            id: number;
+            position?: number;
+            description: string;
+            quantity: number;
+            unit_amount_minor?: number;
+            subtotal_minor?: number;
+            discount_minor?: number;
+            tax_rate_bp?: number;
+            tax_minor?: number;
+            total_minor: number;
+        };
+        InvoiceListResponse: {
+            data: components["schemas"]["Invoice"][];
+        };
+        InvoiceResponse: {
+            data: components["schemas"]["Invoice"];
+        };
         Language: {
             id: number;
             code: string;
@@ -6540,6 +6683,43 @@ export interface components {
                 status: "applied" | "awaiting_approval";
                 message: string;
             };
+        };
+        PayInvoiceRequest: {
+            provider: string;
+            return_url?: string | null;
+        };
+        PaymentInstruction: {
+            kind: string;
+            provider: string;
+            reference?: string | null;
+            redirect_url?: string | null;
+            display?: {
+                [key: string]: string;
+            };
+            settled?: boolean;
+        };
+        PaymentInstructionResponse: {
+            data: components["schemas"]["PaymentInstruction"];
+        };
+        PaymentMethodListResponse: {
+            data: components["schemas"]["PaymentMethodOption"][];
+        };
+        PaymentMethodOption: {
+            provider: string;
+            uses_redirect?: boolean;
+            uses_push_transfer?: boolean;
+            supports_stored_methods?: boolean;
+            supports_unattended_charge?: boolean;
+        };
+        PaymentTransaction: {
+            id: number;
+            provider: string;
+            external_reference?: string | null;
+            status: string;
+            amount_minor: number;
+            currency: string;
+            failure_reason?: string | null;
+            occurred_at?: string;
         };
         PendingPasswordResetItem: {
             id: number;
@@ -7887,6 +8067,12 @@ export interface components {
             /** @enum {string} */
             accountStatus?: "active" | "inactive";
             allowLocalPasswordOnIdpAccount?: boolean;
+        };
+        WebhookAckResponse: {
+            data: {
+                received: number;
+                settled: number;
+            };
         };
     };
     responses: never;
@@ -9903,6 +10089,310 @@ export interface operations {
                 };
             };
             /** @description Profile has no active membership in the requested tenant */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_billing_invoices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invoices with what is still owed on each */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_billing_invoices_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The invoice, its lines and its payments */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such invoice for this tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_billing_invoices_id_pay: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PayInvoiceRequest"];
+            };
+        };
+        responses: {
+            /** @description What the payer must do next */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentInstructionResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such invoice for this tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The invoice is not open, or is already paid in full */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description That payment method is unavailable on this instance */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The provider could not be reached */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_billing_methods: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rails on offer */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentMethodListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -24988,6 +25478,73 @@ export interface operations {
             };
             /** @description Method not allowed */
             405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_payments_webhook_provider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description How many movements were read and how many settled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookAckResponse"];
+                };
+            };
+            /** @description The payload could not be verified */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such payment provider on this instance */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentic but unintelligible */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

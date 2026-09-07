@@ -799,6 +799,24 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::TENANTS_READ,
     ];
     $items[] = [
+        'id' => 'tenant-billing',
+        'label' => 'Billing',
+        'href' => '/billing',
+        'icon' => 'receipt',
+        // `system`, beside website settings and languages: this is the tenant
+        // administering its own account. It is NOT `access` — that group holds
+        // the OPERATOR's plan catalogue and promotions, which decide what
+        // somebody else is charged.
+        'group' => 'system',
+        // 6 — orders are unique within a group, and 1-5 are taken.
+        'order' => 6,
+        // Gated on the same slug as the route behind it. A nav entry that gated
+        // on a role name while the route gates on a slug is how a deployment
+        // with a renamed administrative role ends up holding the permission and
+        // never seeing the link.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::BILLING_VIEW,
+    ];
+    $items[] = [
         'id' => 'promotions',
         'label' => 'Promotions',
         'href' => '/admin/promotions',
@@ -1379,7 +1397,12 @@ $kernel->use(new \Whity\Http\Middleware\PaymentWall(
         $settingsService
     ),
     enabled: (($_ENV['BILLING_WALL_ENABLED'] ?? '1') !== '0'),
-    exemptPrefixes: ['/api/v1/subscription'],
+    // A LOCKED TENANT MUST STILL BE ABLE TO PAY, and a provider must still be
+    // able to tell us they did. Guarding either of these would be a deadlock
+    // dressed as security: the wall answers 402, so the payment that would
+    // lift the wall can never be made or recorded, and the tenant stays
+    // locked forever having paid.
+    exemptPrefixes: ['/api/v1/subscription', '/api/v1/billing', '/api/v1/payments'],
     billingUrl: ($_ENV['BILLING_URL'] ?? getenv('BILLING_URL')) ?: null,
     logger: $logger,
 ));
@@ -2358,6 +2381,87 @@ $planPricesHandler = new \Whity\Api\PlanPricesApiHandler(
 $router->register('GET',    '/api/plans/{id:\d+}/prices',                  [$planPricesHandler, 'list'],   null, null, CorePermissions::PLANS_MANAGE);
 $router->register('POST',   '/api/plans/{id:\d+}/prices',                  [$planPricesHandler, 'create'], null, null, CorePermissions::PLANS_MANAGE);
 $router->register('DELETE', '/api/plans/{id:\d+}/prices/{priceId:\d+}',    [$planPricesHandler, 'retire'], null, null, CorePermissions::PLANS_MANAGE);
+
+// #billing — the payment rails this instance offers.
+//
+// BUILT FROM SETTINGS, NOT FROM ENV, because which rails an instance runs is an
+// operator decision made in the product rather than a deployment decision made
+// in a file. The CliQ webhook secret is the exception: it lives in the
+// encrypted-secret store under a key that is deliberately NOT a SettingsRegistry
+// key, exactly as the SMTP password does, so it can never be read back through
+// GET /settings.
+//
+// A RAIL THAT IS OFF IS NOT REGISTERED AT ALL. The registry's `available()`
+// already filters unconfigured ones, but not registering an rail an operator
+// has switched off means its webhook route answers 404 rather than accepting
+// callbacks for a rail nobody is using.
+$paymentProviders = new \Whity\Core\Payment\PaymentProviderRegistry();
+$globalPaymentSettings = $settingsService->getGlobal();
+
+if (($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ_ENABLED] ?? 'false') === 'true') {
+    $paymentProviders->register(new \Whity\Core\Payment\Cliq\CliqPaymentProvider(
+        (string) ($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ_ALIAS] ?? ''),
+        (string) ($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ_BANK_NAME] ?? ''),
+        (string) ($globalSettingsRepository->get(\Whity\Core\Payment\Cliq\CliqSecrets::WEBHOOK_SECRET_KEY) ?? ''),
+        (string) ($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ_REFERENCE_PREFIX] ?? 'WHT-'),
+    ));
+}
+
+// The fake rail, for a deployment exercising the lifecycle without a bank. OFF
+// by default and global-only: a tenant able to switch on a rail that settles
+// its own invoices for free is the sharpest possible privilege escalation.
+if (($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_MOCK_ENABLED] ?? 'false') === 'true') {
+    $paymentProviders->register(new \Whity\Core\Payment\MockPaymentProvider(
+        (string) ($globalSettingsRepository->get(\Whity\Core\Payment\Cliq\CliqSecrets::MOCK_SECRET_KEY) ?: 'mock-secret')
+    ));
+}
+
+// The card rail is ALWAYS registered and never configured — see
+// CardPaymentProviderAdapter. Registering it keeps the extension point visible
+// (and its refusal testable) without ever offering it to a customer, because
+// `available()` filters on isConfigured().
+$paymentProviders->register(new \Whity\Core\Payment\CardPaymentProviderAdapter());
+
+$invoiceRepository = new \Whity\Core\Billing\InvoiceRepository($db->getPdo());
+$paymentLedger = new \Whity\Core\Payment\PaymentLedger($db->getPdo());
+$paymentReconciler = new \Whity\Core\Billing\PaymentReconciler(
+    $invoiceRepository,
+    $paymentLedger,
+    $db->getPdo()
+);
+$dunningService = new \Whity\Core\Billing\DunningService(
+    $invoiceRepository,
+    $paymentLedger,
+    new \Whity\Core\Subscription\SubscriptionService(
+        new \Whity\Core\Subscription\SubscriptionRepository($db->getPdo()),
+        $settingsService
+    )
+);
+
+// The tenant's own billing. Not the operator's: these are ordinary
+// tenant-scoped permissions, and a tenant sees only its own invoices.
+$billingHandler = new \Whity\Api\BillingApiHandler(
+    $invoiceRepository,
+    $paymentLedger,
+    $paymentReconciler,
+    $paymentProviders,
+    $roleChecker
+);
+$router->register('GET',  '/api/billing/invoices',              [$billingHandler, 'invoices'], null, null, CorePermissions::BILLING_VIEW);
+$router->register('GET',  '/api/billing/invoices/{id:\d+}',     [$billingHandler, 'invoice'],  null, null, CorePermissions::BILLING_VIEW);
+$router->register('GET',  '/api/billing/methods',               [$billingHandler, 'methods'],  null, null, CorePermissions::BILLING_VIEW);
+$router->register('POST', '/api/billing/invoices/{id:\d+}/pay', [$billingHandler, 'pay'],      null, null, CorePermissions::BILLING_PAY);
+
+// UNAUTHENTICATED, NECESSARILY: a bank cannot hold a session. What makes it
+// safe is that verification happens inside translateWebhook() before anything
+// is parsed, and there is no way to obtain events from a payload without it.
+$paymentWebhookHandler = new \Whity\Api\PaymentWebhookApiHandler(
+    $paymentProviders,
+    $paymentReconciler,
+    $dunningService,
+    $logger
+);
+$router->register('POST', '/api/payments/webhook/{provider}', [$paymentWebhookHandler, 'receive'], null);
 
 // Early birds, offers and promo codes — one object, three ways of being found.
 // A promotion carrying a `code` is typed by the customer; one without applies
