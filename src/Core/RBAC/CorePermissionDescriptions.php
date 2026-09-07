@@ -98,6 +98,8 @@ final class CorePermissionDescriptions
         CorePermissions::STORAGE_MANAGE               => 'Manage this tenant\'s storage backend configuration',
         CorePermissions::PLANS_MANAGE                 => 'Manage subscription plans and apply them to tenants (operator)',
         CorePermissions::SUBSCRIPTIONS_MANAGE         => 'Manage a tenant\'s subscription / billing state (operator)',
+        CorePermissions::BILLING_VIEW                 => 'View this tenant\'s own invoices and payment history',
+        CorePermissions::BILLING_PAY                  => 'Start a payment for this tenant\'s own invoices',
         CorePermissions::DOCUMENTS_READ               => 'View and list document/label templates and blocks',
         CorePermissions::DOCUMENTS_WRITE              => 'Create, update and delete document/label templates and blocks',
         CorePermissions::DOCUMENTS_PUBLISH            => 'Publish a template/block tenant-wide or global, or set its required-permission tag',

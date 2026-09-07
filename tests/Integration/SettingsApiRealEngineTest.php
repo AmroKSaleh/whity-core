@@ -140,7 +140,7 @@ final class SettingsApiRealEngineTest extends TestCase
         // above them stays global-only, because whether a whole
         // browser-bearing container runs is an operator's decision.
         // 31 since #billing: eight invoicing keys are tenant-overridable.
-        self::assertCount(31, $data['registry']);
+        self::assertCount(33, $data['registry']);
         self::assertArrayNotHasKey('auth.self_registration_enabled', $data['effective']);
         self::assertSame([], $data['overridden']);
     }

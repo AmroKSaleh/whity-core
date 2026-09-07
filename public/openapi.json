@@ -2452,6 +2452,384 @@
                 }
             }
         },
+        "/api/v1/billing/invoices": {
+            "get": {
+                "operationId": "get_api_v1_billing_invoices",
+                "summary": "This tenant's invoices",
+                "tags": [
+                    "billing"
+                ],
+                "description": "Newest first, drafts included \u2014 a tenant admin building next month's bill needs to see it. Every amount arrives BOTH as minor units and preformatted: 5000 JOD is 5.000, and a client that divides by 100 shows a customer ten times what they owe. How many decimal places a currency has is not something a client can work out for itself.",
+                "responses": {
+                    "200": {
+                        "description": "Invoices with what is still owed on each",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InvoiceListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/billing/invoices/{id}": {
+            "get": {
+                "operationId": "get_api_v1_billing_invoices_id",
+                "summary": "One invoice, its lines and every movement against it",
+                "tags": [
+                    "billing"
+                ],
+                "description": "The payment history includes FAILED and PENDING attempts, not only successful ones: \"why does it say I have not paid\" is answered by the attempt that failed, never by its absence.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The invoice, its lines and its payments",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/InvoiceResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such invoice for this tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/billing/invoices/{id}/pay": {
+            "post": {
+                "operationId": "post_api_v1_billing_invoices_id_pay",
+                "summary": "Begin paying an invoice, by any rail",
+                "tags": [
+                    "billing"
+                ],
+                "description": "ONE ENDPOINT FOR EVERY RAIL. Name a provider; the response carries a `kind` the client branches on once \u2014 send the browser to `redirect_url`, show `reference` and `display`, or report it already settled. A per-rail endpoint would work today and mean a second endpoint, a second client path and a second screen the day a card provider is added. THE ATTEMPT IS RECORDED BEFORE THE PAYER IS SENT ANYWHERE, so a customer who pays and closes the tab has not moved money the platform has no row for. THIS DOES NOT SETTLE ANYTHING: only a verified provider callback marks an invoice paid, because an endpoint that settled on a button press would be taking the customer's word for it.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PayInvoiceRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "What the payer must do next",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PaymentInstructionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such invoice for this tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The invoice is not open, or is already paid in full",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "That payment method is unavailable on this instance",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "The provider could not be reached",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/billing/methods": {
+            "get": {
+                "operationId": "get_api_v1_billing_methods",
+                "summary": "Which payment rails this instance can actually take money with",
+                "tags": [
+                    "billing"
+                ],
+                "description": "CONFIGURED rails only. Offering one that cannot take money produces a button whose only outcome is an error the customer cannot act on. Each row says what the rail can do \u2014 in particular whether it can charge unattended, which is the difference between a subscription that renews itself and one where the customer must push the money every period.",
+                "responses": {
+                    "200": {
+                        "description": "The rails on offer",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PaymentMethodListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/branding": {
             "get": {
                 "operationId": "get_api_v1_branding",
@@ -21564,6 +21942,88 @@
                 ]
             }
         },
+        "/api/v1/payments/webhook/{provider}": {
+            "post": {
+                "operationId": "post_api_v1_payments_webhook_provider",
+                "summary": "A payment provider reports that money moved (PUBLIC, signature-verified)",
+                "tags": [
+                    "billing"
+                ],
+                "description": "UNAUTHENTICATED BY NECESSITY \u2014 a bank cannot hold a session. What makes it safe is that verification happens inside the adapter BEFORE anything is parsed, and there is no way to obtain events from a payload without it: the interface has no separate verify step to forget. IT IS ALSO OUTSIDE THE PAYMENT WALL, deliberately. The wall answers 402 for a tenant that has not paid, so guarding this route would mean the payment that lifts the wall can never be recorded \u2014 a locked tenant would stay locked forever having paid. A REDELIVERY ANSWERS 200: providers retry until they get a success, and a duplicate is the system working, not an error. So does a verified callback carrying nothing we act on.",
+                "parameters": [
+                    {
+                        "name": "provider",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "How many movements were read and how many settled",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/WebhookAckResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "The payload could not be verified",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such payment provider on this instance",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Authentic but unintelligible",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/permissions": {
             "get": {
                 "operationId": "get_api_v1_permissions",
@@ -39702,6 +40162,163 @@
                     "data"
                 ]
             },
+            "Invoice": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "number": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "currency": {
+                        "type": "string"
+                    },
+                    "subtotal_minor": {
+                        "type": "integer"
+                    },
+                    "discount_minor": {
+                        "type": "integer"
+                    },
+                    "tax_minor": {
+                        "type": "integer"
+                    },
+                    "tax_rate_bp": {
+                        "type": "integer"
+                    },
+                    "tax_label": {
+                        "type": "string"
+                    },
+                    "total_minor": {
+                        "type": "integer"
+                    },
+                    "amount_paid_minor": {
+                        "type": "integer"
+                    },
+                    "balance_minor": {
+                        "type": "integer"
+                    },
+                    "total_formatted": {
+                        "type": "string"
+                    },
+                    "balance_formatted": {
+                        "type": "string"
+                    },
+                    "issued_at": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "due_at": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "paid_at": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "seller_name": {
+                        "type": "string"
+                    },
+                    "buyer_name": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "id",
+                    "status",
+                    "currency",
+                    "total_minor",
+                    "balance_minor",
+                    "total_formatted"
+                ]
+            },
+            "InvoiceDetail": {
+                "type": "object",
+                "properties": {
+                    "lines": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/InvoiceLine"
+                        }
+                    },
+                    "payments": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PaymentTransaction"
+                        }
+                    }
+                }
+            },
+            "InvoiceLine": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "position": {
+                        "type": "integer"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "quantity": {
+                        "type": "integer"
+                    },
+                    "unit_amount_minor": {
+                        "type": "integer"
+                    },
+                    "subtotal_minor": {
+                        "type": "integer"
+                    },
+                    "discount_minor": {
+                        "type": "integer"
+                    },
+                    "tax_rate_bp": {
+                        "type": "integer"
+                    },
+                    "tax_minor": {
+                        "type": "integer"
+                    },
+                    "total_minor": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "id",
+                    "description",
+                    "quantity",
+                    "total_minor"
+                ]
+            },
+            "InvoiceListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Invoice"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "InvoiceResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/Invoice"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
             "Language": {
                 "type": "object",
                 "properties": {
@@ -41918,6 +42535,139 @@
                 },
                 "required": [
                     "data"
+                ]
+            },
+            "PayInvoiceRequest": {
+                "type": "object",
+                "properties": {
+                    "provider": {
+                        "type": "string"
+                    },
+                    "return_url": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "provider"
+                ]
+            },
+            "PaymentInstruction": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string"
+                    },
+                    "provider": {
+                        "type": "string"
+                    },
+                    "reference": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "redirect_url": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "display": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string"
+                        }
+                    },
+                    "settled": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "kind",
+                    "provider"
+                ]
+            },
+            "PaymentInstructionResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/PaymentInstruction"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "PaymentMethodListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PaymentMethodOption"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "PaymentMethodOption": {
+                "type": "object",
+                "properties": {
+                    "provider": {
+                        "type": "string"
+                    },
+                    "uses_redirect": {
+                        "type": "boolean"
+                    },
+                    "uses_push_transfer": {
+                        "type": "boolean"
+                    },
+                    "supports_stored_methods": {
+                        "type": "boolean"
+                    },
+                    "supports_unattended_charge": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "provider"
+                ]
+            },
+            "PaymentTransaction": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "provider": {
+                        "type": "string"
+                    },
+                    "external_reference": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "amount_minor": {
+                        "type": "integer"
+                    },
+                    "currency": {
+                        "type": "string"
+                    },
+                    "failure_reason": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "occurred_at": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "id",
+                    "provider",
+                    "status",
+                    "amount_minor",
+                    "currency"
                 ]
             },
             "PendingPasswordResetItem": {
@@ -47260,6 +48010,29 @@
                         "type": "boolean"
                     }
                 }
+            },
+            "WebhookAckResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "received": {
+                                "type": "integer"
+                            },
+                            "settled": {
+                                "type": "integer"
+                            }
+                        },
+                        "required": [
+                            "received",
+                            "settled"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
             }
         },
         "securitySchemes": {

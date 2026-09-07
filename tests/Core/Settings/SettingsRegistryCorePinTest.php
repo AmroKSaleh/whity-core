@@ -100,6 +100,14 @@ final class SettingsRegistryCorePinTest extends TestCase
             'billing.invoice_number_format',
             'billing.invoice_number_scope',
             'billing.invoice_number_reset',
+            // #billing — payment rails (global-only) and dunning (per-tenant).
+            'payments.cliq_enabled',
+            'payments.cliq_alias',
+            'payments.cliq_bank_name',
+            'payments.cliq_reference_prefix',
+            'payments.mock_enabled',
+            'dunning.retry_schedule_days',
+            'dunning.lock_after_days',
             'plugins.store_allowed_hosts',
             'plugins.store_enabled',
             'documents.render_enabled',
@@ -244,6 +252,16 @@ final class SettingsRegistryCorePinTest extends TestCase
             'billing.invoice_number_format' => 'INV-{YYYY}-{SEQ:5}',
             'billing.invoice_number_scope' => 'shared',
             'billing.invoice_number_reset' => 'yearly',
+            // Every rail OFF until an operator configures one: a payment rail
+            // that is on by default can take money before anybody decided it
+            // should.
+            'payments.cliq_enabled' => 'false',
+            'payments.cliq_alias' => '',
+            'payments.cliq_bank_name' => '',
+            'payments.cliq_reference_prefix' => 'WHT-',
+            'payments.mock_enabled' => 'false',
+            'dunning.retry_schedule_days' => '1,3,7',
+            'dunning.lock_after_days' => '14',
             'plugins.store_allowed_hosts' => '',
             'plugins.store_enabled' => 'true',
             'documents.render_enabled' => 'false',

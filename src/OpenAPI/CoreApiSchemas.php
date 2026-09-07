@@ -123,6 +123,7 @@ final class CoreApiSchemas
             self::tenantEntitlementRoutes(),
             self::tenantStorageRoutes(),
             self::planRoutes(),
+            self::billingRoutes(),
             self::subscriptionRoutes(),
             self::documentTemplateRoutes(),
             self::documentBlockRoutes(),
@@ -4209,6 +4210,96 @@ final class CoreApiSchemas
                 'is_active' => self::bool(),
                 'redemption_count' => self::int(),
             ], ['id', 'name', 'code', 'percent_off', 'amount_off', 'currency', 'is_active']),
+            // #billing — an invoice as its own tenant sees it.
+            //
+            // AMOUNTS TRAVEL TWICE: as minor units, which is what anything
+            // computes with, and as a preformatted string, which is what a
+            // screen shows. The second is not redundant — 5000 JOD is 5.000,
+            // and a client that divides by 100 shows every customer an amount
+            // ten times too large. The number of decimal places is a property
+            // of the currency that a client cannot work out for itself.
+            'Invoice' => self::object([
+                'id' => self::int(),
+                'number' => self::str(true),
+                'status' => self::str(),
+                'currency' => self::str(),
+                'subtotal_minor' => self::int(),
+                'discount_minor' => self::int(),
+                'tax_minor' => self::int(),
+                'tax_rate_bp' => self::int(),
+                'tax_label' => self::str(),
+                'total_minor' => self::int(),
+                'amount_paid_minor' => self::int(),
+                'balance_minor' => self::int(),
+                'total_formatted' => self::str(),
+                'balance_formatted' => self::str(),
+                'issued_at' => self::str(true),
+                'due_at' => self::str(true),
+                'paid_at' => self::str(true),
+                'seller_name' => self::str(),
+                'buyer_name' => self::str(),
+            ], ['id', 'status', 'currency', 'total_minor', 'balance_minor', 'total_formatted']),
+            'InvoiceLine' => self::object([
+                'id' => self::int(),
+                'position' => self::int(),
+                'description' => self::str(),
+                'quantity' => self::int(),
+                'unit_amount_minor' => self::int(),
+                'subtotal_minor' => self::int(),
+                'discount_minor' => self::int(),
+                'tax_rate_bp' => self::int(),
+                'tax_minor' => self::int(),
+                'total_minor' => self::int(),
+            ], ['id', 'description', 'quantity', 'total_minor']),
+            // A movement, or an attempted one. Failed and pending attempts are
+            // here too, because "why does it say I have not paid" is answered
+            // by the attempt that failed, not by its absence.
+            'PaymentTransaction' => self::object([
+                'id' => self::int(),
+                'provider' => self::str(),
+                'external_reference' => self::str(true),
+                'status' => self::str(),
+                'amount_minor' => self::int(),
+                'currency' => self::str(),
+                'failure_reason' => self::str(true),
+                'occurred_at' => self::str(),
+            ], ['id', 'provider', 'status', 'amount_minor', 'currency']),
+            'InvoiceDetail' => self::object([
+                'lines' => ['type' => 'array', 'items' => SchemaBuilder::ref('InvoiceLine')],
+                'payments' => ['type' => 'array', 'items' => SchemaBuilder::ref('PaymentTransaction')],
+            ], []),
+            // What a rail can do, so a client offers only what will work.
+            'PaymentMethodOption' => self::object([
+                'provider' => self::str(),
+                'uses_redirect' => self::bool(),
+                'uses_push_transfer' => self::bool(),
+                'supports_stored_methods' => self::bool(),
+                'supports_unattended_charge' => self::bool(),
+            ], ['provider']),
+            // ONE SHAPE FOR EVERY RAIL. `kind` is what a client branches on,
+            // once: send the browser to `redirect_url`, show `reference` and
+            // `display`, or report it already settled. A future card provider
+            // produces `redirect`, which already exists here.
+            'PaymentInstruction' => self::object([
+                'kind' => self::str(),
+                'provider' => self::str(),
+                'reference' => self::str(true),
+                'redirect_url' => self::str(true),
+                'display' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
+                'settled' => self::bool(),
+            ], ['kind', 'provider']),
+            'PayInvoiceRequest' => self::object([
+                'provider' => self::str(),
+                'return_url' => self::str(true),
+            ], ['provider']),
+            'InvoiceListResponse' => self::listEnvelope('Invoice'),
+            'InvoiceResponse' => self::dataEnvelope(SchemaBuilder::ref('Invoice')),
+            'PaymentMethodListResponse' => self::listEnvelope('PaymentMethodOption'),
+            'PaymentInstructionResponse' => self::dataEnvelope(SchemaBuilder::ref('PaymentInstruction')),
+            'WebhookAckResponse' => self::dataEnvelope(self::object([
+                'received' => self::int(),
+                'settled' => self::int(),
+            ], ['received', 'settled'])),
             'PromotionListResponse' => self::listEnvelope('Promotion'),
             'PromotionResponse' => self::dataEnvelope(SchemaBuilder::ref('Promotion')),
             'PromotionCreateRequest' => self::object([
@@ -8720,6 +8811,117 @@ final class CoreApiSchemas
      * Operator subscription-plan admin routes (WC-plans, ADR 0010): catalog CRUD +
      * entitlement bundles + applying a plan to a target tenant. Gated on
      * `plans:manage` AND (in the handler) the system tenant.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    /**
+     * The tenant's own billing, and the provider callback.
+     *
+     * These are TENANT routes, unlike the plan and promotion catalogues above:
+     * ordinary tenant-scoped permissions, and a tenant sees only its own
+     * invoices. There is no system-tenant gate because there is no
+     * cross-tenant power here.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function billingRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/billing/invoices', 'billing:view', [
+                'summary' => 'This tenant\'s invoices',
+                'description' =>
+                    'Newest first, drafts included — a tenant admin building next month\'s bill '
+                    . 'needs to see it. Every amount arrives BOTH as minor units and preformatted: '
+                    . '5000 JOD is 5.000, and a client that divides by 100 shows a customer ten '
+                    . 'times what they owe. How many decimal places a currency has is not '
+                    . 'something a client can work out for itself.',
+                'tags' => ['billing'],
+                'responses' => [
+                    200 => self::jsonResponse('Invoices with what is still owed on each', 'InvoiceListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/billing/invoices/{id:\d+}', 'billing:view', [
+                'summary' => 'One invoice, its lines and every movement against it',
+                'description' =>
+                    'The payment history includes FAILED and PENDING attempts, not only '
+                    . 'successful ones: "why does it say I have not paid" is answered by the '
+                    . 'attempt that failed, never by its absence.',
+                'tags' => ['billing'],
+                'responses' => [
+                    200 => self::jsonResponse('The invoice, its lines and its payments', 'InvoiceResponse'),
+                    404 => self::errorResponse('No such invoice for this tenant'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/billing/methods', 'billing:view', [
+                'summary' => 'Which payment rails this instance can actually take money with',
+                'description' =>
+                    'CONFIGURED rails only. Offering one that cannot take money produces a button '
+                    . 'whose only outcome is an error the customer cannot act on. Each row says '
+                    . 'what the rail can do — in particular whether it can charge unattended, '
+                    . 'which is the difference between a subscription that renews itself and one '
+                    . 'where the customer must push the money every period.',
+                'tags' => ['billing'],
+                'responses' => [
+                    200 => self::jsonResponse('The rails on offer', 'PaymentMethodListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/billing/invoices/{id:\d+}/pay', 'billing:pay', [
+                'summary' => 'Begin paying an invoice, by any rail',
+                'description' =>
+                    'ONE ENDPOINT FOR EVERY RAIL. Name a provider; the response carries a `kind` '
+                    . 'the client branches on once — send the browser to `redirect_url`, show '
+                    . '`reference` and `display`, or report it already settled. A per-rail '
+                    . 'endpoint would work today and mean a second endpoint, a second client path '
+                    . 'and a second screen the day a card provider is added. '
+                    . 'THE ATTEMPT IS RECORDED BEFORE THE PAYER IS SENT ANYWHERE, so a customer '
+                    . 'who pays and closes the tab has not moved money the platform has no row '
+                    . 'for. '
+                    . 'THIS DOES NOT SETTLE ANYTHING: only a verified provider callback marks an '
+                    . 'invoice paid, because an endpoint that settled on a button press would be '
+                    . 'taking the customer\'s word for it.',
+                'tags' => ['billing'],
+                'request' => 'PayInvoiceRequest',
+                'responses' => [
+                    201 => self::jsonResponse('What the payer must do next', 'PaymentInstructionResponse'),
+                    404 => self::errorResponse('No such invoice for this tenant'),
+                    409 => self::errorResponse('The invoice is not open, or is already paid in full'),
+                    422 => self::errorResponse('That payment method is unavailable on this instance'),
+                    502 => self::errorResponse('The provider could not be reached'),
+                ] + self::authErrors(),
+            ]),
+            [
+                'method' => 'POST',
+                'path' => '/api/payments/webhook/{provider}',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'A payment provider reports that money moved (PUBLIC, signature-verified)',
+                    'description' =>
+                        'UNAUTHENTICATED BY NECESSITY — a bank cannot hold a session. What makes '
+                        . 'it safe is that verification happens inside the adapter BEFORE anything '
+                        . 'is parsed, and there is no way to obtain events from a payload without '
+                        . 'it: the interface has no separate verify step to forget. '
+                        . 'IT IS ALSO OUTSIDE THE PAYMENT WALL, deliberately. The wall answers 402 '
+                        . 'for a tenant that has not paid, so guarding this route would mean the '
+                        . 'payment that lifts the wall can never be recorded — a locked tenant '
+                        . 'would stay locked forever having paid. '
+                        . 'A REDELIVERY ANSWERS 200: providers retry until they get a success, and '
+                        . 'a duplicate is the system working, not an error. So does a verified '
+                        . 'callback carrying nothing we act on.',
+                    'tags' => ['billing'],
+                    'responses' => [
+                        200 => self::jsonResponse('How many movements were read and how many settled', 'WebhookAckResponse'),
+                        400 => self::errorResponse('The payload could not be verified'),
+                        404 => self::errorResponse('No such payment provider on this instance'),
+                        422 => self::errorResponse('Authentic but unintelligible'),
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * The operator's plan catalogue, prices and promotions.
      *
      * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
      */
