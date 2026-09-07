@@ -1331,6 +1331,24 @@ final class SettingsRegistry
             self::I18N_ENABLED => self::validateBoolean($value, self::I18N_ENABLED),
             self::INVITATION_TTL_DAYS => self::validateInvitationTtlDays($value),
             self::UI_HIDE_DATES => self::validateBoolean($value, self::UI_HIDE_DATES),
+            // #billing free-text. Declared with defaults and no validate() arm,
+            // these fell straight through to `default` below — so six keys the
+            // registry plainly knows were refused as "Unknown setting key" and
+            // could never be saved. That is the identical defect the error
+            // tracking comment above records, reintroduced two hundred lines
+            // later, which is why `SettingsRegistryValidationArmTest` now
+            // asserts every key can validate its own default.
+            //
+            // Null means "any string is acceptable": a company name, a postal
+            // address, a tax registration and a bank alias are all free-form by
+            // nature, and the only thing worth refusing would be a length the
+            // column cannot hold.
+            self::BILLING_TAX_LABEL,
+            self::BILLING_SELLER_NAME,
+            self::BILLING_SELLER_ADDRESS,
+            self::BILLING_SELLER_TAX_ID,
+            self::PAYMENTS_CLIQ_ALIAS,
+            self::PAYMENTS_CLIQ_BANK_NAME => null,
             default => "Unknown setting key: {$key}",
         };
     }

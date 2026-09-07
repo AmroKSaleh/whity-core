@@ -82,6 +82,62 @@ final class CoreJobs
                 ),
                 false
             );
+
+            // #billing — the two scheduled runs. INTERNAL, both of them, and
+            // registered without the submittable flag deliberately: one issues
+            // invoices (so it spends the number sequence and puts debts in
+            // front of customers) and the other WITHDRAWS ACCESS. An endpoint
+            // anybody could POST to would be a way to lock tenants out on
+            // demand, and to do it without appearing anywhere as an
+            // administrative action.
+            //
+            // Both are safe to run twice, which is what makes them honest
+            // members of an at-least-once queue: the billing run collides on
+            // migration 145's unique index rather than double-billing, and
+            // locking is a state rather than an event.
+            $billingSettings = new \Whity\Core\Settings\SettingsService(
+                new \Whity\Core\Settings\GlobalSettingsRepository($pdo),
+                new \Whity\Core\Settings\TenantSettingsRepository($pdo)
+            );
+            $billingInvoices = new \Whity\Core\Billing\InvoiceRepository($pdo);
+            $billingSubscriptions = new \Whity\Core\Subscription\SubscriptionService(
+                new \Whity\Core\Subscription\SubscriptionRepository($pdo),
+                $billingSettings
+            );
+
+            $registry->register(
+                \Whity\Core\Billing\Jobs\RunSubscriptionBillingJob::NAME,
+                new \Whity\Core\Billing\Jobs\RunSubscriptionBillingJob(
+                    new \Whity\Core\Billing\SubscriptionBillingRun(
+                        $pdo,
+                        $billingInvoices,
+                        new \Whity\Core\Billing\InvoiceNumberAllocator(
+                            new \Whity\Database\SequenceCounters($pdo)
+                        ),
+                        $billingSubscriptions,
+                        $billingSettings,
+                        $logger ?? new \Psr\Log\NullLogger()
+                    )
+                ),
+                false
+            );
+
+            $registry->register(
+                \Whity\Core\Billing\Jobs\RunDunningJob::NAME,
+                new \Whity\Core\Billing\Jobs\RunDunningJob(
+                    new \Whity\Core\Billing\DunningRun(
+                        $billingInvoices,
+                        new \Whity\Core\Billing\DunningService(
+                            $billingInvoices,
+                            new \Whity\Core\Payment\PaymentLedger($pdo),
+                            $billingSubscriptions
+                        ),
+                        $billingSettings,
+                        $logger ?? new \Psr\Log\NullLogger()
+                    )
+                ),
+                false
+            );
         }
     }
 }
