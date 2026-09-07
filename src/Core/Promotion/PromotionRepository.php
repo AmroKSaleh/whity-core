@@ -226,6 +226,46 @@ final class PromotionRepository
     }
 
     /**
+     * Every promotion, live and retired, with how many times each has been taken.
+     *
+     * THE COUNT TRAVELS WITH THE ROW because "how much of this early bird is
+     * left" is the question an operator opens the screen to answer, and asking
+     * it per row would be one request each — a list of forty campaigns becoming
+     * forty-one round trips, which is how a management screen becomes one nobody
+     * opens.
+     *
+     * Retired promotions are included for the reason retired PRICES are: a
+     * campaign that ended is the explanation for a discount somebody is
+     * querying, and a list of only live ones cannot give it.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function listAll(): array
+    {
+        // @tenant-guard-ignore: the redemption count here is the GLOBAL one — an early bird's cap spans tenants by definition, exactly as redemptionCount() below; this is an operator catalogue screen, not a tenant's own view
+        $stmt = $this->db->prepare(
+            'SELECT p.*, (
+                 SELECT COUNT(*) FROM promotion_redemptions r WHERE r.promotion_id = p.id
+             ) AS redemption_count
+               FROM promotions p
+              ORDER BY p.is_active DESC, p.id DESC'
+        );
+        $stmt->execute();
+
+        /** @var list<array<string, mixed>> $rows */
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        return array_map(static function (array $row): array {
+            $count = (int) $row['redemption_count'];
+            unset($row['redemption_count']);
+            $normalized = self::normalizeRow($row);
+            $normalized['redemption_count'] = $count;
+
+            return $normalized;
+        }, $rows);
+    }
+
+    /**
      * The automatic promotions — the early birds and offers, which carry no
      * code and apply to whoever qualifies.
      *
