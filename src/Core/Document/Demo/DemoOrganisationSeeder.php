@@ -373,13 +373,66 @@ final class DemoOrganisationSeeder
         $roleIds = [];
         foreach ($declared as $name => $spec) {
             $roleId = $this->upsertRole($tenantId, $name, $spec['description']);
-            foreach ([...$spec['permissions'], ...self::DIRECTORY_PERMISSIONS] as $permission) {
+            $permissions = [
+                ...$spec['permissions'],
+                ...self::DIRECTORY_PERMISSIONS,
+                ...self::routeDesignPermissions($name, $spec['permissions']),
+            ];
+            foreach ($permissions as $permission) {
                 $this->grant($roleId, $permission);
             }
             $roleIds[$name] = $roleId;
         }
 
         return $roleIds;
+    }
+
+    /**
+     * The route-DESIGN permissions, derived rather than typed — and the reason
+     * they are here at all is a gap this fixture walked straight into.
+     *
+     * WHAT WENT WRONG. Migration 120 introduced `route_templates:read` /
+     * `route_templates:write` and BACKFILLED them onto existing roles: both to
+     * whoever holds `roles:write`, and read additionally to whoever holds
+     * `documents:route`. The nav item for the flow editor says so in as many
+     * words. A backfill only ever reaches roles that EXIST when it runs — and
+     * every demo role is created afterwards, by this seeder — so the demo dean,
+     * who holds `documents:route` and would have been granted read by that
+     * migration on any real tenant, did not have it.
+     *
+     * The consequence was invisible until something was there to look at: with
+     * no route designs seeded, an empty designs list and a 403 render the same.
+     * Once {@see DocumentDemoSeeder::seedRouteTemplates()} put three real designs
+     * in the tenant, every demo persona opened the flow editor on "This route
+     * template could not be loaded" — which is not what a permission refusal is
+     * supposed to teach anybody, and it made the seeded designs unreachable by
+     * the only people who can sign in to look at them.
+     *
+     * DERIVED FROM THE ROLE'S OWN `documents:route`, deliberately, rather than
+     * listed per role: that is migration 120's rule, and re-stating it as a
+     * hand-kept list is how the demo would drift away from the product's
+     * permission model a second time.
+     *
+     * WRITE GOES TO THE DEAN ALONE, which is a discrimination worth having.
+     * The nav item's own note is the argument — "a clerk who may route a
+     * document should not thereby be able to rewrite where every document goes"
+     * — and this fixture has no other place where read and write of the same
+     * resource are held by different people. So: the dean draws the flows, the
+     * heads and the registry officer can open and apply them, and the secretary
+     * and technician do not see the page at all. Three answers, from one list.
+     *
+     * @param list<string> $permissions The role's own document permissions.
+     * @return list<string>
+     */
+    private static function routeDesignPermissions(string $roleName, array $permissions): array
+    {
+        if (!in_array(CorePermissions::DOCUMENTS_ROUTE, $permissions, true)) {
+            return [];
+        }
+
+        return $roleName === self::ROLE_DEAN
+            ? [CorePermissions::ROUTE_TEMPLATES_READ, CorePermissions::ROUTE_TEMPLATES_WRITE]
+            : [CorePermissions::ROUTE_TEMPLATES_READ];
     }
 
     /**

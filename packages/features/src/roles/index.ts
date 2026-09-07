@@ -15,6 +15,8 @@ export type {
   RolesScreenProps,
   RoleRecordScreenProps,
   Role,
+  RoleListQuery,
+  RoleListPage,
   RoleWithPermissions,
   RoleAssignment,
   RoleAssignmentsPage,

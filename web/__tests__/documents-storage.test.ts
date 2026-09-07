@@ -55,6 +55,39 @@ describe('listSaved — API-backed template list', () => {
     expect(list[0].data.pages).toHaveLength(1);
   });
 
+  // WHOLE-OBJECT, not toMatchObject. The suite above checks the fields it
+  // knows about, which is exactly why nobody noticed that `scope` was not among
+  // them: the designer never read it, never sent one, and the server reads a
+  // missing scope on create as `personal` — creator-only. Every template
+  // authored in the designer was invisible to the rest of the tenant, and no
+  // assertion here could fail, because none of them looked at the whole row.
+  //
+  // Same shape of miss as `satisfied_by` on the route-template canvas (#1064).
+  // An equality assertion is the one that notices a field going missing.
+  it('maps the WHOLE SavedTemplate, scope included', async () => {
+    mockGet.mockResolvedValue({
+      data: { data: [templateRow({ scope: 'tenant' })] },
+      response: { status: 200, ok: true },
+    });
+
+    expect(await listSaved()).toEqual([
+      {
+        id: '42',
+        name: 'Invoice',
+        updatedAt: '2026-01-02T00:00:00Z',
+        data: V2_TEMPLATE,
+        scope: 'tenant',
+      },
+    ]);
+  });
+
+  it('reads a row with no scope as personal — the server default, not undefined', async () => {
+    const { scope: _dropped, ...noScope } = templateRow();
+    mockGet.mockResolvedValue({ data: { data: [noScope] }, response: { status: 200, ok: true } });
+
+    expect((await listSaved())[0].scope).toBe('personal');
+  });
+
   it('skips a row whose data fails template validation instead of crashing', async () => {
     mockGet.mockResolvedValue({
       data: { data: [templateRow({ data: { garbage: true } })] },
@@ -98,6 +131,42 @@ describe('saveTemplate — create vs. update', () => {
       body: { name: 'Invoice', data: V2_TEMPLATE },
     });
     expect(id).toBe('42');
+  });
+
+  it('sends the stated scope on create', async () => {
+    mockPost.mockResolvedValue({ data: { data: templateRow({ id: 99 }) }, error: undefined, response: { ok: true } });
+
+    await saveTemplate(V2_TEMPLATE as unknown as DocTemplate, undefined, 'tenant');
+
+    expect(mockPost).toHaveBeenCalledWith('/api/v1/document-templates', {
+      body: { name: 'Invoice', data: V2_TEMPLATE, scope: 'tenant' },
+    });
+  });
+
+  // The create above and this update are a pair, and the asymmetry is the
+  // point. A missing scope means two different things to the server: on create
+  // it DEFAULTS to personal, on update it LEAVES THE STORED VALUE ALONE. So the
+  // designer must state one when creating and must not when updating — sending
+  // it on update would let an ordinary save overwrite a visibility somebody set
+  // deliberately in Templates & Blocks, using whatever the editor happened to
+  // have loaded.
+  it('never sends scope on update, whatever the caller passes', async () => {
+    mockPatch.mockResolvedValue({ data: { data: templateRow({ id: 42 }) }, error: undefined, response: { ok: true } });
+
+    await saveTemplate(V2_TEMPLATE as unknown as DocTemplate, '42', 'global');
+
+    expect(mockPatch).toHaveBeenCalledWith('/api/v1/document-templates/{id}', {
+      params: { path: { id: 42 } },
+      body: { name: 'Invoice', data: V2_TEMPLATE },
+    });
+  });
+
+  it('omits scope entirely when none is stated, leaving the server to default it', async () => {
+    mockPost.mockResolvedValue({ data: { data: templateRow({ id: 99 }) }, error: undefined, response: { ok: true } });
+
+    await saveTemplate(V2_TEMPLATE as unknown as DocTemplate);
+
+    expect(mockPost.mock.calls[0][1].body).not.toHaveProperty('scope');
   });
 
   it('throws the server error message on failure', async () => {

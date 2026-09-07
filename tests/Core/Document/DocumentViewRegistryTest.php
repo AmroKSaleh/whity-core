@@ -13,6 +13,7 @@ use Whity\Core\Document\Organizer\DocumentSubstrate;
 use Whity\Core\Document\Organizer\DocumentSubstrateRegistry;
 use Whity\Core\Document\Organizer\DocumentView;
 use Whity\Core\Document\Organizer\DocumentViewContext;
+use Whity\Core\Document\Organizer\DocumentViewGroup;
 use Whity\Core\Document\Organizer\DocumentViewRegistry;
 use Whity\Core\Document\Organizer\DocumentViewResolution;
 use Whity\Core\Document\Organizer\PdoSchemaPresence;
@@ -161,6 +162,14 @@ final class DocumentViewRegistryTest extends TestCase
             // column on the recipient row rather than a question for the trail.
             CoreDocumentViews::AWAITING_ME => [CoreDocumentSubstrates::ROUTING_RECIPIENTS],
             CoreDocumentViews::ACTED_ON_BY_ME => [CoreDocumentSubstrates::ROUTING_TRAIL],
+            // #1014's two verdict folders declare ROUTING_VERDICT and NOT
+            // ROUTING_TRAIL, even though they query the same table. A column is
+            // the fact they need; naming the coarser substrate as well would
+            // make them available on an installation that has the trail without
+            // the verdict column, where they would render an empty page that
+            // reads as "you have approved nothing".
+            CoreDocumentViews::APPROVED_BY_ME => [CoreDocumentSubstrates::ROUTING_VERDICT],
+            CoreDocumentViews::REJECTED_BY_ME => [CoreDocumentSubstrates::ROUTING_VERDICT],
             // Two, and neither is `documents.origin_ou`: the trail's own unit
             // columns, plus a hierarchy to walk them against.
             CoreDocumentViews::PASSED_THROUGH_MY_UNIT => [
@@ -228,6 +237,8 @@ final class DocumentViewRegistryTest extends TestCase
             [
                 CoreDocumentViews::AWAITING_ME,
                 CoreDocumentViews::ACTED_ON_BY_ME,
+                CoreDocumentViews::APPROVED_BY_ME,
+                CoreDocumentViews::REJECTED_BY_ME,
                 CoreDocumentViews::PASSED_THROUGH_MY_UNIT,
             ] as $key
         ) {
@@ -246,11 +257,22 @@ final class DocumentViewRegistryTest extends TestCase
             $substrates->unavailable()
         );
         self::assertEqualsCanonicalizing(
-            [CoreDocumentSubstrates::ROUTING_RECIPIENTS, CoreDocumentSubstrates::ROUTING_TRAIL],
+            [
+                CoreDocumentSubstrates::ROUTING_RECIPIENTS,
+                CoreDocumentSubstrates::ROUTING_TRAIL,
+                CoreDocumentSubstrates::ROUTING_VERDICT,
+            ],
             $missing
         );
-        foreach ($substrates->unavailable() as $substrate) {
-            self::assertStringContainsString('migration 112', (string) $substrate->provenance);
+        // Each names the work that supplies it, and they do not all name the
+        // same one: the verdict arrived in 118, and an operator told to run 112
+        // when what they are missing is 118 has been sent to the wrong place.
+        $provenance = array_map(
+            static fn (DocumentSubstrate $s): string => (string) $s->provenance,
+            $substrates->unavailable()
+        );
+        foreach ($provenance as $text) {
+            self::assertMatchesRegularExpression('/migration 11[29]/', $text);
         }
     }
 
@@ -275,6 +297,43 @@ final class DocumentViewRegistryTest extends TestCase
         self::assertContains(CoreDocumentViews::AWAITING_ME, $keys, 'the inbox reads recipients, not the trail');
         self::assertNotContains(CoreDocumentViews::ACTED_ON_BY_ME, $keys);
         self::assertNotContains(CoreDocumentViews::PASSED_THROUGH_MY_UNIT, $keys);
+        // The verdict folders read a COLUMN on the trail, so losing the table
+        // takes them as well — but by their own declaration, not by borrowing
+        // the trail substrate's.
+        self::assertNotContains(CoreDocumentViews::APPROVED_BY_ME, $keys);
+        self::assertNotContains(CoreDocumentViews::REJECTED_BY_ME, $keys);
+    }
+
+    /**
+     * An installation on migration 112 but not 118 keeps its three routing
+     * folders and loses exactly the two verdict ones.
+     *
+     * This is what the separate substrate BUYS, and it is asserted rather than
+     * described because the tempting declaration — adding `verdict` to the trail
+     * substrate — passes every other test in this file while making "acted on by
+     * me" and "passed through my unit" vanish on a half-migrated installation,
+     * for a reason that has nothing to do with either of them.
+     */
+    public function testTheVerdictColumnGoingMissingTakesOnlyTheVerdictFolders(): void
+    {
+        $schema = $this->fullSchema();
+        $schema['document_route_events'] = array_values(array_filter(
+            $schema['document_route_events'],
+            static fn (string $c): bool => $c !== 'verdict'
+        ));
+
+        $substrates = new DocumentSubstrateRegistry($this->schema($schema));
+        CoreDocumentSubstrates::registerInto($substrates);
+        $views = new DocumentViewRegistry($substrates);
+        CoreDocumentViews::registerInto($views);
+
+        $keys = array_map(static fn (DocumentView $v): string => $v->key, $views->available());
+
+        self::assertContains(CoreDocumentViews::ACTED_ON_BY_ME, $keys);
+        self::assertContains(CoreDocumentViews::PASSED_THROUGH_MY_UNIT, $keys);
+        self::assertContains(CoreDocumentViews::AWAITING_ME, $keys);
+        self::assertNotContains(CoreDocumentViews::APPROVED_BY_ME, $keys);
+        self::assertNotContains(CoreDocumentViews::REJECTED_BY_ME, $keys);
     }
 
     /**
@@ -331,10 +390,19 @@ final class DocumentViewRegistryTest extends TestCase
         CoreDocumentSubstrates::registerInto($partial);
 
         self::assertFalse($partial->isAvailable(CoreDocumentSubstrates::ROUTING_TRAIL));
+        self::assertFalse(
+            $partial->isAvailable(CoreDocumentSubstrates::ROUTING_VERDICT),
+            'the verdict lives on the trail table, so it cannot outlive it'
+        );
         self::assertTrue($partial->isAvailable(CoreDocumentSubstrates::ROUTING_RECIPIENTS));
-        $missing = $partial->unavailable();
-        self::assertCount(1, $missing);
-        self::assertStringContainsString('#947 item 3', (string) $missing[0]->provenance);
+        $missing = array_map(
+            static fn (DocumentSubstrate $s): string => $s->key,
+            $partial->unavailable()
+        );
+        self::assertEqualsCanonicalizing(
+            [CoreDocumentSubstrates::ROUTING_TRAIL, CoreDocumentSubstrates::ROUTING_VERDICT],
+            $missing
+        );
     }
 
     // ── 3. gating is per substrate ──────────────────────────────────────────
@@ -391,7 +459,7 @@ final class DocumentViewRegistryTest extends TestCase
         self::assertContains(CoreDocumentViews::ACTED_ON_BY_ME, $keys);
     }
 
-    /** On a fully migrated schema, all nine core folders are computable, in rail order. */
+    /** On a fully migrated schema, every core folder is computable, in rail order. */
     public function testAFullyMigratedSchemaOffersEveryCoreFolderInRailOrder(): void
     {
         $views = $this->coreRegistry();
@@ -404,6 +472,8 @@ final class DocumentViewRegistryTest extends TestCase
                 CoreDocumentViews::BELOW_MY_UNIT,
                 CoreDocumentViews::AWAITING_ME,
                 CoreDocumentViews::ACTED_ON_BY_ME,
+                CoreDocumentViews::APPROVED_BY_ME,
+                CoreDocumentViews::REJECTED_BY_ME,
                 CoreDocumentViews::PASSED_THROUGH_MY_UNIT,
                 CoreDocumentViews::STARRED,
                 CoreDocumentViews::COLLECTION,
@@ -763,7 +833,7 @@ final class DocumentViewRegistryTest extends TestCase
      * Pinned against the constructor by
      * {@see testTheSlotInventoryCannotDriftFromTheCriteria()}.
      *
-     * @return array<string, int|bool|list<int>|null>
+     * @return array<string, int|bool|string|list<int>|null>
      */
     private static function viewSlots(DocumentCriteria $criteria): array
     {
@@ -773,6 +843,8 @@ final class DocumentViewRegistryTest extends TestCase
             'inCollectionId' => $criteria->inCollectionId,
             'awaitingProfileId' => $criteria->awaitingProfileId,
             'actedOnByProfileId' => $criteria->actedOnByProfileId,
+            'verdictByProfileId' => $criteria->verdictByProfileId,
+            'verdict' => $criteria->verdict,
             'routedThroughOuIds' => $criteria->routedThroughOuIds,
             'matchesNothing' => $criteria->matchesNothing,
         ];
@@ -816,6 +888,11 @@ final class DocumentViewRegistryTest extends TestCase
             ],
             'document_route_events' => [
                 'id', 'tenant_id', 'document_id', 'actor_profile_id', 'from_ou_id', 'to_ou_id',
+                // #1014 (migration 119). Declared by `routing.verdict` and by
+                // nothing else, which is the point: an installation on 112 but
+                // not 118 loses the two verdict folders and keeps the other
+                // three.
+                'verdict',
             ],
         ];
     }
@@ -897,5 +974,144 @@ final class DocumentViewRegistryTest extends TestCase
             (1, 1, NULL), (2, 1, 1), (3, 1, 2), (4, 1, 2), (5, 1, 4), (9, 2, NULL)');
 
         return $pdo;
+    }
+
+    // ── #998: which sections exist is the registry's answer, not a client's ──
+
+    /**
+     * A view registered under a group nobody declared still gets a section.
+     *
+     * This is the invariant the whole fix turns on. The rail used to filter
+     * views to two known group names and drop the rest, so a folder in a third
+     * group was computed here, returned by the API, and discarded on the way to
+     * the screen — behind a rail that still looked complete. The registry must
+     * never be the place that decides a view's group is not real.
+     */
+    public function testAGroupNobodyDeclaredStillBecomesASection(): void
+    {
+        $substrates = new DocumentSubstrateRegistry($this->schema(['documents' => ['id', 'created_by']]));
+        $views = new DocumentViewRegistry($substrates);
+        $views->registerGroup(new DocumentViewGroup(CoreDocumentViews::GROUP_DERIVED, 'Folders', 10));
+        $views->register($this->view('created-by-me', []));
+        $views->register($this->viewInGroup('in-transit', 'routing'));
+
+        $keys = array_map(static fn (DocumentViewGroup $g): string => $g->key, $views->groups());
+
+        self::assertContains('routing', $keys, 'an undeclared group must still reach the rail');
+    }
+
+    /** Its label falls back to the key: visibly a fallback, not a name somebody chose. */
+    public function testAnUndeclaredGroupIsLabelledWithItsKey(): void
+    {
+        $substrates = new DocumentSubstrateRegistry($this->schema(['documents' => ['id', 'created_by']]));
+        $views = new DocumentViewRegistry($substrates);
+        $views->register($this->viewInGroup('in-transit', 'routing'));
+
+        $groups = $views->groups();
+
+        self::assertCount(1, $groups);
+        self::assertSame('routing', $groups[0]->key);
+        self::assertSame('routing', $groups[0]->label);
+    }
+
+    public function testADeclaredGroupUsesItsDeclaredLabelAndOrder(): void
+    {
+        $substrates = new DocumentSubstrateRegistry($this->schema(['documents' => ['id', 'created_by']]));
+        $views = new DocumentViewRegistry($substrates);
+        $views->registerGroup(new DocumentViewGroup('routing', 'Routing', 30));
+        $views->registerGroup(new DocumentViewGroup(CoreDocumentViews::GROUP_DERIVED, 'Folders', 10));
+        $views->register($this->view('created-by-me', []));
+        $views->register($this->viewInGroup('in-transit', 'routing'));
+
+        $groups = $views->groups();
+
+        self::assertSame([CoreDocumentViews::GROUP_DERIVED, 'routing'], array_map(
+            static fn (DocumentViewGroup $g): string => $g->key,
+            $groups
+        ));
+        self::assertSame('Routing', $groups[1]->label);
+    }
+
+    /** A declared group with no available views is an empty heading, not a section. */
+    public function testAGroupWithNoAvailableViewsIsNotASection(): void
+    {
+        $substrates = new DocumentSubstrateRegistry($this->schema(['documents' => ['id', 'created_by']]));
+        $views = new DocumentViewRegistry($substrates);
+        $views->registerGroup(new DocumentViewGroup(CoreDocumentViews::GROUP_DERIVED, 'Folders', 10));
+        $views->registerGroup(new DocumentViewGroup('empty-one', 'Nothing Here', 20));
+        $views->register($this->view('created-by-me', []));
+
+        $keys = array_map(static fn (DocumentViewGroup $g): string => $g->key, $views->groups());
+
+        self::assertNotContains('empty-one', $keys);
+    }
+
+    /**
+     * A group whose only views are unavailable here disappears WITH them. The
+     * section would otherwise be a heading over nothing, which is the same
+     * false statement an empty "Awaiting me" makes.
+     */
+    public function testAGroupDisappearsWhenItsOnlyViewsSubstrateIsAbsent(): void
+    {
+        $substrates = new DocumentSubstrateRegistry($this->schema(['documents' => ['id', 'created_by']]));
+        $substrates->register(new DocumentSubstrate(
+            'acme.escalations',
+            'Escalation rows a plugin records against a document.',
+            ['acme_escalations'],
+            'a plugin that is not installed here',
+        ));
+
+        $views = new DocumentViewRegistry($substrates);
+        $views->registerGroup(new DocumentViewGroup('plugin-stuff', 'Plugin stuff', 40));
+        $views->register($this->view('created-by-me', []));
+        $views->register(new DocumentView(
+            'escalated-to-me',
+            'Escalated to me',
+            'A folder registered by a test.',
+            'plugin-stuff',
+            ['acme.escalations'],
+            [],
+            static fn (DocumentViewContext $ctx): DocumentViewResolution
+                => DocumentViewResolution::of(DocumentCriteria::unfiltered()),
+        ));
+
+        $keys = array_map(static fn (DocumentViewGroup $g): string => $g->key, $views->groups());
+
+        self::assertNotContains('plugin-stuff', $keys);
+    }
+
+    /** Core declares both of its own sections, so neither relies on the fallback. */
+    public function testCoreDeclaresItsOwnGroups(): void
+    {
+        $substrates = new DocumentSubstrateRegistry($this->schema([
+            'documents' => ['id', 'created_by', 'tenant_id'],
+        ]));
+        CoreDocumentSubstrates::registerInto($substrates);
+
+        $views = new DocumentViewRegistry($substrates);
+        CoreDocumentViews::registerInto($views);
+
+        foreach ($views->groups() as $group) {
+            self::assertNotSame(
+                $group->key,
+                $group->label,
+                "core group '{$group->key}' is falling back to its key instead of declaring a label"
+            );
+        }
+    }
+
+    /** A view in an arbitrary group, for the section tests above. */
+    private function viewInGroup(string $key, string $group): DocumentView
+    {
+        return new DocumentView(
+            $key,
+            ucfirst(str_replace('-', ' ', $key)),
+            'A folder registered by a test.',
+            $group,
+            [],
+            [],
+            static fn (DocumentViewContext $ctx): DocumentViewResolution
+                => DocumentViewResolution::of(DocumentCriteria::unfiltered()),
+        );
     }
 }

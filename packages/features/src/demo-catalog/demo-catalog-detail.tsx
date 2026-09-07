@@ -9,7 +9,7 @@ import { Input } from "@amroksaleh/ui/input"
 import { Skeleton } from "@amroksaleh/ui/skeleton"
 import { Textarea } from "@amroksaleh/ui/textarea"
 
-import { identityTranslate, type NavTranslate } from "../nav/types"
+import { useTranslation } from "../i18n"
 import type { DemoCatalogAdapter, DemoCatalogItem, DemoCatalogItemInput } from "./types"
 
 export interface DemoCatalogDetailProps {
@@ -21,8 +21,6 @@ export interface DemoCatalogDetailProps {
   onSaved: (item: DemoCatalogItem) => void
   /** Called when the caller should navigate back to the list. */
   onCancel: () => void
-  /** Optional translator; falls back to literal strings when omitted. */
-  t?: NavTranslate
   className?: string
 }
 
@@ -39,15 +37,21 @@ function toFormState(item: DemoCatalogItem): FormState {
  * DemoCatalog pilot feature. Serves both "edit an existing item" (`itemId`
  * set) and "create a new item" (`itemId === null`) — never fetches or saves
  * directly, all data access goes through the injected `adapter`.
+ *
+ * Translates itself rather than waiting to be handed a translator — see the
+ * fuller note on {@link DemoCatalogList}. No host ever passed `t`, so every
+ * string here rendered as its own key, and with the translator arriving as a
+ * prop there was no `useTranslation(domain)` in the file for the extractor to
+ * bind these keys to, so none of them reached a catalogue (#984).
  */
 export function DemoCatalogDetail({
   adapter,
   itemId,
   onSaved,
   onCancel,
-  t = identityTranslate,
   className,
 }: DemoCatalogDetailProps) {
+  const t = useTranslation("plugin")
   const isNew = itemId === null
 
   const [form, setForm] = React.useState<FormState | null>(isNew ? emptyForm : null)
@@ -68,13 +72,13 @@ export function DemoCatalogDetail({
       .then((item) => {
         if (cancelled) return
         if (item === null) {
-          setLoadError(t("demoCatalog.detail.notFound"))
+          setLoadError(t("demoCatalog.detail.notFound", "That item no longer exists."))
           return
         }
         setForm(toFormState(item))
       })
       .catch(() => {
-        if (!cancelled) setLoadError(t("demoCatalog.detail.loadError"))
+        if (!cancelled) setLoadError(t("demoCatalog.detail.loadError", "Could not load this item."))
       })
     return () => {
       cancelled = true
@@ -100,7 +104,7 @@ export function DemoCatalogDetail({
         onSaved(saved)
       })
       .catch(() => {
-        setSaveError(t("demoCatalog.detail.saveError"))
+        setSaveError(t("demoCatalog.detail.saveError", "Could not save your changes."))
       })
       .finally(() => {
         setSaving(false)
@@ -111,9 +115,9 @@ export function DemoCatalogDetail({
     return (
       <div className={className}>
         <ErrorState
-          title={t("demoCatalog.detail.errorTitle")}
+          title={t("demoCatalog.detail.errorTitle", "Something went wrong")}
           description={loadError}
-          action={<Button onClick={onCancel}>{t("demoCatalog.detail.back")}</Button>}
+          action={<Button onClick={onCancel}>{t("demoCatalog.detail.back", "Back to the list")}</Button>}
         />
       </div>
     )
@@ -132,13 +136,13 @@ export function DemoCatalogDetail({
       <Card>
         <CardHeader>
           <CardTitle>
-            {isNew ? t("demoCatalog.detail.createTitle") : t("demoCatalog.detail.editTitle")}
+            {isNew ? t("demoCatalog.detail.createTitle", "New item") : t("demoCatalog.detail.editTitle", "Edit item")}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-1.5">
             <label htmlFor="demo-catalog-name" className="text-xs font-medium text-foreground">
-              {t("demoCatalog.detail.nameLabel")}
+              {t("demoCatalog.detail.nameLabel", "Name")}
             </label>
             <Input
               id="demo-catalog-name"
@@ -154,7 +158,7 @@ export function DemoCatalogDetail({
               htmlFor="demo-catalog-description"
               className="text-xs font-medium text-foreground"
             >
-              {t("demoCatalog.detail.descriptionLabel")}
+              {t("demoCatalog.detail.descriptionLabel", "Description")}
             </label>
             <Textarea
               id="demo-catalog-description"
@@ -167,7 +171,7 @@ export function DemoCatalogDetail({
 
           <div className="space-y-1.5">
             <label htmlFor="demo-catalog-status" className="text-xs font-medium text-foreground">
-              {t("demoCatalog.detail.statusLabel")}
+              {t("demoCatalog.detail.statusLabel", "Status")}
             </label>
             <select
               id="demo-catalog-status"
@@ -177,8 +181,8 @@ export function DemoCatalogDetail({
               }
               className="h-8 w-full rounded-md border border-input bg-transparent px-2 text-xs/relaxed"
             >
-              <option value="active">{t("demoCatalog.status.active")}</option>
-              <option value="archived">{t("demoCatalog.status.archived")}</option>
+              <option value="active">{t("demoCatalog.status.active", "Active")}</option>
+              <option value="archived">{t("demoCatalog.status.archived", "Archived")}</option>
             </select>
           </div>
 
@@ -190,10 +194,10 @@ export function DemoCatalogDetail({
         </CardContent>
         <CardFooter className="justify-end gap-2 border-t">
           <Button type="button" variant="ghost" onClick={onCancel}>
-            {t("demoCatalog.detail.cancel")}
+            {t("demoCatalog.detail.cancel", "Cancel")}
           </Button>
           <Button type="submit" disabled={saving}>
-            {saving ? t("demoCatalog.detail.saving") : t("demoCatalog.detail.save")}
+            {saving ? t("demoCatalog.detail.saving", "Saving…") : t("demoCatalog.detail.save", "Save")}
           </Button>
         </CardFooter>
       </Card>

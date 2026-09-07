@@ -40,9 +40,9 @@ export type PluginDataState<T> =
   | { status: 'ready'; data: T; refresh: () => void };
 
 type ResolvedResult<T> =
-  | { key: number; status: 'error' }
-  | { key: number; status: 'empty' }
-  | { key: number; status: 'ready'; data: T };
+  | { key: number; source: string; status: 'error' }
+  | { key: number; source: string; status: 'empty' }
+  | { key: number; source: string; status: 'ready'; data: T };
 
 /** How long any single request may take before the hang guard aborts it. */
 const HANG_GUARD_MS = 15_000;
@@ -141,7 +141,7 @@ export function usePluginData<T>(
         if (!mountedRef.current) return;
 
         if (!response.ok) {
-          setResolved({ key, status: 'error' });
+          setResolved({ key, source, status: 'error' });
           return;
         }
 
@@ -150,7 +150,7 @@ export function usePluginData<T>(
           body = await response.json();
         } catch {
           if (!mountedRef.current) return;
-          setResolved({ key, status: 'error' });
+          setResolved({ key, source, status: 'error' });
           return;
         }
 
@@ -162,7 +162,7 @@ export function usePluginData<T>(
           body === null ||
           !('data' in body)
         ) {
-          setResolved({ key, status: 'error' });
+          setResolved({ key, source, status: 'error' });
           return;
         }
 
@@ -188,7 +188,7 @@ export function usePluginData<T>(
             // list must never be presented as a complete one — so this
             // surfaces as `error`, with the retry every consumer already
             // renders, instead of quietly rendering what did arrive.
-            setResolved({ key, status: 'error' });
+            setResolved({ key, source, status: 'error' });
             return;
           }
 
@@ -200,14 +200,14 @@ export function usePluginData<T>(
         if (!mountedRef.current) return;
 
         if (parsed === null) {
-          setResolved({ key, status: 'empty' });
+          setResolved({ key, source, status: 'empty' });
         } else {
-          setResolved({ key, status: 'ready', data: parsed });
+          setResolved({ key, source, status: 'ready', data: parsed });
         }
       } catch {
         // AbortError from unmount/re-fetch or network error — map to error.
         if (!mountedRef.current) return;
-        setResolved({ key, status: 'error' });
+        setResolved({ key, source, status: 'error' });
       }
     };
 
@@ -224,7 +224,21 @@ export function usePluginData<T>(
   }, [source, fetchKey, bump]);
 
   // If we have not yet received a result for the current fetchKey → loading.
-  if (resolved === null || resolved.key !== fetchKey) {
+  //
+  // AND FOR THE CURRENT `source`. `fetchKey` bumps on refresh and retry, but a
+  // caller changing `source` — a master-detail selection moving to another
+  // record — did not bump it, so the previously resolved result was handed back
+  // as `ready` for the whole time the new request was in flight. Every consumer
+  // read that as "here are the rows for what you just asked about", and it was
+  // the rows for what they asked about before.
+  //
+  // For a `dataTable` that is a display defect: the wrong list, briefly. For a
+  // block that SEEDS AN EDITOR from its source, it is not a display defect at
+  // all — it seeds one record's contents against another record's save
+  // endpoint, and the save is a replacement. Stale-as-ready is the kind of wrong
+  // answer that looks exactly like a right one, so the honest state while a new
+  // source is being fetched is `loading`, which is what it always was.
+  if (resolved === null || resolved.key !== fetchKey || resolved.source !== source) {
     return { status: 'loading' };
   }
 

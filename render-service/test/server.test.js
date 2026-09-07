@@ -63,6 +63,25 @@ describe('whity_render server', () => {
     expect(res.body).toHaveProperty('commit');
   });
 
+  // The BROWSER is the other half of the same question (#1134): the Dockerfile
+  // installs Chromium unpinned, so it can move without this repository moving,
+  // and the flowing mode's paginator is measured against whatever it is. Same
+  // always-present rule as the fields above — a checkout that never ran
+  // `npm run build:browser-info` reports `source: "unknown"` with nulls, not a
+  // missing key. The probe's verdict is `not_run` until start() kicks it off;
+  // what it then gates is pinned in test/capability-gate.test.js.
+  test('GET /health always carries the browser identity and the capability verdict', async () => {
+    const res = await request(app).get('/health');
+    for (const key of ['version', 'package_version', 'executable', 'recorded_at', 'source', 'running_version']) {
+      expect(res.body.browser).toHaveProperty(key);
+    }
+    // `build` when this checkout happens to hold a baked file, `unknown`
+    // otherwise — never a third thing, and never a missing key.
+    expect(['build', 'unknown']).toContain(res.body.browser.source);
+    expect(res.body.browser.running_version).toBeNull();
+    expect(res.body.capabilities.status).toBe('not_run');
+  });
+
   test('POST /render without the secret header is 401', async () => {
     const res = await request(app).post('/render').send({ template: minimalTemplate() });
     expect(res.status).toBe(401);

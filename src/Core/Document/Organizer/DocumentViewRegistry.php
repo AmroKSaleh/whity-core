@@ -82,6 +82,17 @@ final class DocumentViewRegistry implements HostWiredService
     /** @var array<string, DocumentView> */
     private array $views = [];
 
+    /**
+     * Declared rail sections, keyed by {@see DocumentViewGroup::$key}.
+     *
+     * Never consulted to decide whether a view is rendered — only to give its
+     * section a name and a position. A group missing from here is a group with
+     * no label yet, not a group that does not exist.
+     *
+     * @var array<string, DocumentViewGroup>
+     */
+    private array $groups = [];
+
     public function __construct(private readonly DocumentSubstrateRegistry $substrates)
     {
     }
@@ -136,5 +147,51 @@ final class DocumentViewRegistry implements HostWiredService
         );
 
         return $available;
+    }
+
+    /**
+     * Declare a rail section. Re-registering a key REPLACES it, for the reason
+     * {@see register()} gives.
+     */
+    public function registerGroup(DocumentViewGroup $group): void
+    {
+        $this->groups[$group->key] = $group;
+    }
+
+    /**
+     * The sections the rail should render, in order — one per group that has at
+     * least one available view.
+     *
+     * DERIVED FROM THE VIEWS, not from what was registered. A group nobody has
+     * folders in is not a section, it is an empty heading; and a group that has
+     * folders but was never declared still gets a section, via
+     * {@see DocumentViewGroup::fallbackFor()}. That asymmetry is deliberate:
+     * this method exists because the rail used to drop views whose group it did
+     * not recognise, so the one thing it must never do is decide that a view's
+     * group is not real.
+     *
+     * @return list<DocumentViewGroup>
+     */
+    public function groups(): array
+    {
+        $used = [];
+        foreach ($this->available() as $view) {
+            $used[$view->group] = true;
+        }
+
+        $groups = [];
+        foreach (array_keys($used) as $key) {
+            $groups[] = $this->groups[$key] ?? DocumentViewGroup::fallbackFor($key);
+        }
+
+        // Same tie-break as available(), and for the same reason: two groups
+        // sharing an order must not reshuffle between requests.
+        usort(
+            $groups,
+            static fn (DocumentViewGroup $a, DocumentViewGroup $b): int
+                => [$a->order, $a->key] <=> [$b->order, $b->key]
+        );
+
+        return $groups;
     }
 }

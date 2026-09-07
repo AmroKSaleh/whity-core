@@ -14,14 +14,20 @@
  *
  * So every row here is a rule. "Everyone holding Instructor" is ONE row, and it
  * stays one row whether it resolves to four people or four thousand. The picker
- * offers rule kinds from `GET /api/v1/routing-rules` — core's `role` and
- * `role_below_actor`, plus whatever a plugin registered through
- * `RoutingRuleRegistry` — and never a person picker.
+ * offers rule kinds from `GET /api/v1/routing-rules` — core's four, plus
+ * whatever a plugin registered through `RoutingRuleRegistry`.
  *
- * THE RULE-PREVIEW CONTRACT: A COUNT, AFTER THE FACT, AND NO ROSTER EVER
- * ---------------------------------------------------------------------
- * There is no "who will this reach?" button, and that is deliberate rather than
- * unfinished. Three reasons, in order of how much they'd hurt:
+ * `explicit` ("exactly these people, by name") is the one core kind that
+ * enumerates, and it is a KIND rather than an exception to kinds precisely so
+ * the enumeration cannot leak into the others. It MEANS those three: it will not
+ * pick up the fourth person who joins the department, the screen says so where
+ * it is authored, and it is stored as one opaque config value rather than as the
+ * membership table #999 rejected. See `ExplicitRuleResolver`.
+ *
+ * THE RULE-PREVIEW CONTRACT: A COUNT WHERE ONE IS KNOWABLE, NEVER A ROSTER
+ * -----------------------------------------------------------------------
+ * There is no "who will this ROUTE reach?" button, and that is deliberate rather
+ * than unfinished. Three reasons, in order of how much they'd hurt:
  *
  *  1. THERE IS NOTHING TO PREVIEW FOR MOST STEPS. `DocumentRouter::issue()`
  *     resolves ONLY step 1. Steps 2..N are resolved relative to whoever actually
@@ -49,12 +55,59 @@
  * author who picked the wrong role finds out in the response rather than in a
  * complaint six weeks later".
  *
- * If a pre-flight count is wanted later, the seam is a server-side
- * `POST /api/documents/{id}/routes/preview` that runs step 1's resolver and
- * returns `{count, sample}` — the count authoritative, the sample capped. That
- * belongs behind the resolver, not in front of it. It is flagged as follow-up
- * rather than built here, because a preview endpoint is engine surface and this
- * change is a UI one.
+ * THE ONE PRE-FLIGHT ANSWER THERE IS, AND WHY IT COSTS NONE OF THAT (#1015)
+ * ------------------------------------------------------------------------
+ * A `group` step names a STORED definition, and #999 already built the endpoint
+ * that answers "who does group 7 resolve to right now":
+ * `GET /api/v1/user-groups/{id}/preview`, an exact count plus a sample bounded
+ * by the tenant's own `groups.preview_sample_size` (per-tenant, then global, then
+ * the registry default). So choosing a group shows it, and none of the three
+ * objections above applies:
+ *
+ *  - it is not a preview of THE ROUTE. It is a preview of the GROUP, which is a
+ *    thing that exists whether or not any step names it, and which resolves with
+ *    no document, route or actor-in-the-middle in the question;
+ *  - nothing is forked. This client sends one request and renders the resolver's
+ *    own answer, `truncated` included — it re-derives nothing, which is the
+ *    whole reason the server states that flag instead of leaving it to be
+ *    inferred from `total > sample.length`;
+ *  - it is not a roster. A count, a handful of faces, and no way to ask for more
+ *    — there is deliberately no page parameter on that endpoint.
+ *
+ * The answer carries its own caveat wherever it appears, because a group is a
+ * RULE and there is no `user_group_members` table behind it: what is on screen is
+ * true at the moment it was asked, and the step will be resolved again, against
+ * the organisation as it stands, when the document actually moves.
+ *
+ * For the role kinds a pre-flight count is still absent, and the seam if one is
+ * ever wanted is unchanged: a server-side `POST /api/documents/{id}/routes/preview`
+ * that runs step 1's resolver. That belongs behind the resolver, not in front of
+ * it.
+ *
+ * TWO WAYS IN, AND THE SECOND IS NOT A SHORTCUT TO THE FIRST (#1031)
+ * -------------------------------------------------------------------
+ * "Start from a template" does NOT load a design into the step list above for
+ * the author to tweak. It sends the design's ID, and the SERVER reads the
+ * stages, converts them and issues the route. Three reasons, and the third is
+ * the one that matters:
+ *
+ *  1. THIS LIST CANNOT EXPRESS WHAT A DESIGN CONTAINS. A template has gates,
+ *     quorums and verdict branches; the step list has none of those controls.
+ *     Loading a branching design into it would drop every branch on the floor
+ *     and then send what was left as though it were the design — flattening,
+ *     silently, which is the precise failure #1031 exists to prevent.
+ *  2. PROVENANCE WOULD BECOME A CLIENT'S CLAIM. The route records which design
+ *     it came from. If the client composed the steps and merely asserted the id
+ *     beside them, the trail would say "followed Purchase approval" about a
+ *     route nobody checked against that design.
+ *  3. A DESIGN IS RE-READ AT THE MOMENT IT IS APPLIED, so a stage somebody
+ *     redrew this morning is the stage that runs this afternoon.
+ *
+ * What this screen shows instead is a READ-ONLY summary of the design — every
+ * stage, what makes it a gate, and where each verdict leads — because "apply
+ * this" is otherwise a decision about a thing the author cannot see. The
+ * summary is drawn from the same three rules the canvas draws
+ * (`destinationFor` in `route-template-wire`), not from a fourth reading.
  *
  * LIMITS ARE NOT MIRRORED, THEY ARE SURFACED
  * ------------------------------------------
@@ -69,7 +122,7 @@
  * blocks legitimate work.
  */
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@amroksaleh/ui/button';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { Badge } from '@amroksaleh/ui/badge';
@@ -80,12 +133,38 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@amroksaleh/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@amroksaleh/ui/tabs';
+import {
+  AudienceGroupPicker,
+  type AudienceGroupOption,
+  type AudienceGroupPreview,
+  type AudienceGroupPreviewStatus,
+} from '@amroksaleh/ui/audience-group-picker';
+import {
+  AudiencePeoplePicker,
+  type AudiencePersonOption,
+} from '@amroksaleh/ui/audience-people-picker';
 import { IconArrowDown, IconArrowUp, IconPlus, IconTrash } from '@tabler/icons-react';
 import { useTranslation } from '@amroksaleh/features/i18n';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import type { DraftStep, IssueRouteResponse, RoutingRule } from './routing-wire';
-import { isRoleConfiguredKind } from './routing-wire';
+import {
+  destinationFor,
+  type RouteTemplateGraph,
+  type RouteTemplateGraphResponse,
+  type RouteTemplateSummary,
+} from './route-template-wire';
+import {
+  EXPLICIT_KIND,
+  GROUP_KIND,
+  configuredGroupId,
+  configuredProfileIds,
+  configuredRoleId,
+  isCoreConfiguredKind,
+  isRoleConfiguredKind,
+  isStepConfigured,
+} from './routing-wire';
 
 export interface RoleOption {
   id: number;
@@ -105,15 +184,75 @@ export interface RouteComposerProps {
    * as an empty dropdown — #756: an empty state, never invented content.
    */
   rolesUnavailableReason: string | null;
+  /**
+   * Why a POPULATED list may not be all of them — a pagination walk that did not
+   * finish.
+   *
+   * A separate prop from `rolesUnavailableReason` rather than the same one reused,
+   * and the separation fixes a real defect: the host set that single prop to a
+   * "only some roles could be loaded" sentence while ALSO passing the roles it
+   * did get, and this component only ever rendered the prop when the list was
+   * EMPTY. So a truncated picker rendered as though it were whole, which is
+   * exactly the conclusion the host's own comment says must be prevented — an
+   * author deciding a role does not exist and choosing the wrong one. The two
+   * facts are different ("there is no list" / "the list may be short"), they are
+   * rendered in different places, and they are now different props.
+   */
+  rolesIncompleteReason?: string | null;
+  /**
+   * User groups for the `group` kind's `group_id` — the reference kind, and the
+   * reason groups exist (#1015). Empty when they could not be read.
+   */
+  groups: AudienceGroupOption[];
+  /** Why `groups` is empty. Same contract as `rolesUnavailableReason`. */
+  groupsUnavailableReason: string | null;
+  /** Why `groups`, though populated, may be short. */
+  groupsIncompleteReason?: string | null;
+  /** People for the `explicit` kind's `profile_ids`. Empty when unreadable. */
+  people: AudiencePersonOption[];
+  /** Why `people` is empty. Same contract as `rolesUnavailableReason`. */
+  peopleUnavailableReason: string | null;
+  /** Why `people`, though populated, may be short. */
+  peopleIncompleteReason?: string | null;
+  /**
+   * The tenant's route templates (#1031). Empty when there are none, and ALSO
+   * empty when they could not be read — which is why the next prop exists.
+   */
+  templates: RouteTemplateSummary[];
+  /** Why `templates` is empty. Same contract as `rolesUnavailableReason`. */
+  templatesUnavailableReason: string | null;
+  /** Why `templates`, though populated, may be short. */
+  templatesIncompleteReason?: string | null;
   onIssued: () => void;
   onCancel: () => void;
+}
+
+/** How the author is composing: their own steps, or somebody's design. */
+type ComposeMode = 'steps' | 'template';
+
+/** One design's graph as this component holds it. */
+interface TemplateEntry {
+  status: 'loading' | 'ready' | 'error';
+  graph: RouteTemplateGraph | null;
+  error: string | null;
+}
+
+/** One group's membership snapshot as this component holds it. */
+interface PreviewEntry {
+  status: AudienceGroupPreviewStatus;
+  preview: AudienceGroupPreview | null;
+  error: string | null;
 }
 
 let draftKeySeed = 0;
 const nextDraftKey = (): string => `step-${++draftKeySeed}`;
 
 function newStep(kind: string): DraftStep {
-  return { key: nextDraftKey(), rule_kind: kind, rule_config: {}, label: '' };
+  // `satisfied_by` stated rather than omitted. The server reads a missing value
+  // as `act`, so leaving it out would work — and would be the same silence that
+  // let the flow editor destroy a delivery stage on save (#1064). A step that
+  // says what it is cannot be defaulted into something else.
+  return { key: nextDraftKey(), rule_kind: kind, rule_config: {}, label: '', satisfied_by: 'act' };
 }
 
 export function RouteComposer({
@@ -122,6 +261,16 @@ export function RouteComposer({
   rules,
   roles,
   rolesUnavailableReason,
+  rolesIncompleteReason = null,
+  groups,
+  groupsUnavailableReason,
+  groupsIncompleteReason = null,
+  people,
+  peopleUnavailableReason,
+  peopleIncompleteReason = null,
+  templates,
+  templatesUnavailableReason,
+  templatesIncompleteReason = null,
   onIssued,
   onCancel,
 }: RouteComposerProps) {
@@ -134,8 +283,165 @@ export function RouteComposer({
   const [steps, setSteps] = useState<DraftStep[]>(() =>
     firstKind === '' ? [] : [newStep(firstKind)]
   );
+
+  /**
+   * Seed the first step ONCE, whenever the kinds arrive.
+   *
+   * The initialiser above runs on the first render only, and a host that mounts
+   * this component while `GET /api/v1/routing-rules` is still in flight passes
+   * `rules: []` on that render. The composer then opened permanently empty —
+   * "A route needs at least one step", with an Add-a-step button that could only
+   * add a step with no kind. Reproducible by opening the composer promptly after
+   * a page load, which is exactly what somebody who came to send a document
+   * does.
+   *
+   * A ref rather than `steps.length === 0`, because the two are different
+   * states: an author who has REMOVED every step meant to, and must not have one
+   * put back under them. This fires at most once, on the transition from "no
+   * kinds known" to "kinds known".
+   */
+  const seededFirstStep = useRef(firstKind !== '');
+  useEffect(() => {
+    if (seededFirstStep.current || firstKind === '') return;
+    seededFirstStep.current = true;
+    setSteps((current) => (current.length === 0 ? [newStep(firstKind)] : current));
+  }, [firstKind]);
   const [busy, setBusy] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
+  /**
+   * Membership snapshots, keyed by GROUP id rather than by step.
+   *
+   * Two steps naming the same group are asking the same question, so they get one
+   * request and one answer that cannot disagree with itself on the same screen.
+   */
+  const [previews, setPreviews] = useState<Record<number, PreviewEntry>>({});
+
+  /**
+   * Which way in. Defaults to the step list, which is the way that has always
+   * worked and the only one available on an install with no designs.
+   */
+  const [mode, setMode] = useState<ComposeMode>('steps');
+  const [templateId, setTemplateId] = useState<number | null>(null);
+  const [templateEntry, setTemplateEntry] = useState<TemplateEntry | null>(null);
+
+  /**
+   * Read the chosen design's graph so the author can see what they are applying.
+   *
+   * Re-fetched every time a design is chosen, even one seen a moment ago, for
+   * the same reason the group preview is: a design is a shared record somebody
+   * else may have redrawn, and the stages that RUN are the ones the server reads
+   * when the route is issued — not the ones this screen happened to cache.
+   */
+  const loadTemplate = useCallback(
+    async (id: number): Promise<void> => {
+      setTemplateEntry({ status: 'loading', graph: null, error: null });
+      try {
+        const response = await apiClient(`/api/v1/document-route-templates/${id}`);
+        const body = (await response.json().catch(() => null)) as
+          | (RouteTemplateGraphResponse & { error?: string })
+          | null;
+        const data = body?.data;
+        // `== null` catches BOTH an absent `data` and an explicit null: a 200
+        // with no payload is not a design, and reading `.steps` off it would
+        // throw inside a state updater and take the composer down.
+        if (!response.ok || data == null) {
+          setTemplateEntry({
+            status: 'error',
+            graph: null,
+            error:
+              body?.error ??
+              t('routing.compose.template.loadError', 'This route template could not be read.'),
+          });
+          return;
+        }
+        setTemplateEntry({ status: 'ready', graph: data, error: null });
+      } catch {
+        setTemplateEntry({
+          status: 'error',
+          graph: null,
+          error: t('routing.compose.template.loadError', 'This route template could not be read.'),
+        });
+      }
+    },
+    [apiClient, t]
+  );
+
+  /**
+   * Ask the server who a group currently reaches.
+   *
+   * `GET /api/v1/user-groups/{id}/preview` — #999's preview, not a second
+   * mechanism. It answers with an exact count and a bounded sample whose size is
+   * the tenant's `groups.preview_sample_size` (per-tenant, then global, then the
+   * registry default), and this client neither knows nor mirrors that number: it
+   * renders what it is sent, including `truncated`, which the server states rather
+   * than leaving to be inferred.
+   *
+   * Deliberately re-fetched every time a group is chosen, even one seen a moment
+   * ago. The answer is a snapshot of a live organisation, and a cached one shown
+   * as current would be the very staleness a group exists to avoid.
+   */
+  const loadPreview = useCallback(
+    async (groupId: number): Promise<void> => {
+      setPreviews((current) => ({
+        ...current,
+        [groupId]: { status: 'loading', preview: null, error: null },
+      }));
+
+      const fail = (message: string): void => {
+        setPreviews((current) => ({
+          ...current,
+          [groupId]: { status: 'error', preview: null, error: message },
+        }));
+      };
+
+      try {
+        const response = await apiClient(`/api/v1/user-groups/${groupId}/preview`);
+        const body = (await response.json().catch(() => null)) as
+          | {
+              error?: string;
+              data?: {
+                total: number;
+                truncated: boolean;
+                sample_size: number;
+                sample: { profile_id: number; display_name: string | null }[];
+              };
+            }
+          | null;
+
+        const data = body?.data;
+        // `== null` catches BOTH an absent `data` and an explicit null. A body
+        // that answered 200 with no payload is not a preview, and reading
+        // `.total` off it would throw inside a state updater — which takes the
+        // whole composer down over a failed side panel.
+        if (!response.ok || data == null) {
+          // Verbatim: a deleted group's refusal names it by id, and a 403 names
+          // the permission that is missing.
+          fail(body?.error ?? t('routing.compose.group.previewError', 'Who this group reaches could not be worked out.'));
+          return;
+        }
+
+        setPreviews((current) => ({
+          ...current,
+          [groupId]: {
+            status: 'ready',
+            preview: {
+              total: data.total,
+              truncated: data.truncated,
+              sampleSize: data.sample_size,
+              members: (data.sample ?? []).map((member) => ({
+                profileId: member.profile_id,
+                displayName: member.display_name,
+              })),
+            },
+            error: null,
+          },
+        }));
+      } catch {
+        fail(t('routing.compose.group.previewNetworkError', 'Who this group reaches could not be worked out.'));
+      }
+    },
+    [apiClient, t]
+  );
 
   const rulesByKind = useMemo(() => {
     const map = new Map<string, RoutingRule>();
@@ -163,22 +469,38 @@ export function RouteComposer({
   /**
    * Whether every step is complete enough to be worth sending.
    *
-   * Only the shape this client is responsible for: a kind must be chosen, and a
-   * role-configured kind must name a role. Everything else — the tenant's step
-   * ceiling, a plugin rule's own required config — is the engine's to judge, and
-   * guessing at it here would block routes the engine would have accepted.
+   * Only the shape this client is responsible for, which #1015 widened from two
+   * kinds to four: a kind must be chosen, and each of CORE's kinds must carry the
+   * config its own resolver requires. Everything else — the tenant's step ceiling,
+   * the per-step recipient ceiling, a PLUGIN rule's required config — is still the
+   * engine's to judge, and guessing at it here would block routes the engine would
+   * have accepted.
+   *
+   * The rule for which kinds this client may speak for is `isStepConfigured`, and
+   * it lives in `routing-wire` beside the readers that mirror each resolver — so
+   * the answer to "is this step configured" and the answer to "what did the author
+   * configure it with" cannot drift apart.
    */
   const incompleteStep = useMemo(() => {
     for (const [index, step] of steps.entries()) {
       if (step.rule_kind === '') return index;
-      if (isRoleConfiguredKind(step.rule_kind) && step.rule_config['role_id'] === undefined) {
-        return index;
-      }
+      if (!isStepConfigured(step.rule_kind, step.rule_config)) return index;
     }
     return null;
   }, [steps]);
 
   const submitBlockedReason = useMemo<string | null>(() => {
+    if (mode === 'template') {
+      if (templateId === null) {
+        return t('routing.compose.template.blocked.none', 'Choose a route template to apply.');
+      }
+      // Deliberately NOT a step-count check of our own. The server refuses an
+      // empty design in its own words, and it refuses a design over the tenant's
+      // `documents.routing_max_steps` with a message naming both numbers — a
+      // mirrored limit here would be a second copy of a per-tenant setting this
+      // caller may not even be allowed to read.
+      return null;
+    }
     if (steps.length === 0) {
       // The engine's own sentence for the empty case.
       return t(
@@ -192,29 +514,56 @@ export function RouteComposer({
       });
     }
     return null;
-  }, [steps.length, incompleteStep, t]);
+  }, [mode, templateId, steps.length, incompleteStep, t]);
 
   const submit = async (): Promise<void> => {
     setBusy(true);
     setRefusal(null);
     try {
-      const response = await apiClient(`/api/v1/documents/${documentId}/routes`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          // Omitted when blank so the server falls back to the document's own
-          // title, which is what it does and what an author almost always wants:
-          // a route is a circulation OF something.
-          ...(title.trim() === '' ? {} : { title: title.trim() }),
-          // A JSON ARRAY, never an object. The engine indexes `position` from
-          // this order and refuses an object rather than silently re-indexing.
-          steps: steps.map((step) => ({
-            rule_kind: step.rule_kind,
-            rule_config: step.rule_config,
-            ...(step.label.trim() === '' ? {} : { label: step.label.trim() }),
-          })),
-        }),
-      });
+      // TWO ENDPOINTS, not one with an optional field. Applying a design sends
+      // the design's id and NO steps, so a client cannot hand over steps of its
+      // own and have them recorded as though a template produced them. See the
+      // file docblock.
+      const applying = mode === 'template' && templateId !== null;
+      const response = await apiClient(
+        applying
+          ? `/api/v1/documents/${documentId}/routes/from-template`
+          : `/api/v1/documents/${documentId}/routes`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(
+            applying
+              ? {
+                  template_id: templateId,
+                  // Omitted when blank so the server names the circulation after
+                  // the DESIGN it follows, which is what an author who picked
+                  // "Purchase approval" almost always means.
+                  ...(title.trim() === '' ? {} : { title: title.trim() }),
+                }
+              : {
+                  // Omitted when blank so the server falls back to the document's
+                  // own title, which is what it does and what an author almost
+                  // always wants: a route is a circulation OF something.
+                  ...(title.trim() === '' ? {} : { title: title.trim() }),
+                  // A JSON ARRAY, never an object. The engine indexes `position`
+                  // from this order and refuses an object rather than silently
+                  // re-indexing.
+                  steps: steps.map((step) => ({
+                    rule_kind: step.rule_kind,
+                    rule_config: step.rule_config,
+                    ...(step.label.trim() === '' ? {} : { label: step.label.trim() }),
+                    // Sent ALWAYS, including when it is `act` (#1064). The
+                    // server defaults a missing value to `act`, so omitting it
+                    // would work by coincidence rather than by intent — and it
+                    // is exactly the omission that let the flow editor turn a
+                    // delivery stage into an ordinary one on save.
+                    satisfied_by: step.satisfied_by,
+                  })),
+                }
+          ),
+        }
+      );
 
       const body = (await response.json().catch(() => null)) as
         | (IssueRouteResponse & { error?: string })
@@ -261,6 +610,38 @@ export function RouteComposer({
     }
   };
 
+  /**
+   * What "this stage approved" means, in words.
+   *
+   * Three literal `t()` calls rather than one with the raw value interpolated:
+   * `all` / `any` / `majority` are the ENGINE's vocabulary and putting one on
+   * screen would show an author a word from a database column. Written as
+   * separate calls, not built from the value, so the key extractor can see all
+   * three — a computed key is a key no translator ever receives.
+   */
+  const quorumLabel = (quorum: 'all' | 'any' | 'majority'): string => {
+    if (quorum === 'any') {
+      return t('routing.compose.template.quorum.any', 'any one approval carries it');
+    }
+    if (quorum === 'majority') {
+      return t('routing.compose.template.quorum.majority', 'more than half must approve');
+    }
+    return t('routing.compose.template.quorum.all', 'everyone must approve');
+  };
+
+  /**
+   * Where a verdict sends the document, in words.
+   *
+   * `null` is "the chain ends here", and it is a real answer rather than a gap:
+   * a rejection with no branch drawn STOPS, and never falls through to where an
+   * approval would have gone. An author who cannot see that difference on this
+   * screen cannot see it anywhere before the document has already travelled.
+   */
+  const destinationLabel = (position: number | null): string =>
+    position === null
+      ? t('routing.compose.template.ends', 'the chain ends here')
+      : t('routing.compose.template.goesTo', 'stage {position}', { position });
+
   if (rules.length === 0) {
     // No kinds registered at all. An empty picker would read as a loading state
     // that never resolves (#756).
@@ -288,14 +669,56 @@ export function RouteComposer({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           maxLength={255}
-          placeholder={documentTitle}
+          // The placeholder shows what the server will ACTUALLY use, which
+          // differs by which way in the author took: the document's title for a
+          // hand-composed route, the design's name for an applied one. Showing
+          // the document title in both would contradict the help line below it.
+          placeholder={
+            mode === 'template'
+              ? (templates.find((option) => option.id === templateId)?.name ?? documentTitle)
+              : documentTitle
+          }
           className="mt-1 w-full rounded-md border border-border bg-background p-2 text-sm text-foreground"
         />
         <p className="mt-1 text-xs text-muted-foreground">
-          {t('routing.compose.title.help', 'Left blank, the document’s own title is used.')}
+          {mode === 'template'
+            ? t(
+                'routing.compose.title.helpTemplate',
+                'Left blank, the route is named after the template it follows.'
+              )
+            : t('routing.compose.title.help', 'Left blank, the document’s own title is used.')}
         </p>
       </div>
 
+      {/*
+        TWO WAYS IN, side by side rather than one hidden behind the other: an
+        author who has never seen the template picker cannot go looking for it,
+        and a design nobody can reach is the failure #1031 was filed about.
+
+        The step list stays the DEFAULT and stays first, because it is the way
+        that works on an install with no designs at all, and because switching to
+        an empty picker as a landing state would read as something broken (#756).
+      */}
+      <Tabs
+        value={mode}
+        onValueChange={(value) => {
+          setMode(value === 'template' ? 'template' : 'steps');
+          // The refusal on screen belongs to the way in that produced it. Left
+          // standing, the engine's "Step 2 needs a role" would sit above a
+          // template picker that has no step 2.
+          setRefusal(null);
+        }}
+      >
+        <TabsList>
+          <TabsTrigger value="steps" data-slot="route-composer-mode-steps">
+            {t('routing.compose.mode.steps', 'Step by step')}
+          </TabsTrigger>
+          <TabsTrigger value="template" data-slot="route-composer-mode-template">
+            {t('routing.compose.mode.template', 'Start from a template')}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="steps" className="space-y-4">
       {/*
         The preview contract, said out loud where the author is authoring. Without
         it, the absence of a "who will get this" button reads as a missing
@@ -314,7 +737,9 @@ export function RouteComposer({
         {steps.map((step, index) => {
           const rule = rulesByKind.get(step.rule_kind);
           const needsRole = isRoleConfiguredKind(step.rule_kind);
-          const selectedRoleId = step.rule_config['role_id'];
+          const selectedRoleId = configuredRoleId(step.rule_config);
+          const selectedGroupId = configuredGroupId(step.rule_config);
+          const groupPreview = selectedGroupId === null ? undefined : previews[selectedGroupId];
 
           return (
             <li
@@ -389,7 +814,7 @@ export function RouteComposer({
                   )}
                 </div>
 
-                {needsRole ? (
+                {needsRole && (
                   <div>
                     <label className="text-xs text-muted-foreground" htmlFor={`role-${step.key}`}>
                       {t('routing.compose.step.role', 'Role')}
@@ -407,45 +832,195 @@ export function RouteComposer({
                           t('routing.compose.step.noRoles', 'No roles are available to name.')}
                       </p>
                     ) : (
-                      <Select
-                        value={selectedRoleId === undefined ? '' : String(selectedRoleId)}
-                        onValueChange={(value) =>
-                          updateStep(step.key, { rule_config: { role_id: Number(value) } })
-                        }
-                      >
-                        <SelectTrigger id={`role-${step.key}`} className="mt-1">
-                          <SelectValue
-                            placeholder={t('routing.compose.step.rolePlaceholder', 'Choose a role')}
-                          />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {roles.map((role) => (
-                            <SelectItem key={role.id} value={String(role.id)}>
-                              {role.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <>
+                        <Select
+                          value={selectedRoleId === null ? undefined : String(selectedRoleId)}
+                          onValueChange={(value) =>
+                            updateStep(step.key, { rule_config: { role_id: Number(value) } })
+                          }
+                        >
+                          <SelectTrigger id={`role-${step.key}`} className="mt-1">
+                            <SelectValue
+                              placeholder={t('routing.compose.step.rolePlaceholder', 'Choose a role')}
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {roles.map((role) => (
+                              <SelectItem key={role.id} value={String(role.id)}>
+                                {role.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {/*
+                          A SHORT list is not an absent one. Until #1015 this
+                          sentence was passed in and never rendered: the host set
+                          it alongside a POPULATED `roles`, and the only branch
+                          that drew it was the empty one. A picker missing rows
+                          while looking whole is how an author concludes a role
+                          does not exist and names the wrong one — the exact
+                          failure the host's own comment says must be prevented.
+                        */}
+                        {rolesIncompleteReason !== null && (
+                          <p
+                            className="mt-1 text-xs text-muted-foreground"
+                            data-slot="route-composer-roles-incomplete"
+                          >
+                            {rolesIncompleteReason}
+                          </p>
+                        )}
+                      </>
                     )}
-                  </div>
-                ) : (
-                  <div>
-                    <p className="mt-5 text-xs text-muted-foreground">
-                      {/*
-                        A plugin kind whose config this client cannot author. It is
-                        offered anyway — refusing to show it would hide a rule the
-                        install genuinely has — and the engine's own validator is
-                        what says whether `{}` is enough. Its 422 names the step
-                        and quotes the plugin's message.
-                      */}
-                      {t(
-                        'routing.compose.step.pluginConfig',
-                        'This rule is configured by the plugin that provides it. It will be sent with no settings; if it needs some, the server will say which.'
-                      )}
-                    </p>
                   </div>
                 )}
               </div>
+
+              {/*
+                The two kinds #1015 made authorable, each BELOW the grid rather
+                than beside the rule select: both carry more than a dropdown — a
+                membership snapshot, a set of chips — and a half-width column
+                would squeeze the part that is actually the point.
+              */}
+              {step.rule_kind === GROUP_KIND && (
+                <div className="mt-2" data-slot="route-composer-group-step">
+                  <label className="text-xs text-muted-foreground" htmlFor={`group-${step.key}`}>
+                    {t('routing.compose.step.group', 'User group')}
+                  </label>
+                  <div className="mt-1">
+                    <AudienceGroupPicker
+                      id={`group-${step.key}`}
+                      groups={groups}
+                      value={selectedGroupId}
+                      onChange={(groupId) => {
+                        updateStep(step.key, {
+                          rule_config: groupId === null ? {} : { group_id: groupId },
+                        });
+                        // Fetched on CHOOSING, never on rendering: resolving a
+                        // rule costs exactly what using it costs, so a composer
+                        // that previewed every group in the list would fan out
+                        // across the whole tenant just to draw a dropdown.
+                        if (groupId !== null) void loadPreview(groupId);
+                      }}
+                      unavailableReason={groupsUnavailableReason}
+                      incompleteReason={groupsIncompleteReason}
+                      previewStatus={groupPreview?.status ?? 'idle'}
+                      preview={groupPreview?.preview ?? null}
+                      previewError={groupPreview?.error ?? null}
+                      onRetryPreview={
+                        selectedGroupId === null
+                          ? undefined
+                          : () => void loadPreview(selectedGroupId)
+                      }
+                      placeholder={t('routing.compose.step.groupPlaceholder', 'Choose a user group')}
+                      emptyLabel={t(
+                        'routing.compose.step.noGroups',
+                        'No user groups have been defined here yet. An administrator can define one under User Groups, and a step can then name it.'
+                      )}
+                      previewLoadingLabel={t(
+                        'routing.compose.step.groupPreviewLoading',
+                        'Working out who this group reaches…'
+                      )}
+                      previewCountLabel={(total) =>
+                        t('routing.compose.step.groupPreviewCount', 'Reaches {count} people right now.', {
+                          count: total,
+                        })
+                      }
+                      previewEmptyLabel={t(
+                        'routing.compose.step.groupPreviewEmpty',
+                        'This group resolves to nobody right now. A step naming it would reach no one.'
+                      )}
+                      previewSampleLabel={(shown, total) =>
+                        t(
+                          'routing.compose.step.groupPreviewSample',
+                          'Showing {shown} of the {total} — a sample, not the whole set:',
+                          { shown, total }
+                        )
+                      }
+                      previewAllLabel={t('routing.compose.step.groupPreviewAll', 'That is everybody:')}
+                      previewDynamicNote={t(
+                        'routing.compose.step.groupDynamic',
+                        'A group is a rule, not a saved list of people. Who it reaches is worked out again every time the document moves, so this is what it means right now — not a set that has been fixed in place.'
+                      )}
+                      unnamedMemberLabel={(profileId) =>
+                        t('routing.compose.step.groupUnnamed', 'Profile #{id}', { id: profileId })
+                      }
+                      previewRetryLabel={t('routing.compose.step.groupRetry', 'Try again')}
+                      unknownGroupLabel={(groupId) =>
+                        t(
+                          'routing.compose.step.groupUnknown',
+                          'This step names user group #{id}, which is not in the list you can see — it may have been deleted, or you may not be able to read it. Choosing another group here would replace it.',
+                          { id: groupId }
+                        )
+                      }
+                    />
+                  </div>
+                </div>
+              )}
+
+              {step.rule_kind === EXPLICIT_KIND && (
+                <div className="mt-2" data-slot="route-composer-explicit-step">
+                  <label className="text-xs text-muted-foreground" htmlFor={`people-${step.key}`}>
+                    {t('routing.compose.step.people', 'People')}
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    {t(
+                      'routing.compose.step.peopleHelp',
+                      'This step means exactly these people and nobody else — it will not pick up somebody who joins later. For a set that keeps up with the organisation, name a user group instead.'
+                    )}
+                  </p>
+                  <div className="mt-1">
+                    <AudiencePeoplePicker
+                      id={`people-${step.key}`}
+                      people={people}
+                      value={configuredProfileIds(step.rule_config)}
+                      onChange={(profileIds) =>
+                        updateStep(step.key, {
+                          rule_config: profileIds.length === 0 ? {} : { profile_ids: profileIds },
+                        })
+                      }
+                      unavailableReason={peopleUnavailableReason}
+                      incompleteReason={peopleIncompleteReason}
+                      searchPlaceholder={t('routing.compose.step.peopleSearch', 'Search people by name')}
+                      emptyLabel={t('routing.compose.step.noPeople', 'There is nobody here to name.')}
+                      nothingSelectedLabel={t(
+                        'routing.compose.step.peopleNothingSelected',
+                        'Nobody chosen yet.'
+                      )}
+                      noMatchesLabel={t('routing.compose.step.peopleNoMatches', 'Nobody matches that.')}
+                      moreMatchesLabel={(shown, total) =>
+                        t(
+                          'routing.compose.step.peopleMoreMatches',
+                          'Showing {shown} of {total} matches — keep typing to narrow it down.',
+                          { shown, total }
+                        )
+                      }
+                      removeLabel={(name) =>
+                        t('routing.compose.step.peopleRemove', 'Remove {name}', { name })
+                      }
+                      unknownPersonLabel={(profileId) =>
+                        t('routing.compose.step.peopleUnknown', 'Profile #{id}', { id: profileId })
+                      }
+                    />
+                  </div>
+                </div>
+              )}
+
+              {!isCoreConfiguredKind(step.rule_kind) && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {/*
+                    A plugin kind whose config this client cannot author. It is
+                    offered anyway — refusing to show it would hide a rule the
+                    install genuinely has — and the engine's own validator is
+                    what says whether an empty config is enough. Its 422 names
+                    the step and quotes the plugin's message.
+                  */}
+                  {t(
+                    'routing.compose.step.pluginConfig',
+                    'This rule is configured by the plugin that provides it. It will be sent with no settings; if it needs some, the server will say which.'
+                  )}
+                </p>
+              )}
+
 
               <div className="mt-2">
                 <label className="text-xs text-muted-foreground" htmlFor={`label-${step.key}`}>
@@ -459,6 +1034,34 @@ export function RouteComposer({
                   className="mt-1 w-full rounded-md border border-border bg-background p-2 text-sm text-foreground"
                 />
               </div>
+
+              {/* WHAT THIS STEP DOES TO THE PEOPLE IT REACHES (#1054/#1064).
+                  A checkbox rather than the canvas's paired switches, because
+                  this path cannot author a decision at all — so there is no
+                  second state to be mutually exclusive WITH, and a pair of
+                  switches would imply a choice one of whose arms is missing. */}
+              <div className="mt-2">
+                <label
+                  className="flex items-start gap-2 text-xs text-muted-foreground"
+                  htmlFor={`delivery-${step.key}`}
+                >
+                  <input
+                    id={`delivery-${step.key}`}
+                    type="checkbox"
+                    checked={step.satisfied_by === 'delivery'}
+                    onChange={(e) =>
+                      updateStep(step.key, { satisfied_by: e.target.checked ? 'delivery' : 'act' })
+                    }
+                    className="mt-0.5"
+                  />
+                  <span>
+                    {t(
+                      'routing.compose.step.delivery',
+                      'Send without asking — everybody this step reaches is told, their item closes immediately, and the route continues.'
+                    )}
+                  </span>
+                </label>
+              </div>
             </li>
           );
         })}
@@ -468,6 +1071,154 @@ export function RouteComposer({
         <IconPlus className="size-4 me-1" />
         {t('routing.compose.addStep', 'Add a step')}
       </Button>
+        </TabsContent>
+
+        <TabsContent value="template" className="space-y-3" data-slot="route-composer-template">
+          {templatesUnavailableReason !== null ? (
+            // The reason, never an empty dropdown (#756). Somebody who may route
+            // a document need not hold `route_templates:read` — migration 120
+            // grants it to that audience, but a deployment can revoke it.
+            <Alert data-slot="route-composer-templates-unavailable">
+              <AlertDescription>{templatesUnavailableReason}</AlertDescription>
+            </Alert>
+          ) : templates.length === 0 ? (
+            <Alert data-slot="route-composer-templates-empty">
+              <AlertDescription>
+                {t(
+                  'routing.compose.template.none',
+                  'No route templates have been designed here yet. Somebody who may design flows can draw one under Route Templates, and it can then be applied to any document.'
+                )}
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <>
+              <div>
+                <label className="text-xs text-muted-foreground" htmlFor="route-template">
+                  {t('routing.compose.template.label', 'Route template')}
+                </label>
+                <Select
+                  value={templateId === null ? undefined : String(templateId)}
+                  onValueChange={(value) => {
+                    const chosen = Number(value);
+                    setTemplateId(chosen);
+                    // Read on CHOOSING, never on rendering: a picker that read
+                    // every design in the list to draw a dropdown would fetch
+                    // forty graphs to show forty names.
+                    void loadTemplate(chosen);
+                  }}
+                >
+                  <SelectTrigger id="route-template" className="mt-1">
+                    <SelectValue
+                      placeholder={t(
+                        'routing.compose.template.placeholder',
+                        'Choose a route template'
+                      )}
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {templates.map((option) => (
+                      <SelectItem key={option.id} value={String(option.id)}>
+                        {t('routing.compose.template.option', '{name} — {count} stages', {
+                          name: option.name,
+                          count: option.step_count,
+                        })}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {/* A SHORT list is not an absent one — see the roles picker. */}
+                {templatesIncompleteReason !== null && (
+                  <p
+                    className="mt-1 text-xs text-muted-foreground"
+                    data-slot="route-composer-templates-incomplete"
+                  >
+                    {templatesIncompleteReason}
+                  </p>
+                )}
+              </div>
+
+              {templateEntry?.status === 'loading' && (
+                <p className="text-xs text-muted-foreground">
+                  {t('routing.compose.template.loading', 'Reading the design…')}
+                </p>
+              )}
+
+              {templateEntry?.status === 'error' && (
+                <Alert variant="destructive" data-slot="route-composer-template-error">
+                  <AlertDescription>{templateEntry.error}</AlertDescription>
+                </Alert>
+              )}
+
+              {templateEntry?.status === 'ready' && templateEntry.graph !== null && (
+                <div
+                  className="rounded-md border border-border p-3"
+                  data-slot="route-composer-template-summary"
+                >
+                  <p className="text-xs text-muted-foreground">
+                    {t(
+                      'routing.compose.template.snapshot',
+                      'The design is copied onto the document as it stands right now. Redrawing it afterwards will not move a circulation already under way — but each stage still names a RULE, so who it reaches is worked out when the document gets there.'
+                    )}
+                  </p>
+                  <ol className="mt-2 space-y-2" data-slot="route-composer-template-stages">
+                    {[...templateEntry.graph.steps]
+                      .sort((a, b) => a.position - b.position)
+                      .map((stage) => {
+                        const graph = templateEntry.graph as RouteTemplateGraph;
+                        const rule = rulesByKind.get(stage.rule_kind);
+                        return (
+                          <li key={stage.position} className="text-sm">
+                            <span className="font-medium text-foreground">
+                              {t('routing.compose.template.stage', 'Stage {position}', {
+                                position: stage.position,
+                              })}
+                            </span>{' '}
+                            <span className="text-muted-foreground">
+                              {/*
+                                The RULE is always shown, never only the author's
+                                label: a stage labelled "Head of department" that
+                                names a role nobody holds looks identical to one
+                                that works, and the rule is the half that says
+                                what will actually happen.
+                              */}
+                              {stage.label !== null && stage.label !== ''
+                                ? `${stage.label} — ${rule?.label ?? stage.rule_kind}`
+                                : (rule?.label ?? stage.rule_kind)}
+                            </span>
+                            {stage.decision && (
+                              <>
+                                <Badge variant="outline" className="ms-2">
+                                  {t('routing.compose.template.gate', 'Decision: {quorum}', {
+                                    quorum: quorumLabel(
+                                      stage.decision_quorum ?? graph.default_quorum
+                                    ),
+                                  })}
+                                </Badge>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {t(
+                                    'routing.compose.template.approvedGoes',
+                                    'Approved → {destination}',
+                                    { destination: destinationLabel(destinationFor(graph, stage, 'approved')) }
+                                  )}
+                                  {' · '}
+                                  {t(
+                                    'routing.compose.template.rejectedGoes',
+                                    'Rejected → {destination}',
+                                    { destination: destinationLabel(destinationFor(graph, stage, 'rejected')) }
+                                  )}
+                                </p>
+                              </>
+                            )}
+                          </li>
+                        );
+                      })}
+                  </ol>
+                </div>
+              )}
+            </>
+          )}
+        </TabsContent>
+      </Tabs>
 
       {refusal !== null && (
         <Alert variant="destructive" data-slot="route-composer-refusal">

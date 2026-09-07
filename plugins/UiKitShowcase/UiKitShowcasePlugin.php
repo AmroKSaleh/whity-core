@@ -1190,12 +1190,38 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                                     [
                                         'type' => 'card',
                                         'title' => 'Editable — the caller may write this record',
-                                        'description' => 'Rendered only when the host says PUT would be admitted.',
+                                        'description' => 'Rendered only when the host says PUT would be admitted, '
+                                            . 'and it submits that same PUT.',
                                         'children' => [
+                                            // THE FORM SUBMITS THE REQUEST THE GATE
+                                            // ASKED ABOUT. Same verb, same templated
+                                            // path, same `{demo-record-pick}` token —
+                                            // so "may I write this record?" and "write
+                                            // this record" cannot be about different
+                                            // resources, and the permission the pin
+                                            // compares (`uikit:manage`) is read off the
+                                            // one route rather than restated twice.
+                                            //
+                                            // This declaration is also the reference
+                                            // plugin's coverage of the templated write
+                                            // path. It used to submit to the static
+                                            // echo route, and while it did, the loader's
+                                            // ownership walk had nothing templated to
+                                            // check on the WRITE side — so the walk
+                                            // compared `submit.endpoint` literally
+                                            // against a POST/PUT-only map for a long
+                                            // time and nothing noticed, because the
+                                            // showcase never asked it the question.
+                                            // A record page whose editor cannot save
+                                            // the record it is editing is the state
+                                            // that was being demonstrated.
                                             [
                                                 'type' => 'form',
-                                                'submit' => ['method' => 'POST', 'endpoint' => '/api/uikit/demo/echo'],
-                                                'requiredPermission' => 'uikit:view',
+                                                'submit' => [
+                                                    'method' => 'PUT',
+                                                    'endpoint' => '/api/uikit/demo/rows/{demo-record-pick}',
+                                                ],
+                                                'requiredPermission' => 'uikit:manage',
                                                 'children' => [
                                                     [
                                                         'type' => 'textInput',
@@ -1203,7 +1229,11 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                                                         'label' => 'Role',
                                                         'defaultFrom' => 'demo-record.role',
                                                     ],
-                                                    ['type' => 'submitButton', 'label' => 'Save'],
+                                                    [
+                                                        'type' => 'submitButton',
+                                                        'label' => 'Save',
+                                                        'requiredPermission' => 'uikit:manage',
+                                                    ],
                                                 ],
                                             ],
                                         ],
@@ -1320,7 +1350,18 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                     . "            'id'    => 'demo-record-writable',\n"
                     . "            'check' => ['method' => 'PUT', 'endpoint' => '/api/uikit/demo/rows/{demo-record-pick}'],\n"
                     . "            // The two renderings, declared TOGETHER so they cannot drift.\n"
-                    . "            'children'  => [/* the form */],\n"
+                    . "            // The editable one SUBMITS THE REQUEST THE GATE ASKED ABOUT:\n"
+                    . "            // same verb, same templated path, same token. A submit\n"
+                    . "            // endpoint is ownership-checked with route parameters\n"
+                    . "            // normalized, so this matches the plugin's own registered\n"
+                    . "            // PUT /api/uikit/demo/rows/{name} and the permission pin\n"
+                    . "            // reads 'uikit:manage' off that one route.\n"
+                    . "            'children'  => [\n"
+                    . "                ['type' => 'form',\n"
+                    . "                 'submit' => ['method' => 'PUT',\n"
+                    . "                              'endpoint' => '/api/uikit/demo/rows/{demo-record-pick}'],\n"
+                    . "                 'requiredPermission' => 'uikit:manage',\n"
+                    . "                 'children' => [/* inputs, then a submitButton */]]],\n"
                     . "            'otherwise' => [/* a <dl> and the reason */]],\n"
                     . "        // Every block carries the facet, so one gate decides many things.\n"
                     . "        ['type' => 'badge', 'variant' => 'warning', 'label' => 'Read-only for you',\n"
@@ -2028,6 +2069,52 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                                         ['type' => 'numberInput', 'name' => 'qty', 'label' => 'Quantity', 'min' => 0],
                                     ],
                                 ],
+                                // WC-532 item 3: a discriminated union. The
+                                // select below is the discriminator; only the
+                                // matching case renders, and only its inputs
+                                // reach the payload — the other branch's
+                                // fields are ABSENT, not merely hidden.
+                                //
+                                // Both cases deliberately declare a field
+                                // named `value`. That is the shape a
+                                // discriminated union has on the wire
+                                // ({kind:'number', value: 5} or
+                                // {kind:'text', value: 'x'}), and it is legal
+                                // precisely because the cases are mutually
+                                // exclusive — see the name-scoping note in
+                                // BlockValidator.
+                                [
+                                    'type' => 'select',
+                                    'name' => 'answerKind',
+                                    'label' => 'Answer kind',
+                                    'options' => [
+                                        ['value' => 'number', 'label' => 'Numeric'],
+                                        ['value' => 'text', 'label' => 'Free text'],
+                                    ],
+                                ],
+                                [
+                                    'type' => 'variant',
+                                    'discriminator' => 'answerKind',
+                                    'children' => [
+                                        [
+                                            'type' => 'variantCase',
+                                            'when' => 'number',
+                                            'label' => 'Numeric answer',
+                                            'children' => [
+                                                ['type' => 'numberInput', 'name' => 'value', 'label' => 'Expected value'],
+                                                ['type' => 'numberInput', 'name' => 'tolerance', 'label' => 'Tolerance'],
+                                            ],
+                                        ],
+                                        [
+                                            'type' => 'variantCase',
+                                            'when' => 'text',
+                                            'label' => 'Free-text answer',
+                                            'children' => [
+                                                ['type' => 'textInput', 'name' => 'value', 'label' => 'Expected text'],
+                                            ],
+                                        ],
+                                    ],
+                                ],
                                 [
                                     'type' => 'submitButton',
                                     'label' => 'Submit',
@@ -2324,6 +2411,18 @@ final class UiKitShowcasePlugin implements PluginInterface, PluginRequirementsIn
                             'method' => 'POST',
                             'endpoint' => '/api/uikit/demo/tasks/{id}/reject',
                             'confirm' => 'Reject this request? The requester is notified.',
+                            // WC-532 item 5: the review-queue shape. `approve`
+                            // above needs no reason; sending one back does, and
+                            // `confirm` alone could only ask yes/no. The text
+                            // is posted as {"comment": "..."} and the plugin's
+                            // handler is the authority on it being present —
+                            // this only makes the requirement visible.
+                            'prompt' => [
+                                'field' => 'comment',
+                                'label' => 'Reason for rejection',
+                                'required' => true,
+                                'placeholder' => 'Tell the requester what to change',
+                            ],
                             'variant' => 'destructive',
                         ],
                     ],

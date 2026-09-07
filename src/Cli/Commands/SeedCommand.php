@@ -14,9 +14,15 @@ use Whity\Core\Document\DocumentIssuer;
 use Whity\Core\Document\DocumentRepository;
 use Whity\Core\Document\DocumentStarterSeeder;
 use Whity\Core\Document\DocumentTemplateRepository;
+use Whity\Core\Document\Qr\DocumentQrScanRepository;
+use Whity\Core\Document\Qr\DocumentQrService;
+use Whity\Core\Document\Qr\DocumentQrTokenRepository;
+use Whity\Core\Document\RouteTemplate\RouteTemplateGraph;
+use Whity\Core\Document\RouteTemplate\RouteTemplateRepository;
 use Whity\Core\Document\Routing\DocumentRouter;
 use Whity\Core\Document\Routing\RoleBelowActorRuleResolver;
 use Whity\Core\Document\Routing\RoleRuleResolver;
+use Whity\Core\Document\Routing\RouteEdgeRepository;
 use Whity\Core\Document\Routing\RouteEventRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\Document\Routing\RouteRepository;
@@ -50,8 +56,9 @@ use Whity\Storage\StorageDriverFactory;
  *
  * THE DOCUMENT DEMO HAS A GATE OF ITS OWN: --with-document-demo
  * ------------------------------------------------------------
- * {@see DocumentDemoSeeder} seeds an invented faculty, eight demo logins and six
- * routed documents so the document system's screens can be looked at instead of
+ * {@see DocumentDemoSeeder} seeds an invented faculty, eight demo logins, a set
+ * of route designs and a folder of routed documents — one per state the screens
+ * distinguish between — so the document system can be looked at instead of
  * guessed at. It is OFF by default in EVERY environment, development included;
  * only `--with-document-demo` turns it on.
  *
@@ -106,7 +113,7 @@ use Whity\Storage\StorageDriverFactory;
  *   php public/index.php seed --with-document-demo  - …including the document demo dataset
  *   php bin/whity-cli seed                          - Same, via the CLI tool
  */
-class SeedCommand
+class SeedCommand implements CommandHelp, CliCommand
 {
     /**
      * The flag that turns the document demo dataset on.
@@ -116,10 +123,44 @@ class SeedCommand
      */
     public const DOCUMENT_DEMO_FLAG = '--with-document-demo';
 
+    /** The flag that forces the demo accounts on outside development. */
+    public const FIXTURES_FLAG = '--with-fixtures';
+
+    /**
+     * This is the command the defect was found on: `seed --help` seeded.
+     *
+     * Writing the help is the smaller half of the fix — the runner now refuses
+     * to execute ANY command when help is asked for — but this is the one whose
+     * flags somebody was trying to check when it wrote to their database.
+     */
+    public function printHelp(string $commandName): bool
+    {
+        echo "Seed the database with the default tenant, roles and bootstrap administrator.\n\n";
+        echo "Usage:\n";
+        echo "  whity-cli seed [options]\n\n";
+        echo "Options:\n";
+        echo "  " . self::FIXTURES_FLAG . "        Also seed the demo logins (admin@/user@/superuser@example.com).\n";
+        echo "                          Seeded automatically when APP_ENV=development; this forces\n";
+        echo "                          them on anywhere else.\n";
+        echo "  " . self::DOCUMENT_DEMO_FLAG . "  Also seed the document demo dataset (templates, blocks and\n";
+        echo "                          rendered documents). Off by default everywhere, including\n";
+        echo "                          development: it writes real bytes through a storage driver.\n";
+        echo "  --help, -h              Show this help and do nothing else.\n\n";
+        echo "The base seed is idempotent: running it twice does not duplicate anything.\n";
+
+        return true;
+    }
+
+    /** @return list<string> */
+    public function knownFlags(): ?array
+    {
+        return [self::FIXTURES_FLAG, self::DOCUMENT_DEMO_FLAG, '--help', '-h'];
+    }
+
     public function execute(array $argv): int
     {
         try {
-            $withFixtures = in_array('--with-fixtures', $argv, true) ? true : null;
+            $withFixtures = in_array(self::FIXTURES_FLAG, $argv, true) ? true : null;
             $withDocumentDemo = self::wantsDocumentDemo($argv);
 
             $db = Database::connect();
@@ -159,7 +200,8 @@ class SeedCommand
                 }
             } else {
                 echo "  - Document demo data SKIPPED: pass " . self::DOCUMENT_DEMO_FLAG . " for an\n";
-                echo "    invented faculty, its people and six routed documents. Off by default in\n";
+                echo "    invented faculty, its people, three route designs and a routed document\n";
+                echo "    per state the screens distinguish between. Off by default in\n";
                 echo "    EVERY environment, development included — nothing depends on it, so it is\n";
                 echo "    seeded only because somebody wants something to click through.\n";
             }
@@ -251,6 +293,12 @@ class SeedCommand
             new GroupRuleResolver($groupResolver)
         );
 
+        // ONE token repository, handed to both the service that writes through it
+        // and the seeder that makes one read the service does not expose. Two
+        // instances would work identically and would be two things to keep in
+        // step for no reason.
+        $qrTokens = new DocumentQrTokenRepository($pdo);
+
         $seeder = new DocumentDemoSeeder(
             $pdo,
             // The identity seam, not an INSERT of our own: see
@@ -273,6 +321,7 @@ class SeedCommand
                 new RouteStepRepository($pdo),
                 new RouteEventRepository($pdo),
                 new RouteRecipientRepository($pdo),
+                new RouteEdgeRepository($pdo),
                 $rules,
                 $settings,
                 // No HookManager, deliberately. The router's only use for one is
@@ -285,7 +334,31 @@ class SeedCommand
                 // is the system of record and is written either way.
                 null
             ),
-            new DocumentCollectionRepository($pdo)
+            new DocumentCollectionRepository($pdo),
+            // #1056: route DESIGNS, and the validator the editor itself runs.
+            // The graph goes in through `RouteTemplateGraph` rather than
+            // straight into the repository so a seeded design is by construction
+            // one `PUT /graph` would have accepted — a demo whose whole point is
+            // that somebody opens the canvas on it must not contain a canvas the
+            // canvas cannot save.
+            new RouteTemplateRepository($pdo),
+            new RouteTemplateGraph($rules),
+            // Already built above for the router's quorum ladder; passed on
+            // rather than rebuilt, so the seeder cannot read a different
+            // settings chain from the engine it is driving.
+            $settings,
+            // #1036: the verification code. The public base URL is APP_URL, the
+            // same value `public/index.php` hands this service — read the same
+            // way, and EMPTY is a real state that the service answers by
+            // refusing to mint rather than by encoding a relative URL into a
+            // code nothing can follow.
+            new DocumentQrService(
+                $pdo,
+                $qrTokens,
+                new DocumentQrScanRepository($pdo),
+                rtrim((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''), '/')
+            ),
+            $qrTokens
         );
 
         return $seeder->seedForTenant((int) $tenant['id'], (string) $tenant['name']);

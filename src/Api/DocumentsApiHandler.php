@@ -16,11 +16,17 @@ use Whity\Core\Document\DocumentRepository;
 use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\DocumentVisibilityPolicy;
 use Whity\Core\Document\Organizer\CoreDocumentViews;
+use Whity\Core\Document\Organizer\DocumentOrder;
+use Whity\Core\Document\Organizer\DocumentSortField;
 use Whity\Core\Document\Organizer\DocumentSubstrateRegistry;
 use Whity\Core\Document\Organizer\DocumentViewContext;
 use Whity\Core\Document\Organizer\DocumentViewPresenter;
 use Whity\Core\Document\Organizer\DocumentViewRegistry;
+use Whity\Core\Document\Qr\DocumentQrPolicy;
+use Whity\Core\Document\Qr\DocumentQrService;
+use Whity\Core\Document\Qr\DocumentQrStamp;
 use Whity\Core\Document\Render\DocumentRenderer;
+use Whity\Core\Document\Render\VariableData;
 use Whity\Core\Document\Routing\RouteEventRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\Ou\OuReachResolver;
@@ -45,6 +51,7 @@ use Whity\Storage\StorageException;
  * Issued documents (#947 item 1) and the organizer that browses them
  * (#947 item 5, via #978):
  *
+ *   POST /api/documents                                    (documents:render)
  *   GET  /api/documents                                    (documents:read)
  *   GET  /api/documents/views                              (documents:read)
  *   GET  /api/documents/{id}                               (documents:read)
@@ -87,6 +94,47 @@ use Whity\Storage\StorageException;
  * that promised immutability with no way to supersede anything would never
  * have the promise tested.
  *
+ * CREATING ONE (#947 item 1, the half that was missing)
+ * ---------------------------------------------------
+ * Until now nothing in this API could bring a document into existence. The list
+ * was a list, the re-render corrected something that already existed, and the
+ * only create path in the whole subsystem was `POST
+ * /api/document-templates/{id}/render` with `persist: true` — a document as a
+ * SIDE EFFECT of rendering a template, on the template's own resource, and
+ * unreachable on a default install because `documents.render_enabled` is false.
+ * Every document anybody had ever seen came from the demo seeder writing rows.
+ *
+ * {@see create()} is the front door: name a template, supply values for its
+ * placeholders, get a document. Four decisions in it are worth stating here
+ * because each had a plausible alternative:
+ *
+ *  1. IT IS GATED ON `documents:render`, and no new slug was minted. Migration
+ *     113 already made this exact argument when it chose who may ROUTE a
+ *     document: *"`documents:render` is what gates `persist: true` on the render
+ *     routes, so a role holding it is precisely a role that can bring a document
+ *     into existence"*. That sentence is either true, in which case this route
+ *     belongs behind the same slug, or it was wrong then. A `documents:create`
+ *     would be a second answer to one question — and, on every existing
+ *     install, a slug NOBODY HOLDS, which is a lockout wearing the costume of a
+ *     permission check.
+ *
+ *  2. THE RECORD IS THE DELIVERABLE; THE ARTIFACT IS OPPORTUNISTIC. Rendering is
+ *     attempted when the instance can do it and skipped when it cannot, and
+ *     either way the document exists. See {@see create()} for why the opposite
+ *     (refuse to create anything without bytes) would make this route dead on
+ *     every fresh install.
+ *
+ *  3. THE VALUES ARE PERSISTED, on the row, by migration 118. They are the only
+ *     content an unrendered document has, and without them a correction months
+ *     later would silently reissue the document with the template's SAMPLE text
+ *     where the real reference number was.
+ *
+ *  4. THE TEMPLATE'S OWN VISIBILITY IS RE-CHECKED, through the same
+ *     {@see DocumentAccessPolicy} + {@see OuReachResolver} pair the designer's
+ *     list and the re-render already use. Creating from a template you cannot
+ *     SEE would make this route a way to read a gated template's contents by
+ *     rendering it.
+ *
  * NO 403s ON A MISS
  * -----------------
  * A document the caller may not see is reported as missing, not as forbidden.
@@ -98,6 +146,20 @@ use Whity\Storage\StorageException;
  */
 final class DocumentsApiHandler
 {
+    /**
+     * How many unrecognised field names a 422 will list before it stops.
+     *
+     * A fixed ceiling rather than a setting, deliberately: it is not a limit on
+     * what a caller may SEND (the render ceilings in
+     * {@see \Whity\Core\Settings\SettingsRegistry} are, and those are
+     * per-tenant overridable), it is how long one error message is allowed to
+     * get. Nothing about a tenant makes a different answer right, and an
+     * operator asked to tune it would have no basis to choose. Ten is past the
+     * point where a reader is still reading and well short of a response bigger
+     * than the request.
+     */
+    private const UNKNOWN_FIELDS_REPORTED = 10;
+
     public function __construct(
         private readonly DocumentRepository $documents,
         private readonly DocumentArtifactRepository $artifacts,
@@ -146,7 +208,373 @@ final class DocumentsApiHandler
         // the host cannot tell.
         private readonly ?RouteEventRepository $routeEvents = null,
         private readonly ?RouteRecipientRepository $routeRecipients = null,
+        // ── #1036: the document's QR verification code ───────────────────────
+        //
+        // OPTIONAL, following the three above and for the same reason: a host
+        // that does not wire it has no QR at all — no code minted, no code
+        // placed, no `qr` region on the record page and no QR routes registered
+        // — which is a TOTAL and therefore visible absence rather than a partial
+        // and silent one. The failure #1036 forbids is the switch being ON and
+        // the document quietly carrying nothing; that cannot happen here,
+        // because a host without this collaborator has no switch to turn on in
+        // its documents UI either.
+        private readonly ?DocumentQrService $qr = null,
     ) {
+    }
+
+    /**
+     * POST /api/documents — raise a document from a template.
+     *
+     * WHAT IT WRITES, AND IN WHICH ORDER
+     * ----------------------------------
+     *  1. The record, committed. Template pointer + `template_name` snapshot,
+     *     title, origin unit, the values supplied. This is the deliverable.
+     *  2. THEN, only if this instance can render and the caller did not opt out,
+     *     the PDF, appended as an artifact.
+     *
+     * Step 2 failing does not undo step 1, and that is the decision this route
+     * turns on. `documents.render_enabled` DEFAULTS TO FALSE: the render tier is
+     * a separate headless-Chromium container that a sovereign deployment may
+     * never run. If a document could not exist without one, this route would be
+     * a 503 on every fresh install and the front door would still be missing.
+     *
+     * An unrendered document is not a broken one. It has an id, a title, the
+     * values it was raised with, an origin unit, and a `content_url` of null —
+     * which the read path has always handled. Everything the routing engine
+     * needs is `documents.id`, so it can be circulated, acknowledged and
+     * audited with no PDF in sight, and `POST /api/documents/{id}/render` mints
+     * the artifact from the stored values whenever the tier is switched on.
+     *
+     * The response therefore reports the render OUTCOME as a sibling of `data`
+     * — the same shape the routing create uses for `resolved`/`delivered` —
+     * rather than encoding it in the status code. 201 means "the document
+     * exists"; `render.stored` means "and here is whether it has bytes yet".
+     * Folding those into one code would make a working create on a
+     * render-less instance indistinguishable from a failure.
+     *
+     * THE ONE CASE THAT IS AN ERROR RATHER THAN AN OUTCOME is a caller who
+     * EXPLICITLY asked to render (`"render": true`) on an instance that cannot.
+     * Omitting the key means "render if you can", which is what a client that
+     * does not care should send; passing `true` is a claim about the result, and
+     * answering 201 to it would be a lie the client has no way to detect. That
+     * is a 503, before anything is written.
+     *
+     * A CREATOR IN NO UNIT is not an error either. `origin_ou_id` is nullable,
+     * the demo fixture deliberately includes a registry officer who belongs to
+     * no unit, and the organizer already renders OU-anchored folders DISABLED
+     * WITH A REASON rather than hiding them (#951). So the document is raised
+     * with a null origin, it lists and routes normally, and the only thing it is
+     * absent from is the unit-anchored folders — which is true of it, and
+     * which those folders already say out loud.
+     */
+    public function create(Request $request): Response
+    {
+        $ctx = $this->context($request);
+        if ($ctx instanceof Response) {
+            return $ctx;
+        }
+        [$tenantId, $callerId] = $ctx;
+
+        $body = JsonBody::parsed($request);
+
+        $templateId = $body['document_template_id'] ?? null;
+        // A string id is accepted: JSON from a form-driven client routinely
+        // carries numbers as strings, and refusing it here would be a 422 whose
+        // cause is invisible in the payload the developer is looking at. A
+        // non-numeric value is still refused rather than coerced to 0, which
+        // would report "template not found" for a request that named no
+        // template at all.
+        if (is_string($templateId) && ctype_digit($templateId)) {
+            $templateId = (int) $templateId;
+        }
+        if (!is_int($templateId) || $templateId <= 0) {
+            return Response::error("'document_template_id' must be the id of a template to raise this document from", 422);
+        }
+
+        // The SAME visibility pair the designer's own list applies
+        // (DocumentAccessPolicy over the caller's scoped permissions and their
+        // OU reach) — not a re-implementation, and not the document
+        // visibility policy, which answers a different question about a
+        // different row. 404 rather than 403 on a miss, for the reason this
+        // class's docblock gives: a 403 would confirm the template exists.
+        $template = $this->templates->findById($templateId, $tenantId);
+        if ($template === null
+            || !$this->templatePolicy->canView(
+                $template,
+                $callerId,
+                $this->permissionResolver($callerId, $tenantId),
+                $this->ouReach->reachFor($tenantId, $callerId),
+            )) {
+            return Response::error('Template not found', 404);
+        }
+
+        $templateData = is_array($template['data']) ? $template['data'] : [];
+
+        // Validated by the SAME normaliser the render path uses, so a document
+        // can never store values the renderer would later refuse. Note the
+        // argument is the RAW body value including its absence: null means
+        // "fall back to the template's placeholder samples", which is what a
+        // client that offered no form should get, and `[]` means the same.
+        $rows = VariableData::normalizeRows($body['dataRows'] ?? null, $templateData);
+        if ($rows === null) {
+            return Response::error('dataRows must be a list of flat string maps', 422);
+        }
+
+        $unknown = $this->unknownPlaceholders($rows, $templateData);
+        if ($unknown !== []) {
+            // Named, because the alternative is a developer comparing two JSON
+            // blobs by eye. The keys came from the request, so echoing them
+            // discloses nothing the caller did not send.
+            return Response::error(
+                'These fields are not placeholders on this template: ' . implode(', ', $unknown),
+                422
+            );
+        }
+
+        $title = $this->resolveTitle($body, $template);
+
+        $effective = $this->settings->effective($tenantId);
+        $renderable = ($effective[SettingsRegistry::DOCUMENTS_RENDER_ENABLED] ?? 'false') === 'true';
+        // The artifact half only. A record with no artifact writes nothing to
+        // the tenant's storage, and this setting exists to cap storage that
+        // grows without bound — see SettingsRegistry, which describes it as
+        // asking "whether the output may be written". Reading it as a gate on
+        // the RECORD would make an operator who capped storage unable to raise
+        // a document at all, which is not what they turned off.
+        $persistable = ($effective[SettingsRegistry::DOCUMENTS_PERSIST_ENABLED] ?? 'true') === 'true';
+
+        // Tri-state, and the absent case is the common one. `true` = "I require
+        // an artifact"; `false` = "record only, do not render even if you can";
+        // absent = "render if this instance can".
+        $requested = $body['render'] ?? null;
+        if ($requested === true && !$renderable) {
+            return Response::error('Server-side document rendering is disabled on this instance', 503);
+        }
+        if ($requested === true && !$persistable) {
+            return Response::error('Persisting rendered documents is disabled on this instance', 503);
+        }
+
+        try {
+            $document = $this->issuer->raise($tenantId, $callerId, $template, $title, $rows);
+        } catch (\Throwable $e) {
+            error_log('[DocumentsApiHandler] raising the document failed: ' . $e->getMessage());
+            return Response::error('The document could not be created', 503);
+        }
+
+        // MINTED BEFORE THE RENDER, which is the whole reason this route can
+        // carry a code at all: `raise()` commits the record first, so the
+        // document has an id to bind a token to while there is still a render to
+        // put it on. (The older persisted-preview path,
+        // `POST /api/document-templates/{id}/render`, renders BEFORE the record
+        // exists, so it cannot — see this handler's `qrStamp()`.)
+        //
+        // A mint failure must not lose the document: the record is already
+        // committed and is the deliverable. So it degrades to "no code on this
+        // artifact", which the record page reports and an operator can fix in
+        // one click, rather than to a 503 that discards a document somebody
+        // just filled in.
+        $stamp = $this->qrStamp($tenantId, $callerId, (int) $document['id'], $templateData, $effective);
+
+        $render = $this->attemptRender(
+            $tenantId,
+            $callerId,
+            $document,
+            $templateData,
+            $rows,
+            $body['sheet'] ?? null,
+            $requested,
+            $renderable,
+            $persistable,
+            $stamp,
+        );
+
+        return Response::json([
+            'data' => DocumentPresenter::document(
+                $document,
+                $this->artifacts->listForDocument((int) $document['id'], $tenantId)
+            ),
+            'render' => $render,
+        ], 201);
+    }
+
+    /**
+     * Render the freshly-raised document and append the artifact, reporting what
+     * happened rather than throwing.
+     *
+     * EVERY RETURN IS A 201. This method runs AFTER the record is committed, so
+     * there is no failure left that should take the document away — see
+     * {@see create()}. What it owes the caller instead is an honest, machine
+     * readable account, which is why `reason` is a CLOSED VOCABULARY rather than
+     * a sentence: a client deciding whether to offer a "render now" button needs
+     * to tell `disabled` (never going to work here, hide the button) from
+     * `unavailable` (transient, offer the retry) from `declined` (the caller
+     * asked for this). A prose message cannot be branched on, and a null reason
+     * beside `stored: false` would be the shrug this route exists to avoid.
+     *
+     * @param array<string, mixed>        $document
+     * @param array<string, mixed>        $templateData
+     * @param list<array<string, string>> $rows
+     * @return array{attempted: bool, stored: bool, reason: string|null}
+     */
+    private function attemptRender(
+        int $tenantId,
+        int $callerId,
+        array $document,
+        array $templateData,
+        array $rows,
+        mixed $sheet,
+        mixed $requested,
+        bool $renderable,
+        bool $persistable,
+        ?DocumentQrStamp $qr = null,
+    ): array {
+        if ($requested === false) {
+            return ['attempted' => false, 'stored' => false, 'reason' => 'declined'];
+        }
+        if (!$renderable) {
+            return ['attempted' => false, 'stored' => false, 'reason' => 'disabled'];
+        }
+        if (!$persistable) {
+            return ['attempted' => false, 'stored' => false, 'reason' => 'persist_disabled'];
+        }
+
+        try {
+            $pdf = $this->renderer->render($tenantId, $templateData, $rows, $sheet, $qr);
+        } catch (DocumentRenderRejectedException $e) {
+            // Reachable only through `sheet`: `dataRows` was normalised and the
+            // ceilings were not, so an oversized batch or template lands here.
+            // The document keeps its values and can be rendered once the
+            // operator raises the ceiling, which is why this is not a 422 that
+            // discards the record.
+            error_log('[DocumentsApiHandler] the new document was refused a render: ' . $e->clientMessage);
+            return ['attempted' => true, 'stored' => false, 'reason' => 'rejected'];
+        } catch (\Throwable $e) {
+            error_log('[DocumentsApiHandler] rendering the new document failed: ' . $e->getMessage());
+            return ['attempted' => true, 'stored' => false, 'reason' => 'unavailable'];
+        }
+
+        try {
+            $this->issuer->appendArtifact($tenantId, $callerId, $document, $pdf);
+        } catch (\Throwable $e) {
+            error_log('[DocumentsApiHandler] storing the new document artifact failed: ' . $e->getMessage());
+            return ['attempted' => true, 'stored' => false, 'reason' => 'storage_unavailable'];
+        }
+
+        return ['attempted' => true, 'stored' => true, 'reason' => null];
+    }
+
+    /**
+     * The verification code this document should be rendered with, or null.
+     *
+     * THE THREE SCOPES OF #1036 MEET HERE, and this is the only place they do:
+     *
+     *   1. the tenant switch + 2. the template flag →
+     *      {@see DocumentQrPolicy::enabled()}
+     *   3. where it sits on the page → the renderer, via
+     *      {@see \Whity\Core\Document\Qr\QrTemplateComposer}, which supplies a
+     *      default placement when nobody authored one
+     *
+     * Returning null is not "skip the code". It is the instruction the renderer
+     * needs to REMOVE an authored one, so a tenant who switched the feature off
+     * does not get an empty dashed box in the corner of every document issued
+     * from a template that still has the element on it.
+     *
+     * A HOST WITH NO QR SERVICE returns null too, and that is a total absence
+     * rather than a silent partial one — see the constructor.
+     *
+     * MINT FAILURES DEGRADE, THEY DO NOT THROW. Both callers have already
+     * committed the document (create) or are correcting one that exists
+     * (re-render), and neither should lose that work because a token insert
+     * lost a race or the instance has no public URL configured. The document is
+     * simply rendered without a code, the record page says so, and the operator
+     * can mint one deliberately.
+     *
+     * @param array<string, mixed>  $templateData
+     * @param array<string, string> $effective
+     */
+    private function qrStamp(
+        int $tenantId,
+        int $callerId,
+        int $documentId,
+        array $templateData,
+        array $effective,
+    ): ?DocumentQrStamp {
+        if ($this->qr === null || !DocumentQrPolicy::enabled($effective, $templateData)) {
+            return null;
+        }
+
+        try {
+            $token = $this->qr->ensure($tenantId, $documentId, $callerId);
+        } catch (\Throwable $e) {
+            error_log('[DocumentsApiHandler] minting the verification code failed: ' . $e->getMessage());
+
+            return null;
+        }
+
+        if ($token === null) {
+            return null;
+        }
+
+        return DocumentQrStamp::forToken($this->qr, (string) $token['token']);
+    }
+
+    /**
+     * The keys a request supplied that the template declares no placeholder for,
+     * in the order they were sent, without duplicates, and CAPPED.
+     *
+     * HASH LOOKUPS, NOT `in_array`, AND A CEILING ON WHAT IS ECHOED. Both are
+     * about the same request: a large batch (a label sheet can legitimately be
+     * hundreds of rows) with a bad key on every row. Two linear scans per key
+     * makes that quadratic, and naming every offender makes the error body
+     * larger than the request that caused it. Neither is hypothetical for a
+     * route whose input is a caller-supplied map of arbitrary keys.
+     *
+     * The names ARE echoed rather than replaced by a count, up to the cap: the
+     * whole value of this refusal is that it says `refrence` instead of leaving
+     * a developer to compare two JSON blobs by eye. They came from the request,
+     * so echoing them discloses nothing the caller did not send.
+     *
+     * @param list<array<string, string>> $rows
+     * @param array<string, mixed>        $templateData
+     * @return list<string>
+     */
+    private function unknownPlaceholders(array $rows, array $templateData): array
+    {
+        $declared = array_fill_keys(VariableData::keysOf($templateData), true);
+        $unknown = [];
+        foreach ($rows as $row) {
+            foreach ($row as $key => $_value) {
+                if (!isset($declared[$key]) && !isset($unknown[$key])) {
+                    $unknown[$key] = true;
+                    if (count($unknown) >= self::UNKNOWN_FIELDS_REPORTED) {
+                        return array_keys($unknown);
+                    }
+                }
+            }
+        }
+
+        return array_keys($unknown);
+    }
+
+    /**
+     * The document's title: what the caller sent, or the template's name.
+     *
+     * Falling back keeps every record named something, which is what the
+     * organizer lists and what an inbox item is recognised by — the same
+     * fallback {@see DocumentRenderApiHandler} already applies, spelled the same
+     * way so two create paths cannot name the same document differently.
+     *
+     * @param array<string, mixed> $body
+     * @param array<string, mixed> $template
+     */
+    private function resolveTitle(array $body, array $template): string
+    {
+        $title = $body['title'] ?? null;
+        $resolved = is_string($title) && trim($title) !== ''
+            ? trim($title)
+            : (string) $template['name'];
+
+        return mb_substr($resolved, 0, 255);
     }
 
     /**
@@ -188,6 +616,14 @@ final class DocumentsApiHandler
 
         return Response::json([
             'data' => $data,
+            // The sections, in the order the rail should render them. Sent so a
+            // client stops deciding which groups exist and what they are called:
+            // it used to admit two names and silently drop everything else, so a
+            // folder in a third group reached the payload and never the screen.
+            'groups' => array_map(
+                static fn ($group): array => DocumentViewPresenter::group($group),
+                $this->views->groups()
+            ),
             'unavailable_substrates' => array_map(
                 static fn ($substrate): array => DocumentViewPresenter::substrate($substrate),
                 $this->substrates->unavailable()
@@ -270,9 +706,18 @@ final class DocumentsApiHandler
             self::stringParam($query, 'q')
         );
 
+        // Parsed AFTER the view resolves so a bad `sort` on an unanchorable
+        // folder still reports the folder's reason: the caller's first problem
+        // is the one worth telling them about, and 422-then-400 would have them
+        // fix a sort they cannot use yet.
+        $order = self::order($query);
+        if ($order instanceof Response) {
+            return $order;
+        }
+
         $p = PaginationParams::fromPath($request->getPath());
         $total = $this->documents->countForCriteria($tenantId, $criteria);
-        $rows = $this->documents->listForCriteria($tenantId, $criteria, $p->perPage, $p->offset);
+        $rows = $this->documents->listForCriteria($tenantId, $criteria, $p->perPage, $p->offset, $order);
 
         // The artifact list is fetched per document rather than in one join:
         // the join returns a document once per artifact and has to be
@@ -310,6 +755,16 @@ final class DocumentsApiHandler
                 'key' => $view->key,
                 'ou_id' => $viewContext->effectiveOuId(),
                 'collection_id' => $collectionId,
+            ],
+            // The order APPLIED, not the order asked for. `direction` has a
+            // per-field default (A→Z for text, newest-first for a date), so a
+            // client that assumed one would be right half the time and would
+            // draw its arrow the wrong way round the rest. `field: null` is the
+            // recorded order — see DocumentRepository::orderSql() for why that
+            // is not `created_at` under another name.
+            'sort' => [
+                'field' => $order?->field->value,
+                'direction' => $order === null ? 'desc' : $order->direction(),
             ],
         ]);
     }
@@ -460,8 +915,30 @@ final class DocumentsApiHandler
         $body = JsonBody::parsed($request);
         $templateData = is_array($template['data']) ? $template['data'] : [];
 
+        // THE VALUES THE DOCUMENT WAS RAISED WITH, when the request supplies
+        // none. Before migration 118 there was nothing to fall back to and the
+        // renderer used the template's placeholder SAMPLES instead — so
+        // correcting a six-week-old circular from a client that had not kept the
+        // original values reissued it reading `Ref: DEMO-0001`, and the
+        // correction looked like a success. A recorded value now wins over a
+        // sample; a request that names its own `dataRows` still wins over both,
+        // because an explicit correction of the values is exactly what that
+        // field is for.
+        $dataRows = $body['dataRows'] ?? null;
+        if ($dataRows === null) {
+            $dataRows = $document['variable_data'] ?? null;
+        }
+
+        // A CORRECTION CARRIES THE SAME CODE AS THE ORIGINAL. `ensure()` is
+        // idempotent and never rotates, so re-rendering a document does not
+        // retire the paper already in circulation — which it would if the code
+        // were re-minted per artifact, silently voiding every copy the moment
+        // somebody fixed a typo. Rotation is a decision an operator takes
+        // explicitly, through `POST /api/documents/{id}/qr`.
+        $stamp = $this->qrStamp($tenantId, $callerId, (int) $document['id'], $templateData, $effective);
+
         try {
-            $pdf = $this->renderer->render($tenantId, $templateData, $body['dataRows'] ?? null, $body['sheet'] ?? null);
+            $pdf = $this->renderer->render($tenantId, $templateData, $dataRows, $body['sheet'] ?? null, $stamp);
         } catch (DocumentRenderRejectedException $e) {
             // ->clientMessage, never ->getMessage(): see the exception's docblock.
             return Response::error($e->clientMessage, 422);
@@ -567,6 +1044,34 @@ final class DocumentsApiHandler
                 writePermission: null,
                 recordScoped: true,
             ),
+            // #1036. READ is null for the reason the three above are: the
+            // region's dedicated route (`GET /api/documents/{id}/qr`) is
+            // registered on `documents:read` plus DocumentVisibilityPolicy, and
+            // declaring a tighter read here would be a gate with a bypass one
+            // path segment away.
+            //
+            // That also settles who sees the SCAN HISTORY, which is a real
+            // question rather than a fallout: the audience is exactly the
+            // audience for the routing trail, which already names the people who
+            // acted on this document. A scan is a strictly smaller disclosure
+            // than an act, so giving it a narrower audience would create a
+            // second, subtly different visibility rule over the same record —
+            // the shape this subsystem argues against everywhere else — for no
+            // gain. Anonymous scans name nobody at all, because nothing about
+            // them is stored (migration 122).
+            //
+            // WRITE is `documents:render`: rotating or withdrawing a code
+            // changes what every printed copy in the world asserts, which is the
+            // same kind of authority as issuing a corrected version, and it is
+            // held by exactly the people who can already do that.
+            new RecordSectionRequirement(
+                key: 'qr',
+                readPermission: null,
+                writePermission: CorePermissions::DOCUMENTS_RENDER,
+                recordScoped: true,
+                deniedReason: 'You can see this document\'s verification code. Issuing a new one, '
+                    . 'or withdrawing it, is not something your account can do.',
+            ),
         ];
     }
 
@@ -588,7 +1093,53 @@ final class DocumentsApiHandler
         'trail' => 'This document has not been put into circulation, so there is no trail to add to.',
         'recipients' => 'This document is not awaiting you. You are reading it as a record '
             . 'rather than as something to act on.',
+        // The SWITCH branch only. `documentCarriesQr()` says no for three
+        // different reasons and this sentence is true of one of them, so it is
+        // chosen between by {@see self::qrRecordDeniedReason()} rather than read
+        // straight out of this table. Blaming the tenant setting on an instance
+        // with no APP_URL sends an administrator to a settings page where the
+        // switch is already on, with nothing to tell them they are in the wrong
+        // place.
+        'qr' => 'This document does not carry a verification code, and cannot be given one '
+            . 'while QR verification is switched off for this template or this organisation.',
     ];
+
+    /**
+     * Why the `qr` region has nothing to change, told apart by CAUSE.
+     *
+     * The three causes are genuinely different problems with genuinely different
+     * fixes, and only one of them is a setting anybody can reach:
+     *
+     *   - this installation wires no QR service at all — an embedder's build,
+     *     and no grant and no setting anywhere would make a code appear;
+     *   - the instance has no public address, so a code would encode a link that
+     *     leads nowhere — an operator fixes it with APP_URL;
+     *   - the switch is off for this template or this organisation.
+     *
+     * Only consulted when the predicate already said no, so it does not need to
+     * re-derive the switch: reaching the last line IS the switch being off.
+     *
+     * The web client overrides all three with one cause-NEUTRAL sentence and
+     * lets its panel name the cause in the reader's own language, because the
+     * panel holds `configured` and `enabled` and this method's output is prose.
+     * That is not a duplicate: this is what a client without that panel — the
+     * desktop shell, an integrator's own UI — is told, and it was previously
+     * told something false in two cases out of three.
+     */
+    private function qrRecordDeniedReason(): string
+    {
+        if ($this->qr === null) {
+            return 'This installation does not issue verification codes, so no document here '
+                . 'can carry one.';
+        }
+        if (!$this->qr->isConfigured()) {
+            return 'This installation has not been told its own public address, so a verification '
+                . 'code issued here would encode a link that leads nowhere. Nothing about your '
+                . 'account or this document is in the way.';
+        }
+
+        return self::RECORD_DENIED_REASONS['qr'];
+    }
 
     /**
      * The per-region verdicts for this caller and this document, or null when
@@ -642,7 +1193,13 @@ final class DocumentsApiHandler
             'document' => $this->documentIsReissuable($tenantId, $callerId, $document),
             'trail' => $this->documentHasTrail($tenantId, $document),
             'recipients' => $this->documentIsAwaiting($tenantId, $callerId, $document),
+            'qr' => $this->documentCarriesQr($tenantId, $document),
         ];
+
+        // One region's record sentence is chosen rather than looked up — see
+        // qrRecordDeniedReason(). The other three have exactly one cause each.
+        $reasons = self::RECORD_DENIED_REASONS;
+        $reasons['qr'] = $this->qrRecordDeniedReason();
 
         $verdicts = [];
         foreach (self::recordSections() as $requirement) {
@@ -651,7 +1208,7 @@ final class DocumentsApiHandler
                 $callerId,
                 $tenantId,
                 $predicates[$requirement->key] ?? false,
-                self::RECORD_DENIED_REASONS[$requirement->key] ?? null,
+                $reasons[$requirement->key] ?? null,
                 $includeDetail
             );
         }
@@ -756,6 +1313,43 @@ final class DocumentsApiHandler
         }
 
         return false;
+    }
+
+    /**
+     * Whether the `qr` region has anything to show for this document (#1036).
+     *
+     * TRUE in two cases, and the second is the one worth stating: the document
+     * ALREADY has a code, or it is currently eligible for one. The first matters
+     * because a code that was minted while the feature was on must stay visible
+     * — and revocable — after somebody switches it off, which is exactly when an
+     * operator most wants to reach it. Hiding the region on the switch alone
+     * would take the withdraw button away at the moment it is needed.
+     *
+     * Eligibility re-reads the template, because scope 2 lives in the template's
+     * own JSON and a document whose template was deleted
+     * (`document_template_id → SET NULL`) inherits only scope 1.
+     *
+     * @param array<string, mixed> $document
+     */
+    private function documentCarriesQr(int $tenantId, array $document): bool
+    {
+        if ($this->qr === null) {
+            return false;
+        }
+
+        if ($this->qr->active($tenantId, (int) $document['id']) !== null) {
+            return true;
+        }
+
+        if (!$this->qr->isConfigured()) {
+            return false;
+        }
+
+        $templateId = $document['document_template_id'];
+        $template = is_int($templateId) ? $this->templates->findById($templateId, $tenantId) : null;
+        $templateData = is_array($template['data'] ?? null) ? $template['data'] : [];
+
+        return DocumentQrPolicy::enabled($this->settings->effective($tenantId), $templateData);
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────
@@ -949,6 +1543,69 @@ final class DocumentsApiHandler
         $value = trim($query[$name] ?? '');
 
         return $value === '' ? null : $value;
+    }
+
+    /**
+     * The order the caller asked for, null for the recorded default, or a 400.
+     *
+     * WHY AN UNKNOWN `sort` IS REFUSED RATHER THAN IGNORED
+     * ---------------------------------------------------
+     * Ignoring it returns 200 with a page ordered by something else, and the
+     * client draws a sort indicator on a column the rows are not sorted by. The
+     * reader then trusts a claim the response did not make: "these are the
+     * oldest", when they are the most recently recorded. A typo in a hand-built
+     * URL, or a client written against a later build that has a fourth sortable
+     * column, both land there — and neither leaves a trace anybody can find.
+     * So an unknown field is a 400 that NAMES the vocabulary, which is also the
+     * only way a caller can discover it: the openapi spec enumerates it, but an
+     * error a human reads should not require fetching a schema.
+     *
+     * WHY `direction` ALONE IS ALSO A 400
+     * ----------------------------------
+     * `?direction=asc` with no field asks to reverse the default order, and the
+     * default is `id DESC` — a surrogate key this vocabulary deliberately does
+     * not expose ({@see DocumentSortField}). Honouring it would publish `id` as
+     * a sortable column through the back door; ignoring it would silently return
+     * newest-first to somebody who asked for oldest-first.
+     *
+     * @param array<string, string> $query
+     */
+    private static function order(array $query): DocumentOrder|Response|null
+    {
+        $field = self::stringParam($query, 'sort');
+        $direction = self::stringParam($query, 'direction');
+
+        if ($field === null) {
+            if ($direction !== null) {
+                return Response::error(
+                    "direction needs a sort: name one of '"
+                    . implode("', '", array_column(DocumentSortField::cases(), 'value'))
+                    . "'",
+                    400
+                );
+            }
+
+            return null;
+        }
+
+        $parsed = DocumentSortField::tryFrom($field);
+        if ($parsed === null) {
+            return Response::error(
+                "Documents cannot be sorted by '{$field}'. Sortable: '"
+                . implode("', '", array_column(DocumentSortField::cases(), 'value'))
+                . "'",
+                400
+            );
+        }
+
+        if ($direction === null) {
+            return DocumentOrder::forField($parsed);
+        }
+        if ($direction !== 'asc' && $direction !== 'desc') {
+            return Response::error("direction must be 'asc' or 'desc'", 400);
+        }
+
+        return new DocumentOrder($parsed, $direction === 'desc');
     }
 
     /**

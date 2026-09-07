@@ -51,7 +51,9 @@ beforeEach(() => {
     }
     // Any ONE person: the stored record the form is there to edit.
     if (url.startsWith('/api/v1/people/')) {
-      return Promise.resolve(stubResponse({ full_name: 'Ada Lovelace', title: 'Engineer' }));
+      // #981: the `{ data: … }` envelope, which is what core's handlers return
+      // and what the desktop twin has always required.
+      return Promise.resolve(stubResponse({ data: { full_name: 'Ada Lovelace', title: 'Engineer' } }));
     }
     return Promise.resolve(stubResponse({}));
   });
@@ -208,7 +210,7 @@ describe('#949 — a path with no tokens is unaffected', () => {
   } as unknown as Block;
 
   it('fetches the literal path on mount and pre-populates from it', async () => {
-    mockApiClient.mockResolvedValue(stubResponse({ site_name: 'Acme Corp' }));
+    mockApiClient.mockResolvedValue(stubResponse({ data: { site_name: 'Acme Corp' } }));
 
     renderWrapped(<BlockRenderer blocks={[settingsForm]} />);
 
@@ -223,7 +225,7 @@ describe('#949 — a path with no tokens is unaffected', () => {
   });
 
   it('is never treated as unbound — a form with nothing to resolve is bound already', async () => {
-    mockApiClient.mockResolvedValue(stubResponse({ site_name: 'Acme Corp' }));
+    mockApiClient.mockResolvedValue(stubResponse({ data: { site_name: 'Acme Corp' } }));
 
     renderWrapped(<BlockRenderer blocks={[settingsForm]} />);
 

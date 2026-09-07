@@ -20,3 +20,10 @@ parameters:
         # numbered file), not via Composer PSR-4. Point PHPStan at them so the
         # WC-54 real-engine test can reference its migration class for analysis.
         - database/migrations
+        # The CI guards' shared helpers are plain functions in a file the guards
+        # `require`, not autoloaded classes — `whity_core_route_table()` is the
+        # ONE parser of core's route table, and `permissions:unheld` requires it
+        # for the same reason the guards do. Copying it into src/ to satisfy the
+        # analyser would create the second implementation #1020 was spent
+        # removing, so the analyser is told where it lives instead.
+        - scripts/lib

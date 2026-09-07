@@ -35,6 +35,23 @@ trait DocumentRecordTrait
             'is_system'           => self::toBool($row['is_system']),
             'created_by'          => $row['created_by'] !== null ? (int) $row['created_by'] : null,
             'owner_ou_id'         => ($row['owner_ou_id'] ?? null) !== null ? (int) $row['owner_ou_id'] : null,
+            // WHICH shipped starter this row IS, or null for anything a user or
+            // a plugin made (#1013).
+            //
+            // It used to be withheld here, and withholding it made the id of a
+            // starter unreachable through this repository: `starterKeysForTenant()`
+            // hands back keys with no ids, and a row carried no key, so "the
+            // template for starter key X" had no supported answer and the one
+            // consumer that needed it went round the repository with its own
+            // SELECT — a second query surface for a table the tenant-predicate
+            // guard polices, and the repository no longer the single place that
+            // knows how these rows are addressed.
+            //
+            // It is also the only column that can answer "is this row starter X",
+            // which `is_system` cannot: that says "a system row" and nothing more,
+            // so a management surface driving a Starter badge off it can label the
+            // row but can never offer to restore the starter it came from.
+            'starter_key'         => ($row['starter_key'] ?? null) !== null ? (string) $row['starter_key'] : null,
             'created_at'          => (string) $row['created_at'],
             'updated_at'          => (string) $row['updated_at'],
         ];

@@ -36,11 +36,17 @@ final class TenantsApiHandlerRealEngineTest extends TestCase
     protected function setUp(): void
     {
         $this->pdo = self::makeSqliteSchema();
+        // The list endpoint reads `page`/`per_page`/`sort`/`dir`/`q` from $_GET
+        // as well as the path (FrankenPHP strips the query string from the
+        // path at runtime), so a superglobal left behind by another test would
+        // silently re-sort or filter this one's fixtures.
+        $_GET = [];
     }
 
     protected function tearDown(): void
     {
         TenantContext::reset();
+        $_GET = [];
     }
 
     /**
@@ -127,6 +133,325 @@ final class TenantsApiHandlerRealEngineTest extends TestCase
         $this->assertArrayHasKey('createdAt', $tenant);
         $this->assertArrayNotHasKey('created_at', $tenant);
         $this->assertNotNull($tenant['createdAt']);
+    }
+
+    // ============ #1102: the shared list contract (sort + search) ============
+    //
+    // The tenants screen fetched `per_page=100` and sorted and filtered the
+    // result IN THE BROWSER, with its own comment admitting that anything past
+    // the hundredth workspace was simply unreachable. Moving the sort to the
+    // server is what makes the rest of the list reachable, so these tests assert
+    // the ORDER the endpoint returns — string-checking the SQL would prove
+    // nothing about what the engine does with it, least of all across the two
+    // engines this suite runs under.
+
+    /**
+     * Every key the endpoint offers actually reorders the list, in both
+     * directions, and the default is the `created_at DESC` it always used.
+     *
+     * @dataProvider tenantSortCases
+     * @param list<int> $expected Tenant ids in the order the endpoint must return them.
+     */
+    public function testEachSortKeyReordersTheList(string $query, array $expected): void
+    {
+        $this->seedSortableTenants();
+        MockRequestFactory::setTestTenant(0);
+
+        $this->assertSame($expected, $this->listedIds('/api/tenants?' . $query));
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: list<int>}>
+     */
+    public static function tenantSortCases(): array
+    {
+        return [
+            // Alpha, Bravo, Charlie, Delta Works, Echo Works.
+            'name ascending'        => ['sort=name&dir=asc', [2, 4, 5, 1, 3]],
+            'name descending'       => ['sort=name&dir=desc', [3, 1, 5, 4, 2]],
+            // kilo, lima, mike, yankee, zulu — deliberately NOT the name order,
+            // so a spec that quietly sorted by the wrong column would show up.
+            'slug ascending'        => ['sort=slug&dir=asc', [3, 5, 1, 4, 2]],
+            // Member counts 0, 0, 1, 2, 3 — the two zeroes are a real tie, broken
+            // by id so the pair keeps its order in both directions.
+            'userCount ascending'   => ['sort=userCount&dir=asc', [2, 4, 3, 1, 5]],
+            'userCount descending'  => ['sort=userCount&dir=desc', [5, 1, 3, 2, 4]],
+            'createdAt ascending'   => ['sort=createdAt&dir=asc', [4, 2, 5, 1, 3]],
+            // No sort at all: the endpoint's historical created_at DESC.
+            'no sort is createdAt descending' => ['', [3, 1, 5, 2, 4]],
+        ];
+    }
+
+    /**
+     * An unrecognised sort key falls back to the default rather than erroring.
+     *
+     * A client that asks for a column this endpoint does not offer — an older
+     * build, a renamed column — should get the list, not a 400 it cannot act on.
+     */
+    public function testAnUnknownSortKeyFallsBackToTheDefault(): void
+    {
+        $this->seedSortableTenants();
+        MockRequestFactory::setTestTenant(0);
+
+        $bogus = $this->listedIds('/api/tenants?sort=not_a_column');
+
+        $this->assertSame($this->listedIds('/api/tenants'), $bogus);
+        $this->assertSame([3, 1, 5, 2, 4], $bogus);
+    }
+
+    /**
+     * A sort key cannot carry SQL: it is a KEY into the handler's own map, never
+     * an expression. Asserting the rows rather than the query string is the
+     * point — if the value ever did reach the SQL, this would error or answer
+     * differently.
+     */
+    public function testASortKeyCannotInjectSql(): void
+    {
+        $this->seedSortableTenants();
+        MockRequestFactory::setTestTenant(0);
+
+        $attack = $this->listedIds(
+            '/api/tenants?sort=' . rawurlencode('name; DROP TABLE tenants--')
+        );
+
+        $this->assertSame($this->listedIds('/api/tenants'), $attack);
+        $this->assertSame(
+            6,
+            $this->scalar('SELECT COUNT(*) FROM tenants'),
+            'the table is still there (five fixtures plus the system tenant)'
+        );
+    }
+
+    /**
+     * THE ONE THAT IS EASY TO GET WRONG: the search narrows the reported TOTAL,
+     * not only the rows.
+     *
+     * A COUNT that ignores the filter reports the unfiltered total, and the
+     * client dutifully renders page controls for pages that come back empty.
+     */
+    public function testSearchNarrowsBothTheRowsAndTheTotal(): void
+    {
+        $this->seedSortableTenants();
+        MockRequestFactory::setTestTenant(0);
+
+        $unfiltered = $this->listBody('/api/tenants');
+        $this->assertSame(5, $unfiltered['pagination']['total']);
+
+        $filtered = $this->listBody('/api/tenants?q=works');
+
+        $this->assertSame([3, 1], array_column($filtered['data'], 'id'));
+        $this->assertSame(2, $filtered['pagination']['total'], 'the COUNT must carry the search predicate');
+        $this->assertSame(1, $filtered['pagination']['totalPages']);
+    }
+
+    /** The narrowed total survives paging, so page two is not advertised. */
+    public function testSearchTotalIsFilteredEvenWhenPaged(): void
+    {
+        $this->seedSortableTenants();
+        MockRequestFactory::setTestTenant(0);
+
+        $body = $this->listBody('/api/tenants?q=works&per_page=1');
+
+        $this->assertCount(1, $body['data']);
+        $this->assertSame(2, $body['pagination']['total']);
+        $this->assertSame(2, $body['pagination']['totalPages']);
+    }
+
+    /** Search is case-insensitive on whichever engine the suite is running. */
+    public function testSearchIsCaseInsensitive(): void
+    {
+        $this->seedSortableTenants();
+        MockRequestFactory::setTestTenant(0);
+
+        $this->assertSame(
+            $this->listedIds('/api/tenants?q=works'),
+            $this->listedIds('/api/tenants?q=WORKS'),
+            'ILIKE on PostgreSQL, LIKE on SQLite — the same answer either way'
+        );
+    }
+
+    /** The slug is searchable too, not just the display name. */
+    public function testSearchMatchesTheSlug(): void
+    {
+        $this->seedSortableTenants();
+        MockRequestFactory::setTestTenant(0);
+
+        $this->assertSame([4], $this->listedIds('/api/tenants?q=yankee'));
+    }
+
+    /**
+     * Paging over a TIED sort column returns every row exactly once.
+     *
+     * Eight workspaces with no members at all share one `userCount`, and
+     * `LIMIT/OFFSET` over an ORDER BY with ties has no defined order WITHIN the
+     * tie — so without the id tiebreaker a workspace can appear on two pages
+     * while another never appears at all. On screen that reads as a deleted
+     * tenant, which is why this is asserted over a walk rather than one page.
+     */
+    public function testPagingOverATiedSortColumnSeesEveryTenantExactlyOnce(): void
+    {
+        $this->seedTiedTenants();
+        MockRequestFactory::setTestTenant(0);
+
+        $seen = [];
+        for ($page = 1; $page <= 3; $page++) {
+            foreach ($this->listedIds("/api/tenants?sort=userCount&per_page=3&page={$page}") as $id) {
+                $seen[] = $id;
+            }
+        }
+
+        sort($seen);
+        $this->assertSame(range(1, 8), $seen, 'every workspace exactly once across the walk');
+    }
+
+    /** And two consecutive pages of a tied sort never overlap. */
+    public function testConsecutivePagesOfATiedSortDoNotOverlap(): void
+    {
+        $this->seedTiedTenants();
+        MockRequestFactory::setTestTenant(0);
+
+        $first  = $this->listedIds('/api/tenants?sort=userCount&per_page=3&page=1');
+        $second = $this->listedIds('/api/tenants?sort=userCount&per_page=3&page=2');
+
+        $this->assertCount(3, $first);
+        $this->assertCount(3, $second);
+        $this->assertSame([], array_intersect($first, $second));
+    }
+
+    /**
+     * A single-tenant caller's search still cannot reach another workspace.
+     *
+     * The search is ANDed onto `t.id = :tenant_id`, never substituted for it, so
+     * a term that names a different workspace exactly matches nothing.
+     */
+    public function testSearchCannotReachAnotherTenantsWorkspace(): void
+    {
+        $this->seedSortableTenants();
+        MockRequestFactory::setTestTenant(1);
+
+        $body = $this->listBody('/api/tenants?q=Alpha%20Systems');
+
+        $this->assertSame([], array_column($body['data'], 'id'), 'tenant 2 must stay invisible to tenant 1');
+        $this->assertSame(0, $body['pagination']['total']);
+    }
+
+    /**
+     * A search that matches nothing is an empty list, NOT "tenant not found".
+     *
+     * The 404 means "the workspace you belong to is missing", which is a real
+     * and alarming condition; reporting it because a reader mistyped a filter
+     * would be a screen telling them their own workspace ceased to exist. `q`
+     * is new to this endpoint, so no request a client can make today reaches
+     * this branch.
+     */
+    public function testAnEmptySearchResultIsNotReportedAsAMissingTenant(): void
+    {
+        $this->seedSortableTenants();
+        MockRequestFactory::setTestTenant(1);
+
+        $response = $this->handler()->list(new Request('GET', '/api/tenants?q=nothing-matches-this'));
+
+        $this->assertSame(200, $response->getStatusCode());
+        $body = json_decode($response->getBody(), true);
+        $this->assertSame([], $body['data']);
+        $this->assertSame(0, $body['pagination']['total']);
+    }
+
+    /** The genuine 404 — a caller whose own workspace is absent — is unchanged. */
+    public function testAMissingOwnTenantStillReturns404(): void
+    {
+        MockRequestFactory::setTestTenant(99);
+
+        $response = $this->handler()->list(new Request('GET', '/api/tenants'));
+
+        $this->assertSame(404, $response->getStatusCode());
+    }
+
+    /** The envelope is unchanged, so a client cannot tell the endpoint moved. */
+    public function testThePaginationEnvelopeKeepsItsShape(): void
+    {
+        $this->seedSortableTenants();
+        MockRequestFactory::setTestTenant(0);
+
+        $body = $this->listBody('/api/tenants?page=2&per_page=2&sort=name');
+
+        $this->assertSame(
+            ['page' => 2, 'perPage' => 2, 'total' => 5, 'totalPages' => 3],
+            $body['pagination']
+        );
+    }
+
+    // ---- list-contract fixtures & helpers ----
+
+    /**
+     * Run the list endpoint as the current tenant and return the response body.
+     *
+     * @return array{data: list<array<string, mixed>>, pagination: array<string, int>}
+     */
+    private function listBody(string $path): array
+    {
+        $response = $this->handler()->list(new Request('GET', $path));
+        $this->assertSame(200, $response->getStatusCode(), $response->getBody());
+
+        /** @var array{data: list<array<string, mixed>>, pagination: array<string, int>} $body */
+        $body = json_decode($response->getBody(), true);
+
+        return $body;
+    }
+
+    /**
+     * The tenant ids the endpoint returned, in the order it returned them.
+     *
+     * @return list<int>
+     */
+    private function listedIds(string $path): array
+    {
+        return array_map('intval', array_column($this->listBody($path)['data'], 'id'));
+    }
+
+    /**
+     * Five workspaces whose name, slug, creation date and member count each
+     * produce a DIFFERENT order, so a sort that silently used the wrong column
+     * cannot pass by coincidence.
+     */
+    private function seedSortableTenants(): void
+    {
+        $rows = [
+            [1, 'Delta Works',    'mike',   '2026-01-04 00:00:00'],
+            [2, 'Alpha Systems',  'zulu',   '2026-01-02 00:00:00'],
+            [3, 'Echo Works',     'kilo',   '2026-01-05 00:00:00'],
+            [4, 'Bravo Holdings', 'yankee', '2026-01-01 00:00:00'],
+            [5, 'Charlie Group',  'lima',   '2026-01-03 00:00:00'],
+        ];
+
+        // Tenants 1 and 2 already exist (see makeSqliteSchema); the rest do not.
+        $update = $this->pdo->prepare('UPDATE tenants SET name = ?, slug = ?, created_at = ? WHERE id = ?');
+        $insert = $this->pdo->prepare('INSERT INTO tenants (id, name, slug, created_at) VALUES (?, ?, ?, ?)');
+
+        foreach ($rows as [$id, $name, $slug, $createdAt]) {
+            if ($id <= 2) {
+                $update->execute([$name, $slug, $createdAt, $id]);
+                continue;
+            }
+            $insert->execute([$id, $name, $slug, $createdAt]);
+        }
+
+        // Member counts 2, 0, 1, 0, 3 — the two zeroes are the tie.
+        $this->seedUser(301, 1, 'one@example.com');
+        $this->seedUser(302, 1, 'two@example.com');
+        $this->seedUser(303, 3, 'three@example.com');
+        $this->seedUser(304, 5, 'four@example.com');
+        $this->seedUser(305, 5, 'five@example.com');
+        $this->seedUser(306, 5, 'six@example.com');
+    }
+
+    /** Eight workspaces with no members, so `userCount` is tied across all of them. */
+    private function seedTiedTenants(): void
+    {
+        $insert = $this->pdo->prepare('INSERT INTO tenants (id, name, slug, created_at) VALUES (?, ?, ?, ?)');
+        for ($id = 3; $id <= 8; $id++) {
+            $insert->execute([$id, sprintf('Tied %02d', $id), sprintf('tied-%02d', $id), '2026-02-01 00:00:00']);
+        }
     }
 
     // ============ WC-49: tenant creation is gated to system administrators ============
@@ -682,4 +1007,21 @@ final class TenantsApiHandlerRealEngineTest extends TestCase
              VALUES (?, ?, true, true, NOW())'
         )->execute([$profileId, $email]);
     }
+
+    /**
+     * One integer out of a scalar query.
+     *
+     * `PDO::query()` can return false, and PHPStan says so. This file carries a
+     * baseline of six grandfathered call sites that ignore that; adding more
+     * would grow a baseline whose whole purpose is to stop growing, so the new
+     * assertions go through here instead.
+     */
+    private function scalar(string $sql): int
+    {
+        $stmt = $this->pdo->query($sql);
+        $this->assertNotFalse($stmt, "query failed: {$sql}");
+
+        return (int) $stmt->fetchColumn();
+    }
+
 }

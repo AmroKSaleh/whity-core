@@ -79,8 +79,16 @@ export function createDocumentDesignerAdapter(transport: Transport): DocumentDes
       }, []);
     },
 
-    async saveTemplate(template: DocTemplate, id?: string): Promise<string> {
-      const payload = { name: template.name, data: template as unknown as Record<string, unknown> };
+    async saveTemplate(template: DocTemplate, id?: string, scope?: string): Promise<string> {
+      const payload: Record<string, unknown> = {
+        name: template.name,
+        data: template as unknown as Record<string, unknown>,
+      };
+      // Create only — see the web twin in web/lib/documents/storage.ts for why
+      // an update deliberately leaves the stored scope untouched.
+      if (id === undefined && scope !== undefined && scope !== '') {
+        payload.scope = scope;
+      }
       const res =
         id !== undefined
           ? await transport.request('PATCH', `${LIST_PATH_TEMPLATES}/${id}`, payload)

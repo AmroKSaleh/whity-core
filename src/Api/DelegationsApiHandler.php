@@ -13,7 +13,7 @@ use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Http\JsonBody;
-use Whity\Http\PaginationParams;
+use Whity\Http\ListQuery;
 use PDO;
 
 /**
@@ -61,6 +61,11 @@ class DelegationsApiHandler
      * Query filters (all optional): `granteeType` (role|user), `granteeId`,
      * `grantorUserId`, `includeRevoked` (1/true to include revoked rows).
      *
+     * Page, sort and search follow the shared list contract: `page`/`per_page`,
+     * `sort`/`dir` over {@see DelegationRepository::listSpec()}'s keys, and `q`
+     * against the `permission` column. All of it composes with the filters and
+     * the tenant scope above rather than replacing any of them.
+     *
      * @param Request $request The incoming request.
      * @return Response JSON list of delegations under the `data` key.
      */
@@ -92,13 +97,22 @@ class DelegationsApiHandler
             $includeRevoked = isset($query['includeRevoked'])
                 && in_array(strtolower((string) $query['includeRevoked']), ['1', 'true', 'yes'], true);
 
-            $p     = PaginationParams::fromPath($request->getPath());
+            // Page, sort and search. The column expressions belong to the table,
+            // so the spec is declared beside the SQL in
+            // {@see DelegationRepository::listSpec()}; only the caller-facing
+            // keys cross this boundary, and an unknown one is not a sort.
+            $q = ListQuery::fromPath($request->getPath(), DelegationRepository::listSpec());
+
+            // The SAME ListQuery goes to count() and list(), so the search
+            // narrows the reported total and the returned rows together — a
+            // total taken without it would advertise pages that come back empty.
             $total = $this->service->count(
                 $tenantId,
                 $granteeType,
                 $granteeId,
                 $grantorUserId,
-                $includeRevoked
+                $includeRevoked,
+                $q
             );
             $rows = $this->service->list(
                 $tenantId,
@@ -106,11 +120,12 @@ class DelegationsApiHandler
                 $granteeId,
                 $grantorUserId,
                 $includeRevoked,
-                $p->perPage,
-                $p->offset
+                $q->page->perPage,
+                $q->page->offset,
+                $q
             );
 
-            return Response::json(['data' => array_map([$this, 'toPublic'], $rows), 'pagination' => $p->meta($total)], 200);
+            return Response::json(['data' => array_map([$this, 'toPublic'], $rows), 'pagination' => $q->meta($total)], 200);
         } catch (\Exception $e) {
             $this->log('error', 'Failed to fetch delegations', [
                 'event' => 'delegations.error',

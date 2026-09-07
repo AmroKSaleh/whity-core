@@ -52,16 +52,29 @@ final class RouteAction
      * forward to, and inventing a destination would be the engine deciding
      * something the route's author did not. {@see RouteAction::ACKNOWLEDGED} is
      * the terminal act.
+     *
+     * Also refused on a DECISION step (#1014), where choosing the destination is
+     * exactly what the gate exists to take away from the person answering.
+     * Allowing both would give every approver a one-click way past the verdict,
+     * and the route would read as approved because the document plainly moved.
      */
     public const FORWARDED = 'forwarded';
 
     /**
-     * A recipient acted and the document goes no further along their chain.
+     * A recipient acted and CHOSE NO DESTINATION.
      *
-     * Closes their inbox row and opens nothing. Legal at any step, not only the
-     * last: a person who is the intended end of their branch says so here, and
-     * the other chains are unaffected because there is no aggregate that could
-     * be waiting on them.
+     * On a circulation step that means the document goes no further along their
+     * chain: closes their inbox row and opens nothing. Legal at any step, not
+     * only the last — a person who is the intended end of their branch says so
+     * here, and the other chains are unaffected because there is no aggregate
+     * that could be waiting on them.
+     *
+     * On a DECISION step (#1014) it is the act that carries a VERDICT
+     * ({@see RouteVerdict}), and the engine may then open the verdict's edge. The
+     * verb's meaning is unchanged by that and is why it is the one chosen: the
+     * ACTOR still names no destination. Where the document goes is derived from
+     * what they decided, which is the whole point of a gate — {@see FORWARDED},
+     * where the actor DOES choose, is refused there.
      */
     public const ACKNOWLEDGED = 'acknowledged';
 

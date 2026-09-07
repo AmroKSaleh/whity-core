@@ -28,6 +28,13 @@ database.sqlite
 load-tests
 node_modules
 
+# #1049: the build identity is WRITTEN INSIDE the release stage, from the
+# WHITY_BUILD_COMMIT build arg. A copy from a developer's tree must never enter
+# the context — the release RUN would overwrite it today, but an image that
+# reports somebody's local HEAD as its own is precisely the confident lie
+# GET /api/build exists to make impossible, and it must not be one edit away.
+build-identity.json
+
 # vendor/ is produced INSIDE the release stage (composer install --no-dev).
 # composer.lock is committed to git and intentionally included in the build
 # context so the release stage can pin exact dependency versions.

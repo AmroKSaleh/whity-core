@@ -14,6 +14,7 @@ import { Button } from '@amroksaleh/ui/button';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { IconAlertCircle, IconCopy, IconCheck } from '@tabler/icons-react';
 import { useTranslation } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
 import type { NewCredential } from './types';
 
 interface CredentialModalProps {
@@ -29,6 +30,7 @@ export function CredentialModal({
 }: CredentialModalProps) {
   const { addToast } = useToast();
   const t = useTranslation('admin');
+  const dates = useDateDisplay();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -42,9 +44,11 @@ export function CredentialModal({
     }
   };
 
-  const expiresAt = credential.expiresAt
-    ? new Date(credential.expiresAt).toLocaleDateString()
-    : t('aiPrincipals.credential.expiresUnknown', 'unknown');
+  // #1068: null here means EITHER no expiry was returned or this tenant hides
+  // dates, and the block below drops out for both. "Expires: unknown" would be
+  // untrue in the second case — and this dialog is shown once and never again,
+  // which makes it the worst place in the product to say something untrue.
+  const expiresAt = dates.date(credential.expiresAt);
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -94,12 +98,14 @@ export function CredentialModal({
             </div>
           </div>
 
-          <div className="space-y-1">
-            <p className="text-xs font-medium text-muted-foreground">
-              {t('aiPrincipals.credential.expires', 'Expires')}
-            </p>
-            <p className="text-sm text-foreground">{expiresAt}</p>
-          </div>
+          {expiresAt !== null && (
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-muted-foreground">
+                {t('aiPrincipals.credential.expires', 'Expires')}
+              </p>
+              <p className="text-sm text-foreground">{expiresAt}</p>
+            </div>
+          )}
 
           <div className="space-y-1">
             <p className="text-xs font-medium text-muted-foreground">

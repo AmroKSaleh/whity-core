@@ -26,8 +26,32 @@ import { useTranslation } from '@amroksaleh/features/i18n';
 /** Sentinel: when a sensitive field holds this value, it is omitted from the submit payload. */
 export const SENSITIVE_SENTINEL = '••••••';
 
+/**
+ * One cell of a `fieldArray` row.
+ *
+ * The first five members are what a template input WRITES. The last two exist
+ * for what a seeded row CARRIES: a `fieldArray` with a `source` copies each
+ * fetched row whole and lets the template overlay the keys it names, so a fact
+ * the editor does not render — a `select` question's `options`, a field's
+ * `validation` rules — rides back out on the submit exactly as it arrived.
+ *
+ * That passthrough is not a convenience. The submit behind a sourced array is a
+ * REPLACEMENT, so a key the editor dropped on the way in is a key the server is
+ * being told to forget. Carrying the row whole means the editor can only ever
+ * change what it actually shows somebody.
+ */
+export type FieldArrayCell =
+  | string
+  | boolean
+  | LocalizedTextValue
+  | OuScopeValue
+  | number
+  | null
+  | unknown[]
+  | Record<string, unknown>;
+
 /** A `fieldArray` (WC-532 A2) value: an ordered list of per-row sub-records. */
-export type FieldArrayValue = Record<string, string | boolean | LocalizedTextValue | OuScopeValue>[];
+export type FieldArrayValue = Record<string, FieldArrayCell>[];
 
 /**
  * A single form field's value. Most inputs are `string | boolean`; a
@@ -41,10 +65,40 @@ export type FormValue = string | boolean | LocalizedTextValue | FieldArrayValue 
 /** The value shape exposed to all form descendants via context. */
 export interface FormBlockContextValue {
   values: Record<string, FormValue>;
-  setValue(name: string, value: FormValue): void;
+  /**
+   * Write a field's value. `undefined` REMOVES the key from the value map
+   * rather than storing an empty one, and the difference is load-bearing for a
+   * sourced `fieldArray`: an absent key is omitted from the submit payload
+   * entirely, so a replace endpoint handed no list at all refuses the request,
+   * where one handed `[]` would empty the record and report success.
+   */
+  setValue(name: string, value: FormValue | undefined): void;
   errors: Record<string, string>;
   isSubmitting: boolean;
   submit(): void;
+  /**
+   * A descendant declares that the form MUST NOT be submitted yet, and says
+   * why; `null` releases the hold. `submit()` refuses while any hold stands and
+   * shows each reason under the field that raised it.
+   *
+   * This exists because of one specific way a form can lie. An input renders
+   * its own emptiness, and for most inputs an empty render is just an empty
+   * value — the server sees a blank and decides. But a `fieldArray` bound to a
+   * `source` submits a REPLACEMENT set, so "I have no rows" is not a blank, it
+   * is an instruction to delete every stored row. Until its fetch has landed, an
+   * empty render means "I do not know yet", and the two are indistinguishable
+   * from outside the block. So the block that knows the difference is the one
+   * that gets to say so, rather than the provider guessing from the value.
+   *
+   * Deliberately NOT the same mechanism as `errors`: an error is the outcome of
+   * a submit the user asked for, and a hold is a state the form is in before
+   * they ask. Holds therefore also disable the submit button, so the ordinary
+   * case is a control that is visibly not ready rather than one that refuses
+   * after the fact.
+   */
+  holdSubmit(name: string, reason: string | null): void;
+  /** Whether any descendant currently holds the submit. */
+  submitHeld: boolean;
 }
 
 const FormBlockContext = React.createContext<FormBlockContextValue | null>(null);
@@ -158,8 +212,91 @@ const FORM_INPUT_TYPES = [
  * anywhere inside a `form` (the `inForm` ancestor rule), so default-seeding and
  * required-validation must reach them too. A nested `form` owns its own
  * inputs, so we never descend into one.
+ *
+ * Exported for `FieldArrayRenderer`, which needs the same walk over a ROW
+ * TEMPLATE in order to map a fetched row onto the inputs that will edit it.
+ * Deriving that from the one walk rather than a second list is what keeps
+ * "which children are inputs" a single answer: a template input the seeder did
+ * not know about would render blank over a stored value and then save the blank.
  */
-function collectFormInputs(blocks: Block[]): Block[] {
+/**
+ * The input names belonging to `variant` branches that are NOT selected.
+ *
+ * WC-532 item 3. This is the one place the form deliberately departs from the
+ * `visibleWhen` convention documented in {@link collectFormInputs}: a hidden
+ * input keeps its value in the map and still submits, because hiding is a
+ * display decision and the server is authoritative over what it accepts.
+ *
+ * A `variant` is not hiding. Its cases are alternative SHAPES for the same
+ * record, and a discriminated union means the branches that were not chosen do
+ * not exist — `{kind:'numeric', value: 5}`, never
+ * `{kind:'numeric', value: 5, text: '', pairs: []}` with twelve other branches
+ * riding along for the server to sort out.
+ *
+ * So these names are dropped from the payload AND exempted from required-field
+ * validation. Both, or neither is any use: a required field in an unchosen
+ * branch would block a submit that never intended to include it, and a form
+ * whose Save button does nothing while pointing at a field the user cannot see
+ * is the worst version of this feature.
+ *
+ * Nested variants work by construction — the walk recurses through cases, and
+ * an inner variant inside an inactive outer case is unreachable, so everything
+ * under it is collected as inactive too.
+ */
+export function inactiveVariantInputNames(
+  blocks: Block[],
+  values: Record<string, unknown>
+): Set<string> {
+  const dead = new Set<string>();
+  const alive = new Set<string>();
+
+  const walk = (list: Block[], live: boolean): void => {
+    for (const block of list) {
+      if (block.type === 'variant') {
+        const chosen = values[(block as { discriminator: string }).discriminator];
+        for (const child of (block.children ?? []) as Block[]) {
+          if (child.type !== 'variantCase') continue;
+          // String-compared: a discriminator is a select/text value on the
+          // wire, and `when` is declared as a string in the contract. Comparing
+          // loosely would make `when: '1'` answer to a numeric 1 in one browser
+          // and not another.
+          const active = live && String(chosen ?? '') === String((child as { when: string }).when);
+          walk((child.children ?? []) as Block[], active);
+        }
+        continue;
+      }
+      // Everything under an inactive case is inactive, whatever it is —
+      // including inputs nested in sections, cards or an inner variant.
+      const into = live ? alive : dead;
+      for (const input of collectFormInputs([block])) {
+        const n = (input as { name?: string }).name;
+        if (typeof n === 'string' && n !== '') into.add(n);
+      }
+      if (!live) continue;
+      for (const slot of ['children', 'otherwise'] as const) {
+        const nested = (block as { children?: unknown; otherwise?: unknown })[slot];
+        if (Array.isArray(nested)) walk(nested as Block[], live);
+      }
+    }
+  };
+
+  walk(blocks, true);
+
+  // BOTH SETS ARE NEEDED, because sibling cases are allowed to reuse a name —
+  // that is the point of the feature, and the validator permits it deliberately
+  // ({kind:'number', value: 5} and {kind:'text', value: 'x'} are one field in
+  // two shapes).
+  //
+  // So a name appearing in an unchosen branch does NOT mean it should be
+  // dropped: the chosen branch may declare the same name, and dropping it would
+  // silently strip the one field the union exists to carry. Only a name that is
+  // dead everywhere it appears is excluded.
+  for (const name of alive) dead.delete(name);
+
+  return dead;
+}
+
+export function collectFormInputs(blocks: Block[]): Block[] {
   const inputs: Block[] = [];
   for (const block of blocks) {
     if ((FORM_INPUT_TYPES as readonly string[]).includes(block.type)) {
@@ -207,6 +344,17 @@ function collectDefaults(
   const defaults: Record<string, FormValue> = {};
   for (const input of collectFormInputs(children)) {
     if (input.type === 'fieldArray') {
+      // A SOURCED array is left OUT of the value map entirely — not seeded with
+      // `[]`. Its rows are the stored ones, and until the fetch lands nobody
+      // knows what they are; `[]` would be a confident answer to that question,
+      // and the wrong one, submitted to an endpoint that reads it as "delete
+      // them all". Absent is the honest state, and it is also a second line of
+      // defence: a submit that somehow escaped the hold below would omit the key
+      // rather than send an empty list, and a replace endpoint that is handed no
+      // list at all refuses the request instead of emptying the record.
+      if (input.source !== undefined && input.source !== '') {
+        continue;
+      }
       // Seed `min` empty rows (each with the template's own defaults) so a
       // required-min array starts populated; 0 min → an empty array.
       const min = typeof input.min === 'number' && input.min > 0 ? input.min : 0;
@@ -261,6 +409,36 @@ function collectDefaults(
  *   - 422/issues → issues report rendered + error toast
  *   - other error → error toast
  */
+/**
+ * The record inside a preload response, or null when there is nothing to seed.
+ *
+ * THE ENVELOPE IS THE CONTRACT (#981). Core's handlers return
+ * `{ data: { … } }` throughout, and the desktop renderer REQUIRES it — its
+ * `fetchSource()` throws "malformed response" on a body with no `data` key. Web
+ * used to spread the whole parsed body, so against a conventional endpoint it
+ * seeded a single field called `data` and left every real field empty.
+ *
+ * A BARE BODY IS NO LONGER ACCEPTED, deliberately. Sniffing for a `data` key
+ * and falling back would leave the contract permanently undecided: an endpoint
+ * that legitimately returns a field named `data` becomes ambiguous, and the two
+ * renderers would go on disagreeing about what a preload response is — which is
+ * the drift this fix exists to end. A declaration whose endpoint returns a bare
+ * body now seeds nothing on web, exactly as it already fails on desktop.
+ *
+ * Seeding nothing is also the SAFE direction. `isLoading` stays true until this
+ * resolves and an unbound form is disabled (#957), so a response we cannot read
+ * leaves the form unsubmittable rather than blank-and-ready — the state that
+ * overwrites a record with empties.
+ */
+function unwrapEnvelope(body: unknown): Record<string, FormValue> | null {
+  if (body === null || typeof body !== 'object') return null;
+  const data = (body as { data?: unknown }).data;
+  if (data === null || data === undefined || typeof data !== 'object' || Array.isArray(data)) {
+    return null;
+  }
+  return data as Record<string, FormValue>;
+}
+
 export function FormProvider({
   block,
   children,
@@ -291,6 +469,25 @@ export function FormProvider({
   const [serverIssues, setServerIssues] = React.useState<ActionIssue[] | null>(null);
   const [isLoading, setIsLoading] = React.useState(block.dataSource !== undefined);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  // Reasons descendants have given for why this form is not ready to be sent,
+  // keyed by the input name that raised each. See `holdSubmit` on the context.
+  const [holds, setHolds] = React.useState<Record<string, string>>({});
+
+  // Idempotent by construction: re-registering the SAME reason returns the
+  // previous object, so a child that calls this from an effect on every render
+  // cannot drive a render loop.
+  const holdSubmit = React.useCallback((name: string, reason: string | null) => {
+    setHolds((prev) => {
+      if (reason === null) {
+        if (!(name in prev)) return prev;
+        const next = { ...prev };
+        delete next[name];
+        return next;
+      }
+      if (prev[name] === reason) return prev;
+      return { ...prev, [name]: reason };
+    });
+  }, []);
 
   // #949: `dataSource.path` carries the same `{token}` syntax a
   // `dataRecord.source` does, and it now resolves by the same rule — NOT AT
@@ -323,12 +520,28 @@ export function FormProvider({
     if (!dataSourcePath || !dataSourceMethod) return;
     apiClient(dataSourcePath, { method: dataSourceMethod })
       .then((response) => response.json())
-      .then((data: unknown) => {
-        if (data !== null && typeof data === 'object') {
-          setValues((prev) => ({
-            ...prev,
-            ...(data as Record<string, FormValue>),
-          }));
+      .then((body: unknown) => {
+        // THE `{ data: … }` ENVELOPE, which this used to spread whole (#981).
+        //
+        // Core's own handlers document that envelope throughout — `Response: {
+        // data: { id, code, name, … } }` appears across LanguagesApiHandler,
+        // UsersApiHandler and the rest — so a plugin endpoint following the
+        // platform convention was seeding ONE form field literally named
+        // `data`, and every real field stayed empty.
+        //
+        // That is #957's hazard reached by a second route: an enabled,
+        // un-prefilled form. Against an update endpoint that replaces rather
+        // than merges, submitting it writes blanks over every field the user
+        // did not retype, and reports success.
+        //
+        // The desktop renderer has always required the envelope — its
+        // `fetchSource()` throws "malformed response" without a `data` key —
+        // so the two renderers disagreed about what a preload response IS.
+        // This is the side that was wrong: one platform silently mis-seeded
+        // while the other failed loudly.
+        const record = unwrapEnvelope(body);
+        if (record !== null) {
+          setValues((prev) => ({ ...prev, ...record }));
         }
         setIsLoading(false);
       })
@@ -339,8 +552,16 @@ export function FormProvider({
   }, [dataSourcePath, dataSourceMethod, loadErrorText]);
 
   const setValue = React.useCallback(
-    (name: string, value: string | boolean) => {
-      setValues((prev) => ({ ...prev, [name]: value }));
+    (name: string, value: FormValue | undefined) => {
+      setValues((prev) => {
+        if (value === undefined) {
+          if (!(name in prev)) return prev;
+          const next = { ...prev };
+          delete next[name];
+          return next;
+        }
+        return { ...prev, [name]: value };
+      });
       // Clear the field error when the user edits the field.
       setErrors((prev) => {
         if (!(name in prev)) return prev;
@@ -355,7 +576,16 @@ export function FormProvider({
   const submit = React.useCallback(() => {
     // Collect required-field errors across all descendant inputs (any depth).
     const newErrors: Record<string, string> = {};
+
+    // WC-532 item 3: fields in an unchosen `variant` branch are not part of
+    // this record's shape, so they are neither required nor sent. Computed once
+    // and used for both, because enforcing one without the other is incoherent.
+    const inactive = inactiveVariantInputNames(block.children, values);
+
     for (const child of collectFormInputs(block.children)) {
+      if (typeof (child as { name?: string }).name === 'string' && inactive.has((child as { name: string }).name)) {
+        continue;
+      }
       if (
         (child.type === 'textInput' ||
           child.type === 'textArea' ||
@@ -405,6 +635,21 @@ export function FormProvider({
       }
     }
 
+    // Holds are applied LAST and overwrite anything the loop above wrote for the
+    // same name, because a hold is the more specific truth. An array still
+    // waiting on its rows fails the min-count check too, and "needs at least 1
+    // entry" would send the author off to add one — which is precisely the
+    // wrong instruction, since the rows they are missing already exist and are
+    // on their way.
+    //
+    // This is the AUTHORITATIVE refusal. The submit button is disabled while a
+    // hold stands, but a disabled button is an affordance; this is the check a
+    // programmatic `submit()` still has to get past, and the one the destructive
+    // case is actually tested against.
+    for (const [name, reason] of Object.entries(holds)) {
+      newErrors[name] = reason;
+    }
+
     setErrors(newErrors);
     if (Object.keys(newErrors).length > 0) {
       return;
@@ -417,6 +662,10 @@ export function FormProvider({
     const payload: Record<string, unknown> = {};
     for (const [key, val] of Object.entries(values)) {
       if (val === SENSITIVE_SENTINEL) continue;
+      // WC-532 item 3 — the branches that were not chosen do not exist. See
+      // `inactiveVariantInputNames` for why this is the one deliberate
+      // exception to "hidden inputs still submit".
+      if (inactive.has(key)) continue;
       payload[key] = val;
     }
 
@@ -465,7 +714,7 @@ export function FormProvider({
         }
       }
     );
-  }, [block, values, addToast, t, onSubmitSuccess, resolveRef]);
+  }, [block, values, holds, addToast, t, onSubmitSuccess, resolveRef]);
 
   const contextValue: FormBlockContextValue = {
     values,
@@ -473,6 +722,8 @@ export function FormProvider({
     errors,
     isSubmitting,
     submit,
+    holdSubmit,
+    submitHeld: Object.keys(holds).length > 0,
   };
 
   return (

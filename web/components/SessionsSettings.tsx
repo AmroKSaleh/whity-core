@@ -17,6 +17,7 @@ import {
   AlertDialogTrigger,
 } from '@amroksaleh/ui/alert-dialog';
 import { useTranslation } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
 import { IconDeviceDesktop, IconDeviceDesktopOff } from '@tabler/icons-react';
 
 /**
@@ -49,13 +50,9 @@ interface Session {
   current: boolean;
 }
 
-function formatWhen(value: string): string {
-  const parsed = Date.parse(value.replace(' ', 'T') + 'Z');
-  return Number.isNaN(parsed) ? value : new Date(parsed).toLocaleString();
-}
-
 export function SessionsSettings() {
   const { apiClient, refreshAuth } = useAuth();
+  const dates = useDateDisplay();
   const { addToast } = useToast();
   const t = useTranslation('auth');
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -196,16 +193,31 @@ export function SessionsSettings() {
                       </Badge>
                     )}
                   </p>
-                  <p className="text-xs text-muted-foreground">
-                    {session.ip_address
-                      ? t('sessions.ipAndLastActive', '{ip} · Last active {when}', {
-                          ip: session.ip_address,
-                          when: formatWhen(session.last_seen_at),
-                        })
-                      : t('sessions.lastActive', 'Last active {when}', {
-                          when: formatWhen(session.last_seen_at),
-                        })}
-                  </p>
+                  {/*
+                    #1068: the ADDRESS survives on its own when dates are
+                    hidden. This line exists so somebody can recognise a session
+                    that is not theirs, and an IP does that; "· Last active —"
+                    would be a separator with nothing after it.
+                  */}
+                  {(() => {
+                    const lastActive = dates.dateTime(session.last_seen_at);
+                    if (lastActive === null) {
+                      return session.ip_address ? (
+                        <p className="text-xs text-muted-foreground">{session.ip_address}</p>
+                      ) : null;
+                    }
+
+                    return (
+                      <p className="text-xs text-muted-foreground">
+                        {session.ip_address
+                          ? t('sessions.ipAndLastActive', '{ip} · Last active {when}', {
+                              ip: session.ip_address,
+                              when: lastActive,
+                            })
+                          : t('sessions.lastActive', 'Last active {when}', { when: lastActive })}
+                      </p>
+                    );
+                  })()}
                 </div>
               </div>
               {!session.current && (

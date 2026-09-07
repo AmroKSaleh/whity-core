@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/api/build": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Build identity of the running backend (the backend half of /web-build) */
+        get: operations["get_api_build"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -185,6 +202,26 @@ export interface paths {
         };
         /** Platform-wide aggregate statistics */
         get: operations["get_api_v1_admin_stats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agenda-items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One meeting's agenda, in order
+         * @description A FLAT, FILTERED collection read: a tabular client addresses a collection with query parameters and cannot build a nested path out of a selection. `meeting_id` is required — an unfiltered tenant-wide list is not a question anybody asks, and answering one would make a forgotten filter look like a working call.
+         */
+        get: operations["get_api_v1_agenda_items"];
         put?: never;
         post?: never;
         delete?: never;
@@ -448,6 +485,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/billing/invoices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * This tenant's invoices
+         * @description Newest first, drafts included — a tenant admin building next month's bill needs to see it. Every amount arrives BOTH as minor units and preformatted: 5000 JOD is 5.000, and a client that divides by 100 shows a customer ten times what they owe. How many decimal places a currency has is not something a client can work out for itself.
+         */
+        get: operations["get_api_v1_billing_invoices"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/invoices/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One invoice, its lines and every movement against it
+         * @description The payment history includes FAILED and PENDING attempts, not only successful ones: "why does it say I have not paid" is answered by the attempt that failed, never by its absence.
+         */
+        get: operations["get_api_v1_billing_invoices_id"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/invoices/{id}/pay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Begin paying an invoice, by any rail
+         * @description ONE ENDPOINT FOR EVERY RAIL. Name a provider; the response carries a `kind` the client branches on once — send the browser to `redirect_url`, show `reference` and `display`, or report it already settled. A per-rail endpoint would work today and mean a second endpoint, a second client path and a second screen the day a card provider is added. THE ATTEMPT IS RECORDED BEFORE THE PAYER IS SENT ANYWHERE, so a customer who pays and closes the tab has not moved money the platform has no row for. THIS DOES NOT SETTLE ANYTHING: only a verified provider callback marks an invoice paid, because an endpoint that settled on a button press would be taking the customer's word for it.
+         */
+        post: operations["post_api_v1_billing_invoices_id_pay"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Which payment rails this instance can actually take money with
+         * @description CONFIGURED rails only. Offering one that cannot take money produces a button whose only outcome is an error the customer cannot act on. Each row says what the rail can do — in particular whether it can charge unattended, which is the difference between a subscription that renews itself and one where the customer must push the money every period.
+         */
+        get: operations["get_api_v1_billing_methods"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/branding": {
         parameters: {
             query?: never;
@@ -513,6 +630,99 @@ export interface paths {
         post: operations["post_api_v1_branding_global_assets_key"];
         /** Clear a global branding asset default */
         delete: operations["delete_api_v1_branding_global_assets_key"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/convening-bodies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the tenant's convening bodies
+         * @description Active bodies first, then by key. A retired body stays readable — its minute-book outlives its usefulness — but takes no new meetings.
+         */
+        get: operations["get_api_v1_convening_bodies"];
+        put?: never;
+        /**
+         * Constitute a convening body
+         * @description `body_key` is immutable once set: every decision number the body mints quotes it. `name` may be a plain string or an object of language code to text — a body has as many real names as it has languages.
+         */
+        post: operations["post_api_v1_convening_bodies"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/convening-bodies/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one body, with its current seats
+         * @description The membership travels with the body because the two are never wanted apart. `?history=true` includes PAST seats, which is how a decision taken last March is attributed to the body as it was constituted then.
+         */
+        get: operations["get_api_v1_convening_bodies_id"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a convening body
+         * @description Refused, never forced, once the body has met: deleting it would destroy agendas and decisions, some of which have already approved documents. A body that has finished its work is deactivated.
+         */
+        delete: operations["delete_api_v1_convening_bodies_id"];
+        options?: never;
+        head?: never;
+        /**
+         * Rename a body, re-home it, retire it or revive it
+         * @description `body_key` is refused: decision numbers already quote it, so editing it would leave them naming a body that no longer exists.
+         */
+        patch: operations["patch_api_v1_convening_bodies_id"];
+        trace?: never;
+    };
+    "/api/v1/convening-bodies/{id}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a body's seats */
+        get: operations["get_api_v1_convening_bodies_id_members"];
+        put?: never;
+        /**
+         * Seat somebody on a body, or move the seat they hold
+         * @description Appointing a current member to a different seat updates the seat they already hold rather than closing it and opening another — a chair who becomes secretary did not leave the body for an instant.
+         */
+        post: operations["post_api_v1_convening_bodies_id_members"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/convening-bodies/{id}/members/{profileId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * End somebody's seat on a body
+         * @description A DEPARTURE, not a deletion: the row is kept with an end date, so a decision taken while they sat remains attributable to the body as it was then.
+         */
+        delete: operations["delete_api_v1_convening_bodies_id_members_profileid"];
         options?: never;
         head?: never;
         patch?: never;
@@ -781,6 +991,26 @@ export interface paths {
         patch: operations["patch_api_v1_document_blocks_id"];
         trace?: never;
     };
+    "/api/v1/document-blocks/{id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What would break if this block changed: the templates and blocks that instance it
+         * @description A block is POINTER-referenced (a `blockInstance` element), so editing it propagates to everything that instances it — and unlike delete, an edit is never refused. This is the answer a client needs before offering either action. There are TWO kinds of user: `templates`, and `blocks`, since a block may contain another block. Both are row-filtered to what the caller may see; `total` counts EVERY reference of both kinds in the tenant and `hidden` is the difference, so a caller with narrow reach is told the edit reaches further than they can see instead of being quietly understated. `total > 0` means exactly that a DELETE would be refused with 409.
+         */
+        get: operations["get_api_v1_document_blocks_id_usage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/document-collections": {
         parameters: {
             query?: never;
@@ -844,6 +1074,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/document-route-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** This tenant's route template DESIGNS, by name (paginated, no people counts) */
+        get: operations["get_api_v1_document_route_templates"];
+        put?: never;
+        /** Start a route template. Created EMPTY — the graph is saved by its own verb */
+        post: operations["post_api_v1_document_route_templates"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/document-route-templates/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One design, with its steps, its edges and the quorum an unset step will follow */
+        get: operations["get_api_v1_document_route_templates_id"];
+        put?: never;
+        post?: never;
+        /** Discard a design. Routes already issued from it are untouched — they carry their own steps */
+        delete: operations["delete_api_v1_document_route_templates_id"];
+        options?: never;
+        head?: never;
+        /** Rename or re-describe a template. The graph is untouched — it has its own verb */
+        patch: operations["patch_api_v1_document_route_templates_id"];
+        trace?: never;
+    };
+    "/api/v1/document-route-templates/{id}/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** REPLACE the template's whole graph — every step and every edge, atomically */
+        put: operations["put_api_v1_document_route_templates_id_graph"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/document-templates": {
         parameters: {
             query?: never;
@@ -898,6 +1182,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/document-verifications/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Verify a document from the QR code printed on it (public, rate-limited)
+         * @description PUBLIC and unauthenticated by design: the caller is somebody holding a printed sheet, and the paper is the whole of their relationship with this system. Always 200. An unknown token, a malformed one, a withdrawn one and a superseded one produce the SAME body at the default disclosure level, so this endpoint cannot be asked whether a document exists. A tenant may raise `documents.qr_public_detail` to `stage`, which adds the current routing verb and distinguishes a revoked code from an unrecognised one, or LOWER it to `undated`, which withholds `issued_on` and leaves everything else as `minimal`. It never returns a document id, a title, any content, any recipient, or any name of a person or unit — a signed-in reader who wants the record calls GET /api/documents/by-verification/{token}, where RBAC decides unchanged.
+         */
+        get: operations["get_api_v1_document_verifications_token"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents": {
         parameters: {
             query?: never;
@@ -910,6 +1214,30 @@ export interface paths {
          * @description Naming no view is the plain tenant-wide list. `view` selects one of the folders from GET /api/documents/views; a key this installation cannot compute is a 404, because from outside it does not exist.
          */
         get: operations["get_api_v1_documents"];
+        put?: never;
+        /**
+         * Raise a document from a template, supplying values for its placeholders
+         * @description The record is the deliverable and the rendered artifact is opportunistic. `documents.render_enabled` defaults to FALSE, so on a default install this returns a document with no artifact and `content_url: null` — which is a complete, routable document, not a degraded one: the values it was raised with are stored on the record, and POST /api/documents/{id}/render mints the artifact from them if the tier is later switched on. The `render` block says what happened. Sending `render: true` turns "could not render" into a 503 instead, for a caller who genuinely requires the bytes. A template the caller cannot SEE is a 404, never a 403, and the check is the designer's own visibility policy — creating from a gated template must not be a way to read it.
+         */
+        post: operations["post_api_v1_documents"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/by-verification/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Resolve a scanned QR code to the record it names, under the existing RBAC
+         * @description The scan-through. The token selects a ROW; DocumentVisibilityPolicy then decides, unchanged and with no knowledge that a token was involved. A caller without reach gets 404 with the same message GET /api/documents/{id} gives them — holding the paper confers nothing. A code minted in another tenant collapses into the same 404. `code_honoured` says whether the printing that got the caller here is still the current one.
+         */
+        get: operations["get_api_v1_documents_by_verification_token"];
         put?: never;
         post?: never;
         delete?: never;
@@ -989,6 +1317,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/documents/{id}/convening": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Which bodies has this document been in front of, and what did they decide?
+         * @description THE REVERSE READ. Without it the subsystem is invisible from the document side: somebody looking at a document that is sitting still has no way to discover it is waiting for a body that meets on the 14th.
+         */
+        get: operations["get_api_v1_documents_id_convening"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/qr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The verification code on a document, and the record of it being scanned
+         * @description The record page panel. `enabled` composes the tenant setting with the template flag; `configured` is separate because "this instance has no public address" and "this tenant switched it off" are different problems with different fixes. `token` is null in TWO different states — never minted, and withdrawn — so `retired` is what separates them: it lists the codes this document has carried and stopped honouring, newest first, each with the reason (`withdrawn` or `superseded`). A retired entry carries the human reference, never the token and never a verification URL. Anonymous scans appear with `scanner_profile_id: null` and carry nothing else about the scanner — no address, no device — because nothing else is stored.
+         */
+        get: operations["get_api_v1_documents_id_qr"];
+        put?: never;
+        /**
+         * Issue a new verification code, retiring the current one
+         * @description ALWAYS ROTATES. The previous code is retired as `superseded` in the same transaction, so anybody holding an older printing stops being able to confirm it — which is the reason to call this, and why re-rendering a document deliberately does NOT do it.
+         */
+        post: operations["post_api_v1_documents_id_qr"];
+        /**
+         * Stop honouring the verification code on a document
+         * @description The answer to "paper cannot be recalled". The symbol stays legible on every copy in the world and stops confirming anything; the row survives with its timestamps. 204 whether or not a code was live, so a second click is not an error and the route does not report whether a document has one.
+         */
+        delete: operations["delete_api_v1_documents_id_qr"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/documents/{id}/recipients": {
         parameters: {
             query?: never;
@@ -1035,6 +1411,23 @@ export interface paths {
         put?: never;
         /** Issue a route on a document: create it, its ordered steps and the first step's recipients */
         post: operations["post_api_v1_documents_id_routes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/documents/{id}/routes/from-template": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply a route template to a document: copy its stages and branches into a live route */
+        post: operations["post_api_v1_documents_id_routes_from_template"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1131,7 +1524,8 @@ export interface paths {
         delete: operations["delete_api_v1_email_domains_id"];
         options?: never;
         head?: never;
-        patch?: never;
+        /** Change a domain's default role or whether it auto-provisions */
+        patch: operations["patch_api_v1_email_domains_id"];
         trace?: never;
     };
     "/api/v1/email-domains/{id}/verify": {
@@ -1218,6 +1612,310 @@ export interface paths {
         put?: never;
         /** Create Api/v1/example/secure */
         post: operations["post_api_v1_example_secure"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Feature flags composed with the tenant plan: what this tenant can actually use
+         * @description The curated feature flags, keyed by their settings key, resolved for the tenant making the request. The settings console already edits the operator half and is global and system-tenant-only; this composes it with the tenant PLAN, which that surface knows nothing about. Each row carries three booleans rather than one, because "off" is not a single condition: `operator_enabled` is the instance switch, `entitled` is whether the plan includes it where a commercial gate is declared, and `enabled` is both. One flag would send whoever is looking to the wrong place, since an operator setting cannot be fixed by changing a plan, nor a plan in settings.
+         */
+        get: operations["get_api_v1_features"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/form-fields": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One form's fields, addressed by query param
+         * @description The same list as GET /api/v1/forms/{id}/fields, reachable by `?form_id=` so a master-detail picker can drive it — a data-bound block's params append QUERY params to a fixed source and cannot fill a PATH segment. This flat form exists for READS only; every write stays nested under the form, which is what makes a delete refuse when the field belongs to a different one. An absent or unknown `form_id` returns an empty list, not a 422: the picker renders before anybody has chosen.
+         */
+        get: operations["get_api_v1_form_fields"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/form-submissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the tenant's submissions
+         * @description Newest first, optionally narrowed by `form_id` or `submitted_by`. Each row carries the form key and name so a list renders without a round trip per row. `document_id` is null for a submission to a form with no route template (it collected, it did not circulate) and for one whose document was later deleted — both ordinary states, not failures.
+         */
+        get: operations["get_api_v1_form_submissions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/form-submissions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one submission, with the fields it was answering
+         * @description The fields travel with the submission because the two are useless apart — an answer of `41` means nothing without the field that says what was asked. They are TODAY's fields, and `form_version_now` is returned beside the submission's own `form_version` so a reader can SEE when the two do not line up and knows they are looking at drift rather than at a bug.
+         */
+        get: operations["get_api_v1_form_submissions_id"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/forms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the tenant's forms
+         * @description Newest first. `?status=` narrows to `draft`, `published` or `archived`. Each row carries `available_transitions` and `accepts_submissions`, both DERIVED from the status, so a client rendering the lifecycle controls does not have to hold a second copy of the transition table.
+         */
+        get: operations["get_api_v1_forms"];
+        put?: never;
+        /**
+         * Author a new form
+         * @description Always created as a `draft`: a form is never born live, because one with no fields yet that accepted submissions would collect empty ones. `route_template_id` is what makes submissions CIRCULATE — pointed at a design from /api/v1/document-route-templates, every submission becomes a document routed through the existing engine. Omitted, the form collects and stops there.
+         */
+        post: operations["post_api_v1_forms"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/forms/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one form, with its fields and its submission count
+         * @description The submission count travels with the form because an author about to change a published one needs to know that people have already answered it — and a count they have to go and fetch is a count they will not fetch.
+         */
+        get: operations["get_api_v1_forms_id"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Rename a form, retitle it, or change where its submissions go
+         * @description `form_key` is immutable and a body carrying one is REFUSED, not ignored: code and links bind to the key, so editing it in place would silently repoint every reference at a form that no longer exists. `status` is likewise refused — it moves through /publish and /archive, which are acts rather than attribute assignments.
+         */
+        patch: operations["patch_api_v1_forms_id"];
+        trace?: never;
+    };
+    "/api/v1/forms/{id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop accepting submissions
+         * @description Everything already submitted stays exactly where it is; only the door closes. REVERSIBLE — republishing is allowed, because retiring a form at the end of a cycle and wanting it back at the start of the next one is the ordinary case. There is no DELETE at all: a form is what somebody's submission was an answer TO, and destroying it leaves every submission as a bag of keys with nothing to say what they meant.
+         */
+        post: operations["post_api_v1_forms_id_archive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/forms/{id}/fields": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A form's fields, in authoring order
+         * @description Ordered by `position`, then `id` — the id tie-break makes the sequence TOTAL, since `position` carries no unique index (a drag-reorderable ordinal must not, or a two-field swap becomes a three-statement dance). `meta` carries the vocabularies a builder renders its pickers from, so a client cannot hold a stale copy of the field kinds or the prefill sources.
+         */
+        get: operations["get_api_v1_forms_id_fields"];
+        /**
+         * Save a form's whole field set at once
+         * @description Authoring a form is one act of composition, not a sequence of independent single-field decisions — an editor that adds, reorders and deletes question cards in place cannot rest on per-field calls without inventing a client-side transaction and hoping every leg lands. Reconciled by `field_key`, which is the stable identity a recorded ANSWER refers to and is deliberately not updatable: a key present in both the payload and the stored set is the SAME question, edited or moved, while a stored key absent from the payload is a question withdrawn — and its answers stay recorded but stop having a label. Matching on position instead would rename every question below an insertion and silently reattribute its answers. Position comes from the order sent, and the whole reconciliation is one transaction.
+         */
+        put: operations["put_api_v1_forms_id_fields"];
+        /**
+         * Add a field to a form
+         * @description Appended AFTER the current maximum position unless one is given: a builder that adds a field expects it at the end, where the author is looking. `select` and `multiselect` require a non-empty `options` list; `profile_ref` and `ou_ref` accept none, because their choices are RESOLVED from the tenant's live people and units rather than authored — a pasted roster is wrong by the end of the month, still renders, and still reports success. `prefill_source` names a rule for reaching the submitter's own details and is resolved at render time, never stored.
+         */
+        post: operations["post_api_v1_forms_id_fields"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/forms/{id}/fields/{fieldId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Take a field off a form
+         * @description Answers already given to it are NOT deleted — they stay in the submission and simply stop having a label. That is why an ARCHIVED form refuses this: its fields are the only remaining explanation of what its submissions answered. The field id is scoped to the form in the path, so a delete addressed through the wrong form is a 404 rather than a cross-form deletion.
+         */
+        delete: operations["delete_api_v1_forms_id_fields_fieldid"];
+        options?: never;
+        head?: never;
+        /**
+         * Edit a field, or move it in the order
+         * @description `field_key` is immutable and a body carrying one is REFUSED: answers already submitted are keyed by it, so renaming a key in place does not rename the answers, it ORPHANS them, silently, while reporting success. `field_type` MAY change — fixing text to textarea is a real edit — and options are re-validated against the new kind in the same request, so a select demoted to text cannot keep choices nothing will draw.
+         */
+        patch: operations["patch_api_v1_forms_id_fields_fieldid"];
+        trace?: never;
+    };
+    "/api/v1/forms/{id}/public-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Open this form to people who have no account, minting its public address
+         * @description OPT-IN and OFF BY DEFAULT on every form: `public_enabled` is only ever true because of this call. It mints a 256-bit random slug and returns the absolute `public_url` built from it — the ONLY credential the public endpoints have, which is why it is random rather than derived from the form id or key: a guessable address makes the whole catalogue of an install's forms walkable with curl. REFUSED (422) on a form that is not `published` (a link to one answers 404 to everybody who follows it), and on a form carrying a `profile_ref` or `ou_ref` field — the reference kinds would make the public submit a MEMBERSHIP ORACLE, since the existence check behind them reveals whether a given id belongs to this organisation. A `file` field is ACCEPTED (it was refused until migration 134 only because no anonymous upload route existed; a file input asks the tenant's data nothing, so it cannot answer anything about it). `opens_at` / `closes_at` are optional; either may be null for "no boundary on this side". They are naive local date-times in the instance's own clock, and a UTC offset is REFUSED rather than silently applied. Re-opening after a close mints a DIFFERENT address: a withdrawn link stays withdrawn.
+         */
+        post: operations["post_api_v1_forms_id_public_link"];
+        /**
+         * Close this form's public link
+         * @description The slug is DESTROYED, not parked beside a disabled flag, so the old address is unresolvable by construction rather than by a check somebody could remove. The window dates go with it. IDEMPOTENT: closing a link that is already closed is a 200, because a client that lost a response must be able to retry; `meta.closed` says whether this call was the one that changed anything. Submissions already received are untouched.
+         */
+        delete: operations["delete_api_v1_forms_id_public_link"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/forms/{id}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make the form live, and mint a version
+         * @description A form with no fields is REFUSED: publishing one would produce a live form that collects nothing, renders as an empty page with a submit button, and reports every submission as successful. Publishing increments `version`, and every submission stamps the version it was answered against — which lets a reader SEE drift between an old answer set and today's fields, but does not by itself reconstruct the old field list. Idempotent: asking for the state the form is already in returns it rather than erroring.
+         */
+        post: operations["post_api_v1_forms_id_publish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/forms/{id}/render": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The form as it should be DRAWN for the caller, with their prefilled values
+         * @description Fields in order, grouped into derived `sections`, plus `prefill` — values resolved SERVER-SIDE from the CALLER'S own saved details so they do not retype what the organisation already knows. Prefill is a suggestion, never an answer: nothing is recorded until the person submits. `unresolved_prefill` names any field whose declared source nothing in this install stores, so an empty box is distinguishable from a bug. A form that is not accepting submissions still renders — `accepts_submissions` says which — so a person following a link to an archived form learns it closed rather than that it never existed.
+         */
+        get: operations["get_api_v1_forms_id_render"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/forms/{id}/submissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit a form
+         * @description Answers arrive under `data`, keyed by field key; everything else in the body is ignored, because a body that could also set `submitted_by_profile_id` would let a caller sign a declaration in somebody else's name. On success the submission ALSO becomes a core DOCUMENT, so it inherits routing, approvals, the inbox, QR verification, artifacts and row-level visibility — and when the form names a route template, that document starts circulating in the same transaction. `meta.routed` says whether it did, so a client never tells somebody their request is on its way when nothing is moving. `meta.ignored_keys` names answers that matched no field (a stale client): they are dropped rather than refused, so a race nobody caused does not discard everything the person typed.
+         */
+        post: operations["post_api_v1_forms_id_submissions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/forms/{id}/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attach a file to a form you are filling in
+         * @description MULTIPART, one part named `file`. Returns the `reference` a `file` answer carries, plus the filename, the SNIFFED content type, the byte size and the server's SHA-256 of what it stored. Gated `forms:submit` — the same permission as the submit itself, because uploading is half of answering. ACCEPTS application/pdf, image/png and image/jpeg ONLY, decided by the LEADING BYTES: a declared Content-Type that contradicts the bytes is a 422, and a declared type is never what gets stored. Office formats are absent on purpose — a .docx is indistinguishable from any other ZIP by magic bytes. MAXIMUM 10 MiB. REFUSED (422) on a form that is not accepting submissions, and on a form with no `file` field — so a broad permission cannot be aimed at arbitrary form ids as a way into a tenant's storage. THROTTLED to 20 uploads per caller per hour. THE UPLOAD IS SINGLE-USE and expires: it is spent by the first submission that names it, and anything never submitted is deleted by the `form-uploads:sweep` retention job (24 h by default).
+         */
+        post: operations["post_api_v1_forms_id_uploads"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1658,6 +2356,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me/form-submissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller's own submissions
+         * @description Only ever the caller's rows — the ROUTE decides whose, not a query param, so nothing a client omits or changes can widen it. Gated on `forms:submit` rather than `forms:read` because the rows already name exactly one person, so a tenant-wide permission has nothing left to decide; requiring the read permission would hide this from precisely the people whose submissions are in it. A caller with no profile (a service principal) gets an empty list, which is true rather than an authorization failure somebody has to investigate.
+         */
+        get: operations["get_api_v1_me_form_submissions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me/identities": {
         parameters: {
             query?: never;
@@ -1823,6 +2541,304 @@ export interface paths {
         put?: never;
         /** Resolve which of a batch of requests the caller is permitted to make */
         post: operations["post_api_v1_me_permitted_actions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meeting-attendees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One meeting's attendance, and what each attendee had answered
+         * @description Every row carries `was_invited` and `invitation_status` beside the attendance, because the interesting rows are the ones where the two disagree: somebody who declined and came anyway, somebody who holds no invitation at all. `convening:read` and not `convening:manage`, so that a caller who can already see this meeting's invitations and decisions is not refused the less sensitive fact of who was in the room.
+         */
+        get: operations["get_api_v1_meeting_attendees"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meeting-decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One meeting's decisions */
+        get: operations["get_api_v1_meeting_decisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meeting-invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One meeting's invitations and answers */
+        get: operations["get_api_v1_meeting_invitations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meetings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List meetings, narrowed by body and status
+         * @description Most recent first, by id rather than by date: a draft has no date at all, and ordering on a nullable column heaps every draft at whichever end the engine sorts nulls.
+         */
+        get: operations["get_api_v1_meetings"];
+        put?: never;
+        /**
+         * Open a meeting on a body, in draft
+         * @description Always `draft`, never straight to `scheduled`. Scheduling is its own act with its own meaning ("this is fixed, tell people"), and a sitting must not become scheduled as a side effect of somebody starting an agenda.
+         */
+        post: operations["post_api_v1_meetings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meetings/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one meeting, with its agenda, decisions and invitations
+         * @description Everything behind one request, because nobody has ever wanted three of the four. A screen that fetched them separately would render an agenda before it knew which items had been decided.
+         */
+        get: operations["get_api_v1_meetings_id"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meetings/{id}/agenda": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Put an item — often a document — on a meeting's agenda
+         * @description A draft or scheduled meeting accumulates items freely. Attaching to a meeting that has ALREADY BEEN HELD is possible and must be asked for (`allow_held: true`): it asserts the body considered the item at a sitting that is over, which is right for a paper tabled on the day and wrong if you meant the next meeting. A cancelled meeting is refused outright.
+         */
+        post: operations["post_api_v1_meetings_id_agenda"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meetings/{id}/agenda/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Rewrite the whole agenda's order
+         * @description The list must name every item on the agenda exactly once. A partial list describes an order that omits items, and both readings of that — leave them where they are, or append them — are guesses.
+         */
+        put: operations["put_api_v1_meetings_id_agenda_order"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meetings/{id}/agenda/{itemId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove an agenda item, closing the gap it leaves
+         * @description Refused once a decision has been recorded against the item: a decision may already have approved a document, and deleting what it was about would leave it quoting an item nobody can read.
+         */
+        delete: operations["delete_api_v1_meetings_id_agenda_itemid"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meetings/{id}/agenda/{itemId}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Minute the body's decision, and drive the document's approval route
+         * @description THE ONE ENDPOINT HERE THAT CAN MOVE SOMEBODY ELSE'S DOCUMENT. One call allocates the decision number from the platform counter, applies the verdict through the existing routing engine, and writes the decision row — all three in one transaction, in that order, so a decision can never claim an approval the engine refused. Approved advances or fires the approve edge; rejected fires the reject edge or goes nowhere; a deferral is recorded and moves nothing. The `routing` object always says what actually happened, including the ordinary cases where nothing did.
+         */
+        post: operations["post_api_v1_meetings_id_agenda_itemid_decision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meetings/{id}/attendance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Record who actually attended a meeting that has been held
+         * @description A REPLACEMENT of the whole list, which is why it is a PUT: a secretary reads a sign-in sheet and asserts the entire set, not a stream of arrivals. Anybody omitted is removed from the record of who attended. ATTENDANCE IS NOT AN INVITATION ANSWER — an acceptance is a prediction made before the sitting and attendance is what happened at it, they disagree constantly, and neither overwrites the other. Somebody who was never invited can be recorded: give a `profile_id` for a person with an account or an `attendee_name` for a guest without one. Refused unless the meeting has been HELD — attendance taken beforehand is a guess, and the platform already holds guesses as invitation answers.
+         */
+        put: operations["put_api_v1_meetings_id_attendance"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meetings/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Call off a meeting that has not happened
+         * @description A state rather than a deletion: a called-off sitting is a fact the minute-book needs, and deleting the row would take its agenda with it.
+         */
+        post: operations["post_api_v1_meetings_id_cancel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meetings/{id}/hold": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record that the meeting took place
+         * @description Terminal: nothing un-holds a meeting, because decisions minuted at it may already have advanced somebody's document. `held_at` is supplied rather than stamped by the server — a body routinely minutes yesterday's sitting, and the date chooses the year each decision number is minted under.
+         */
+        post: operations["post_api_v1_meetings_id_hold"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meetings/{id}/invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Invite the body's current members
+         * @description Membership is resolved NOW, not stored earlier — the same rule-not-roster principle the routing engine enforces on its steps. Idempotent: somebody already invited is not re-invited, not re-notified, and does not have their answer reset, so this is safe to call again after a person joins the body.
+         */
+        post: operations["post_api_v1_meetings_id_invitations"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meetings/{id}/invitations/respond": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept, decline, or answer tentatively
+         * @description UNPERMISSIONED on purpose: being invited IS the authorization, the same posture `/api/me/notifications` takes. The answering person comes from the SESSION and never from the request body. `invited` is not among the answers — it is the state the system puts the row in, and "un-answering" means nothing.
+         */
+        post: operations["post_api_v1_meetings_id_invitations_respond"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/meetings/{id}/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fix a date and a place; re-scheduling is the same call
+         * @description When the sitting had already been announced, EVERYBODY holding an invitation is told it moved — including the people who declined, because somebody who could not make the old date may well make the new one.
+         */
+        post: operations["post_api_v1_meetings_id_schedule"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2158,6 +3174,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/payments/webhook/{provider}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A payment provider reports that money moved (PUBLIC, signature-verified)
+         * @description UNAUTHENTICATED BY NECESSITY — a bank cannot hold a session. What makes it safe is that verification happens inside the adapter BEFORE anything is parsed, and there is no way to obtain events from a payload without it: the interface has no separate verify step to forget. IT IS ALSO OUTSIDE THE PAYMENT WALL, deliberately. The wall answers 402 for a tenant that has not paid, so guarding this route would mean the payment that lifts the wall can never be recorded — a locked tenant would stay locked forever having paid. A REDELIVERY ANSWERS 200: providers retry until they get a success, and a duplicate is the system working, not an error. So does a verified callback carrying nothing we act on.
+         */
+        post: operations["post_api_v1_payments_webhook_provider"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/permissions": {
         parameters: {
             query?: never;
@@ -2182,7 +3218,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List persons in the caller's tenant */
+        /**
+         * List persons in the caller's tenant
+         * @description Always paginated — this endpoint already returned one page before it gained sort and search, so its default is unchanged. A client that needs every person must follow the `pagination` envelope to the last page.
+         */
         get: operations["get_api_v1_persons"];
         put?: never;
         /** Create a person record */
@@ -2278,6 +3317,50 @@ export interface paths {
         put: operations["put_api_v1_plans_id_entitlements"];
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plans/{id}/prices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What this plan costs, on every set of terms (operator)
+         * @description Includes RETIRED prices. A list of only the live ones cannot explain a charge somebody is querying, and that is the question this screen is opened to answer. Amounts are minor units — 4900 is 49.00 in a two-decimal currency.
+         */
+        get: operations["get_api_v1_plans_id_prices"];
+        put?: never;
+        /**
+         * Price this plan on a set of terms (operator)
+         * @description A plan may carry many prices — one per currency, billing period and seat basis — but only ONE LIVE price per combination of those. A second live price for the same terms is refused with 409 rather than accepted, because two of them would make the checkout, the invoice and the price list each pick differently and somebody be charged an amount no screen displayed. Retire the existing one first. `unit_amount` must be an integer of minor units; a decimal is refused with 422, since 49.9 truncating to 49 is a hundredfold error that looks like a real price.
+         */
+        post: operations["post_api_v1_plans_id_prices"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plans/{id}/prices/{priceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Retire a price (operator)
+         * @description RETIRES rather than destroys, and returns the retired row. The price is what a past charge was made against, so deleting it would throw away the record of what somebody was charged; the partial unique index frees its slot the moment it stops being active, so a replacement can be created immediately.
+         */
+        delete: operations["delete_api_v1_plans_id_prices_priceid"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2513,6 +3596,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/promotions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Early birds, offers and promo codes (operator)
+         * @description One object, three ways of being found: a promotion carrying a `code` must be typed by the customer, one without applies automatically to whoever qualifies. Each row carries `redemption_count` because "how much of this early bird is left" is the question this list is opened to answer, and asking per row would be one request each. Retired promotions are included — a campaign that ended is the explanation for a discount somebody is querying.
+         */
+        get: operations["get_api_v1_promotions"];
+        put?: never;
+        /**
+         * Create a promotion (operator)
+         * @description Send `percent_off` OR `amount_off` with a `currency`, never both. A percentage has no currency and applies to any price; a fixed amount is an amount of one currency and is refused against a price in another, because converting needs a rate nobody stored. Amounts are minor units — a decimal is refused rather than rounded to a hundredth of the intended discount. Omit `code` for an early bird or offer. Omit `plan_ids` to cover every plan, including ones added later. `max_redemptions_per_tenant` defaults to 1, or one tenant consumes a whole early-bird allocation.
+         */
+        post: operations["post_api_v1_promotions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/promotions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Retire a promotion (operator)
+         * @description RETIRES rather than destroys, and returns the retired row. A redeemed promotion is the evidence of why a tenant is paying what they are paying. Retiring also frees its code, which operators reuse — the same seasonal name, every year.
+         */
+        delete: operations["delete_api_v1_promotions_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/forms/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Render a publicly-opened form (PUBLIC, unauthenticated, rate-limited)
+         * @description PUBLIC and unauthenticated by design: the caller is somebody outside the organisation — an applicant, a supplier, a member of the public — who has no account and does not need one. THE TENANT IS RESOLVED FROM THE SLUG, never from a header, a query parameter or the Host — all of which are values this caller chooses. A malformed slug, an unknown slug, a form whose link was closed, and a form that is not published all produce THE SAME 404 with the same sentence, so this endpoint cannot be asked which slugs name a real form or whether an organisation uses public forms at all. The response carries NO id, tenant id, form key, author, route template, submission count, status, version or prefill — an anonymous caller has no saved details for the platform to pre-fill, and nothing about how the organisation works is disclosed. Person and unit fields are omitted from the field list, for the reason POST /api/v1/forms/{id}/public-link refuses them. FILE fields ARE served: attach the bytes at POST /api/v1/public/forms/{slug}/uploads first and put the returned `reference` in the answer. A form OUTSIDE its submission window still renders, with `accepts_submissions: false` and the window dates, so somebody holding a genuine link is told they are early or late rather than that the link is wrong.
+         */
+        get: operations["get_api_v1_public_forms_slug"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/forms/{slug}/submissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit a publicly-opened form (PUBLIC, unauthenticated, rate-limited)
+         * @description The answers arrive under `data`, keyed by field key, and NOTHING ELSE in the body is read — a body that could also set `submitted_by_profile_id`, `form_version` or a route template would let an anonymous stranger sign a declaration in somebody's name or aim it at a flow the organisation did not choose. The submission is recorded with NO SUBMITTER (`form_submissions.submitted_by_profile_id` is NULL — no sentinel profile, because a fake person is something every membership and permission check would have to know to special-case). It BECOMES A DOCUMENT and circulates through the tenant's existing routing engine exactly as an internal submission does, which is safe because the caller cannot name a route template: it lives on the FORM, is set only by `forms:manage`, and is never read from a request body. Throttled per IP and per form. The response is a receipt, not the submission row: no id, no document id, no tenant id.
+         */
+        post: operations["post_api_v1_public_forms_slug_submissions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/forms/{slug}/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Attach a file to a publicly-opened form (PUBLIC, unauthenticated, rate-limited)
+         * @description The anonymous half of the upload above, and the route that made `file` fields servable on a public form at all. A file input is NOT the membership oracle a person or unit picker is: it offers no list, resolves no id against this organisation, and returns one opaque reference to the caller's own bytes — so there is no question about the tenant it can be asked. THE TENANT IS RESOLVED FROM THE SLUG, and every reason there is no publicly served form behind it collapses to the SAME 404 as the render and the submit. BOUNDED, because what a stranger can spend here is storage: 10 uploads per IP per hour, 400 per form per hour across all addresses, and a size ceiling of 5 MiB — HALF the authenticated one, so bytes-per-address-per-hour is what is capped rather than just the count. Same three accepted kinds, same magic-byte check. Anything never submitted is deleted by the retention sweep, so an abandoned upload costs a day of storage rather than a permanent one.
+         */
+        post: operations["post_api_v1_public_forms_slug_uploads"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/relations": {
         parameters: {
             query?: never;
@@ -2559,6 +3746,46 @@ export interface paths {
         get: operations["get_api_v1_relationship_types"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the reports this caller may run
+         * @description FILTERED to what the caller may actually run, not annotated with a permitted flag: listing a report over data the caller cannot see would publish its existence, and would leave every client to re-implement the same filter differently. `required_permission` is carried so a screen can hide what it must without asking.
+         */
+        get: operations["get_api_v1_reports"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reports/{source}/document": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a report and issue it as a document
+         * @description Runs the named source and renders its rows as a flowing, paginated document — a real `documents` record with an immutable artifact, so routing, verification and the organizer all apply to it. Bounded by `documents.flow_max_table_rows`; when the ceiling bites, `truncated` is true AND the document says so on its own first page, because a reader holding a printed subset has no other way to know it is one. Answers 202 rather than 201 when the record was created but the render did not produce an artifact — the document exists and can be re-rendered against the same id.
+         */
+        post: operations["post_api_v1_reports_source_document"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2833,7 +4060,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List this tenant's tag groups */
+        /**
+         * List this tenant's tag groups
+         * @description Returns EVERY matching group unless `page` or `per_page` is sent, in which case one page comes back with a `pagination` envelope. Pagination is opt-in because this list also populates dropdowns and the tags screen's id-to-label map, which would silently truncate; `sort`, `dir` and `q` apply either way. There is no sort by display name: it is a bilingual JSON object with no member-extraction syntax common to both supported engines. Searching it works.
+         */
         get: operations["get_api_v1_tag_groups"];
         put?: never;
         /** Create a tag group */
@@ -2873,7 +4103,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List this tenant's tags, optionally within a group */
+        /**
+         * List this tenant's tags, optionally within a group
+         * @description Returns EVERY matching tag unless `page` or `per_page` is sent, in which case one page comes back with a `pagination` envelope. Pagination is opt-in because this list also populates pickers and id-to-label maps that would silently truncate; `sort`, `dir` and `q` apply either way.
+         */
         get: operations["get_api_v1_tags"];
         put?: never;
         /** Create a tag in a group */
@@ -3030,6 +4263,179 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/time-window-types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the tenant's period kinds
+         * @description The tenant's own vocabulary of period kinds, ordered by key. `parent_type_id` is how a kind says which kind it nests inside — a sub-period inside a period — and depth is derived from it rather than stored.
+         */
+        get: operations["get_api_v1_time_window_types"];
+        put?: never;
+        /** Author a new period kind, or adopt a declared one */
+        post: operations["post_api_v1_time_window_types"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/time-window-types/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the period kinds declared in code, with this tenant's adoption state
+         * @description Core and plugin declarations. A plugin's keys are namespaced under the plugin (`acme:growing_season`); adopting one with POST /api/v1/time-window-types copies its declared label and nesting in as the tenant's starting values. A declaration says nothing about WHEN a period runs — boundaries are authored per period, never derived from a calendar.
+         */
+        get: operations["get_api_v1_time_window_types_catalog"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/time-window-types/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a period kind
+         * @description Refused, never forced, while any period is of this kind or any kind nests inside it. A period is what records were scoped to and rolled up by, and a vocabulary edit does not get to destroy one.
+         */
+        delete: operations["delete_api_v1_time_window_types_id"];
+        options?: never;
+        head?: never;
+        /**
+         * Relabel a period kind, or change what it nests inside
+         * @description The `key` is immutable — code binds to it, so editing it in place would silently repoint every reference at a kind that no longer exists. A nesting change that would close a loop is refused.
+         */
+        patch: operations["patch_api_v1_time_window_types_id"];
+        trace?: never;
+    };
+    "/api/v1/time-windows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List periods, and resolve which one contains a date
+         * @description `?type_id=` with `?on=` IS the resolution question — "which period of this kind contains this date" — and answers with zero or one period. Zero is a real answer: no period covers that date, and no nearest match is invented, because attributing a record to a period it does not belong to is worse than leaving it unattributed. Ordered by `starts_on`, never by id: a period entered out of order has a higher id than periods preceding it.
+         */
+        get: operations["get_api_v1_time_windows"];
+        put?: never;
+        /**
+         * Define a period, with explicit boundaries
+         * @description Boundaries are AUTHORED and inclusive at both ends; nothing derives them from a month, a quarter or a parent's length. Two periods of one kind may not overlap, because a date has to belong to exactly one of them, and a nested period must sit inside its parent's range and be of the kind its own kind nests inside.
+         */
+        post: operations["post_api_v1_time_windows"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/time-windows/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one period, with its seal trail
+         * @description The trail travels with the period because the two facts are never wanted apart: "is this closed" is half an answer without "and has it ever been reopened, by whom, and why".
+         */
+        get: operations["get_api_v1_time_windows_id"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Relabel a period, or move its boundaries
+         * @description A CLOSED period is refused: moving the boundaries of a sealed period is the most effective way there is to unseal it without leaving a trace, since the state still reads closed while records that were inside it no longer are. Reopen it first, on the record.
+         */
+        patch: operations["patch_api_v1_time_windows_id"];
+        trace?: never;
+    };
+    "/api/v1/time-windows/{id}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close a period — seal it
+         * @description Refused while any period nested inside it is still open, naming them, because a sealed period containing an accruing one is not a seal. Repeat with `cascade: true` to close them in the same act; each gets its own trail row marked as having come from this one, so the trail distinguishes an act somebody performed from a consequence of one they performed elsewhere. Closing an already-closed period is a no-op rather than an error. The response carries the report the close was made against — what was still unfinished at the moment of sealing is unrecoverable once the work moves on.
+         */
+        post: operations["post_api_v1_time_windows_id_close"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/time-windows/{id}/close-report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What closing this period would seal
+         * @description The difference between a control and a trap. `open_children` is structural and BLOCKS the close; `unfinished` is contributed by whatever holds records in the period (through the `time_window.close_report` filter hook) and does NOT block — it is told to the person, who decides. `unfinished_reported` distinguishes "nothing is unfinished" from "nothing is tracking it", which are both an empty list and only one of which is an all-clear. Gated on read rather than close: looking changes nothing.
+         */
+        get: operations["get_api_v1_time_windows_id_close_report"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/time-windows/{id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reopen a closed period, on the record
+         * @description A REASON IS REQUIRED and is recorded permanently. Refusing reopening outright sounds safer and is not: an institution that must correct a sealed period will do it anyway, somewhere this platform cannot see, and a reopen that names who, when and why is strictly better than one that leaves no record. Does not reopen nested periods, and is refused while the period containing this one is closed — reopen that first.
+         */
+        post: operations["post_api_v1_time_windows_id_reopen"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/translations": {
         parameters: {
             query?: never;
@@ -3095,6 +4501,26 @@ export interface paths {
         };
         /** Get resolved translations for a language + domain (public) */
         get: operations["get_api_v1_translations_language_code_domain"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ui/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Display preferences for the resolved tenant (public)
+         * @description How the interface should PRESENT this tenant, resolved per-tenant then global then the registry default. A DISPLAY contract only: nothing behind it is filtered, every timestamp is still written, still queryable, still returned by every other endpoint and still in the audit trail. A client that ignores this answer renders exactly what it renders today. Tenant resolution follows branding: the authenticated tenant, else the request host, else the global layer. Never fails — an unreachable settings layer answers with the defaults.
+         */
+        get: operations["get_api_v1_ui_preferences"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3507,11 +4933,77 @@ export interface components {
         BrandingResponse: {
             data: components["schemas"]["Branding"];
         };
+        BuildIdentityResponse: {
+            commit: string | null;
+            /** @enum {string} */
+            source: "build" | "checkout" | "unknown";
+            core_version: string;
+            built_at: string | null;
+            booted_at: string;
+            uptime_seconds: number;
+            checkout_commit: string | null;
+            applied_migration_count: number | null;
+            latest_applied_migration: string | null;
+            pending_migration_count: number | null;
+        };
         CapabilityDenial: {
             /** @enum {string} */
             code: "no-resource" | "no-route" | "forbidden";
             reason: string;
             detail: string | null;
+        };
+        ConveningBody: {
+            id: number;
+            tenant_id: number;
+            body_key: string;
+            name: components["schemas"]["LocalizedLabel"];
+            display_name: string;
+            ou_id: number | null;
+            description: string | null;
+            is_active: boolean;
+            created_at: string;
+            updated_at: string;
+        };
+        ConveningBodyCreateRequest: {
+            body_key: string;
+            name: string | components["schemas"]["LocalizedLabel"];
+            ou_id?: number | null;
+            description?: string;
+        };
+        ConveningBodyDetailResponse: {
+            data: components["schemas"]["ConveningBody"] & {
+                members: components["schemas"]["ConveningBodyMember"][];
+            };
+        };
+        ConveningBodyListResponse: {
+            data: components["schemas"]["ConveningBody"][];
+        };
+        ConveningBodyMember: {
+            id: number;
+            tenant_id: number;
+            body_id: number;
+            profile_id: number;
+            /** @enum {string} */
+            member_role: "chair" | "secretary" | "member";
+            joined_at: string;
+            left_at: string | null;
+        };
+        ConveningBodyMemberListResponse: {
+            data: components["schemas"]["ConveningBodyMember"][];
+        };
+        ConveningBodyMemberRequest: {
+            profile_id: number;
+            /** @enum {string} */
+            member_role?: "chair" | "secretary" | "member";
+        };
+        ConveningBodyResponse: {
+            data: components["schemas"]["ConveningBody"];
+        };
+        ConveningBodyUpdateRequest: {
+            name?: string | components["schemas"]["LocalizedLabel"];
+            ou_id?: number | null;
+            description?: string;
+            is_active?: boolean;
         };
         DataType: {
             key: string;
@@ -3740,6 +5232,7 @@ export interface components {
             is_system: boolean;
             created_by?: number | null;
             owner_ou_id?: number | null;
+            starter_key?: string | null;
             created_at: string;
             updated_at: string;
         };
@@ -3769,6 +5262,34 @@ export interface components {
             required_permission?: string | null;
             owner_ou_id?: number | null;
         };
+        DocumentBlockUsage: {
+            block_id: number;
+            total: number;
+            hidden: number;
+            templates: {
+                id: number;
+                name: string;
+                /** @enum {string} */
+                scope: "personal" | "tenant" | "global" | "system";
+                required_permission?: string | null;
+                owner_ou_id?: number | null;
+                is_system: boolean;
+                updated_at: string;
+            }[];
+            blocks: {
+                id: number;
+                name: string;
+                /** @enum {string} */
+                scope: "personal" | "tenant" | "global" | "system";
+                required_permission?: string | null;
+                owner_ou_id?: number | null;
+                is_system: boolean;
+                updated_at: string;
+            }[];
+        };
+        DocumentBlockUsageResponse: {
+            data: components["schemas"]["DocumentBlockUsage"];
+        };
         DocumentCollection: {
             id: number;
             tenant_id: number;
@@ -3797,6 +5318,35 @@ export interface components {
         DocumentCollectionUpdateRequest: {
             name: string;
         };
+        DocumentConveningEntry: {
+            agenda_item: components["schemas"]["MeetingAgendaItem"];
+            meeting: components["schemas"]["Meeting"];
+            body: components["schemas"]["ConveningBody"];
+            decisions: components["schemas"]["MeetingDecision"][];
+        };
+        DocumentConveningResponse: {
+            data: components["schemas"]["DocumentConveningEntry"][];
+        };
+        DocumentCreateRequest: {
+            document_template_id: number;
+            title?: string | null;
+            dataRows?: {
+                [key: string]: string;
+            }[];
+            sheet?: {
+                [key: string]: unknown;
+            } | null;
+            render?: boolean | null;
+        };
+        DocumentCreateResponse: {
+            data: components["schemas"]["Document"];
+            render: {
+                attempted: boolean;
+                stored: boolean;
+                /** @enum {string|null} */
+                reason?: "declined" | "disabled" | "persist_disabled" | "rejected" | "unavailable" | "storage_unavailable" | null;
+            };
+        };
         DocumentListResponse: {
             data: components["schemas"]["Document"][];
             pagination: components["schemas"]["Pagination"];
@@ -3804,6 +5354,12 @@ export interface components {
                 key: string;
                 ou_id?: number | null;
                 collection_id?: number | null;
+            };
+            sort: {
+                /** @enum {string|null} */
+                field: "title" | "created_at" | "template_name" | null;
+                /** @enum {string} */
+                direction: "asc" | "desc";
             };
         };
         DocumentRenderRequest: {
@@ -3833,18 +5389,27 @@ export interface components {
             document_id: number;
             title: string;
             created_by?: number | null;
+            template_id?: number | null;
+            template_name?: string | null;
             created_at: string;
             steps: components["schemas"]["DocumentRouteStep"][];
+            edges: components["schemas"]["DocumentRouteEdge"][];
+            /** @enum {string} */
+            default_quorum: "all" | "any" | "majority";
         };
         DocumentRouteActionRequest: {
             /** @enum {string} */
             action: "forwarded" | "acknowledged" | "returned" | "noted";
             note?: string | null;
+            /** @enum {string|null} */
+            verdict?: "approved" | "rejected" | null;
         };
         DocumentRouteActionResponse: {
             data: components["schemas"]["DocumentTrailEvent"];
             resolved: number;
             delivered: number;
+            /** @enum {string|null} */
+            decided?: "approved" | "rejected" | null;
         };
         DocumentRouteCreateRequest: {
             title?: string | null;
@@ -3854,7 +5419,26 @@ export interface components {
                     [key: string]: unknown;
                 };
                 label?: string | null;
+                decision?: boolean | null;
+                /** @enum {string|null} */
+                decision_quorum?: "all" | "any" | "majority" | null;
+                on_approved?: number | null;
+                on_rejected?: number | null;
+                /** @enum {string} */
+                satisfied_by?: "act" | "delivery";
             }[];
+        };
+        DocumentRouteEdge: {
+            id: number;
+            route_id: number;
+            from_step_id: number;
+            to_step_id: number;
+            /** @enum {string} */
+            verdict: "approved" | "rejected";
+        };
+        DocumentRouteFromTemplateRequest: {
+            template_id: number;
+            title?: string | null;
         };
         DocumentRouteListResponse: {
             data: components["schemas"]["DocumentRoute"][];
@@ -3870,6 +5454,7 @@ export interface components {
             created_by_event_id: number;
             closed_by_event_id?: number | null;
             open: boolean;
+            closed_by_delivery: boolean;
             created_at: string;
         };
         DocumentRouteRecipientListResponse: {
@@ -3888,6 +5473,12 @@ export interface components {
                 [key: string]: unknown;
             };
             label?: string | null;
+            decision: boolean;
+            /** @enum {string|null} */
+            decision_quorum?: "all" | "any" | "majority" | null;
+            /** @enum {string} */
+            satisfied_by: "act" | "delivery";
+            rejection_count: number;
         };
         DocumentStarResponse: {
             data: components["schemas"]["DocumentCollection"] | null;
@@ -3911,6 +5502,7 @@ export interface components {
             is_system: boolean;
             created_by?: number | null;
             owner_ou_id?: number | null;
+            starter_key?: string | null;
             created_at: string;
             updated_at: string;
         };
@@ -3951,6 +5543,8 @@ export interface components {
             from_ou_id?: number | null;
             to_ou_id?: number | null;
             note?: string | null;
+            /** @enum {string|null} */
+            verdict?: "approved" | "rejected" | null;
             occurred_at: string;
         };
         DocumentTrailListResponse: {
@@ -3970,8 +5564,14 @@ export interface components {
             available: boolean;
             unavailable_reason?: string | null;
         };
+        DocumentViewGroup: {
+            key: string;
+            label: string;
+            order: number;
+        };
         DocumentViewListResponse: {
             data: components["schemas"]["DocumentView"][];
+            groups: components["schemas"]["DocumentViewGroup"][];
             unavailable_substrates: components["schemas"]["DocumentSubstrate"][];
         };
         DomainVerificationChallenge: {
@@ -4023,6 +5623,16 @@ export interface components {
             error: string;
             details?: Record<string, never>;
         };
+        Feature: {
+            key: string;
+            enabled: boolean;
+            operator_enabled: boolean;
+            entitlement: string | null;
+            entitled: boolean;
+        };
+        FeatureListResponse: {
+            data: components["schemas"]["Feature"][];
+        };
         ForceResetRequest: {
             profile_id: number;
         };
@@ -4031,6 +5641,230 @@ export interface components {
                 profile_id: number;
                 /** @enum {string} */
                 status: "forced";
+            };
+        };
+        Form: {
+            id: number;
+            tenant_id: number;
+            form_key: string;
+            name: {
+                ar?: string;
+                en?: string;
+            };
+            description?: string | null;
+            /** @enum {string} */
+            status: "draft" | "published" | "archived";
+            version: number;
+            route_template_id?: number | null;
+            created_by_profile_id?: number | null;
+            created_at?: string;
+            updated_at?: string;
+            available_transitions: string[];
+            accepts_submissions: boolean;
+            public_enabled: boolean;
+            public_slug?: string | null;
+            public_url?: string | null;
+            public_opens_at?: string | null;
+            public_closes_at?: string | null;
+            public_enabled_at?: string | null;
+            public_enabled_by_profile_id?: number | null;
+            public_window_open?: boolean;
+        };
+        FormBuilderVocabularies: {
+            field_types: string[];
+            option_bearing_field_types?: string[];
+            prefill_sources: {
+                source: string;
+                backed: boolean;
+                reason?: string | null;
+            }[];
+        };
+        FormCreateRequest: {
+            form_key: string;
+            name: {
+                ar?: string;
+                en?: string;
+            };
+            description?: string;
+            route_template_id?: number | null;
+        };
+        FormDetailResponse: {
+            data: components["schemas"]["Form"] & {
+                fields?: components["schemas"]["FormField"][];
+                sections?: components["schemas"]["FormSection"][];
+                submission_count?: number;
+            };
+        };
+        FormField: {
+            id: number;
+            tenant_id: number;
+            form_id: number;
+            field_key: string;
+            /** @enum {string} */
+            field_type: "text" | "textarea" | "number" | "date" | "select" | "multiselect" | "checkbox" | "file" | "profile_ref" | "ou_ref";
+            label: {
+                ar?: string;
+                en?: string;
+            };
+            help_text?: string | null;
+            is_required: boolean;
+            options?: components["schemas"]["FormFieldOption"][];
+            validation?: components["schemas"]["FormFieldValidation"];
+            prefill_source?: string | null;
+            prefill_backed?: boolean;
+            section_key?: string | null;
+            position: number;
+            multi_valued?: boolean;
+            created_at?: string;
+            updated_at?: string;
+        };
+        FormFieldCreateRequest: {
+            field_key: string;
+            /** @enum {string} */
+            field_type: "text" | "textarea" | "number" | "date" | "select" | "multiselect" | "checkbox" | "file" | "profile_ref" | "ou_ref";
+            label: {
+                ar?: string;
+                en?: string;
+            };
+            help_text?: string;
+            is_required?: boolean;
+            options?: components["schemas"]["FormFieldOption"][];
+            validation?: components["schemas"]["FormFieldValidation"];
+            prefill_source?: string | null;
+            section_key?: string;
+            position?: number;
+        };
+        FormFieldListResponse: {
+            data: components["schemas"]["FormField"][];
+            meta?: components["schemas"]["FormBuilderVocabularies"];
+        };
+        FormFieldOption: {
+            value: string;
+            label: {
+                ar?: string;
+                en?: string;
+            };
+        };
+        FormFieldResponse: {
+            data: components["schemas"]["FormField"];
+        };
+        FormFieldSetRequest: {
+            /** @description Every field the form should have after this call. A stored field_key absent from this list is withdrawn; answers already given to it stay recorded and stop having a label. */
+            fields: components["schemas"]["FormFieldCreateRequest"][];
+        };
+        FormFieldUpdateRequest: {
+            /** @enum {string} */
+            field_type?: "text" | "textarea" | "number" | "date" | "select" | "multiselect" | "checkbox" | "file" | "profile_ref" | "ou_ref";
+            label?: {
+                ar?: string;
+                en?: string;
+            };
+            help_text?: string;
+            is_required?: boolean;
+            options?: components["schemas"]["FormFieldOption"][];
+            validation?: components["schemas"]["FormFieldValidation"];
+            prefill_source?: string | null;
+            section_key?: string;
+            position?: number;
+        };
+        FormFieldValidation: {
+            min?: number;
+            max?: number;
+            maxLength?: number;
+            pattern?: string;
+        };
+        FormListResponse: {
+            data: components["schemas"]["Form"][];
+        };
+        FormPublicLinkClosedResponse: {
+            data: components["schemas"]["Form"];
+            meta?: {
+                closed: boolean;
+            };
+        };
+        FormPublicLinkRequest: {
+            /** @description YYYY-MM-DD or YYYY-MM-DD HH:MM[:SS] in the instance's own time zone. A bare date means the START of that day. */
+            opens_at?: string | null;
+            /** @description Same format. A bare date closes at MIDNIGHT THAT MORNING, so "all of the 30th" is written as the 31st or as an explicit time. */
+            closes_at?: string | null;
+        };
+        FormRenderResponse: {
+            data: {
+                form: components["schemas"]["Form"];
+                fields: components["schemas"]["FormField"][];
+                sections: components["schemas"]["FormSection"][];
+                prefill: {
+                    [key: string]: string;
+                };
+                unresolved_prefill?: {
+                    field_key: string;
+                    source: string;
+                    reason: string;
+                }[];
+                accepts_submissions: boolean;
+            };
+        };
+        FormResponse: {
+            data: components["schemas"]["Form"];
+        };
+        FormSection: {
+            key: string | null;
+            field_keys: string[];
+        };
+        FormSubmission: {
+            id: number;
+            tenant_id: number;
+            form_id: number;
+            form_version: number;
+            submitted_by_profile_id?: number | null;
+            document_id?: number | null;
+            data: {
+                [key: string]: unknown;
+            };
+            submitted_at: string;
+            created_at?: string;
+            form_key?: string;
+            form_name?: {
+                ar?: string;
+                en?: string;
+            };
+        };
+        FormSubmissionCreateRequest: {
+            data: {
+                [key: string]: unknown;
+            };
+        };
+        FormSubmissionCreateResponse: {
+            data: components["schemas"]["FormSubmission"];
+            meta: {
+                routed: boolean;
+                ignored_keys: string[];
+            };
+        };
+        FormSubmissionDetailResponse: {
+            data: components["schemas"]["FormSubmission"] & {
+                fields?: components["schemas"]["FormField"][];
+                form_version_now?: number | null;
+            };
+        };
+        FormSubmissionListResponse: {
+            data: components["schemas"]["FormSubmission"][];
+        };
+        FormUpdateRequest: {
+            name?: {
+                ar?: string;
+                en?: string;
+            };
+            description?: string;
+            route_template_id?: number | null;
+        };
+        FormUploadResponse: {
+            data: {
+                reference: string;
+                filename?: string | null;
+                content_type: string;
+                byte_size: number;
+                checksum_sha256: string;
             };
         };
         FrontendFeature: {
@@ -4278,6 +6112,49 @@ export interface components {
                 status: "revoked";
             };
         };
+        Invoice: {
+            id: number;
+            number?: string | null;
+            status: string;
+            currency: string;
+            subtotal_minor?: number;
+            discount_minor?: number;
+            tax_minor?: number;
+            tax_rate_bp?: number;
+            tax_label?: string;
+            total_minor: number;
+            amount_paid_minor?: number;
+            balance_minor: number;
+            total_formatted: string;
+            balance_formatted?: string;
+            issued_at?: string | null;
+            due_at?: string | null;
+            paid_at?: string | null;
+            seller_name?: string;
+            buyer_name?: string;
+        };
+        InvoiceDetail: {
+            lines?: components["schemas"]["InvoiceLine"][];
+            payments?: components["schemas"]["PaymentTransaction"][];
+        };
+        InvoiceLine: {
+            id: number;
+            position?: number;
+            description: string;
+            quantity: number;
+            unit_amount_minor?: number;
+            subtotal_minor?: number;
+            discount_minor?: number;
+            tax_rate_bp?: number;
+            tax_minor?: number;
+            total_minor: number;
+        };
+        InvoiceListResponse: {
+            data: components["schemas"]["Invoice"][];
+        };
+        InvoiceResponse: {
+            data: components["schemas"]["Invoice"];
+        };
         Language: {
             id: number;
             code: string;
@@ -4306,6 +6183,10 @@ export interface components {
             /** @enum {string} */
             direction?: "ltr" | "rtl";
             enabled?: boolean;
+        };
+        /** @description Language code => text. At least one entry. */
+        LocalizedLabel: {
+            [key: string]: string;
         };
         Login2faRequiredResponse: {
             requires_2fa: boolean;
@@ -4389,6 +6270,177 @@ export interface components {
             email?: string;
             password?: string;
             current_password: string;
+        };
+        Meeting: {
+            id: number;
+            tenant_id: number;
+            body_id: number;
+            meeting_number: number;
+            title: components["schemas"]["LocalizedLabel"];
+            display_title: string;
+            scheduled_at: string | null;
+            held_at: string | null;
+            location: string | null;
+            /** @enum {string} */
+            status: "draft" | "scheduled" | "held" | "cancelled";
+            created_by_profile_id: number | null;
+            created_at: string;
+        };
+        MeetingAgendaItem: {
+            id: number;
+            tenant_id: number;
+            meeting_id: number;
+            position: number;
+            title: components["schemas"]["LocalizedLabel"];
+            display_title: string;
+            document_id: number | null;
+            notes: string | null;
+            created_at: string;
+        };
+        MeetingAgendaItemCreateRequest: {
+            title: string | components["schemas"]["LocalizedLabel"];
+            document_id?: number | null;
+            notes?: string;
+            allow_held?: boolean;
+        };
+        MeetingAgendaItemListResponse: {
+            data: components["schemas"]["MeetingAgendaItem"][];
+        };
+        MeetingAgendaItemResponse: {
+            data: components["schemas"]["MeetingAgendaItem"];
+        };
+        MeetingAgendaReorderRequest: {
+            item_ids: number[];
+        };
+        MeetingAttendanceCount: {
+            attendees: number;
+            attendees_who_held_an_invitation: number;
+            attendees_who_did_not: number;
+            invitations_issued: number;
+            invited_who_did_not_attend: number;
+            quorum_evaluated: boolean;
+            basis: string;
+        };
+        MeetingAttendanceEntryRequest: {
+            profile_id?: number | null;
+            attendee_name?: string | null;
+            /** @enum {string} */
+            capacity?: "member" | "substitute" | "guest";
+            note?: string | null;
+        };
+        MeetingAttendanceRequest: {
+            attendees: components["schemas"]["MeetingAttendanceEntryRequest"][];
+        };
+        MeetingAttendanceResponse: {
+            data: components["schemas"]["MeetingAttendee"][];
+            counted: components["schemas"]["MeetingAttendanceCount"];
+        };
+        MeetingAttendee: {
+            id: number;
+            tenant_id: number;
+            meeting_id: number;
+            profile_id: number | null;
+            attendee_name: string | null;
+            /** @enum {string} */
+            capacity: "member" | "substitute" | "guest";
+            note: string | null;
+            recorded_at: string;
+            recorded_by_profile_id: number | null;
+            was_invited: boolean;
+            invitation_status: string | null;
+        };
+        MeetingCreateRequest: {
+            body_id: number;
+            title: string | components["schemas"]["LocalizedLabel"];
+        };
+        MeetingDecision: {
+            id: number;
+            tenant_id: number;
+            meeting_id: number;
+            agenda_item_id: number;
+            decision_number: string;
+            /** @enum {string} */
+            verdict: "approved" | "rejected" | "deferred";
+            rationale: string | null;
+            decided_at: string;
+            recorded_by_profile_id: number | null;
+            route_id: number | null;
+            route_event_id: number | null;
+        };
+        MeetingDecisionListResponse: {
+            data: components["schemas"]["MeetingDecision"][];
+        };
+        MeetingDecisionRequest: {
+            /** @enum {string} */
+            verdict: "approved" | "rejected" | "deferred";
+            rationale?: string;
+            decision_number?: string;
+            decided_at?: string;
+        };
+        MeetingDecisionResponse: {
+            data: components["schemas"]["MeetingDecision"];
+            routing: components["schemas"]["MeetingDecisionRouting"];
+        };
+        MeetingDecisionRouting: {
+            applied: boolean;
+            reason: string;
+            explanation: string;
+            route_id: number | null;
+            step_id: number | null;
+            actor_profile_id: number | null;
+            event_id: number | null;
+            decided: string | null;
+        };
+        MeetingDetailResponse: {
+            data: components["schemas"]["Meeting"] & {
+                body: components["schemas"]["ConveningBody"];
+                agenda: components["schemas"]["MeetingAgendaItem"][];
+                decisions: components["schemas"]["MeetingDecision"][];
+                invitations: components["schemas"]["MeetingInvitation"][];
+                attendance: components["schemas"]["MeetingAttendee"][];
+            };
+        };
+        MeetingHoldRequest: {
+            held_at?: string;
+        };
+        MeetingInvitation: {
+            id: number;
+            tenant_id: number;
+            meeting_id: number;
+            profile_id: number;
+            /** @enum {string} */
+            status: "invited" | "accepted" | "declined" | "tentative";
+            sent_at: string | null;
+            responded_at: string | null;
+        };
+        MeetingInvitationListResponse: {
+            data: components["schemas"]["MeetingInvitation"][];
+        };
+        MeetingInvitationRespondRequest: {
+            /** @enum {string} */
+            status: "accepted" | "declined" | "tentative";
+        };
+        MeetingInvitationResponse: {
+            data: components["schemas"]["MeetingInvitation"];
+        };
+        MeetingInviteResponse: {
+            data: components["schemas"]["MeetingInvitation"][];
+            invited: number;
+            already_invited: number;
+        };
+        MeetingListResponse: {
+            data: components["schemas"]["Meeting"][];
+        };
+        MeetingResponse: {
+            data: components["schemas"]["Meeting"];
+        };
+        MeetingScheduleRequest: {
+            scheduled_at: string;
+            location?: string;
+        };
+        MeetingScheduleResponse: {
+            data: components["schemas"]["Meeting"];
+            notified: number;
         };
         Membership: {
             id: number;
@@ -4632,6 +6684,43 @@ export interface components {
                 message: string;
             };
         };
+        PayInvoiceRequest: {
+            provider: string;
+            return_url?: string | null;
+        };
+        PaymentInstruction: {
+            kind: string;
+            provider: string;
+            reference?: string | null;
+            redirect_url?: string | null;
+            display?: {
+                [key: string]: string;
+            };
+            settled?: boolean;
+        };
+        PaymentInstructionResponse: {
+            data: components["schemas"]["PaymentInstruction"];
+        };
+        PaymentMethodListResponse: {
+            data: components["schemas"]["PaymentMethodOption"][];
+        };
+        PaymentMethodOption: {
+            provider: string;
+            uses_redirect?: boolean;
+            uses_push_transfer?: boolean;
+            supports_stored_methods?: boolean;
+            supports_unattended_charge?: boolean;
+        };
+        PaymentTransaction: {
+            id: number;
+            provider: string;
+            external_reference?: string | null;
+            status: string;
+            amount_minor: number;
+            currency: string;
+            failure_reason?: string | null;
+            occurred_at?: string;
+        };
         PendingPasswordResetItem: {
             id: number;
             profile_id: number;
@@ -4753,6 +6842,31 @@ export interface components {
         PlanListResponse: {
             data: components["schemas"]["PlanSummary"][];
         };
+        PlanPrice: {
+            id: number;
+            plan_id: number;
+            currency: string;
+            unit_amount: number;
+            /** @enum {string} */
+            billing_period: "month" | "year" | "once";
+            is_per_seat: boolean;
+            is_active: boolean;
+            created_at?: string;
+            updated_at?: string;
+        };
+        PlanPriceCreateRequest: {
+            currency: string;
+            unit_amount: number;
+            /** @enum {string} */
+            billing_period: "month" | "year" | "once";
+            is_per_seat?: boolean;
+        };
+        PlanPriceListResponse: {
+            data: components["schemas"]["PlanPrice"][];
+        };
+        PlanPriceResponse: {
+            data: components["schemas"]["PlanPrice"];
+        };
         PlanRef: {
             id: number;
             plan_key: string;
@@ -4819,6 +6933,83 @@ export interface components {
             data: {
                 personId: number | null;
                 relations: components["schemas"]["RelationSummary"][];
+            };
+        };
+        Promotion: {
+            id: number;
+            name: string;
+            code: string | null;
+            percent_off: number | null;
+            amount_off: number | null;
+            currency: string | null;
+            starts_at?: string | null;
+            ends_at?: string | null;
+            max_redemptions?: number | null;
+            max_redemptions_per_tenant?: number;
+            is_active: boolean;
+            redemption_count?: number;
+        };
+        PromotionCreateRequest: {
+            name: string;
+            code?: string | null;
+            percent_off?: number | null;
+            amount_off?: number | null;
+            currency?: string | null;
+            starts_at?: string | null;
+            ends_at?: string | null;
+            max_redemptions?: number | null;
+            max_redemptions_per_tenant?: number | null;
+            plan_ids?: number[];
+        };
+        PromotionListResponse: {
+            data: components["schemas"]["Promotion"][];
+        };
+        PromotionResponse: {
+            data: components["schemas"]["Promotion"];
+        };
+        PublicFormField: {
+            field_key: string;
+            /** @enum {string} */
+            field_type: "text" | "textarea" | "number" | "date" | "select" | "multiselect" | "checkbox";
+            label: {
+                ar?: string;
+                en?: string;
+            };
+            help_text?: string | null;
+            is_required: boolean;
+            options?: {
+                [key: string]: unknown;
+            }[];
+            validation?: {
+                [key: string]: unknown;
+            };
+            section_key?: string | null;
+            position: number;
+            multi_valued?: boolean;
+        };
+        PublicFormResponse: {
+            data: {
+                slug: string;
+                name: {
+                    ar?: string;
+                    en?: string;
+                };
+                description?: string | null;
+                fields: components["schemas"]["PublicFormField"][];
+                sections: components["schemas"]["FormSection"][];
+                accepts_submissions: boolean;
+                opens_at?: string | null;
+                closes_at?: string | null;
+            };
+        };
+        PublicFormSubmissionResponse: {
+            data: {
+                received: boolean;
+                submitted_at?: string | null;
+            };
+            meta?: {
+                routed: boolean;
+                ignored_keys: string[];
             };
         };
         RecordSectionDenial: {
@@ -5013,6 +7204,74 @@ export interface components {
             name?: string;
             description?: string;
             permissions?: (number | string)[];
+        };
+        RouteTemplate: {
+            id: number;
+            name: string;
+            description?: string | null;
+            step_count: number;
+            created_by?: number | null;
+            created_at: string;
+            updated_at: string;
+        };
+        RouteTemplateCreateRequest: {
+            name: string;
+            description?: string | null;
+        };
+        RouteTemplateDeleteResponse: {
+            data: {
+                id: number;
+                deleted: boolean;
+            };
+        };
+        RouteTemplateEdge: {
+            from: number;
+            to: number;
+            verdict: string;
+        };
+        RouteTemplateGraphRequest: {
+            steps: components["schemas"]["RouteTemplateStep"][];
+            edges?: components["schemas"]["RouteTemplateEdge"][];
+        };
+        RouteTemplateGraphResponse: {
+            data: {
+                id: number;
+                name: string;
+                description?: string | null;
+                step_count?: number;
+                default_quorum: string;
+                max_steps: number;
+                created_by?: number | null;
+                created_at?: string;
+                updated_at?: string;
+                steps: components["schemas"]["RouteTemplateStep"][];
+                edges: components["schemas"]["RouteTemplateEdge"][];
+            };
+        };
+        RouteTemplateListResponse: {
+            data: components["schemas"]["RouteTemplate"][];
+            pagination: components["schemas"]["Pagination"];
+        };
+        RouteTemplateResponse: {
+            data: components["schemas"]["RouteTemplate"];
+        };
+        RouteTemplateStep: {
+            position: number;
+            rule_kind: string;
+            rule_config: {
+                [key: string]: unknown;
+            };
+            label?: string | null;
+            decision: boolean;
+            decision_quorum?: string | null;
+            /** @enum {string} */
+            satisfied_by?: "act" | "delivery";
+            canvas_x?: number;
+            canvas_y?: number;
+        };
+        RouteTemplateUpdateRequest: {
+            name?: string;
+            description?: string | null;
         };
         RoutingRule: {
             kind: string;
@@ -5210,6 +7469,7 @@ export interface components {
         };
         TagGroupListResponse: {
             data: components["schemas"]["TagGroup"][];
+            pagination?: components["schemas"]["Pagination"];
         };
         TagGroupUpdateRequest: {
             key?: string;
@@ -5220,6 +7480,7 @@ export interface components {
         };
         TagListResponse: {
             data: components["schemas"]["Tag"][];
+            pagination?: components["schemas"]["Pagination"];
         };
         TagUpdateRequest: {
             name: string;
@@ -5266,6 +7527,10 @@ export interface components {
         };
         TenantEmailDomainResponse: {
             data: components["schemas"]["TenantEmailDomain"];
+        };
+        TenantEmailDomainUpdateRequest: {
+            default_role_id?: number;
+            auto_provision?: boolean;
         };
         TenantEmailDomainVerifyPendingResponse: {
             error: string;
@@ -5357,6 +7622,127 @@ export interface components {
             data: {
                 [key: string]: string;
             };
+        };
+        TimeWindow: {
+            id: number;
+            tenant_id: number;
+            window_type_id: number;
+            parent_window_id: number | null;
+            key: string;
+            label: string;
+            /** Format: date */
+            starts_on: string;
+            /** Format: date */
+            ends_on: string;
+            /** @enum {string} */
+            state: "open" | "closed";
+            created_at: string | null;
+            updated_at: string | null;
+        };
+        TimeWindowCloseReport: {
+            window: components["schemas"]["TimeWindow"];
+            blocked: boolean;
+            open_children: components["schemas"]["TimeWindow"][];
+            unfinished: components["schemas"]["TimeWindowUnfinishedGroup"][];
+            unfinished_total: number;
+            unfinished_reported: boolean;
+        };
+        TimeWindowCloseReportResponse: {
+            data: components["schemas"]["TimeWindowCloseReport"];
+        };
+        TimeWindowCloseRequest: {
+            reason?: string;
+            cascade?: boolean;
+        };
+        TimeWindowCloseResponse: {
+            data: {
+                window: components["schemas"]["TimeWindow"];
+                closed_ids: number[];
+                report: components["schemas"]["TimeWindowCloseReport"];
+            };
+        };
+        TimeWindowCreateRequest: {
+            window_type_id: number;
+            key: string;
+            label?: string;
+            /** Format: date */
+            starts_on: string;
+            /** Format: date */
+            ends_on: string;
+            parent_window_id?: number | null;
+        };
+        TimeWindowDetailResponse: {
+            data: components["schemas"]["TimeWindow"] & {
+                trail: components["schemas"]["TimeWindowStateEvent"][];
+            };
+        };
+        TimeWindowListResponse: {
+            data: components["schemas"]["TimeWindow"][];
+        };
+        TimeWindowReopenRequest: {
+            reason: string;
+        };
+        TimeWindowResponse: {
+            data: components["schemas"]["TimeWindow"];
+        };
+        TimeWindowStateEvent: {
+            id: number;
+            window_id: number;
+            /** @enum {string} */
+            action: "closed" | "reopened";
+            actor_profile_id: number | null;
+            reason: string | null;
+            cascaded_from_window_id: number | null;
+            occurred_at: string;
+        };
+        TimeWindowType: {
+            id: number;
+            tenant_id: number;
+            key: string;
+            label: string;
+            parent_type_id: number | null;
+            source: string;
+            created_at: string | null;
+            updated_at: string | null;
+        };
+        TimeWindowTypeCatalogEntry: {
+            key: string;
+            source: string;
+            label: string;
+            parent_key: string | null;
+            adopted: boolean;
+            adopted_id: number | null;
+        };
+        TimeWindowTypeCatalogResponse: {
+            data: components["schemas"]["TimeWindowTypeCatalogEntry"][];
+        };
+        TimeWindowTypeCreateRequest: {
+            key: string;
+            label?: string;
+            parent_type_id?: number | null;
+        };
+        TimeWindowTypeListResponse: {
+            data: components["schemas"]["TimeWindowType"][];
+        };
+        TimeWindowTypeResponse: {
+            data: components["schemas"]["TimeWindowType"];
+        };
+        TimeWindowTypeUpdateRequest: {
+            label?: string;
+            parent_type_id?: number | null;
+        };
+        TimeWindowUnfinishedGroup: {
+            label: string;
+            count: number;
+            source: string;
+        };
+        TimeWindowUpdateRequest: {
+            label?: string;
+            /** Format: date */
+            starts_on?: string;
+            /** Format: date */
+            ends_on?: string;
+            parent_window_id?: number | null;
         };
         TokenOnlyRequest: {
             token: string;
@@ -5682,6 +8068,12 @@ export interface components {
             accountStatus?: "active" | "inactive";
             allowLocalPasswordOnIdpAccount?: boolean;
         };
+        WebhookAckResponse: {
+            data: {
+                received: number;
+                settled: number;
+            };
+        };
     };
     responses: never;
     parameters: never;
@@ -5691,6 +8083,53 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_api_build: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The identity of the running process and the schema state it is in */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BuildIdentityResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_health: {
         parameters: {
             query?: never;
@@ -6607,6 +9046,83 @@ export interface operations {
                 };
             };
             /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_agenda_items: {
+        parameters: {
+            query: {
+                /** @description The meeting whose agenda to read. */
+                meeting_id: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The agenda */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingAgendaItemListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Meeting not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description meeting_id is required */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -7610,6 +10126,310 @@ export interface operations {
             };
         };
     };
+    get_api_v1_billing_invoices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invoices with what is still owed on each */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_billing_invoices_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The invoice, its lines and its payments */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvoiceResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such invoice for this tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_billing_invoices_id_pay: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PayInvoiceRequest"];
+            };
+        };
+        responses: {
+            /** @description What the payer must do next */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentInstructionResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such invoice for this tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The invoice is not open, or is already paid in full */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description That payment method is unavailable on this instance */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The provider could not be reached */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_billing_methods: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The rails on offer */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaymentMethodListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_branding: {
         parameters: {
             query?: never;
@@ -8003,6 +10823,627 @@ export interface operations {
                 };
             };
             /** @description Unknown branding key */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_convening_bodies: {
+        parameters: {
+            query?: {
+                /** @description Send `true` to list only active bodies. */
+                active?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tenant's convening bodies */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConveningBodyListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_convening_bodies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConveningBodyCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The created body */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConveningBodyResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A malformed or already-taken key, or an empty name */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_convening_bodies_id: {
+        parameters: {
+            query?: {
+                /** @description Send `true` to include seats that have ended. */
+                history?: string;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The body and its members */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConveningBodyDetailResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Convening body not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_convening_bodies_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            deleted: boolean;
+                        };
+                    };
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Convening body not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The body has meetings on record */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patch_api_v1_convening_bodies_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConveningBodyUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated body */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConveningBodyResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Convening body not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No updatable field supplied, or an attempt to change body_key */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_convening_bodies_id_members: {
+        parameters: {
+            query?: {
+                /** @description Send `true` to include seats that have ended. */
+                history?: string;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The seats */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConveningBodyMemberListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Convening body not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_convening_bodies_id_members: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConveningBodyMemberRequest"];
+            };
+        };
+        responses: {
+            /** @description The body's current seats */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConveningBodyMemberListResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Convening body not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing profile_id, or a seat outside the vocabulary */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_convening_bodies_id_members_profileid: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                profileId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The remaining seats */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConveningBodyMemberListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description That person does not currently sit on this body */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -9763,6 +13204,73 @@ export interface operations {
             };
         };
     };
+    get_api_v1_document_blocks_id_usage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The referencing templates and blocks, plus the unfiltered total */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentBlockUsageResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Block not found or not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_document_collections: {
         parameters: {
             query?: never;
@@ -10216,6 +13724,493 @@ export interface operations {
             };
             /** @description Method not allowed */
             405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_document_route_templates: {
+        parameters: {
+            query?: {
+                /** @description 1-indexed page (default 1) */
+                page?: number;
+                /** @description Page size (default 25, max 100) */
+                per_page?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tenant's route templates with pagination */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouteTemplateListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_document_route_templates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RouteTemplateCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The created template */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouteTemplateResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A template with that name already exists in this tenant */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A missing, empty or over-long name */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_document_route_templates_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The template and its graph */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouteTemplateGraphResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Route template not found in this tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_document_route_templates_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The deleted template id */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouteTemplateDeleteResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Route template not found in this tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patch_api_v1_document_route_templates_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RouteTemplateUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated template */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouteTemplateResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Route template not found in this tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Another template in this tenant already has that name */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description An empty or over-long name, or a non-text description */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    put_api_v1_document_route_templates_id_graph: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RouteTemplateGraphRequest"];
+            };
+        };
+        responses: {
+            /** @description The saved graph */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RouteTemplateGraphResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Route template not found in this tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A rule kind nothing registered, a config the rule refused, an edge naming a position that is not on the canvas, an edge leaving a step that is not a decision, or more steps than documents.routing_max_steps allows */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10705,6 +14700,97 @@ export interface operations {
             };
         };
     };
+    get_api_v1_document_verifications_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Whether the code verifies, and the minimum that makes that meaningful */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: {
+                            verified: boolean;
+                            /**
+                             * @description Present only when verified is false. `unrecognised` covers unknown, malformed, withdrawn and superseded at the default disclosure level.
+                             * @enum {string}
+                             */
+                            reason?: "unrecognised" | "withdrawn" | "superseded";
+                            /** @description Date only, and only at the `stage` level */
+                            revoked_on?: string | null;
+                            /** @description The short reference printed beneath the code */
+                            reference?: string;
+                            /** @description The issuing ORGANISATION, never a person or a unit */
+                            issuer?: string;
+                            /** @description The issue DATE (YYYY-MM-DD), not a timestamp. ABSENT at the `undated` disclosure level — absent rather than null, because null would be a statement about the document and this is a statement about the page. */
+                            issued_on?: string | null;
+                            /**
+                             * @description Only at the `stage` disclosure level
+                             * @enum {string}
+                             */
+                            stage?: "issued" | "forwarded" | "acknowledged" | "returned" | "noted";
+                            /** @description Date only, and only at the `stage` level */
+                            stage_on?: string | null;
+                        };
+                    };
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many verification attempts from this address */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Verification is temporarily unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_documents: {
         parameters: {
             query?: {
@@ -10720,6 +14806,10 @@ export interface operations {
                 collection_id?: number;
                 /** @description Case-insensitive substring of the document title */
                 q?: string;
+                /** @description Order by one of "title", "created_at" or "template_name". Omit for the order documents were recorded in, newest first. An unknown value is a 400 rather than an ignored parameter, so a client can never draw a sort indicator on a column the rows are not ordered by. */
+                sort?: string;
+                /** @description "asc" or "desc". Defaults per field — ascending for the two text columns, descending for created_at — and the order actually applied is echoed back in `sort`. Requires `sort`. */
+                direction?: string;
             };
             header?: never;
             path?: never;
@@ -10736,7 +14826,7 @@ export interface operations {
                     "application/json": components["schemas"]["DocumentListResponse"];
                 };
             };
-            /** @description A required view parameter is missing, or ou_id is not a unit in this tenant */
+            /** @description A required view parameter is missing, ou_id is not a unit in this tenant, or the sort is not one this list offers */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -10783,6 +14873,174 @@ export interface operations {
             };
             /** @description The view exists but the caller cannot anchor it (e.g. they belong to no unit) */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_documents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The document, and whether an artifact was rendered for it */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentCreateResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such template, or it is not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No template named, a bad dataRows shape, or a value supplied for a placeholder the template does not declare */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description render:true was requested and rendering or persistence is disabled on this instance */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_documents_by_verification_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The document this code names */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: {
+                            id: number;
+                            code_honoured: boolean;
+                        };
+                    };
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such code, or the document it names is not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11077,6 +15335,331 @@ export interface operations {
             };
             /** @description The stored artifact could not be read from storage */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_documents_id_convening: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every agenda item naming this document, with its meeting, body and decisions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentConveningResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_documents_id_qr: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The live code, if any, and the scan trail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: {
+                            enabled?: boolean;
+                            configured?: boolean;
+                            token?: {
+                                reference?: string;
+                                verification_url?: string;
+                                issued_at?: string | null;
+                                issued_by?: number | null;
+                            } | null;
+                            retired?: {
+                                total?: number;
+                                recent?: {
+                                    reference?: string;
+                                    issued_at?: string | null;
+                                    revoked_at?: string;
+                                    revoked_by?: number | null;
+                                    /** @enum {string} */
+                                    reason?: "withdrawn" | "superseded";
+                                }[];
+                            };
+                            scans?: {
+                                total?: number;
+                                recent?: {
+                                    id?: number;
+                                    document_id?: number;
+                                    qr_token_id?: number;
+                                    scanner_profile_id?: number | null;
+                                    /** @enum {string} */
+                                    outcome?: "verified" | "refused";
+                                    scanned_at?: string;
+                                }[];
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such document, or it is not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_documents_id_qr: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The new code */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: {
+                            reference?: string;
+                            verification_url?: string;
+                            issued_at?: string | null;
+                            issued_by?: number | null;
+                        };
+                    };
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such document, or it is not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description QR verification is switched off for this template or tenant */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description This instance has no public address configured */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_documents_id_qr: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The code is no longer honoured */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such document, or it is not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11397,6 +15980,95 @@ export interface operations {
                 };
             };
             /** @description No steps, a step naming an unregistered rule kind, a config the rule refused, or a step/recipient ceiling exceeded */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_documents_id_routes_from_template: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentRouteFromTemplateRequest"];
+            };
+        };
+        responses: {
+            /** @description The issued route with the copied steps and edges, its template provenance, and how many recipients the first step resolved to and delivered */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentRouteResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The caller may route documents but may not read route templates (route_templates:read) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Document not visible to the caller, or no such template in this tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A design with no stages, a branch leaving a stage that produces no verdict, a rule kind nothing registers any more, or more stages than the tenant's documents.routing_max_steps allows right now */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -11956,6 +16628,95 @@ export interface operations {
             };
         };
     };
+    patch_api_v1_email_domains_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantEmailDomainUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated domain registration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantEmailDomainResponse"];
+                };
+            };
+            /** @description Tenant context is required */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Domain registration not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No changes given, or default_role_id is not a role this tenant may assign */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     post_api_v1_email_domains_id_verify: {
         parameters: {
             query?: never;
@@ -12481,6 +17242,1660 @@ export interface operations {
             };
             /** @description Internal server error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_features: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The feature catalogue for this tenant */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_form_fields: {
+        parameters: {
+            query?: {
+                /** @description The form whose fields to return. */
+                form_id?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The fields, with the builder vocabularies */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormFieldListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_form_submissions: {
+        parameters: {
+            query?: {
+                /** @description Restrict to one form. */
+                form_id?: number;
+                /** @description Restrict to one submitter. */
+                submitted_by?: number;
+                /** @description Page size (default 50, max 200). */
+                limit?: number;
+                /** @description Rows to skip. */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The matching submissions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormSubmissionListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A form this tenant does not have */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_form_submissions_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The submission and its fields */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormSubmissionDetailResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Submission not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_forms: {
+        parameters: {
+            query?: {
+                /** @description Restrict to one lifecycle state. */
+                status?: string;
+                /** @description Page size (default 100, max 500). */
+                limit?: number;
+                /** @description Rows to skip. */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tenant's forms */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description An unrecognised status filter */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_forms: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FormCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The created form */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A malformed or duplicate key, a name in no language, or a route template this tenant does not have */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_forms_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The form, its fields and its counts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormDetailResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Form not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patch_api_v1_forms_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FormUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated form */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Form not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description An immutable field, no updatable field, or an unknown route template */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_forms_id_archive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The archived form */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Form not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The form moved under this request — reload and retry */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The transition is not allowed from here */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_forms_id_fields: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The fields, with the builder vocabularies */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormFieldListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Form not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    put_api_v1_forms_id_fields: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FormFieldSetRequest"];
+            };
+        };
+        responses: {
+            /** @description The resulting field set, in order */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormFieldListResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Form not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The form is archived, so its fields cannot be changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A malformed or duplicated key, an unknown kind or prefill source, a choice-bearing field with no choices, or an invalid validation pattern */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_forms_id_fields: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FormFieldCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The created field */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormFieldResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Form not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The form is archived, so its fields cannot be changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A malformed or duplicate key, an unknown kind or prefill source, a choice-bearing field with no choices, or an invalid validation pattern */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_forms_id_fields_fieldid: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                fieldId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            deleted: boolean;
+                        };
+                    };
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Form or field not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The form is archived, so its fields cannot be changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patch_api_v1_forms_id_fields_fieldid: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                fieldId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FormFieldUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated field */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormFieldResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Form or field not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The form is archived, so its fields cannot be changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description An immutable field, no updatable field, or an invalid value */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_forms_id_public_link: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FormPublicLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description The form, with its new public link */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Form not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The form already has a public link, or it moved under this request */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The form is not published, carries a field a stranger could not answer, or the window is malformed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_forms_id_public_link: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The form, with no public link */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormPublicLinkClosedResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Form not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_forms_id_publish: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The published form */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Form not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The form moved under this request — reload and retry */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The transition is not allowed from here, or the form has no fields */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_forms_id_render: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The form, drawn for this caller */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormRenderResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Form not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_forms_id_submissions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FormSubmissionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The recorded submission */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormSubmissionCreateResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Form not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The form is not accepting submissions, an answer failed validation, a reference names no record in this tenant, or the form's route template cannot be run as drawn */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_forms_id_uploads: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description The file to attach. PDF, PNG or JPEG, decided by MAGIC BYTES rather than by filename or Content-Type. Maximum 10 MiB.
+                     */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The stored file, and the reference to answer with */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormUploadResponse"];
+                };
+            };
+            /** @description No file part, or the multipart body could not be read */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Form not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too large, not an accepted kind, the form asks for no file, or the form is not accepting submissions */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many uploads from this caller */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The file could not be stored */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -14982,6 +21397,78 @@ export interface operations {
             };
         };
     };
+    get_api_v1_me_form_submissions: {
+        parameters: {
+            query?: {
+                /** @description Restrict to one form. */
+                form_id?: number;
+                /** @description Page size (default 50, max 200). */
+                limit?: number;
+                /** @description Rows to skip. */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's submissions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormSubmissionListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_me_identities: {
         parameters: {
             query?: never;
@@ -15756,6 +22243,1318 @@ export interface operations {
                 };
             };
             /** @description Missing 'checks' list, or more than 200 checks */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_meeting_attendees: {
+        parameters: {
+            query: {
+                /** @description The meeting whose attendance to read. */
+                meeting_id: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The attendance, and what was counted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingAttendanceResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Meeting not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description meeting_id is required */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_meeting_decisions: {
+        parameters: {
+            query: {
+                /** @description The meeting whose decisions to read. */
+                meeting_id: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The decisions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingDecisionListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Meeting not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description meeting_id is required */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_meeting_invitations: {
+        parameters: {
+            query: {
+                /** @description The meeting whose invitations to read. */
+                meeting_id: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The invitations */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingInvitationListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Meeting not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description meeting_id is required */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_meetings: {
+        parameters: {
+            query?: {
+                /** @description Restrict to one convening body. */
+                body_id?: number;
+                /** @description Comma-separated: draft, scheduled, held, cancelled. */
+                status?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The matching meetings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A malformed filter */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_meetings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MeetingCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The created meeting */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such body, or the body is not active */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_meetings_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The whole sitting */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingDetailResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Meeting not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_meetings_id_agenda: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MeetingAgendaItemCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The agenda item */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingAgendaItemResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Meeting not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A cancelled meeting, or a held meeting without allow_held */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    put_api_v1_meetings_id_agenda_order: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MeetingAgendaReorderRequest"];
+            };
+        };
+        responses: {
+            /** @description The reordered agenda */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingAgendaItemListResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Meeting not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The list is not a permutation of this meeting's items */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_meetings_id_agenda_itemid: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                itemId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            deleted: boolean;
+                        };
+                    };
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Agenda item not found on this meeting */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A decision has been recorded against this item */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_meetings_id_agenda_itemid_decision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                itemId: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MeetingDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description The decision, and what it did */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingDecisionResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Agenda item not found on this meeting */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A meeting that has not been held, a verdict outside the vocabulary, or a refusal from the routing engine (returned in its own words) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    put_api_v1_meetings_id_attendance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MeetingAttendanceRequest"];
+            };
+        };
+        responses: {
+            /** @description The recorded attendance, and what was counted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingAttendanceResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Meeting not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A meeting that has not been held, an attendee that identifies nobody, a duplicated profile, or a capacity outside the vocabulary */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_meetings_id_cancel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The cancelled meeting */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A meeting that has already been held */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_meetings_id_hold: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MeetingHoldRequest"];
+            };
+        };
+        responses: {
+            /** @description The held meeting */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A meeting that is already held or was cancelled */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_meetings_id_invitations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The meeting's invitations */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingInviteResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A draft, held or cancelled meeting, or a body with no members */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_meetings_id_invitations_respond: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MeetingInvitationRespondRequest"];
+            };
+        };
+        responses: {
+            /** @description Your answer */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingInvitationResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Answering an invitation requires a signed-in person */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not an answer, or you hold no invitation to this meeting */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_meetings_id_schedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MeetingScheduleRequest"];
+            };
+        };
+        responses: {
+            /** @description The scheduled meeting */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeetingScheduleResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A meeting that is held or cancelled, or an unreadable date */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -17697,6 +25496,73 @@ export interface operations {
             };
         };
     };
+    post_api_v1_payments_webhook_provider: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description How many movements were read and how many settled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookAckResponse"];
+                };
+            };
+            /** @description The payload could not be verified */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such payment provider on this instance */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Authentic but unintelligible */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_permissions: {
         parameters: {
             query?: {
@@ -17769,7 +25635,20 @@ export interface operations {
     };
     get_api_v1_persons: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Case-insensitive substring match on the display name */
+                q?: string;
+                /** @description Deprecated spelling of q, kept for existing clients. An explicit q wins. */
+                search?: string;
+                /** @description One of name (default), account, created. An unrecognised key is ignored rather than refused. */
+                sort?: string;
+                /** @description asc (default) or desc */
+                dir?: string;
+                /** @description Page number (1-based) */
+                page?: number;
+                /** @description Page size (default 25, max 100) */
+                per_page?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -18660,6 +26539,239 @@ export interface operations {
             };
             /** @description Validation failed */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_plans_id_prices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every price this plan has carried */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanPriceListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such plan */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_plans_id_prices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanPriceCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The new price */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanPriceResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such plan */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description This plan already has a live price on those terms */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The currency, amount or period cannot be billed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_plans_id_prices_priceid: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                priceId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The retired price */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanPriceResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such price on this plan */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -19703,6 +27815,485 @@ export interface operations {
             };
         };
     };
+    get_api_v1_promotions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every promotion, live and retired */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromotionListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_promotions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromotionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The new promotion */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromotionResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Another live promotion already uses that code */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The promotion cannot be created as described */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_promotions_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The retired promotion */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromotionResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such promotion */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_public_forms_slug: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The form, as a stranger may see it */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicFormResponse"];
+                };
+            };
+            /** @description No publicly-open form is served at this address */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many attempts from this address */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Temporarily unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_public_forms_slug_submissions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FormSubmissionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Received */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicFormSubmissionResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No publicly-open form is served at this address */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description An answer failed validation, or the form is outside its submission window */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many attempts from this address, or for this form */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Temporarily unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_public_forms_slug_uploads: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description The file to attach. PDF, PNG or JPEG, decided by MAGIC BYTES rather than by filename or Content-Type. Maximum 5 MiB on this public surface.
+                     */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The stored file, and the reference to answer with */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormUploadResponse"];
+                };
+            };
+            /** @description No file part, or the multipart body could not be read */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No publicly-open form is served at this address */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too large, not an accepted kind, the form asks for no file, or the form is outside its submission window */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many uploads from this address, or for this form */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Temporarily unavailable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_relations: {
         parameters: {
             query?: never;
@@ -19994,6 +28585,182 @@ export interface operations {
             };
             /** @description Internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_reports: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The runnable reports */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            key: string;
+                            label: string;
+                            origin: string;
+                            required_permission: string;
+                        }[];
+                    };
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_reports_source_document: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                source: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The issued document */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            document_id: number;
+                            title: string;
+                            page_count?: number;
+                            row_count: number;
+                            total_rows: number;
+                            truncated: boolean;
+                            content_url?: string | null;
+                        };
+                    };
+                };
+            };
+            /** @description The document was recorded but no artifact was stored */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such report, or the caller may not read its data */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The document was refused (a tenant ceiling, or a tree the renderer would not accept) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The report could not be run, or rendering is unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -20329,6 +29096,12 @@ export interface operations {
                 page?: number;
                 /** @description Page size (default 25, max 100). A client that needs every role must follow the `pagination` envelope to the last page; one request only ever describes page one. */
                 per_page?: number;
+                /** @description Sort key: `name`, `description`, or `created` (default, newest first). `permissionCount` is not offered — it is an aggregate the roles screen deliberately does not sort by. An unrecognised key falls back to the default rather than erroring. */
+                sort?: string;
+                /** @description Sort direction, `asc` or `desc`. Anything else is read as `asc`. */
+                dir?: string;
+                /** @description Case-insensitive substring match on role name or description. It narrows `pagination.total` too. */
+                q?: string;
             };
             header?: never;
             path?: never;
@@ -20736,6 +29509,12 @@ export interface operations {
                 page?: number;
                 /** @description Page size (default 25, max 100) */
                 per_page?: number;
+                /** @description Sort key: `name` (display name), `email`, or `assigned` (default, newest grant first). An unrecognised key falls back to the default rather than erroring. */
+                sort?: string;
+                /** @description Sort direction, `asc` or `desc`. Anything else is read as `asc`. */
+                dir?: string;
+                /** @description Case-insensitive substring match on a holder's display name or email. It narrows `pagination.total`, so a searched list's total is the number of MATCHING holders and no longer the role's headcount. */
+                q?: string;
             };
             header?: never;
             path: {
@@ -21936,7 +30715,18 @@ export interface operations {
     };
     get_api_v1_tag_groups: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Case-insensitive substring match on the group key and its display names */
+                q?: string;
+                /** @description One of key, created, updated. An unrecognised key is ignored rather than refused. */
+                sort?: string;
+                /** @description asc (default) or desc */
+                dir?: string;
+                /** @description Page number (1-based). Sending it opts this list into pagination. */
+                page?: number;
+                /** @description Page size (default 25, max 100). Sending it opts this list into pagination. */
+                per_page?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -22342,6 +31132,16 @@ export interface operations {
             query?: {
                 /** @description Only tags in this group */
                 group_id?: number;
+                /** @description Case-insensitive substring match on the tag name and its group's key and display name */
+                q?: string;
+                /** @description One of name, group, created. An unrecognised key is ignored rather than refused. */
+                sort?: string;
+                /** @description asc (default) or desc */
+                dir?: string;
+                /** @description Page number (1-based). Sending it opts this list into pagination. */
+                page?: number;
+                /** @description Page size (default 25, max 100). Sending it opts this list into pagination. */
+                per_page?: number;
             };
             header?: never;
             path?: never;
@@ -23709,6 +32509,972 @@ export interface operations {
             };
         };
     };
+    get_api_v1_time_window_types: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tenant's period vocabulary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimeWindowTypeListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_time_window_types: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TimeWindowTypeCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The created kind */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimeWindowTypeResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The tenant already holds this key */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Malformed key, a namespaced key no plugin declares, the reserved key `none`, or a parent that is not a kind in this tenant */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_time_window_types_catalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The declared catalogue */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimeWindowTypeCatalogResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_time_window_types_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: {
+                            deleted: boolean;
+                        };
+                    };
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Time window type not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Periods are of this kind, or kinds nest inside it */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patch_api_v1_time_window_types_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TimeWindowTypeUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated kind */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimeWindowTypeResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Time window type not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No updatable field supplied, or a nesting loop */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_time_windows: {
+        parameters: {
+            query?: {
+                /** @description Restrict to one period kind. */
+                type_id?: number;
+                /** @description Restrict to `open` or `closed`. */
+                state?: string;
+                /** @description Keep only periods containing this `YYYY-MM-DD` date. */
+                on?: string;
+                /** @description Restrict to periods nesting inside this one. */
+                parent_id?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The matching periods */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimeWindowListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A malformed filter, or a kind this tenant does not have */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_time_windows: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TimeWindowCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The created period */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimeWindowResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Malformed dates, an overlap with another period of the same kind, or a parent that is the wrong kind, closed, or does not contain these dates */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_time_windows_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The period and its trail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimeWindowDetailResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Time window not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patch_api_v1_time_windows_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TimeWindowUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description The updated period */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimeWindowResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Time window not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The period is closed, the dates overlap another of the same kind, or the change would leave a nested period outside it */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_time_windows_id_close: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TimeWindowCloseRequest"];
+            };
+        };
+        responses: {
+            /** @description The sealed period and what it sealed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimeWindowCloseResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Time window not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Periods nested inside this one are still open */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_time_windows_id_close_report: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The report */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimeWindowCloseReportResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Time window not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_time_windows_id_reopen: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TimeWindowReopenRequest"];
+            };
+        };
+        responses: {
+            /** @description The reopened period and its trail */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimeWindowDetailResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Time window not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No reason given, or the period containing this one is closed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_translations: {
         parameters: {
             query?: {
@@ -24163,6 +33929,58 @@ export interface operations {
                 };
             };
             /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_ui_preferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The effective display preferences */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: {
+                            /** @description When true, no date or time is rendered on any screen (`ui.hide_dates`). It does NOT govern the public document-verification page, which has its own disclosure control, `documents.qr_public_detail`. */
+                            hideDates: boolean;
+                        };
+                    };
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -24903,6 +34721,12 @@ export interface operations {
                 page?: number;
                 /** @description Page size (default 25, max 100) */
                 per_page?: number;
+                /** @description Sort key: `name` (default) or `rule`. `rule` orders by the rule KIND slug, not by the localised label the screen renders — the server cannot order by a string the client computes, but the kind still groups every row that renders the same label together. An unrecognised key falls back to the default rather than erroring. */
+                sort?: string;
+                /** @description Sort direction, `asc` or `desc`. Anything else is read as `asc`. */
+                dir?: string;
+                /** @description Case-insensitive substring match on a group's name or description — the two fields rendered verbatim. The rule kind is a slug the screen never shows, so it is not searched. The term narrows `pagination.total` too. */
+                q?: string;
             };
             header?: never;
             path?: never;
@@ -25464,6 +35288,12 @@ export interface operations {
                 page?: number;
                 /** @description Page size (default 25, max 100). A client that needs every user must follow the `pagination` envelope to the last page; one request only ever describes page one. */
                 per_page?: number;
+                /** @description Sort key: `name`, `email`, `role`, `status`, `created` (default), plus `tenant` for a system-tenant caller. `name` and `email` order identically — the name IS the email's local part. An unrecognised key is not an error: it falls back to the default, because a client asking for a column it cannot see should get a list rather than a 400. */
+                sort?: string;
+                /** @description Sort direction, `asc` or `desc`. Anything else is read as `asc`. */
+                dir?: string;
+                /** @description Case-insensitive substring match on email or role name. It narrows `pagination.total` too, so the envelope always describes the filtered list. */
+                q?: string;
             };
             header?: never;
             path?: never;

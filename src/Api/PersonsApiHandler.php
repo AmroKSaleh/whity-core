@@ -11,7 +11,7 @@ use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Http\InputLimits;
 use Whity\Http\JsonBody;
-use Whity\Http\PaginationParams;
+use Whity\Http\ListQuery;
 use Whity\Core\Tenant\TenantContext;
 
 /**
@@ -45,11 +45,27 @@ class PersonsApiHandler
     /**
      * GET /api/persons — list/search persons visible to the current tenant.
      *
-     * Query: `search` (optional display-name substring). Each row carries a
-     * `relationCount` for the list view.
+     * Query: `page`, `per_page`, `sort` (`name`, `account`, `created`), `dir`
+     * and `q`; `search` is accepted as the pre-contract spelling of `q`. Each
+     * row carries a `relationCount` for the list view.
+     *
+     * PAGINATION STAYS UNCONDITIONAL HERE, AND THAT IS A DECISION (#1102).
+     * Unlike `/api/tags` and `/api/tag-groups`, this endpoint ALREADY paged by
+     * default before adopting {@see ListQuery} — twenty-five rows with a
+     * `pagination` envelope — so making pagination opt-in would change ITS
+     * default in the opposite direction, handing a client that sends no
+     * parameters the tenant's entire person graph where it used to get one page.
+     * That is why `alwaysPaginate` is passed explicitly: the flag records that
+     * this endpoint's default was chosen, not inherited.
+     *
+     * What actually changes for a caller is that `sort` and `q` now work. The
+     * relations screen fetched `per_page=100` and sorted and filtered in the
+     * browser precisely because they did not, and its own comment recorded the
+     * consequence: a tenant with more than a hundred people could not see the
+     * rest, with nothing on screen saying so.
      *
      * @param Request $request The incoming request.
-     * @return Response JSON list under `data`.
+     * @return Response JSON list under `data`, with a `pagination` envelope.
      */
     public function list(Request $request): Response
     {
@@ -59,10 +75,13 @@ class PersonsApiHandler
                 return Response::error('Tenant context is required', 400);
             }
 
-            $search = $this->queryParam($request, 'search');
-            $p      = PaginationParams::fromPath($request->getPath());
-            $total  = $this->persons->count($tenantId, $search);
-            $rows   = $this->persons->list($tenantId, $search, $p->perPage, $p->offset);
+            $query  = ListQuery::fromPath(
+                $this->listPath($request),
+                PersonRepository::listSpec(),
+                alwaysPaginate: true
+            );
+            $total  = $this->persons->count($tenantId, $query);
+            $rows   = $this->persons->list($tenantId, $query);
 
             $data = array_map(
                 fn (array $row): array => $this->toPublic(
@@ -72,7 +91,7 @@ class PersonsApiHandler
                 $rows
             );
 
-            return Response::json(['data' => $data, 'pagination' => $p->meta($total)], 200);
+            return Response::json(['data' => $data, 'pagination' => $query->meta($total)], 200);
         } catch (\Exception $e) {
             error_log('[PersonsApiHandler] list failed: ' . $e->getMessage());
             return Response::error('Failed to fetch persons', 500);
@@ -372,6 +391,34 @@ class PersonsApiHandler
             'typeName' => (string) $relation['typeName'],
             'direction' => (string) $relation['direction'],
         ];
+    }
+
+    /**
+     * The request path with the legacy `search` parameter folded in as `q`.
+     *
+     * `search` is this endpoint's PRE-CONTRACT spelling of the same filter. It
+     * is documented, it is exercised by a regression test that exists because
+     * the filter was once dead in production (WC-537), and the clients that send
+     * it are not updated in this repository — so it keeps working. Rewriting it
+     * into the path rather than teaching {@see ListQuery} a second parameter
+     * name keeps the alias local to the one endpoint that owes it: every other
+     * list endpoint speaks only `q`.
+     *
+     * An explicit `q` wins, so a caller that has moved on is never overridden by
+     * a stale `search` its own tooling still appends. Appending to the PATH is
+     * what makes the alias work at runtime as well as in tests:
+     * {@see ListQuery::fromPath()} merges `$_GET` first and lets the path win.
+     */
+    private function listPath(Request $request): string
+    {
+        $path = $request->getPath();
+
+        $legacy = $this->queryParam($request, 'search');
+        if ($legacy === null || $legacy === '' || $this->queryParam($request, 'q') !== null) {
+            return $path;
+        }
+
+        return $path . (str_contains($path, '?') ? '&' : '?') . 'q=' . rawurlencode($legacy);
     }
 
     /**

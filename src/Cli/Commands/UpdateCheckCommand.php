@@ -23,7 +23,7 @@ use Whity\Core\Update\ReleaseCheckResult;
  *   1 — an update is available;
  *   2 — the check could not be performed (network, rate limit, bad payload).
  */
-final class UpdateCheckCommand
+final class UpdateCheckCommand implements CliCommand
 {
     private LatestReleaseCheck $check;
 

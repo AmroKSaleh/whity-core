@@ -25,6 +25,7 @@ import {
   blocksById,
   makeBlockFromElements,
   resolveInstance,
+  wouldCycle,
   type BlockScope,
   type DocBlock,
 } from '@amroksaleh/ui/documents/blocks';
@@ -44,7 +45,23 @@ import { Canvas } from './canvas';
 import { SideRail, type RailTab } from './side-rail';
 import { PrintDocument } from './print-document';
 import { EditorTopBar, ShortcutsDialog, useModLabel } from './editor-top-bar';
-import type { EditorCommandContext, ZoomAction } from './editor-commands';
+import {
+  buildEditorMenus,
+  flowBlockLabel,
+  blockDeleteConsequence,
+  blockDeletedMessage,
+  savedMessage,
+  sharedTemplateWarning,
+  type EditorCommandContext,
+  type ZoomAction,
+} from './editor-commands';
+import { ConfirmDelete } from './confirm-delete';
+import { CommandPalette } from '@amroksaleh/ui/command-palette';
+import { FlowEditor } from './flow-editor';
+import { FlowBlockSettings } from './flow-block-settings';
+import { canvasToFlow, describeSwitch, flowToCanvas } from './mode-switch';
+import { newFlowBlock, type FlowBlockType, type FlowContent } from '@amroksaleh/ui/documents/flow';
+import { flowPaletteItems, paletteItemsForFlow, paletteItemsFromMenus } from './editor-palette';
 
 /** Zoom bounds + step for the View menu / toolbar zoom controls. */
 const ZOOM_MIN = 0.25;
@@ -74,6 +91,29 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
   const [showRulers, setShowRulers] = useState(false);
   const [saved, setSaved] = useState<SavedTemplate[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
+
+  /**
+   * Who the NEXT create files this template for. Only consulted while unsaved.
+   *
+   * `personal` matches the server's default for a missing scope, so the control
+   * starts by describing what already happens rather than changing it.
+   */
+  const [pendingScope, setPendingScope] = useState<BlockScope>('personal');
+
+  /**
+   * The current document's visibility.
+   *
+   * DERIVED for a saved template, deliberately: `saved` is re-fetched after
+   * every save and delete, so this is the server's answer, not a guess kept in
+   * step by hand. Six separate places call `setCurrentId`; a second useState
+   * beside it would need all six to remember, and the one that forgot would
+   * leave the badge quietly naming the wrong audience — which is the exact
+   * failure this whole change exists to fix.
+   */
+  const templateScope: BlockScope =
+    currentId === null
+      ? pendingScope
+      : ((saved.find((s) => s.id === currentId)?.scope as BlockScope | undefined) ?? 'personal');
   /**
    * Bumped every time the editor swaps to a different document (New, Open
    * saved, Import). In-flight async work started against the previous document
@@ -89,6 +129,14 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
   const [railTab, setRailTab] = useState<RailTab>('layers');
   const [railOpen, setRailOpen] = useState(true);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  // #1186: which flow block is being edited. Separate from `selectedIds`
+  // because a flow block is addressed by INDEX and a canvas element by id —
+  // one selection model covering both would have to mean different things
+  // depending on the mode, which is how a selection ends up pointing at the
+  // wrong thing after a switch.
+  const [flowSelected, setFlowSelected] = useState<number | null>(null);
+  const mode = template.mode ?? 'canvas';
   // The canvas scroll viewport, measured by View ▸ Fit page in window.
   const viewportRef = useRef<HTMLElement>(null);
 
@@ -125,13 +173,31 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
   // Effective library = the caller's visible blocks (server RBAC-filtered) +
   // any built-in starter blocks not already covered — so the Blocks panel is
   // never empty even for a tenant that predates per-tenant starter seeding.
-  // Matched by NAME (not id): a seeded starter's id is a real backend id, not
-  // the client constant's symbolic id ('sys-header'), so an id-based match
-  // would show both and duplicate it once the tenant IS seeded.
+  //
+  // MATCHED BY `starterKey`, WITH NAME AS THE FALLBACK.
+  //
+  // Not by id: a seeded starter's id is a real backend id, not the client
+  // constant's symbolic one, so an id match would show both.
+  //
+  // Not by name alone, which is what this did: a display name is the one thing
+  // about a seeded block a tenant is invited to change. Rename "Company header"
+  // to "Acme header" and the match failed, so the built-in starter came back
+  // and sat in the palette beside the real block — two entries, same block,
+  // one of them a phantom that exists in nobody's library. Since starters are
+  // persisted on insert, inserting the phantom then made a third.
+  //
+  // `starter_key` is the identity the server assigns and never accepts from a
+  // client (migration 075), and it has been on every block row since #1013 —
+  // the client was simply dropping it. `DocumentDemoSeeder` records making and
+  // then abandoning this exact name-matching trade on the server side.
+  //
+  // The name fallback stays for rows seeded before 075, which have no key.
   const refreshBlocks = useCallback(async () => {
     try {
       const saved = await adapter.listBlocks();
-      const extras = STARTER_BLOCKS.filter((b) => !saved.some((s) => s.name === b.name));
+      const extras = STARTER_BLOCKS.filter(
+        (b) => !saved.some((s) => (s.starterKey ? s.starterKey === b.id : s.name === b.name))
+      );
       setBlocks([...saved, ...extras]);
     } catch (error) {
       addToast(
@@ -348,6 +414,26 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
         return;
       }
       const mod = e.ctrlKey || e.metaKey;
+
+      // The command palette. `/` alone, and Ctrl/Cmd-K as the conventional
+      // alternative for anyone who expects it.
+      //
+      // Both sit BELOW the guard above, which already returns early for an
+      // INPUT/TEXTAREA/contentEditable target — so a slash typed into a text
+      // element, a placeholder name or the batch editor stays a slash. That
+      // guard is the whole reason `/` is safe to bind bare here; without it
+      // this would be a keystroke that silently eats a character.
+      if (!mod && e.key === '/') {
+        e.preventDefault();
+        setPaletteOpen(true);
+        return;
+      }
+      if (mod && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault();
+        setPaletteOpen(true);
+        return;
+      }
+
       if (mod && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
         e.preventDefault();
         undo();
@@ -676,6 +762,40 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
   };
 
   // ── reusable blocks ───────────────────────────────────────────────────────
+
+  /** Whether an id came from the backend. Everything else — a starter's
+   *  `sys-header`, a locally-minted uuid — is a block that does not exist
+   *  server-side yet, which is the distinction the whole section below turns
+   *  on. Same test `saveBlock` uses to pick CREATE over UPDATE. */
+  const isBackendId = (id: string) => /^\d+$/.test(id);
+
+  /**
+   * Follow a block that has just been given a new id — in the live document AND
+   * IN THE UNDO STACKS.
+   *
+   * Saving a block whose id was not a backend id creates it, and the backend
+   * mints a fresh numeric one. `refreshBlocks()` then drops the old entry from
+   * the library (it matches by name), so every instance still pointing at the
+   * old id resolves to nothing.
+   *
+   * The history stacks matter as much as the current template, and used to be
+   * left behind: the old id resolves to nothing ANYWHERE now, so a snapshot
+   * holding it is a snapshot that renders a hole. Repointing only the live
+   * document leaves undo as a way to travel back to the broken state — which is
+   * worse than not fixing it, because it looks fixed until somebody presses
+   * ctrl-Z.
+   *
+   * Deliberately NOT a `commit()`: this is not an edit the author made, it is
+   * the same document described correctly. Pushing it as an undo step would
+   * offer "undo" as a way to re-break the pointers.
+   */
+  const followBlockId = useCallback((fromId: string, toId: string) => {
+    if (fromId === toId) return;
+    setTemplate((tpl) => repointBlockInstances(tpl, fromId, toId));
+    setPast((p) => p.map((tpl) => repointBlockInstances(tpl, fromId, toId)));
+    setFuture((f) => f.map((tpl) => repointBlockInstances(tpl, fromId, toId)));
+  }, []);
+
   const saveSelectionAsBlock = async () => {
     const sel = elements.filter((e) => selectedIds.includes(e.id));
     const block = makeBlockFromElements(`Block ${blocks.length + 1}`, sel);
@@ -695,16 +815,79 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     }
   };
 
-  const insertBlock = (blockId: string) => {
+  /**
+   * Place a block on the page — PERSISTING IT FIRST if it is one of the
+   * client-side starters.
+   *
+   * THE BUG THIS FIXES IS INVISIBLE UNTIL THE PDF ARRIVES. A starter
+   * (`sys-header`) exists only in this bundle: `refreshBlocks` merges
+   * STARTER_BLOCKS into the library so the panel is never empty for a tenant
+   * that predates per-tenant seeding. Inserting one used to write a
+   * `blockInstance` pointing at `sys-header` straight into the template, and
+   * the canvas renders it perfectly, because the canvas resolves against that
+   * same in-memory library.
+   *
+   * The SERVER does not have that library. `DocumentRenderer::resolveBlocks()`
+   * skips any id that is not all digits and the harness renders a missing block
+   * as empty — so the document the customer receives has a blank space where
+   * its header was, with nothing anywhere reporting a problem. The designer,
+   * the preview, and the print view all agree it is fine.
+   *
+   * So a starter becomes real before anything points at it. Saved as
+   * `personal`, not with its own `system` scope: creating a system/tenant block
+   * is a publish action, which most authors may not perform, and it would fail
+   * exactly the people this fallback exists for. Personal is enough — the
+   * renderer resolves blocks by id within the tenant, not by who is reading, so
+   * the PDF is correct for every recipient.
+   */
+  const insertBlock = async (blockId: string) => {
     const b = blocksMap[blockId];
     if (!b) return;
+
+    // THE ONLY PLACE A CYCLE CAN BE CREATED (#1186 slice 3). Blocks may hold
+    // blocks, so inserting one INTO a block being edited can close a loop —
+    // directly (a block into itself) or through a chain nobody can see on
+    // screen, which is the case actually built by accident: A already holds B,
+    // and someone drops A into B months later.
+    //
+    // Refused here rather than survived at render time. `flattenBlock` cuts a
+    // cycle and reports it, so the document still prints — but the honest
+    // moment to say no is when somebody builds one, not when part of a
+    // document quietly stops appearing.
+    if (blockEdit && wouldCycle(blocksMap, blockEdit.id, blockId)) {
+      addToast(
+        t(
+          'designer.block.wouldCycle',
+          'That block already contains this one, so adding it here would make a loop.'
+        ),
+        'error'
+      );
+      return;
+    }
+
+    let id = blockId;
+    if (!isBackendId(blockId)) {
+      try {
+        id = await adapter.saveBlock({ ...b, scope: 'personal' });
+        await refreshBlocks();
+      } catch (error) {
+        // Refuse to place it rather than placing a pointer that renders as a
+        // hole. A visible failure now beats a silent one at print time.
+        addToast(
+          error instanceof Error ? error.message : t('designer.block.saveFailed', 'Failed to save block.'),
+          'error'
+        );
+        return;
+      }
+    }
+
     commit('insert-block');
     setTemplate((tpl) => {
       const els = tpl.pages[pageIndex]?.elements ?? [];
       const inst = {
         id: `blockInstance-${Date.now()}-${(pasteSeq.current += 1)}`,
         type: 'blockInstance' as const,
-        blockId,
+        blockId: id,
         x: 8,
         y: 8,
         w: b.w,
@@ -717,17 +900,59 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     });
   };
 
-  const deleteBlockDef = async (id: string) => {
+  /**
+   * Actually delete a block. Reached only through the confirmation below.
+   *
+   * The toast no longer says "from your library". A tenant or global block is
+   * not in your library, it is in everybody's, and telling the person who just
+   * removed one that they tidied their own shelf is the most misleading moment
+   * in the whole flow. It now names the same audience the dialog warned about,
+   * so the confirmation and the result agree.
+   */
+  const deleteBlockDef = async (b: DocBlock) => {
     try {
-      await adapter.deleteBlock(id);
+      await adapter.deleteBlock(b.id);
       await refreshBlocks();
-      addToast(t('designer.block.deleted', 'Block deleted from your library.'), 'info');
+      addToast(blockDeletedMessage(t, b.scope, b.name), 'info');
     } catch (error) {
+      // A 409 here is the server's reference-integrity guard ("still referenced
+      // by N templates") — the most useful thing it can say, so it is relayed
+      // verbatim rather than flattened into a generic failure.
       addToast(
         error instanceof Error ? error.message : t('designer.block.deleteFailed', 'Failed to delete block.'),
         'error'
       );
     }
+  };
+
+  /**
+   * What the confirmation is currently asking about, or null when it is closed.
+   *
+   * One slot for both deletes rather than a pair of booleans: two of these can
+   * never be open at once, and a single nullable makes that a fact of the type
+   * instead of an invariant somebody has to maintain.
+   */
+  const [pendingDelete, setPendingDelete] = useState<{
+    title: string;
+    body: string;
+    consequence: string | null;
+    confirmLabel: string;
+    run: () => void;
+  } | null>(null);
+
+  const askDeleteBlock = (id: string) => {
+    const b = blocksMap[id];
+    if (!b) return;
+    setPendingDelete({
+      title: t('designer.block.confirmDeleteTitle', 'Delete “{name}”?', { name: b.name }),
+      body: t(
+        'designer.block.confirmDeleteBody',
+        'The block is removed for good. Documents that already use it keep working only if nothing points at it — a block still in use cannot be deleted.'
+      ),
+      consequence: blockDeleteConsequence(t, b),
+      confirmLabel: t('designer.block.confirmDeleteAction', 'Delete block'),
+      run: () => void deleteBlockDef(b),
+    });
   };
 
   // Change a block's visibility tier — a real, server-enforced publish action
@@ -738,8 +963,20 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     const b = blocksMap[id];
     if (!b) return;
     try {
-      await adapter.saveBlock({ ...b, scope });
+      const savedId = await adapter.saveBlock({ ...b, scope });
       await refreshBlocks();
+      // Publishing a STARTER creates it, so the backend hands back a different
+      // id — the same fork `exitBlockEdit` has always handled and this one did
+      // not. Without it, changing a starter's visibility silently stranded
+      // every instance of it already on the page: the starter leaves the
+      // library (refreshBlocks matches by name), the instances keep pointing at
+      // `sys-header`, and they render as "missing block". A visibility change
+      // is the last action anyone would expect to damage the document.
+      //
+      // `insertBlock` now persists a starter before placing it, so newly placed
+      // instances already hold a backend id. This still matters for every
+      // document saved before that.
+      followBlockId(id, savedId);
     } catch (error) {
       addToast(
         error instanceof Error
@@ -786,10 +1023,13 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     const stash = blockStashRef.current;
     const editing = blockEdit;
     if (!stash || !editing) return;
-    // The pre-edit document to put back. Reassigned below when saving minted a
-    // new block id, so the restored page follows the block rather than
-    // dangling at its old one.
+    // The pre-edit document to put back, and the history it came with. All
+    // three are rewritten below when saving minted a new block id, so the
+    // restored page — and every state undo can travel back to — follows the
+    // block rather than dangling at its old id.
     let restored = stash.template;
+    let restoredPast = stash.past;
+    let restoredFuture = stash.future;
     if (save) {
       const els = template.pages[0]?.elements ?? [];
       const rebuilt = makeBlockFromElements(editing.name, els);
@@ -809,9 +1049,14 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
           // instance on the page still points at the old one, and
           // `refreshBlocks` has just dropped the starter from the library
           // (same name as the block now saved), so leaving them alone renders
-          // them all as "missing block". Follow the id instead.
+          // them all as "missing block". Follow the id instead — in the undo
+          // stacks too, since the old id now resolves to nothing anywhere and a
+          // snapshot still holding it is a snapshot that renders a hole.
           if (savedId !== editing.id) {
-            restored = repointBlockInstances(restored, editing.id, savedId);
+            const follow = (tpl: DocTemplate) => repointBlockInstances(tpl, editing.id, savedId);
+            restored = follow(restored);
+            restoredPast = restoredPast.map(follow);
+            restoredFuture = restoredFuture.map(follow);
           }
           addToast(t('designer.block.updated', 'Block “{name}” updated.', { name: editing.name }), 'success');
         } catch (error) {
@@ -828,8 +1073,8 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     setCurrentPage(stash.currentPage);
     setSelectedIds(stash.selectedIds);
     setCurrentId(stash.currentId);
-    setPast(stash.past);
-    setFuture(stash.future);
+    setPast(restoredPast);
+    setFuture(restoredFuture);
     historyRef.current = { lastLabel: '', lastTime: 0 };
     blockStashRef.current = null;
     setBlockEdit(null);
@@ -837,6 +1082,13 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
 
   // Detach a block instance: replace the pointer with independent copies of the
   // block's elements (inlined at the instance position), unlinking it.
+  //
+  // ONE LEVEL, deliberately, now that blocks may nest (#1186). Detaching a
+  // letterhead inlines its elements and leaves the logo instance inside it
+  // still a live pointer — you unlinked the letterhead, not everything the
+  // letterhead was built from. `resolveInstance` rather than `flattenBlock` is
+  // what says so: flattening would quietly sever every nested block too, and a
+  // person who wanted that can detach the inner one next.
   const detachInstance = (instId: string) => {
     const inst = elements.find((e) => e.id === instId);
     if (!inst || inst.type !== 'blockInstance') return;
@@ -920,13 +1172,85 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     // overwrite the saved template with it.
     const epoch = docEpoch.current;
     try {
-      const id = await adapter.saveTemplate(withSettings(template), currentId ?? undefined);
+      const creating = currentId === null;
+      const id = await adapter.saveTemplate(
+        withSettings(template),
+        currentId ?? undefined,
+        // Create only. An update leaves the stored scope alone so a save here
+        // cannot overwrite a visibility somebody set in Templates & Blocks,
+        // where the OU placement and permission tag that belong with it live.
+        creating ? pendingScope : undefined
+      );
       const stillSameDoc = docEpoch.current === epoch;
       if (stillSameDoc) {
         setCurrentId(id);
       }
-      setSaved(await adapter.listTemplates());
-      addToast(t('designer.template.saved', 'Template saved.'), 'success');
+      const list = await adapter.listTemplates();
+      setSaved(list);
+
+      // NAME THE AUDIENCE. "Template saved." was true and useless: it was also
+      // what you got when the save filed the template where nobody but you
+      // could ever see it, which is how a designer full of work looked like an
+      // empty product to everyone else.
+      //
+      // Read back from the list rather than echoing what we sent — the server
+      // has the last word on scope, and a refused promotion must not be
+      // reported here as if it had happened.
+      const filedAs = (list.find((s) => s.id === id)?.scope as BlockScope | undefined) ?? 'personal';
+      addToast(savedMessage(t, filedAs), 'success');
+    } catch (error) {
+      addToast(
+        error instanceof Error ? error.message : t('designer.template.saveFailed', 'Failed to save template.'),
+        'error'
+      );
+    }
+  };
+
+  /**
+   * SAVE AS A COPY — start from an existing template without overwriting it.
+   *
+   * The hole this fills is not "a convenience". Opening a TENANT-WIDE template,
+   * changing something, and pressing Save rewrites the template everyone in the
+   * tenant uses: `doSave` updates in place whenever `currentId` is set, and an
+   * update deliberately leaves the stored scope alone, so the edit stays
+   * published. Somebody exploring "what if the header looked like this" had no
+   * way to keep the result that did not also change everyone else's document,
+   * and nothing on screen said so.
+   *
+   * Three things make this a copy rather than a second save:
+   *
+   *  - it CREATES (no id passed), so the original row is untouched;
+   *  - it is filed as PERSONAL whatever the original was, because copying
+   *    somebody's tenant template is not the same act as publishing your
+   *    version of it to the tenant — and promoting it is a deliberate step that
+   *    lives in Templates & Blocks with the placement and permission tag that
+   *    belong beside it;
+   *  - the editor then follows the COPY. Leaving it pointed at the original
+   *    would put the next Ctrl+S straight back into the bug this exists to
+   *    prevent.
+   */
+  const doSaveAsCopy = async () => {
+    const epoch = docEpoch.current;
+    // Named, not prompted, matching how a block is saved from a selection. The
+    // library is where things get renamed, and two rows with one name is the
+    // confusion worth avoiding here.
+    const copy = withSettings({
+      ...template,
+      name: t('designer.template.copyName', '{name} (copy)', { name: template.name }),
+    });
+
+    try {
+      const id = await adapter.saveTemplate(copy, undefined, 'personal');
+      const list = await adapter.listTemplates();
+      setSaved(list);
+
+      if (docEpoch.current === epoch) {
+        setCurrentId(id);
+        setTemplate(copy);
+      }
+
+      const filedAs = (list.find((s) => s.id === id)?.scope as BlockScope | undefined) ?? 'personal';
+      addToast(savedMessage(t, filedAs), 'success');
     } catch (error) {
       addToast(
         error instanceof Error ? error.message : t('designer.template.saveFailed', 'Failed to save template.'),
@@ -953,10 +1277,9 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     addToast(t('designer.template.loaded', 'Loaded “{name}”.', { name: entry.name }), 'info');
   };
 
-  const doDeleteSaved = async () => {
-    if (!currentId) return;
+  const doDeleteSaved = async (id: string) => {
     try {
-      await adapter.deleteTemplate(currentId);
+      await adapter.deleteTemplate(id);
       setSaved(await adapter.listTemplates());
       setCurrentId(null);
       addToast(t('designer.template.deleted', 'Saved template deleted.'), 'info');
@@ -968,6 +1291,101 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
         'error'
       );
     }
+  };
+
+  /**
+   * Ask before deleting the open template.
+   *
+   * The menu item sits directly under "Open saved" and used to delete on the
+   * first click, with nothing to undo it — the undo stack holds document edits,
+   * not rows. Naming the template is most of the value: it is the difference
+   * between confirming an action and confirming *which* action.
+   */
+  const askDeleteSaved = () => {
+    if (!currentId) return;
+    const id = currentId;
+    setPendingDelete({
+      title: t('designer.template.confirmDeleteTitle', 'Delete “{name}”?', { name: template.name }),
+      body: t(
+        'designer.template.confirmDeleteBody',
+        'The saved template is removed for good. The document open in the editor stays as it is, unsaved.'
+      ),
+      consequence: templateScope === 'personal' ? null : sharedTemplateWarning(t, templateScope),
+      confirmLabel: t('designer.template.confirmDeleteAction', 'Delete template'),
+      run: () => void doDeleteSaved(id),
+    });
+  };
+
+  /**
+   * Insert a flow block, after the selected one or at the end.
+   *
+   * "After the selected one" is what makes the `/` palette feel like writing
+   * rather than appending: you are somewhere in the document, and the new block
+   * arrives where you are. With nothing selected it goes to the end, which is
+   * where an author with no cursor is.
+   */
+  const insertFlowBlock = (type: FlowBlockType) => {
+    commit('flow-insert');
+    const at = flowSelected === null ? (template.flow?.blocks.length ?? 0) : flowSelected + 1;
+    setTemplate((tpl) => {
+      const content: FlowContent = tpl.flow ?? { blocks: [] };
+      const blocks = [...content.blocks];
+      blocks.splice(at, 0, newFlowBlock(type));
+      return { ...tpl, flow: { ...content, blocks } };
+    });
+    setFlowSelected(at);
+  };
+
+  /**
+   * Switch the document between canvas and flow (#1186 slice 2).
+   *
+   * Routed through the SAME confirmation the deletes use, because canvas ->
+   * flow discards placement and cannot recover it. The count comes from
+   * `describeSwitch`, so the number the author is shown is the number that
+   * actually survives — promising more than converts would be worse than not
+   * saying anything.
+   *
+   * Flow -> canvas is additive and asks nothing: it lays the blocks out and
+   * every one of them is draggable from that moment. An "are you sure" on an
+   * action that loses nothing trains people to dismiss the ones that do.
+   */
+  const switchMode = (to: 'canvas' | 'flow') => {
+    if (to === mode) return;
+    const cost = describeSwitch(template, to);
+
+    const apply = () => {
+      commit('switch-mode');
+      setSelectedIds([]);
+      setFlowSelected(null);
+      if (to === 'flow') {
+        setTemplate((tpl) => ({ ...tpl, mode: 'flow', flow: canvasToFlow(tpl) }));
+      } else {
+        setTemplate((tpl) => flowToCanvas(tpl, () => `el-${Date.now()}-${(pasteSeq.current += 1)}`));
+      }
+    };
+
+    if (!cost.lossy) {
+      apply();
+      return;
+    }
+
+    setPendingDelete({
+      title: t('flow.switchTitle', 'Switch to document mode?'),
+      body: t(
+        'flow.switchBody',
+        'Document mode arranges blocks one below another, so the positions you set on the canvas are not kept. Your canvas layout stays saved and comes back if you switch again.'
+      ),
+      consequence: t(
+        'flow.switchCost',
+        '{carried} of {total} items carry over as text or images. Shapes, lines, barcodes and placed blocks have no document-mode equivalent and are left behind.',
+        {
+          carried: String(cost.carried),
+          total: String(template.pages.reduce((n, p) => n + p.elements.length, 0)),
+        }
+      ),
+      confirmLabel: t('flow.switchAction', 'Switch to document mode'),
+      run: apply,
+    });
   };
 
   // Load a fresh document (blank or a starter), resetting all editor state.
@@ -1053,12 +1471,15 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     batchIndex: batchClampIndex,
     batchTotal: rows.length,
     blockEditing: blockEdit !== null,
+    mode,
+    onSwitchMode: switchMode,
 
     onNew: doNew,
     onStartFrom: doStartFrom,
     onOpenSaved: doLoad,
     onSave: () => void doSave(),
-    onDeleteSaved: () => void doDeleteSaved(),
+    onSaveAsCopy: () => void doSaveAsCopy(),
+    onDeleteSaved: askDeleteSaved,
     onImport: () => fileRef.current?.click(),
     onExport: () => exportTemplateJson(withSettings(template)),
     onPrint: doPrint,
@@ -1074,7 +1495,7 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
     onSelectAll: selectAllOnPage,
 
     onAddElement: addElement,
-    onInsertBlock: insertBlock,
+    onInsertBlock: (id) => void insertBlock(id),
 
     onAlign: alignSelected,
     onDistribute: distributeSelected,
@@ -1126,6 +1547,8 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
           commit('name');
           setTemplate((tpl) => ({ ...tpl, name }));
         }}
+        scope={templateScope}
+        onScopeChange={setPendingScope}
         zoom={zoom}
         blockEdit={blockEdit}
         onExitBlockEdit={(save) => void exitBlockEdit(save)}
@@ -1155,6 +1578,24 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
           data-testid="doc-canvas-viewport"
           className="min-h-0 flex-1 overflow-auto bg-muted/30 p-6"
         >
+          {mode === 'flow' ? (
+            /* Document mode. The canvas viewport keeps its scroll and padding —
+               only what sits inside it changes — so switching modes does not
+               rebuild the whole editor chrome around the author. */
+            <FlowEditor
+              content={template.flow ?? { blocks: [] }}
+              onChange={(next) => {
+                commit('flow-edit');
+                setTemplate((tpl) => ({ ...tpl, flow: next }));
+              }}
+              selected={flowSelected}
+              onSelect={setFlowSelected}
+              // A refused image is REPORTED. Without this the picker closes and
+              // nothing changes, which reads exactly like the editor ignoring
+              // the click — the failure the picker was added to fix.
+              onError={(message) => addToast(message, 'error')}
+            />
+          ) : (
           <Canvas
             elements={elements}
             page={template.page}
@@ -1171,6 +1612,7 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
             onChangeMany={changeMany}
             onEditBlock={enterBlockEdit}
           />
+          )}
         </main>
 
         {railOpen ? (
@@ -1178,6 +1620,30 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
             tab={railTab}
             onTabChange={setRailTab}
             onCollapse={() => setRailOpen(false)}
+            // Document mode swaps the properties slot for the selected BLOCK's
+            // settings. Passed only in flow mode, so the canvas rail is
+            // untouched (#1186).
+            blockSettings={
+              mode === 'flow' ? (
+                <FlowBlockSettings
+                  block={flowSelected === null ? null : (template.flow?.blocks[flowSelected] ?? null)}
+                  nextBlock={
+                    flowSelected === null ? null : (template.flow?.blocks[flowSelected + 1] ?? null)
+                  }
+                  onChange={(next) => {
+                    if (flowSelected === null) return;
+                    commit('block-settings');
+                    setTemplate((tpl) => ({
+                      ...tpl,
+                      flow: {
+                        ...(tpl.flow ?? { blocks: [] }),
+                        blocks: (tpl.flow?.blocks ?? []).map((b, i) => (i === flowSelected ? next : b)),
+                      },
+                    }));
+                  }}
+                />
+              ) : undefined
+            }
             palette={{
               elements,
               selectedIds,
@@ -1187,8 +1653,8 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
               onToggleLock: toggleLock,
               onToggleHidden: toggleHidden,
               onDelete: deleteElement,
-              onInsertBlock: insertBlock,
-              onDeleteBlock: deleteBlockDef,
+              onInsertBlock: (id) => void insertBlock(id),
+              onDeleteBlock: askDeleteBlock,
               onSetBlockScope: setBlockScope,
             }}
             inspector={{
@@ -1284,20 +1750,20 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={t('designer.page.moveLeft', 'Move page left')}
+          aria-label={t('designer.page.moveEarlier', 'Move page earlier')}
           disabled={pageIndex === 0}
           onClick={() => movePage('left')}
         >
-          <IconChevronLeft className="h-4 w-4" />
+          <IconChevronLeft className="h-4 w-4 rtl:rotate-180" />
         </Button>
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={t('designer.page.moveRight', 'Move page right')}
+          aria-label={t('designer.page.moveLater', 'Move page later')}
           disabled={pageIndex >= template.pages.length - 1}
           onClick={() => movePage('right')}
         >
-          <IconChevronRight className="h-4 w-4" />
+          <IconChevronRight className="h-4 w-4 rtl:rotate-180" />
         </Button>
         <Button
           variant="ghost"
@@ -1328,7 +1794,7 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
                 disabled={batchClampIndex <= 0}
                 onClick={() => setBatchIndex(batchClampIndex - 1)}
               >
-                <IconChevronLeft className="h-4 w-4" />
+                <IconChevronLeft className="h-4 w-4 rtl:rotate-180" />
               </Button>
               <span className="tabular-nums">
                 {t('designer.status.row', 'Row {index} / {total}', {
@@ -1344,7 +1810,7 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
                 disabled={batchClampIndex >= rows.length - 1}
                 onClick={() => setBatchIndex(batchClampIndex + 1)}
               >
-                <IconChevronRight className="h-4 w-4" />
+                <IconChevronRight className="h-4 w-4 rtl:rotate-180" />
               </Button>
             </span>
           )}
@@ -1363,6 +1829,52 @@ export function DocumentDesignerScreen({ adapter, onNotify, onClose }: DocumentD
       <PrintDocument template={template} datasets={printDatasets} blocks={blocksMap} sheet={sheet} />
 
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} modLabel={modLabel} />
+
+      {/* The `/` palette. Its items are DERIVED from the same registry the menu
+          bar renders (see editor-palette.tsx), so a command added to the menus
+          appears here without anyone remembering to add it — and one removed
+          cannot linger. Built only while open: flattening ~60 nodes on every
+          render of the editor would be work nobody asked for. */}
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        items={
+          !paletteOpen
+            ? []
+            : mode === 'flow'
+              ? paletteItemsForFlow(
+                  buildEditorMenus(ctx, t),
+                  flowPaletteItems(
+                    t('commands.menu.insert', 'Insert'),
+                    (type) => flowBlockLabel(t, type),
+                    insertFlowBlock
+                  )
+                )
+              : paletteItemsFromMenus(buildEditorMenus(ctx, t))
+        }
+        label={t('palette.command.label', 'Command palette')}
+        placeholder={t('palette.command.placeholder', 'Type a command or search for a block…')}
+        emptyLabel={t('palette.command.empty', 'No matching command')}
+      />
+
+      <ConfirmDelete
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+        title={pendingDelete?.title ?? ''}
+        body={pendingDelete?.body ?? ''}
+        consequence={pendingDelete?.consequence ?? null}
+        confirmLabel={pendingDelete?.confirmLabel ?? ''}
+        onConfirm={() => {
+          // Read the action out before clearing: AlertDialogAction closes the
+          // dialog as part of the same click, and `pendingDelete` is null by the
+          // time a later tick would look at it.
+          const run = pendingDelete?.run;
+          setPendingDelete(null);
+          run?.();
+        }}
+      />
 
       {/* Print stylesheet: hide the app chrome and emit each page at the physical
           @page size with a break between pages. Rendered as a text child (not

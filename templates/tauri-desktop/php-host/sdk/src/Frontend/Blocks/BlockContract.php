@@ -52,7 +52,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * array{
  *   container: bool,                          // may carry child blocks (see childSlots())
  *   props: array<string, array{              // prop name => its rule
- *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck',
+ *     type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck'|'preloadSpec',
  *     required: bool,
  *     values?: list<string|int>,             // allowed set for enum / intEnum
  *   }>,
@@ -60,7 +60,7 @@ namespace Whity\Sdk\Frontend\Blocks;
  * ```
  *
  * @phpstan-type PropRule array{
- *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck',
+ *   type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'itemActionList'|'blockId'|'contextPath'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck'|'preloadSpec',
  *   required: bool,
  *   values?: list<string|int>,
  * }
@@ -802,8 +802,18 @@ final class BlockContract
 
             // ---- interactive blocks (SP3, WC-233) ----
             'form' => ['container' => true, 'props' => [
-                'submit'             => ['type' => 'submitSpec', 'required' => true],
-                'requiredPermission' => ['type' => 'string',     'required' => false],
+                'submit'             => ['type' => 'submitSpec',  'required' => true],
+                // The GET a form issues on mount to pre-populate its fields.
+                //
+                // DECLARED HERE BECAUSE AN UNDECLARED PROP IS NOT VALIDATED AND
+                // NOT STRIPPED. `BlockValidator::validateProps()` iterates these
+                // rules, never the node's own keys, and `PluginLoader`'s walk
+                // returns the node it was handed — so a prop the contract does
+                // not mention travels to the client untouched. This one did, and
+                // the loader therefore never ownership-checked the path a form
+                // fetches, alone among every endpoint a block can name.
+                'dataSource'         => ['type' => 'preloadSpec', 'required' => false],
+                'requiredPermission' => ['type' => 'string',      'required' => false],
             ]],
             // WC-532 A2: a repeatable field-group. Its `children` are the
             // per-row sub-form template (input leaves); the web renderer lets
@@ -811,12 +821,82 @@ final class BlockContract
             // rows as a JSON array under `name`. Form-only (needs a `form`
             // ancestor) and, like `form`, scopes its template input names per
             // row. `min`/`max` bound the row count; `itemLabel` names each row.
+            //
+            // `source`/`params` MAKE IT AN EDITOR RATHER THAN A COMPOSER, AND
+            // THAT TURNS IT INTO A DESTRUCTIVE INSTRUMENT
+            // -----------------------------------------------------------------
+            // Without a `source` this block only ever ADDS: it starts empty, the
+            // user builds rows, and the submit creates them. With one, it starts
+            // from what is already stored and the submit is a REPLACEMENT — the
+            // whole point of "edit the questions in place, then save the set" —
+            // and a replacement endpoint deletes whatever the payload omits.
+            //
+            // So an array that rendered empty because its fetch had not landed,
+            // or had failed, or had never been aimed at a record, would submit
+            // "there are no rows" and be believed. That is not a display bug with
+            // a data consequence; it is the data consequence. The renderer
+            // therefore treats a sourced array as NOT SUBMITTABLE until the fetch
+            // has actually delivered rows for the CURRENTLY bound source — it
+            // holds the enclosing form's submit rather than sending an empty set —
+            // and, unlike `dataTable`, it does not fetch at all until every
+            // declared `param` resolves. A read whose `params` are half-bound
+            // shows a shorter table; a WRITE whose params were half-bound saves
+            // one form's questions over another's.
+            //
+            // `source` stays OPTIONAL: a `fieldArray` without one is unchanged,
+            // still starts empty, and is still the right block for composing new
+            // rows. Both `apiPath` ownership-checking and version rewriting come
+            // free — the host's plugin loader derives what to check from this
+            // table, so a plugin cannot point a sourced array at somebody
+            // else's route. (Named in prose rather than linked: the SDK ships
+            // standalone and may not reference a host symbol, even in a comment.)
             'fieldArray' => ['container' => true, 'props' => [
                 'name'      => ['type' => 'inputName', 'required' => true],
                 'label'     => ['type' => 'string',    'required' => true],
                 'itemLabel' => ['type' => 'string',    'required' => false],
                 'min'       => ['type' => 'int',       'required' => false],
                 'max'       => ['type' => 'int',       'required' => false],
+                'source'    => ['type' => 'apiPath',        'required' => false],
+                'params'    => ['type' => 'sourceParamList', 'required' => false],
+            ]],
+            // WC-532 item 3: a form region whose SHAPE depends on the value of
+            // another field — a discriminated union. `discriminator` names a
+            // sibling input in the same form; each `variantCase` child declares
+            // the value it answers to, and only the matching one renders.
+            //
+            // WHY THIS IS NOT `visibleWhen` ON THIRTEEN SECTIONS
+            // --------------------------------------------------
+            // `visibleWhen` hides. It is documented, in the web form context,
+            // that "hidden inputs stay in the value map" — the server
+            // re-validates and is authoritative over what it accepts, so
+            // showing and hiding deliberately does not change the payload.
+            //
+            // A discriminated union needs the opposite: the branches that were
+            // not chosen must be ABSENT, not merely invisible. A resource with
+            // thirteen type-dependent payloads, declared as thirteen hidden
+            // sections, submits all thirteen payloads at once and asks the
+            // server to sort it out. That is a different meaning, so it is a
+            // different mechanism rather than a flag on the existing one.
+            //
+            // WHY THE CASES ARE CHILD BLOCKS AND NOT A `cases` PROP
+            // -----------------------------------------------------
+            // A prop holding nested trees is invisible to every walker — the
+            // validator, the showcase coverage tests, and the host loader's
+            // ownership check and version rewrite. {@see self::CHILD_SLOTS}
+            // records what that costs: "an unchecked slot is a `source` that
+            // never got ownership-checked". Cases carried in `children` are
+            // traversed by everything that already walks a tree, so a `source`
+            // inside a case is checked exactly like one anywhere else, with no
+            // walker taught anything new.
+            'variant' => ['container' => true, 'props' => [
+                'discriminator' => ['type' => 'inputName', 'required' => true],
+            ]],
+            // One branch of a `variant`. `when` is the discriminator value this
+            // case answers to; only a direct child of `variant` (enforced in
+            // BlockValidator, as `tab` is for `tabs`).
+            'variantCase' => ['container' => true, 'props' => [
+                'when'  => ['type' => 'string', 'required' => true],
+                'label' => ['type' => 'string', 'required' => false],
             ]],
             // WC-532 A3 / #909: `visibleWhen` is no longer declared per type.
             // It is a UNIVERSAL facet ({@see self::UNIVERSAL_PROPS}) merged into

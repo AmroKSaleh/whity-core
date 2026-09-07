@@ -56,6 +56,14 @@ const customJestConfig = {
     // per-package pins needed. (They previously pointed at web/node_modules,
     // which the hoist emptied.)
   },
+  // NOTE ON ESM DEPENDENCIES: do NOT add `transformIgnorePatterns` here to get a
+  // node_modules package transformed. next/jest builds its own pattern from the
+  // Next config's `transpilePackages` and ORs it FIRST, so a hand-written entry
+  // never takes effect — the package stays untransformed and every suite that
+  // touches it dies at module load with "Cannot use import statement outside a
+  // module", which reads like a broken component rather than a config gap.
+  // Add the package to `transpilePackages` in web/next.config.ts instead; that
+  // is what @tanstack/react-table v9 (ESM-only) needed.
   testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
   // packages/features ships browser-side logic (the i18n cache and hooks) but
   // has no runner of its own, so its __tests__ would sit inert next to the

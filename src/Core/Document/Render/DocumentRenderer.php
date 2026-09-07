@@ -6,6 +6,8 @@ namespace Whity\Core\Document\Render;
 
 use Whity\Core\Document\BlockReferenceScanner;
 use Whity\Core\Document\DocumentBlockRepository;
+use Whity\Core\Document\Qr\DocumentQrStamp;
+use Whity\Core\Document\Qr\QrTemplateComposer;
 use Whity\Core\Settings\SettingsRegistry;
 use Whity\Core\Settings\SettingsService;
 
@@ -43,6 +45,17 @@ final class DocumentRenderer
         private readonly DocumentBlockRepository $blocks,
         private readonly SettingsService $settings,
         private readonly RenderServiceClientInterface $renderService,
+        /**
+         * The flowing renderer, for templates in document mode (#1186).
+         *
+         * NULLABLE so an existing construction of this class keeps working —
+         * every test that builds one, and any host that wires it by hand. A
+         * null one is not a silent downgrade: a flow template refuses with a
+         * message naming the missing wiring, because printing its canvas pages
+         * instead would produce the blank document this whole seam exists to
+         * stop.
+         */
+        private readonly ?FlowDocumentRenderer $flow = null,
     ) {
     }
 
@@ -52,13 +65,46 @@ final class DocumentRenderer
      * @param array<string, mixed> $templateData The verbatim client DocTemplate JSON.
      * @param mixed                $rawDataRows  The request's `dataRows`, unvalidated.
      * @param mixed                $rawSheet     The request's `sheet`, unvalidated.
+     * @param DocumentQrStamp|null $qr           The document's verification code, or
+     *        null when it carries none. See {@see QrTemplateComposer::compose()} — null is not
+     *        merely "do nothing", it actively REMOVES an authored code, which is
+     *        what stops a template with a QR element placed from printing an
+     *        empty dashed box on every document of a tenant that has the feature
+     *        switched off.
      *
      * @throws DocumentRenderRejectedException   Bad input, or a ceiling exceeded.
      * @throws RenderServiceUnavailableException The render service failed.
      */
-    public function render(int $tenantId, array $templateData, mixed $rawDataRows, mixed $rawSheet): string
-    {
+    public function render(
+        int $tenantId,
+        array $templateData,
+        mixed $rawDataRows,
+        mixed $rawSheet,
+        ?DocumentQrStamp $qr = null,
+    ): string {
+        // DOCUMENT MODE TAKES A DIFFERENT ROAD ENTIRELY (#1186).
+        //
+        // Everything below this branch is the fixed-canvas path: it measures a
+        // `pages` tree, resolves block instances into it, and asks the service
+        // to print one PDF page per template page. A flow template's content
+        // does not live in `pages` — it lives in `flow` — so running it through
+        // any of that would print the canvas the author never used, which for a
+        // document built entirely in flow mode is a blank starting page.
+        //
+        // That is what happened before this branch existed: the document was
+        // authored, saved, and printed as nothing, with no error anywhere.
+        if (FlowTemplatePayload::isFlowMode($templateData)) {
+            return $this->renderFlow($tenantId, $templateData);
+        }
+
         $effective = $this->settings->effective($tenantId);
+
+        // BEFORE the size ceiling, deliberately. Composition can ADD elements —
+        // the supplied default placement is a QR plus its caption — so measuring
+        // the template first would let a document sail past a limit the bytes
+        // actually sent then exceed. The ceiling exists to bound what crosses
+        // the wire, so it has to measure what crosses the wire.
+        $templateData = QrTemplateComposer::compose($templateData, $qr !== null)['data'];
 
         $templateBytes = strlen((string) json_encode($templateData, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
         $maxTemplateBytes = (int) ($effective[SettingsRegistry::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES]
@@ -69,9 +115,25 @@ final class DocumentRenderer
             );
         }
 
-        $dataRows = $this->normalizeDataRows($rawDataRows, $templateData);
+        // Delegated to VariableData since `POST /api/documents` has to apply the
+        // IDENTICAL reading to values it PERSISTS without rendering them
+        // (migration 118). Two normalisers would let a document store values
+        // this renderer would then refuse — a document that cannot be rendered,
+        // discovered weeks later with nothing pointing at the two spellings.
+        // Idempotent, so a caller that already normalised loses nothing here.
+        $dataRows = VariableData::normalizeRows($rawDataRows, $templateData);
         if ($dataRows === null) {
             throw DocumentRenderRejectedException::because('dataRows must be a list of flat string maps');
+        }
+
+        // The reserved verification values are merged into every row AFTER
+        // normalisation, so they cannot be refused by the flat-string-map check
+        // and cannot be overwritten by a template that declares a placeholder of
+        // the same dotted name. Every row, not the first: a label sheet is one
+        // document of N physical things, and a code on only the top one would
+        // make the rest unverifiable while looking exactly like the part that is.
+        if ($qr !== null) {
+            $dataRows = QrTemplateComposer::rowsWith($dataRows, $qr->url, $qr->reference);
         }
 
         $maxRows = (int) ($effective[SettingsRegistry::DOCUMENTS_RENDER_MAX_ROWS]
@@ -111,6 +173,34 @@ final class DocumentRenderer
     }
 
     /**
+     * Render a document-mode template through the flowing service.
+     *
+     * The ceilings, the enablement check and the call itself already belong to
+     * {@see FlowDocumentRenderer} — it is what the SDK's `FlowDocument` path
+     * uses — so this only has to build the payload and hand it over. Two
+     * renderers applying two sets of limits to the same service is how one of
+     * them ends up enforcing a bound the other does not.
+     *
+     * @param array<string, mixed> $templateData
+     *
+     * @throws DocumentRenderRejectedException   Empty content, or a ceiling.
+     * @throws RenderServiceUnavailableException The service could not do it.
+     */
+    private function renderFlow(int $tenantId, array $templateData): string
+    {
+        if ($this->flow === null) {
+            // Named rather than silently falling through to the canvas path.
+            // Falling through would print a blank page and report success,
+            // which is the failure this branch was added to remove.
+            throw DocumentRenderRejectedException::because(
+                'This document is in document mode, which this instance cannot render'
+            );
+        }
+
+        return $this->flow->render($tenantId, FlowTemplatePayload::build($templateData))->bytes;
+    }
+
+    /**
      * Resolve every `blockInstance`-referenced block (anywhere in the template
      * tree) to its live elements, tenant-scoped. A reference to a deleted/
      * foreign-tenant block is simply omitted from the map — the render harness
@@ -128,76 +218,46 @@ final class DocumentRenderer
      */
     private function resolveBlocks(array $templateData, int $tenantId): array
     {
-        $ids = BlockReferenceScanner::collectBlockIds($templateData);
-        $out = [];
-        foreach ($ids as $id) {
+        // A WORKLIST, not a single pass over the template's own references
+        // (#1186 slice 3). A block may now hold another block, and a nested
+        // reference lives in the PARENT BLOCK'S data — somewhere this method
+        // never looked, because it scanned the template tree alone.
+        //
+        // Scanning once was correct while nesting was forbidden and silently
+        // wrong the moment it was not: the nested id never entered the map, the
+        // harness looked it up, found nothing, and drew nothing. The document
+        // would have printed with a hole in it and no error anywhere.
+        $queue   = BlockReferenceScanner::collectBlockIds($templateData);
+        $out     = [];
+        $visited = [];
+
+        while ($queue !== []) {
+            $id = (string) array_shift($queue);
+
+            // Also the cycle guard. A block that (transitively) contains itself
+            // is resolved once and not re-entered, so a malformed library costs
+            // a wrong-looking document rather than a render that never returns.
+            if (isset($visited[$id])) {
+                continue;
+            }
+            $visited[$id] = true;
+
             if (!ctype_digit($id)) {
                 continue;
             }
+
             $block = $this->blocks->findById((int) $id, $tenantId);
-            if ($block !== null) {
-                $out[$id] = ['id' => $id, 'elements' => $block['data']];
+            if ($block === null) {
+                continue;
             }
-        }
 
-        return $out;
-    }
+            $out[$id] = ['id' => $id, 'elements' => $block['data']];
 
-    /**
-     * Validate + normalise the request's `dataRows`: a list of flat
-     * string=>string maps. Absent/empty defaults to a single row built from
-     * the template's placeholder samples (mirrors the designer's own
-     * `sampleDataOf()` preview default — a render with no explicit batch still
-     * produces one sensible page rather than an empty one).
-     *
-     * @param array<string, mixed> $templateData
-     * @return list<array<string, string>>|null Null on a validation failure.
-     */
-    private function normalizeDataRows(mixed $raw, array $templateData): ?array
-    {
-        if ($raw === null) {
-            return [$this->sampleDataOf($templateData)];
-        }
-        if (!is_array($raw) || !array_is_list($raw)) {
-            return null;
-        }
-        if ($raw === []) {
-            return [$this->sampleDataOf($templateData)];
-        }
-
-        $rows = [];
-        foreach ($raw as $row) {
-            if (!is_array($row)) {
-                return null;
-            }
-            $normalized = [];
-            foreach ($row as $key => $value) {
-                if (!is_string($key) || !is_scalar($value)) {
-                    return null;
-                }
-                $normalized[$key] = (string) $value;
-            }
-            $rows[] = $normalized;
-        }
-
-        return $rows;
-    }
-
-    /**
-     * The sample-data map built from a template's placeholders (key -> sample),
-     * mirroring `web/lib/documents/storage.ts`'s `sampleDataOf()`.
-     *
-     * @param array<string, mixed> $templateData
-     * @return array<string, string>
-     */
-    private function sampleDataOf(array $templateData): array
-    {
-        $out = [];
-        $placeholders = $templateData['placeholders'] ?? [];
-        if (is_array($placeholders)) {
-            foreach ($placeholders as $p) {
-                if (is_array($p) && is_string($p['key'] ?? null)) {
-                    $out[$p['key']] = (string) ($p['sample'] ?? '');
+            // Tenant-scoped at every level: `findById` takes the tenant, so a
+            // nested pointer cannot reach across tenants however deep it sits.
+            foreach (BlockReferenceScanner::collectBlockIds($block['data']) as $childId) {
+                if (!isset($visited[$childId])) {
+                    $queue[] = $childId;
                 }
             }
         }

@@ -31,7 +31,24 @@
 
 services:
   postgres:
-    image: postgres:15-alpine
+    # pgvector/pgvector:pg15 — stock postgres:15 plus the `vector` extension, so
+    # a plugin can declare a vector column for similarity search. The extension
+    # is AVAILABLE, not enabled: a plugin still runs
+    # `CREATE EXTENSION IF NOT EXISTS vector` in its own migration, so a
+    # deployment that wants none carries none.
+    #
+    # UPGRADING AN EXISTING DATABASE NEEDS A REINDEX. This image is Debian
+    # (glibc); postgres:15-alpine was musl, and the two sort text differently:
+    #
+    #     musl  -> Banana, Cherry, apple, date
+    #     glibc -> apple, Banana, Cherry, date
+    #
+    # Same data, same collation name (en_US.utf8), different order. Postgres
+    # does NOT warn, because musl records no collation version for it to
+    # compare against — so every index on a text column is silently wrong until
+    # rebuilt. On an existing volume, run `REINDEX DATABASE <name>;` once after
+    # the swap. A fresh database is unaffected.
+    image: pgvector/pgvector:pg15
     container_name: whity_staging_postgres
     restart: unless-stopped
     environment:

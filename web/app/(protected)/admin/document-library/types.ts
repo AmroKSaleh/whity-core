@@ -46,8 +46,29 @@ export interface DocumentSubstrate {
   provenance: string | null;
 }
 
+/**
+ * A rail section, as the server states it.
+ *
+ * The client used to decide which groups existed — it admitted `derived` and
+ * `personal` and silently dropped anything else — and titled the sections
+ * itself. So a folder registered under a third group was computed by the
+ * registry, returned by the API, and discarded on the way to the screen.
+ */
+export interface DocumentViewGroup {
+  key: string;
+  /** English default from the server; translated by key where this client knows one. */
+  label: string;
+  order: number;
+}
+
 export interface DocumentViewsResponse {
   data: DocumentView[];
+  /**
+   * Optional so a client stays compatible with a server that predates it. When
+   * absent the rail derives its sections from the views themselves rather than
+   * falling back to the two hardcoded names, because that fallback IS the bug.
+   */
+  groups?: DocumentViewGroup[];
   unavailable_substrates: DocumentSubstrate[];
 }
 
@@ -104,9 +125,54 @@ export interface Pagination {
   totalPages: number;
 }
 
+/**
+ * A column the SERVER can order by.
+ *
+ * Deliberately not every column the table shows. `origin_ou_id` is absent
+ * because the cell displays a NAME this client resolves from a separate,
+ * separately-permissioned request (`ous:read`, which the plain user role does
+ * not hold): ordering by the id would order rows by something the reader cannot
+ * see. The server refuses anything outside this set with a 400 rather than
+ * ignoring it, so a control here can never draw an indicator on a column the
+ * rows are not sorted by.
+ */
+export type DocumentSortField = 'title' | 'created_at' | 'template_name';
+
+export type SortDirection = 'asc' | 'desc';
+
+/**
+ * The order the server APPLIED.
+ *
+ * `field: null` is the order documents were recorded in, newest first — which is
+ * not `created_at` under another name, because several documents issued in one
+ * transaction share that timestamp exactly.
+ *
+ * This is read back rather than assumed: `direction` defaults per field (A→Z for
+ * the text columns, newest-first for the date), so a client that assumed one
+ * default would draw its arrow the wrong way round on one of the three.
+ */
+export interface AppliedSort {
+  field: DocumentSortField | null;
+  direction: SortDirection;
+}
+
 export interface DocumentListResponse {
   data: DocumentRow[];
   pagination: Pagination;
   /** Which folder ran, and the anchor the SERVER resolved (not the one we guessed). */
   view: { key: string; ou_id: number | null; collection_id: number | null };
+  sort: AppliedSort;
 }
+
+/**
+ * List or grid.
+ *
+ * Remembered in `localStorage`, which is per BROWSER rather than per person —
+ * there is no per-user preference store in core, and inventing a table plus an
+ * endpoint to remember a layout toggle would be a schema migration to record a
+ * preference nobody would miss on a new machine. Same choice the units and
+ * relations screens already make for their view toggles. Stated plainly rather
+ * than described as "remembered for you", which would be a claim about the
+ * account.
+ */
+export type LibraryLayout = 'list' | 'grid';

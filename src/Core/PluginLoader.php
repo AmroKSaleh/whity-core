@@ -20,6 +20,8 @@ use Whity\Core\Ou\InvalidOuTypeException;
 use Whity\Core\Document\Routing\InvalidRoutingRuleException;
 use Whity\Core\Document\Routing\RoutingRuleRegistry;
 use Whity\Core\Ou\OuTypeRegistry;
+use Whity\Core\TimeWindow\InvalidWindowTypeException;
+use Whity\Core\TimeWindow\WindowTypeRegistry;
 use Whity\Sdk\Health\PluginHealthProbesInterface;
 use Whity\Core\DataType\DataTypeRegistry;
 use Whity\Core\DataType\InvalidDataTypeException;
@@ -33,6 +35,7 @@ use Whity\Sdk\Settings\PluginSettingsInterface;
 use Whity\Sdk\DataType\PluginDataTypesInterface;
 use Whity\Sdk\Ou\PluginOuTypesInterface;
 use Whity\Sdk\Routing\PluginRoutingRulesInterface;
+use Whity\Sdk\TimeWindow\PluginWindowTypesInterface;
 use Whity\Sdk\Rbac\PluginResourceTypesInterface;
 use Whity\Sdk\Tenant\PluginTablesInterface;
 use Whity\Core\Hooks\HookManager;
@@ -45,10 +48,12 @@ use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
 use Whity\Mcp\Prompts\Prompt;
 use Whity\Mcp\Prompts\PromptRegistry;
+use Whity\Mcp\Tools\AuthoredToolRegistry;
 use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginJobsInterface;
 use Whity\Sdk\PluginMcpInterface;
+use Whity\Sdk\PluginMcpToolsInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 use Whity\Sdk\PluginRolesInterface;
 use Whity\Sdk\PluginThemeInterface;
@@ -122,6 +127,15 @@ class PluginLoader
     private ?OuTypeRegistry $ouTypeRegistry = null;
 
     private ?RoutingRuleRegistry $routingRuleRegistry = null;
+
+    /**
+     * Catalogue of plugin-contributed TIME-WINDOW types (#1070).
+     *
+     * Null when the host wires none, in which case declarations are skipped
+     * rather than failing — the same optionality every other contribution point
+     * here has.
+     */
+    private ?WindowTypeRegistry $windowTypeRegistry = null;
 
     /**
      * Optional catalogue of plugin-contributed status-page probes.
@@ -392,6 +406,7 @@ class PluginLoader
      * @param AuditLogger|null $auditLogger Optional audit writer for plugin-declared events
      * @param OuTypeRegistry|null $ouTypeRegistry Optional catalogue of plugin-contributed OU types
      * @param RoutingRuleRegistry|null $routingRuleRegistry Optional catalogue of plugin-contributed document routing rules
+     * @param WindowTypeRegistry|null $windowTypeRegistry Optional catalogue of plugin-contributed time-window types
      */
     public function __construct(
         string $pluginDir,
@@ -407,7 +422,8 @@ class PluginLoader
         ?PluginSettingsRegistry $pluginSettingsRegistry = null,
         ?AuditLogger $auditLogger = null,
         ?OuTypeRegistry $ouTypeRegistry = null,
-        ?RoutingRuleRegistry $routingRuleRegistry = null
+        ?RoutingRuleRegistry $routingRuleRegistry = null,
+        ?WindowTypeRegistry $windowTypeRegistry = null
     ) {
         $this->pluginDir = $pluginDir;
         $this->router = $router;
@@ -415,6 +431,7 @@ class PluginLoader
         $this->resourceTypeRegistry = $resourceTypeRegistry;
         $this->ouTypeRegistry = $ouTypeRegistry;
         $this->routingRuleRegistry = $routingRuleRegistry;
+        $this->windowTypeRegistry = $windowTypeRegistry;
         $this->healthProbeRegistry = $healthProbeRegistry;
         $this->tableOwnershipRegistry = $tableOwnershipRegistry;
         $this->dataTypeRegistry = $dataTypeRegistry;
@@ -1576,6 +1593,80 @@ class PluginLoader
             requiredRole:       $requiredRole,
             requiredPermission: $requiredPermission,
         ));
+    }
+
+    /**
+     * Register the HAND-AUTHORED MCP tools contributed by plugins (SDK 1.43,
+     * {@see PluginMcpToolsInterface}).
+     *
+     * The same shape as {@see collectMcpPrompts()}, and for the same reasons —
+     * including the one that matters most: a plugin that is administratively
+     * disabled, auto-failed, or otherwise not active contributes NOTHING. A
+     * disabled plugin whose TOOLS an AI agent could still list and call would
+     * still be part of the platform's surface, which is not what disabling one
+     * means. That is #952 exactly, and tools are the half of it where the
+     * consequence is an action rather than a listing.
+     *
+     * `suppressesDerivedMcpTools()` is read here rather than by the deriver,
+     * because this is the only place that holds both the plugin instance and
+     * its lifecycle state. A suppression from a DISABLED plugin is ignored for
+     * the same reason its tools are: a plugin that is off does not get to keep
+     * shaping the surface.
+     */
+    public function collectMcpTools(AuthoredToolRegistry $registry): void
+    {
+        foreach ($this->registeredPlugins as $pluginKey => $info) {
+            $plugin = $info['plugin'];
+            if (!$plugin instanceof PluginMcpToolsInterface) {
+                continue;
+            }
+
+            if (isset($this->administrativelyDisabled[$pluginKey])) {
+                continue;
+            }
+            $lifecycle = $this->lifecycles[$pluginKey] ?? null;
+            if ($lifecycle === null || !$lifecycle->isActive()) {
+                continue;
+            }
+
+            try {
+                $descriptors = $plugin->getMcpTools();
+            } catch (Throwable $e) {
+                $this->handlePluginThrowable($pluginKey, $e, 'getMcpTools');
+                continue;
+            }
+
+            foreach ($descriptors as $descriptor) {
+                if (!is_array($descriptor)) {
+                    $this->logWarning("[Plugin:{$pluginKey}] getMcpTools() returned a non-array descriptor — skipped.");
+                    continue;
+                }
+                $reason = $registry->register($descriptor, $pluginKey);
+                if ($reason !== null) {
+                    $this->logWarning("[Plugin:{$pluginKey}] getMcpTools(): {$reason}.");
+                }
+            }
+
+            // Read AFTER the descriptors, and in its own try: a plugin whose
+            // getMcpTools() threw has contributed nothing, so honouring a
+            // suppression from it would remove its derived tools and leave it
+            // with no tools at all — the failure would read as "this plugin has
+            // no MCP surface" rather than "this plugin errored".
+            try {
+                if ($plugin->suppressesDerivedMcpTools()) {
+                    // The NAMESPACE PREFIX, not the plugin key. That is what a
+                    // route carries (`$route['namespacePrefix']`, the same field
+                    // `Router::unregisterByNamespace()` filters on), so it is
+                    // the only identifier that lets the deriver tell this
+                    // plugin's routes from anyone else's. Recording the plugin
+                    // key here would produce a suppression that matches nothing
+                    // and silently derives the tools anyway.
+                    $registry->suppressDerivationFor($info['namespacePrefix']);
+                }
+            } catch (Throwable $e) {
+                $this->handlePluginThrowable($pluginKey, $e, 'suppressesDerivedMcpTools');
+            }
+        }
     }
 
     /**
@@ -2814,17 +2905,39 @@ class PluginLoader
         // judged against this — what registered, not what was declared — so a
         // route refused for colliding with core can never back a screen.
         $registeredGetRoutes = [];
-        // POST/PUT routes the router ACTUALLY accepted, mapped to their
-        // requiredPermission — the ownership basis for an 'action' frontend
-        // screen, exactly as $registeredGetRoutes backs a 'crud' screen.
-        $registeredActionRoutes = [];
-        // #868: EVERY write route the router accepted (POST/PUT/PATCH/DELETE),
-        // keyed "METHOD /normalized/path" with each `{param}` collapsed to `{}`.
-        // This is the ownership basis for an `inbox` action's endpoint, which —
-        // unlike a form's `submit` — is a TEMPLATE the renderer substitutes a row
-        // value into, so a declared `{taskId}` and a registered `{id}` name the
-        // same segment and must compare equal. Values only, no permission: an
-        // inbox action declares no permission to pin (see the walk below).
+        // EVERY write route the router ACTUALLY accepted (POST/PUT/PATCH/DELETE),
+        // keyed "METHOD /normalized/path" — each `{param}` collapsed to `{}` by
+        // {@see normalizeRouteKey()} — and mapped to its requiredPermission.
+        // This is the ownership basis for an 'action' frontend screen, for an
+        // `inbox` action's endpoint, for an `accessGate`'s write `check`, and for
+        // a `form`/`actionButton` endpoint, exactly as $registeredGetRoutes backs
+        // a 'crud' screen and every read-side block prop.
+        //
+        // ONE MAP, and it used to be two. There was a raw-keyed POST/PUT map for
+        // the 'action' screen and the interactive block endpoints, and a
+        // normalized POST/PUT/PATCH/DELETE map for inbox actions and access
+        // gates — two answers to "is this a write route this plugin owns?", and
+        // the interactive block endpoints were reading the wrong one. Every prop
+        // a record page uses to READ compared with parameters normalized; the two
+        // props that WRITE compared literally, against a map that had never heard
+        // of PATCH. So the pattern the SDK documents — a form submitting to
+        // `/api/x/things/{record}` — matched nothing and dropped the entire
+        // feature at load, fail-closed and silently, and a described record page
+        // could display a record, gate an editor on the caller's write
+        // permission, and never save.
+        //
+        // A parameter's NAME is not part of a route: the renderer substitutes a
+        // concrete value there and the dispatcher matches the route's own
+        // compiled pattern, so a declared `{record}` and a registered `{id}` — or
+        // `{id:\d+}`, whose inline constraint (WC-160) no declaration can
+        // restate — name the same segment. Normalizing is what the read side has
+        // always done, for that reason.
+        //
+        // The gate is NOT widened. The path SHAPE must still be one this plugin
+        // actually registered, the METHOD must still be one it registered a
+        // handler for, and the permission pin below still compares the route's
+        // requiredPermission with the block's. Merging the two maps removes a
+        // duplicated fact rather than adding a permission.
         $registeredWriteRoutes = [];
         // GET path => the SAME wrapped handler passed to Router::register(),
         // so a theme-override route (WC-242) can be invoked in-process
@@ -2890,12 +3003,13 @@ class PluginLoader
                 if ($upperMethod === 'GET') {
                     $registeredGetRoutes[$path] = $requiredPermission;
                     $registeredGetHandlers[$path] = $wrappedHandler;
-                } elseif ($upperMethod === 'POST' || $upperMethod === 'PUT') {
-                    $registeredActionRoutes["{$upperMethod} {$path}"] = $requiredPermission;
                 }
 
                 if (in_array($upperMethod, ['POST', 'PUT', 'PATCH', 'DELETE'], true)) {
-                    $registeredWriteRoutes[self::normalizeRouteKey($upperMethod, $path)] = true;
+                    // The permission is the VALUE, not a second map: every
+                    // consumer that needs the pin reads it here, and every
+                    // consumer that only needs ownership uses array_key_exists.
+                    $registeredWriteRoutes[self::normalizeRouteKey($upperMethod, $path)] = $requiredPermission;
                 }
             }
         }
@@ -2968,6 +3082,37 @@ class PluginLoader
                 $this->logWarning("Plugin {$pluginKey} declares an invalid OU type: " . $e->getMessage());
             } catch (Throwable $e) {
                 $this->handlePluginThrowable($pluginKey, $e, 'getOuTypes');
+            }
+        }
+
+        // 2a-pre-ter. Register declared TIME-WINDOW TYPES (#1070). The same shape
+        //     as (2a-pre) and for the same reasons: an OPTIONAL interface, so a
+        //     plugin bringing no period vocabulary implements nothing and is
+        //     skipped, and the source is $plugin->getName() — supplied here,
+        //     never taken from the plugin's own return value — so a key is
+        //     namespaced under its real owner and no plugin can mint a BARE key
+        //     that shadows a tenant's own vocabulary.
+        //
+        //     A declaration makes a key ADOPTABLE and supplies the label and the
+        //     nesting a tenant starts from. It creates no period and writes into
+        //     no tenant: force-seeding one deployment's period vocabulary into
+        //     another's picker would be a cross-tenant write driven by an
+        //     install-wide plugin.
+        //
+        //     Two boundaries, because two different things can go wrong: a
+        //     malformed DECLARATION is a logged warning (the plugin keeps
+        //     serving, it simply contributes no types), while a getWindowTypes()
+        //     that THROWS is plugin code misbehaving and goes through the
+        //     lifecycle error boundary that can eventually fail the plugin.
+        if ($this->windowTypeRegistry !== null && $plugin instanceof PluginWindowTypesInterface) {
+            try {
+                $this->windowTypeRegistry->register($plugin->getName(), $plugin->getWindowTypes());
+            } catch (InvalidWindowTypeException $e) {
+                $this->logWarning(
+                    "Plugin {$pluginKey} declares an invalid time-window type: " . $e->getMessage()
+                );
+            } catch (Throwable $e) {
+                $this->handlePluginThrowable($pluginKey, $e, 'getWindowTypes');
             }
         }
 
@@ -3179,7 +3324,6 @@ class PluginLoader
             $plugin,
             $pluginKey,
             $registeredGetRoutes,
-            $registeredActionRoutes,
             $registeredWriteRoutes
         );
 
@@ -3297,8 +3441,7 @@ class PluginLoader
      * @param PluginInterface $plugin The plugin being registered.
      * @param string $pluginKey Stable identity (original FQCN) for bookkeeping.
      * @param array<string, string|null> $registeredGetRoutes GET path => requiredPermission, ACTUALLY registered for this plugin.
-     * @param array<string, string|null> $registeredActionRoutes "METHOD /path" => requiredPermission, POST/PUT routes ACTUALLY registered for this plugin.
-     * @param array<string, true> $registeredWriteRoutes "METHOD /normalized/path" => true, every POST/PUT/PATCH/DELETE route ACTUALLY registered (#868).
+     * @param array<string, string|null> $registeredWriteRoutes "METHOD /normalized/path" => requiredPermission, every POST/PUT/PATCH/DELETE route ACTUALLY registered for this plugin.
      * @return array{
      *     features: list<array<string, mixed>>,
      *     dropped: list<array{plugin: string, featureId: string|null, reason: string}>
@@ -3308,7 +3451,6 @@ class PluginLoader
         PluginInterface $plugin,
         string $pluginKey,
         array $registeredGetRoutes,
-        array $registeredActionRoutes = [],
         array $registeredWriteRoutes = []
     ): array {
         if (!$plugin instanceof PluginFrontendInterface) {
@@ -3336,7 +3478,6 @@ class PluginLoader
                 $pluginKey,
                 $ownPermissions,
                 $registeredGetRoutes,
-                $registeredActionRoutes,
                 $registeredWriteRoutes,
                 $dropped
             );
@@ -3375,12 +3516,35 @@ class PluginLoader
      * `dataRecord.source` is matched against the GET-route map, which is keyed
      * by path with no method in the key.
      *
+     * IT COLLAPSES TWO DIFFERENT SYNTAXES, which is why the pattern is what it
+     * is. One side is a ROUTE path, whose placeholders are `{name}` or
+     * `{name:constraint}` (WC-160). The other is a BLOCK declaration's context
+     * token — `{demo-record-pick}`, `{edit-person.id}` — which carries hyphens
+     * and dots a route parameter may not. So the inner rule cannot be the
+     * Router's placeholder grammar: applying that would stop collapsing every
+     * context token in the contract and refuse every block declaration there is.
+     *
+     * The braces close on the first `}` that is not part of a `{n}` / `{n,m}`
+     * QUANTIFIER, which is the one piece the previous `\{[^}]*\}` got wrong. A
+     * constraint may legitimately contain one (`{code:[a-f0-9]{10}}`, WC-569 —
+     * `Router::pathToPattern()` accepts it and compiles it), and `[^}]*` cannot
+     * span the inner `}`: it matched `{code:[a-f0-9]{10}` and left a stray brace
+     * behind, so the key became `/api/x/codes/{}}` and could never equal the
+     * `/api/x/codes/{}` a declaration normalises to. A route registered with a
+     * quantifier constraint was therefore unnameable from any block tree.
+     *
+     * No in-tree route uses one today, so this is preventive rather than a live
+     * break — but it is the same helper every ownership comparison in this file
+     * now runs through, on the read side and (since this change) the write side
+     * alike, so the failure it prevents would have been a whole feature silently
+     * dropped at load.
+     *
      * @param string $path A route path or a block's `recordPath` template.
      * @return string The normalized key.
      */
     private static function normalizePathKey(string $path): string
     {
-        return (string) preg_replace('/\{[^}]*\}/', '{}', $path);
+        return (string) preg_replace('/\{(?:[^{}]|\{\d+(?:,\d*)?\})*\}/', '{}', $path);
     }
 
     /**
@@ -3421,8 +3585,7 @@ class PluginLoader
      * @param string $pluginKey Stable identity (original FQCN) for log messages.
      * @param array<int|string, mixed> $ownPermissions The plugin's own declared permissions.
      * @param array<string, string|null> $registeredGetRoutes GET path => requiredPermission, ACTUALLY registered for this plugin.
-     * @param array<string, string|null> $registeredActionRoutes "METHOD /path" => requiredPermission, POST/PUT routes ACTUALLY registered for this plugin.
-     * @param array<string, true> $registeredWriteRoutes "METHOD /normalized/path" => true, every POST/PUT/PATCH/DELETE route ACTUALLY registered (#868).
+     * @param array<string, string|null> $registeredWriteRoutes "METHOD /normalized/path" => requiredPermission, every POST/PUT/PATCH/DELETE route ACTUALLY registered for this plugin.
      * @param list<array{plugin: string, featureId: string|null, reason: string}> $dropped
      *        Collects every refusal, by reference (#953). Every rule in this
      *        method reports through the one `$drop` closure, so recording there
@@ -3436,7 +3599,6 @@ class PluginLoader
         string $pluginKey,
         array $ownPermissions,
         array $registeredGetRoutes,
-        array $registeredActionRoutes = [],
         array $registeredWriteRoutes = [],
         array &$dropped = []
     ): ?array {
@@ -3549,13 +3711,7 @@ class PluginLoader
             // The plugin declared the unversioned path (e.g. /api/hello/greetings).
             // Rewrite it to the versioned URL the browser must actually call so the
             // normalized descriptor is ready to use without further transformation.
-            $vp = $this->router->getVersionPrefix();
-            if ($vp !== '') {
-                $pos = strpos($basePath, '/', 1);
-                $basePath = $pos === false
-                    ? $basePath . $vp
-                    : substr($basePath, 0, $pos) . $vp . substr($basePath, $pos);
-            }
+            $basePath = $this->router->versionedPath($basePath);
 
             $resource = ['basePath' => $basePath, 'titleField' => $titleField];
         }
@@ -3589,13 +3745,7 @@ class PluginLoader
             }
 
             // Same versioning rewrite as resource.basePath/action.path above.
-            $vp = $this->router->getVersionPrefix();
-            if ($vp !== '') {
-                $pos = strpos($embedPath, '/', 1);
-                $embedPath = $pos === false
-                    ? $embedPath . $vp
-                    : substr($embedPath, 0, $pos) . $vp . substr($embedPath, $pos);
-            }
+            $embedPath = $this->router->versionedPath($embedPath);
 
             $embed = ['path' => $embedPath];
         }
@@ -3622,14 +3772,21 @@ class PluginLoader
             if (!is_string($path) || !str_starts_with($path, '/api/')) {
                 return $drop("action.path must be a string starting with '/api/'", $id);
             }
-            $routeKey = "{$method} {$path}";
-            if (!array_key_exists($routeKey, $registeredActionRoutes)) {
+            // Keyed the same way every other write-route lookup in this file is
+            // keyed. For a token-free `action.path` — which is what an action
+            // screen normally declares, since its generic form submits to one
+            // fixed route — this is byte-for-byte the comparison it replaces.
+            // The METHOD is still restricted to POST/PUT above, before this
+            // lookup, so widening the MAP to PATCH/DELETE cannot let an action
+            // screen point at one.
+            $routeKey = self::normalizeRouteKey($method, $path);
+            if (!array_key_exists($routeKey, $registeredWriteRoutes)) {
                 return $drop("action.path '{$path}' is not a {$method} route this plugin registered", $id);
             }
-            if ($registeredActionRoutes[$routeKey] !== $permission) {
+            if ($registeredWriteRoutes[$routeKey] !== $permission) {
                 return $drop(
                     "action.path '{$path}' route requiredPermission '"
-                    . ($registeredActionRoutes[$routeKey] ?? 'none')
+                    . ($registeredWriteRoutes[$routeKey] ?? 'none')
                     . "' does not match the descriptor's '{$permission}'",
                     $id
                 );
@@ -3683,13 +3840,7 @@ class PluginLoader
             }
 
             // Same versioning rewrite as for resource.basePath above.
-            $vp = $this->router->getVersionPrefix();
-            if ($vp !== '') {
-                $pos = strpos($path, '/', 1);
-                $path = $pos === false
-                    ? $path . $vp
-                    : substr($path, 0, $pos) . $vp . substr($path, $pos);
-            }
+            $path = $this->router->versionedPath($path);
 
             $action = [
                 'method' => $method,
@@ -3729,7 +3880,6 @@ class PluginLoader
             // drops the ENTIRE feature, mirroring how crud's basePath works),
             // then rewrite it to the versioned URL exactly as basePath/path are
             // rewritten for crud and action screens.
-            $vp = $this->router->getVersionPrefix();
 
             // $dropSource / $dropReason captures the violating path or reason
             // from any depth so the outer $drop() call can include it in the
@@ -3749,12 +3899,15 @@ class PluginLoader
              * @param array<string, mixed> $node
              * @return array<string, mixed>|null
              */
+            // Captured rather than reached through `$this`: the walk is a STATIC
+            // closure, so it has no `$this` to call `versionedPath()` on.
+            $router = $this->router;
+
             $walkNode = null;
             $walkNode = static function (array $node) use (
                 $registeredGetRoutes,
-                $registeredActionRoutes,
                 $registeredWriteRoutes,
-                $vp,
+                $router,
                 &$walkNode,
                 &$dropSource,
                 &$dropReason
@@ -3763,7 +3916,19 @@ class PluginLoader
                 if (is_string($type)) {
                     $rule = \Whity\Sdk\Frontend\Blocks\BlockContract::rulesFor($type);
                     $sourceKind = $rule !== null ? ($rule['props']['source']['type'] ?? null) : null;
-                    if ($sourceKind === 'apiPath' || $sourceKind === 'recordPath') {
+                    // `array_key_exists` and not just the kind: since `fieldArray`
+                    // a `source` prop may be OPTIONAL, so a node of a
+                    // source-bearing type need not carry one. Reading
+                    // `$node['source']` unconditionally warned and produced null,
+                    // which failed the ownership check and DROPPED the whole
+                    // feature — every source-less `fieldArray` on the platform,
+                    // silently, for a prop it never declared. BlockValidator has
+                    // already refused a `source` of the wrong shape by here; what
+                    // it cannot do is invent one that was never written.
+                    if (
+                        ($sourceKind === 'apiPath' || $sourceKind === 'recordPath')
+                        && array_key_exists('source', $node)
+                    ) {
                         /** @var string $source — guaranteed a valid apiPath/recordPath by BlockValidator */
                         $source = $node['source'];
                         // #883: a `recordPath` (`dataRecord.source`) may carry
@@ -3789,21 +3954,70 @@ class PluginLoader
                             $dropSource = $source;
                             return null;
                         }
-                        if ($vp !== '') {
-                            $pos = strpos($source, '/', 1);
-                            $node['source'] = $pos === false
-                                ? $source . $vp
-                                : substr($source, 0, $pos) . $vp . substr($source, $pos);
+                        $node['source'] = $router->versionedPath($source);
+                    }
+
+                    // (c3-g) A `form`'s PRELOAD endpoint. Same gate as `source`
+                    // directly above, because it is the same kind of thing: a
+                    // GET the client issues with the user's session, whose body
+                    // lands on the screen.
+                    //
+                    // It had no gate at all. `dataSource` was absent from
+                    // BlockContract, and an undeclared prop is neither validated
+                    // (validateProps iterates the DECLARED rules, never the
+                    // node's keys) nor stripped (this walk returns the node it
+                    // was handed) — so it reached the renderer untouched. Every
+                    // other endpoint a block can name is checked against the
+                    // routes THIS plugin registered: `submit` below, every
+                    // `source` above, `inbox.actions`, every `rowActionList`.
+                    // This was the one that was not, which made it the way
+                    // around all of them.
+                    //
+                    // Compared with route parameters normalized, like a
+                    // `recordPath`: `dataSource.path` carries the same `{token}`
+                    // segments (#949) and a declared `{record}` names the same
+                    // segment as a registered `{id}`.
+                    //
+                    // Version-rewritten for the reason (c3-d) gives: an
+                    // unversioned path matches no route, so the preload would
+                    // fail and hand the author an enabled, EMPTY form — which
+                    // against an update endpoint that replaces rather than
+                    // merges writes blanks over every field and reports success
+                    // (#957). Fixing ownership without the rewrite would have
+                    // traded a security gap for a data-loss one.
+                    if ($type === 'form' && array_key_exists('dataSource', $node)) {
+                        $preload = $node['dataSource'];
+                        $preloadPath = is_array($preload) ? ($preload['path'] ?? null) : null;
+
+                        // Fail closed on a shape BlockValidator would have
+                        // refused. It runs before this walk, so reaching here
+                        // with a malformed spec means it was not validated at
+                        // all — the state this block exists to end.
+                        if (!is_string($preloadPath) || $preloadPath === '') {
+                            $dropReason = 'form.dataSource must be an object with a GET path';
+                            return null;
                         }
+
+                        if (!self::matchesRegisteredGetRoute($preloadPath, $registeredGetRoutes)) {
+                            $dropSource = $preloadPath;
+                            $dropReason = "form.dataSource path '{$preloadPath}' is not a GET route this plugin registered";
+                            return null;
+                        }
+
+                        $node['dataSource']['path'] = $router->versionedPath($preloadPath);
                     }
 
                     // (c3-c) Interactive endpoint ownership + versioning (WC-234).
                     // A `form` node's `submit` spec and an `actionButton` node's
-                    // `action` spec declare a POST/PUT endpoint the block submits
-                    // to. The endpoint must be a route THIS plugin actually
-                    // registered and the route's requiredPermission must EQUAL the
-                    // block's declared requiredPermission (fail-closed). Mirrors
-                    // the screen:'action' pattern exactly (PluginLoader.php ~2515).
+                    // `action` spec declare a POST/PUT/PATCH endpoint the block
+                    // submits to (the verb set `BlockValidator::validateSubmitSpec()`
+                    // accepts). The endpoint must be a route THIS plugin actually
+                    // registered — compared with route parameters normalized, so a
+                    // record page's `/api/x/things/{record}` matches the plugin's
+                    // own `PUT /api/x/things/{id}` — and the route's
+                    // requiredPermission must EQUAL the block's declared
+                    // requiredPermission (fail-closed). Mirrors the
+                    // screen:'action' pattern exactly, and now shares its map.
                     $endpointSpec = null;
                     if ($type === 'form' && isset($node['submit']) && is_array($node['submit'])) {
                         $endpointSpec = [
@@ -3862,12 +4076,7 @@ class PluginLoader
                                 return null;
                             }
 
-                            if ($vp !== '') {
-                                $pos = strpos($actionEndpoint, '/', 1);
-                                $action['endpoint'] = $pos === false
-                                    ? $actionEndpoint . $vp
-                                    : substr($actionEndpoint, 0, $pos) . $vp . substr($actionEndpoint, $pos);
-                            }
+                            $action['endpoint'] = $router->versionedPath($actionEndpoint);
 
                             $rewrittenActions[] = $action;
                         }
@@ -3913,36 +4122,108 @@ class PluginLoader
                             return null;
                         }
 
-                        if ($vp !== '') {
-                            $pos = strpos($checkEndpoint, '/', 1);
-                            $node['check']['endpoint'] = $pos === false
-                                ? $checkEndpoint . $vp
-                                : substr($checkEndpoint, 0, $pos) . $vp . substr($checkEndpoint, $pos);
+                        $node['check']['endpoint'] = $router->versionedPath($checkEndpoint);
+                    }
+
+                    // (c3-f) a `rowActionList` prop — `dataTable.rowActions`,
+                    // `flow.nodeActions` — may carry `{method, endpoint}` mutation
+                    // entries, and those came through this walk UNTOUCHED: neither
+                    // ownership-checked nor version-rewritten. Both halves matter.
+                    //
+                    // The endpoint reached the browser unversioned, so the action
+                    // POSTed to a path the router does not serve and answered 404
+                    // on click. The block rendered, the button looked live, and
+                    // only pressing it said otherwise — the failure was invisible
+                    // to every check that stops at "does the feature load".
+                    //
+                    // And this was the one write endpoint in the contract a plugin
+                    // could aim at a route it does not own, while `form.submit`,
+                    // `actionButton.action` and an inbox action are each refused
+                    // for precisely that.
+                    //
+                    // Found from the contract rather than by name, so a third type
+                    // declaring a `rowActionList` is covered the day it is added
+                    // instead of the day somebody notices it 404s.
+                    foreach (($rule['props'] ?? []) as $propName => $propRule) {
+                        $entries = $node[$propName] ?? null;
+                        if ($propRule['type'] !== 'rowActionList' || !is_array($entries)) {
+                            continue;
                         }
+
+                        $rewrittenEntries = [];
+                        foreach ($entries as $entry) {
+                            // An `href` entry is internal navigation and an `open`
+                            // entry is a block id. Neither names a route, and
+                            // BlockValidator already refused any other shape.
+                            if (!is_array($entry)
+                                || !is_string($entry['endpoint'] ?? null)
+                                || !is_string($entry['method'] ?? null)
+                            ) {
+                                $rewrittenEntries[] = $entry;
+
+                                continue;
+                            }
+
+                            $rowMethod   = strtoupper($entry['method']);
+                            $rowEndpoint = $entry['endpoint'];
+
+                            // Same key an inbox action and an `accessGate` write
+                            // check use, so a declared `{record}` matches a
+                            // registered `{id}`.
+                            if (!array_key_exists(
+                                self::normalizeRouteKey($rowMethod, $rowEndpoint),
+                                $registeredWriteRoutes
+                            )) {
+                                $dropReason = "{$type}.{$propName} action endpoint "
+                                    . "'{$rowMethod} {$rowEndpoint}' is not a write route this plugin registered";
+
+                                return null;
+                            }
+
+                            $entry['endpoint'] = $router->versionedPath($rowEndpoint);
+
+                            $rewrittenEntries[] = $entry;
+                        }
+
+                        $node[$propName] = $rewrittenEntries;
                     }
 
                     if ($endpointSpec !== null) {
-                        $key = strtoupper((string) $endpointSpec['method']) . ' ' . (string) $endpointSpec['endpoint'];
-                        if (!array_key_exists($key, $registeredActionRoutes)) {
-                            $dropReason = "interactive block endpoint '{$key}' is not a POST/PUT route this plugin registered";
+                        $method   = strtoupper((string) $endpointSpec['method']);
+                        $endpoint = (string) $endpointSpec['endpoint'];
+                        // The declaration as written, for the log message: a
+                        // reason quoting a normalized key would name a path the
+                        // author never typed.
+                        $declared = "{$method} {$endpoint}";
+
+                        // Keyed by {@see normalizeRouteKey()} — the SAME key an
+                        // inbox action and an `accessGate` write check already
+                        // use, and the same normalization
+                        // {@see matchesRegisteredGetRoute()} applies on the read
+                        // side. A `submit`/`action` endpoint is a TEMPLATE the
+                        // renderer substitutes context values into, exactly as
+                        // those are, so a declared `{record}` and a registered
+                        // `{id}` (or `{id:\d+}`) name the same segment. Comparing
+                        // the literals refused the pattern the SDK documents and
+                        // dropped the whole feature for a naming difference the
+                        // dispatcher does not read.
+                        $key = self::normalizeRouteKey($method, $endpoint);
+                        if (!array_key_exists($key, $registeredWriteRoutes)) {
+                            $dropReason = "interactive block endpoint '{$declared}' is not a write route "
+                                . 'this plugin registered';
                             return null;
                         }
-                        if ($registeredActionRoutes[$key] !== $endpointSpec['perm']) {
-                            $dropReason = "interactive block endpoint '{$key}' route requiredPermission does not match the block's requiredPermission";
+                        if ($registeredWriteRoutes[$key] !== $endpointSpec['perm']) {
+                            $dropReason = "interactive block endpoint '{$declared}' route requiredPermission does not match the block's requiredPermission";
                             return null;
                         }
                         // Version-rewrite the endpoint in place — same insertion
                         // logic as $source above (keep the /api/ prefix so that
                         // FrontendFeaturesApiHandler re-validation still passes).
-                        if ($vp !== '') {
-                            $e   = (string) $endpointSpec['endpoint'];
-                            $pos = strpos($e, '/', 1);
-                            $versioned = $pos === false
-                                ? $e . $vp
-                                : substr($e, 0, $pos) . $vp . substr($e, $pos);
-                            $ref = (string) $endpointSpec['ref'];
-                            $node[$ref]['endpoint'] = $versioned;
-                        }
+                        $ref = (string) $endpointSpec['ref'];
+                        $node[$ref]['endpoint'] = $router->versionedPath(
+                            (string) $endpointSpec['endpoint']
+                        );
                     }
                 }
 

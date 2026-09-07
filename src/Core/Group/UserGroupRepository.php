@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Whity\Core\Group;
 
 use PDO;
+use Whity\Http\ListQuery;
+use Whity\Http\ListSpec;
 
 /**
  * Data-access for `user_groups` (#999) — the named rules, and nothing about who
@@ -52,11 +54,52 @@ final class UserGroupRepository
     }
 
     /**
-     * A page of this tenant's groups, by name.
+     * What a caller may sort and search this table by (#1102).
      *
-     * Ordered by name because that is how a picker reads and because it is the
-     * order the unique constraint's index already provides — no sort, no second
-     * index.
+     * DECLARED HERE, NOT IN THE HANDLER, even though it is the ENDPOINT's
+     * contract. The values are SQL column expressions interpolated straight into
+     * the statements below — they are code, not input — so they belong beside
+     * the SQL that uses them, where renaming a column and forgetting the map is
+     * one diff rather than two files. The KEYS are the endpoint's vocabulary and
+     * are all the handler needs to know.
+     *
+     * The keys are the columns the user-groups screen renders. `rule` sorts by
+     * `rule_kind`, the slug — the screen shows a LOCALISED label resolved from
+     * the `/api/group-rules` catalogue, and the server cannot order by a string
+     * the client will compute. Ordering by the kind still groups every row that
+     * will render the same label together, which is what clicking that header is
+     * for; it is alphabetical in the slug rather than in the reader's language,
+     * and that is the honest limit of sorting a derived column on the server.
+     *
+     * For the same reason `rule_kind` is NOT searchable: a reader typing into
+     * the search box types what they can see, and matching a slug they cannot
+     * see would return rows for a reason the screen does not explain. Search is
+     * name and description — the two fields rendered verbatim.
+     *
+     * Default `name` ascending, which is the order this table has always been
+     * read in: it is how a picker reads, and it is the order the UNIQUE
+     * (tenant_id, name) index already provides, so the default costs no sort.
+     */
+    public static function listSpec(): ListSpec
+    {
+        return new ListSpec(
+            sortable: [
+                'name' => 'name',
+                'rule' => 'rule_kind',
+            ],
+            tiebreaker: 'id',
+            searchable: ['name', 'description'],
+            defaultSort: 'name',
+            defaultDirection: 'asc',
+        );
+    }
+
+    /**
+     * A page of this tenant's groups.
+     *
+     * Ordered by whatever {@see listSpec()} allowed the caller to ask for,
+     * defaulting to name — how a picker reads, and the order the unique
+     * constraint's index already provides.
      *
      * DELIBERATELY WITHOUT A MEMBER COUNT. `document_collections` carries an
      * `item_count` on its list rows and this does not, and the difference is the
@@ -69,19 +112,17 @@ final class UserGroupRepository
      *
      * @return list<array<string, mixed>>
      */
-    public function listForTenant(int $tenantId, int $limit, int $offset): array
+    public function listForTenant(int $tenantId, ListQuery $query): array
     {
         $stmt = $this->db->prepare(
             'SELECT id, tenant_id, name, description, rule_kind, rule_config,
                     created_by, created_at, updated_at
                FROM user_groups
-              WHERE tenant_id = :tenant_id
-              ORDER BY name ASC, id ASC
-              LIMIT :limit OFFSET :offset'
+              WHERE tenant_id = :tenant_id' . $query->andSearch($this->db)
+            . ' ' . $query->orderBy() . ' LIMIT :limit OFFSET :offset'
         );
         $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
-        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
-        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $query->bindAll($stmt);
         $stmt->execute();
 
         /** @var list<array<string, mixed>> $rows */
@@ -93,14 +134,26 @@ final class UserGroupRepository
     /**
      * How many groups this tenant has, for the pagination envelope.
      *
+     * PASS THE SAME QUERY YOU PASSED {@see listForTenant()}. A count that
+     * ignores the search counts rows the page will never contain, and the client
+     * draws page controls for pages that come back empty — the one mistake this
+     * pair can make that looks like working software. `null` means the whole
+     * tenant, which is a different and also legitimate question (how many groups
+     * exist at all), and the only one that may be asked without a request.
+     *
      * A separate count rather than a window function: the two engines disagree
      * about `COUNT(*) OVER ()` on an empty result, and a total that is absent
      * when a page is empty is a total a client cannot render.
      */
-    public function countForTenant(int $tenantId): int
+    public function countForTenant(int $tenantId, ?ListQuery $query = null): int
     {
-        $stmt = $this->db->prepare('SELECT COUNT(*) AS c FROM user_groups WHERE tenant_id = :tenant_id');
-        $stmt->execute([':tenant_id' => $tenantId]);
+        $stmt = $this->db->prepare(
+            'SELECT COUNT(*) AS c FROM user_groups WHERE tenant_id = :tenant_id'
+            . ($query === null ? '' : $query->andSearch($this->db))
+        );
+        $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+        $query?->bindSearch($stmt);
+        $stmt->execute();
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
         return $row === false ? 0 : (int) $row['c'];

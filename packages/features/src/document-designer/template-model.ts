@@ -36,6 +36,27 @@ export interface DocumentTemplateRow {
   name: string;
   updated_at: string;
   data: unknown;
+  /**
+   * WHO CAN SEE THIS TEMPLATE — `personal`, `tenant`, `global` or `system`.
+   *
+   * Optional because a row from a server that predates the field, or a fixture
+   * written before it, must still map. Absent reads as `personal`, which is
+   * what the server itself defaults a missing scope to.
+   *
+   * CARRIED HERE BECAUSE ITS ABSENCE WAS INVISIBLE AND EXPENSIVE. The designer
+   * never declared this field, so it never sent one either — and the server
+   * reads a missing `scope` on CREATE as `personal`, which
+   * `DocumentAccessPolicy::canView()` defines as *the creator and nobody else*.
+   * Every template authored in the designer was therefore invisible to every
+   * other person in the tenant, absent from their create-document picker, and
+   * the only place to change it was a different page behind a different
+   * permission. Nothing said so; the save toast read "Template saved."
+   *
+   * Blocks have carried their scope from the beginning and have a control for
+   * it in the palette, which is what makes this an oversight rather than a
+   * policy.
+   */
+  scope?: string;
 }
 
 export type { SavedTemplate };
@@ -51,6 +72,10 @@ export function toSavedTemplate(row: DocumentTemplateRow): SavedTemplate | null 
     name: row.name,
     updatedAt: row.updated_at,
     data: migrateTemplate(row.data),
+    // Absent reads as `personal` — the same reading the server gives a missing
+    // scope, so a row from an older backend describes itself the same way on
+    // both sides rather than arriving as `undefined` and being defaulted twice.
+    scope: typeof row.scope === 'string' && row.scope !== '' ? row.scope : 'personal',
   };
 }
 

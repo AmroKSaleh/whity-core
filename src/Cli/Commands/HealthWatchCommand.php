@@ -68,7 +68,7 @@ use Whity\Database\Database;
  *   health:watch --interval=30   # override the pass interval
  *   health:watch --url=https://… # public URL to probe (else WHITY_PUBLIC_URL)
  */
-final class HealthWatchCommand
+final class HealthWatchCommand implements CliCommand
 {
     private const DEFAULT_INTERVAL_SECONDS = 60;
 

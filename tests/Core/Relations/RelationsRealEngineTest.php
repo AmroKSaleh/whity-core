@@ -14,6 +14,7 @@ use Whity\Api\Exception\SelfRelationException;
 use Whity\Core\Relations\PersonRepository;
 use Whity\Core\Relations\RelationRepository;
 use Whity\Core\Relations\RelationResolver;
+use Whity\Http\ListQuery;
 
 /**
  * Real-engine (in-memory SQLite, STRINGIFY_FETCHES on for Postgres parity) tests
@@ -318,7 +319,10 @@ final class RelationsRealEngineTest extends TestCase
         RelationsSchema::seedPerson($this->pdo, 1, 'Alice Smith');
         RelationsSchema::seedPerson($this->pdo, 1, 'Bob Jones');
 
-        $hits = $this->persons->list(1, 'smith');
+        // The search now arrives as the shared list contract's `q`, which is
+        // what the endpoint builds; the repository no longer takes a bare
+        // string, so the test exercises the real path rather than a shortcut.
+        $hits = $this->persons->list(1, ListQuery::fromPath('/?q=smith', PersonRepository::listSpec()));
         $this->assertCount(1, $hits);
         $this->assertSame('Alice Smith', $hits[0]['display_name']);
     }

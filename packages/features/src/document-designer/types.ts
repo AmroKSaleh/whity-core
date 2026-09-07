@@ -37,6 +37,12 @@ export interface SavedTemplate {
   name: string;
   updatedAt: string;
   data: DocTemplate;
+  /**
+   * Who can see it: `personal` (the creator alone), `tenant`, `global` or
+   * `system`. See {@link DocumentTemplateRow.scope} for why this was missing
+   * and what it cost.
+   */
+  scope: string;
 }
 
 /**
@@ -50,8 +56,15 @@ export interface SavedTemplate {
 export interface DocumentDesignerAdapter {
   /** GET /document-templates — RBAC-filtered server-side, newest first. */
   listTemplates(): Promise<SavedTemplate[]>;
-  /** POST (no id) or PATCH (id); returns the template's id. */
-  saveTemplate(template: DocTemplate, id?: string): Promise<string>;
+  /**
+   * POST (no id) or PATCH (id); returns the template's id.
+   *
+   * `scope` is who should be able to see it. Omitting it on CREATE lets the
+   * server default it to `personal` — creator-only — which is what the designer
+   * did for its whole life without saying so. Omitting it on UPDATE leaves the
+   * stored scope alone.
+   */
+  saveTemplate(template: DocTemplate, id?: string, scope?: string): Promise<string>;
   /** DELETE /document-templates/{id}. */
   deleteTemplate(id: string): Promise<void>;
   /** GET /document-blocks — RBAC-filtered. */

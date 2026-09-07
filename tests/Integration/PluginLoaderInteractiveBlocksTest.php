@@ -32,6 +32,29 @@ use Whity\Core\Router;
  *   The endpoint IS a registered POST/PUT route but its route requiredPermission
  *   differs from the block's declared `requiredPermission` → feature dropped
  *   fail-closed.
+ *
+ * Test 4 (THE WRITE GATE — a record page that can save):
+ *   The three props a record page uses to READ are all compared with route
+ *   parameters NORMALIZED — `dataRecord.source` through
+ *   `matchesRegisteredGetRoute`, an `accessGate.check` and an `inbox` action
+ *   through `normalizeRouteKey`. The two props that WRITE were not, and the
+ *   interactive-endpoint map they were compared against recorded POST and PUT
+ *   only. So the pattern the SDK documents — a form submitting to
+ *   `/api/x/things/{record}` — matched nothing and the whole feature was
+ *   dropped at load, fail-closed and silently:
+ *
+ *     - a `PATCH` submit matched nothing because the verb was never recorded;
+ *     - `PUT /api/x/things/{record}` matched nothing because the registered
+ *       route spells its parameter `{id}` (or `{id:\d+}`), and the comparison
+ *       was on the literal string.
+ *
+ *   A record page could therefore display a record, gate an editor on the
+ *   caller's write permission, and never save. These tests are the shape of
+ *   that gap: each fixture below declares the documented pattern and asserts
+ *   the feature SURVIVES and its endpoint is version-rewritten, while the
+ *   refusals that must keep working — a foreign path, a shape mismatch, a
+ *   permission that does not line up — are asserted alongside so the fix is
+ *   visibly a normalisation and not a widening.
  */
 final class PluginLoaderInteractiveBlocksTest extends TestCase
 {
@@ -40,12 +63,14 @@ final class PluginLoaderInteractiveBlocksTest extends TestCase
     private static string $ownedEndpointDir;
     private static string $foreignEndpointDir;
     private static string $permMismatchDir;
+    private static string $templatedWriteDir;
 
     public static function setUpBeforeClass(): void
     {
         self::$ownedEndpointDir  = sys_get_temp_dir() . '/whity_ibb_owned_'    . uniqid();
         self::$foreignEndpointDir = sys_get_temp_dir() . '/whity_ibb_foreign_'  . uniqid();
         self::$permMismatchDir   = sys_get_temp_dir() . '/whity_ibb_permmatch_' . uniqid();
+        self::$templatedWriteDir = sys_get_temp_dir() . '/whity_ibb_templated_' . uniqid();
 
         // ── Plugin 1: registers POST /api/x/save (x:write)
         //    Feature 1a: form block with matching submit endpoint + permission
@@ -230,11 +255,201 @@ PHP);
         ];
     }
 PHP);
+
+        // ── Plugin 4: the WRITE GATE. Registers the write routes a record page
+        //    actually needs — each with a PATH PARAMETER, which is the whole
+        //    point: a record page is about ONE record, so the route that saves
+        //    it is templated by construction.
+        //
+        //      PUT    /api/r/items/{id}         (r:manage)  param name differs
+        //      PATCH  /api/r/items/{id}/state   (r:manage)  verb was unrecorded
+        //      PATCH  /api/r/codes/{id:\d+}     (r:manage)  inline constraint
+        //      PUT    /api/r/locked/{id}        (r:manage)  for the perm pin
+        //
+        //    Every declaration below spells its parameter `{record}` — the
+        //    host-seeded binding a record ROUTE supplies — exactly as the SDK
+        //    documents. Domain-neutral throughout: `items`, `codes`, `state`.
+        self::writePlugin(self::$templatedWriteDir, 'IbbTemplated', <<<'PHP'
+    public function getPermissions(): array { return ['r:manage', 'r:read']; }
+    public function getRoutes(): array
+    {
+        $ok = static fn ($r) => \Whity\Sdk\Http\Response::json(['data' => []]);
+
+        return [
+            ['method' => 'PUT',   'path' => '/api/r/items/{id}',       'handler' => $ok,
+             'requiredRole' => null, 'requiredPermission' => 'r:manage'],
+            ['method' => 'PATCH', 'path' => '/api/r/items/{id}/state', 'handler' => $ok,
+             'requiredRole' => null, 'requiredPermission' => 'r:manage'],
+            ['method' => 'PATCH', 'path' => '/api/r/codes/{id:\d+}',   'handler' => $ok,
+             'requiredRole' => null, 'requiredPermission' => 'r:manage'],
+            // WC-569: a constraint carrying a {n} QUANTIFIER. Router accepts and
+            // compiles it; the loader's path-key normaliser used to mis-collapse
+            // it and leave a stray brace, so no declaration could ever name it.
+            ['method' => 'PUT',   'path' => '/api/r/tokens/{id:[a-f0-9]{8}}', 'handler' => $ok,
+             'requiredRole' => null, 'requiredPermission' => 'r:manage'],
+            ['method' => 'PUT',   'path' => '/api/r/locked/{id}',      'handler' => $ok,
+             'requiredRole' => null, 'requiredPermission' => 'r:manage'],
+            ['method' => 'DELETE','path' => '/api/r/items/{id}',       'handler' => $ok,
+             'requiredRole' => null, 'requiredPermission' => 'r:manage'],
+        ];
+    }
+    public function getFrontendFeatures(): array
+    {
+        $saveButton = ['type' => 'submitButton', 'label' => 'Save'];
+        $field = ['type' => 'textInput', 'name' => 'title', 'label' => 'Title'];
+
+        return [
+            // The documented record-page pattern: PUT a templated record path,
+            // parameter named differently from the registered route's.
+            [
+                'id' => 'r-put-templated',
+                'label' => 'R Put Templated',
+                'screen' => 'blocks',
+                'requiredPermission' => 'r:manage',
+                'blocks' => [[
+                    'type' => 'form',
+                    'submit' => ['method' => 'PUT', 'endpoint' => '/api/r/items/{record}'],
+                    'requiredPermission' => 'r:manage',
+                    'children' => [$field, $saveButton],
+                ]],
+            ],
+            // PATCH — the sync update verb the contract accepts and the map
+            // never recorded.
+            [
+                'id' => 'r-patch-templated',
+                'label' => 'R Patch Templated',
+                'screen' => 'blocks',
+                'requiredPermission' => 'r:manage',
+                'blocks' => [[
+                    'type' => 'form',
+                    'submit' => ['method' => 'PATCH', 'endpoint' => '/api/r/items/{record}/state'],
+                    'requiredPermission' => 'r:manage',
+                    'children' => [$field, $saveButton],
+                ]],
+            ],
+            // An INLINE CONSTRAINT on the registered route. The declaration
+            // cannot restate it (and should not have to): the constraint is the
+            // route's business, and the block names the segment.
+            [
+                'id' => 'r-patch-constrained',
+                'label' => 'R Patch Constrained',
+                'screen' => 'blocks',
+                'requiredPermission' => 'r:manage',
+                'blocks' => [[
+                    'type' => 'form',
+                    'submit' => ['method' => 'PATCH', 'endpoint' => '/api/r/codes/{record}'],
+                    'requiredPermission' => 'r:manage',
+                    'children' => [$field, $saveButton],
+                ]],
+            ],
+            // A constraint carrying a {n} QUANTIFIER (WC-569). Same principle
+            // as above and a different failure: the normaliser, not the literal
+            // comparison, was what refused this one.
+            [
+                'id' => 'r-put-quantifier-constrained',
+                'label' => 'R Put Quantifier Constrained',
+                'screen' => 'blocks',
+                'requiredPermission' => 'r:manage',
+                'blocks' => [[
+                    'type' => 'form',
+                    'submit' => ['method' => 'PUT', 'endpoint' => '/api/r/tokens/{record}'],
+                    'requiredPermission' => 'r:manage',
+                    'children' => [$field, $saveButton],
+                ]],
+            ],
+            // The same, through an actionButton rather than a form.
+            [
+                'id' => 'r-action-templated',
+                'label' => 'R Action Templated',
+                'screen' => 'blocks',
+                'requiredPermission' => 'r:manage',
+                'blocks' => [[
+                    'type' => 'actionButton',
+                    'label' => 'Advance',
+                    'action' => ['method' => 'PATCH', 'endpoint' => '/api/r/items/{record}/state'],
+                    'requiredPermission' => 'r:manage',
+                ]],
+            ],
+            // STILL REFUSED (1): the permission pin. The path normalises onto a
+            // route this plugin owns, and the block's declared permission does
+            // not equal that route's — so the feature must still drop. This is
+            // the assertion that proves normalising the KEY did not lose the
+            // VALUE the pin is read from.
+            [
+                'id' => 'r-perm-mismatch-templated',
+                'label' => 'R Perm Mismatch Templated',
+                'screen' => 'blocks',
+                'requiredPermission' => 'r:read',
+                'blocks' => [[
+                    'type' => 'form',
+                    'submit' => ['method' => 'PUT', 'endpoint' => '/api/r/locked/{record}'],
+                    'requiredPermission' => 'r:read',
+                    'children' => [$field, $saveButton],
+                ]],
+            ],
+            // STILL REFUSED (2): a templated endpoint under a path this plugin
+            // never registered. Normalising parameter NAMES must not turn the
+            // ownership gate into a shape wildcard.
+            [
+                'id' => 'r-foreign-templated',
+                'label' => 'R Foreign Templated',
+                'screen' => 'blocks',
+                'requiredPermission' => 'r:manage',
+                'blocks' => [[
+                    'type' => 'form',
+                    'submit' => ['method' => 'PUT', 'endpoint' => '/api/elsewhere/{record}'],
+                    'requiredPermission' => 'r:manage',
+                    'children' => [$field, $saveButton],
+                ]],
+            ],
+            // STILL REFUSED (3): the right prefix, the wrong SHAPE — one more
+            // segment than any registered route has.
+            [
+                'id' => 'r-wrong-shape',
+                'label' => 'R Wrong Shape',
+                'screen' => 'blocks',
+                'requiredPermission' => 'r:manage',
+                'blocks' => [[
+                    'type' => 'form',
+                    'submit' => ['method' => 'PUT', 'endpoint' => '/api/r/items/{record}/extra'],
+                    'requiredPermission' => 'r:manage',
+                    'children' => [$field, $saveButton],
+                ]],
+            ],
+            // STILL REFUSED (4): the right path and shape, the wrong VERB. The
+            // plugin registers no POST under /api/r/items/{id}.
+            [
+                'id' => 'r-wrong-verb',
+                'label' => 'R Wrong Verb',
+                'screen' => 'blocks',
+                'requiredPermission' => 'r:manage',
+                'blocks' => [[
+                    'type' => 'form',
+                    'submit' => ['method' => 'POST', 'endpoint' => '/api/r/items/{record}'],
+                    'requiredPermission' => 'r:manage',
+                    'children' => [$field, $saveButton],
+                ]],
+            ],
+            // Sibling: must survive every drop above.
+            [
+                'id' => 'r-static',
+                'label' => 'R Static',
+                'screen' => 'custom',
+                'requiredPermission' => 'r:read',
+            ],
+        ];
+    }
+PHP);
     }
 
     public static function tearDownAfterClass(): void
     {
-        foreach ([self::$ownedEndpointDir, self::$foreignEndpointDir, self::$permMismatchDir] as $dir) {
+        foreach ([
+            self::$ownedEndpointDir,
+            self::$foreignEndpointDir,
+            self::$permMismatchDir,
+            self::$templatedWriteDir,
+        ] as $dir) {
             self::removeDirectory($dir);
         }
     }
@@ -455,6 +670,234 @@ PHP);
             $byId,
             'A valid sibling feature must survive even when the permission-mismatch feature is dropped'
         );
+    }
+
+    // ── TEST 4: the write gate ───────────────────────────────────────────
+
+    /**
+     * The documented record-page pattern: a form PUTting a templated record
+     * path whose parameter the plugin's own route spells differently.
+     *
+     * `PUT /api/r/items/{record}` against a registered `PUT /api/r/items/{id}`.
+     * The renderer substitutes a concrete id there, the dispatcher matches the
+     * route's own pattern, and the parameter's NAME is a word neither of them
+     * reads. This is the same comparison `dataRecord.source` has always made
+     * for the READ half.
+     */
+    public function testATemplatedPutSubmitIsOwnedWhenTheRouteSpellsItsParameterDifferently(): void
+    {
+        [$loader] = $this->loadDir(self::$templatedWriteDir, new Router('/v1'));
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+
+        $this->assertArrayHasKey(
+            'r-put-templated',
+            $byId,
+            "A form submitting PUT /api/r/items/{record} must be served: the plugin registers "
+            . 'PUT /api/r/items/{id}, and the parameter name is not part of the route'
+        );
+        $this->assertSame(
+            '/api/v1/r/items/{record}',
+            $byId['r-put-templated']['blocks'][0]['submit']['endpoint'],
+            'and its endpoint must be version-rewritten like every other owned endpoint'
+        );
+    }
+
+    /**
+     * PATCH — the sync update verb `BlockValidator::validateSubmitSpec()`
+     * accepts and the interactive-endpoint map never recorded, so a PATCH
+     * submit matched nothing at all regardless of its path.
+     */
+    public function testATemplatedPatchSubmitIsOwned(): void
+    {
+        [$loader] = $this->loadDir(self::$templatedWriteDir, new Router('/v1'));
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+
+        $this->assertArrayHasKey(
+            'r-patch-templated',
+            $byId,
+            'A form submitting PATCH to a registered PATCH route must be served — the verb has to be '
+            . 'recorded in the ownership map, or every PATCH submit is refused for not existing'
+        );
+        $this->assertSame(
+            '/api/v1/r/items/{record}/state',
+            $byId['r-patch-templated']['blocks'][0]['submit']['endpoint']
+        );
+    }
+
+    /**
+     * A registered route carrying an INLINE CONSTRAINT (`{id:\d+}`, WC-160).
+     *
+     * The block cannot restate the constraint — it is the route's own business
+     * — so a literal comparison could never match one, which is the second half
+     * of why the literal comparison had to go.
+     */
+    public function testATemplatedSubmitIsOwnedWhenTheRouteCarriesAnInlineConstraint(): void
+    {
+        [$loader] = $this->loadDir(self::$templatedWriteDir, new Router('/v1'));
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+
+        $this->assertArrayHasKey(
+            'r-patch-constrained',
+            $byId,
+            'A form submitting to a route registered as /api/r/codes/{id:\\d+} must be served — the '
+            . 'constraint belongs to the route, and no declaration can or should repeat it'
+        );
+        $this->assertSame(
+            '/api/v1/r/codes/{record}',
+            $byId['r-patch-constrained']['blocks'][0]['submit']['endpoint']
+        );
+    }
+
+    /**
+     * A registered route whose constraint carries a `{n}` QUANTIFIER.
+     *
+     * `Router::pathToPattern()` accepts `{id:[a-f0-9]{8}}` and compiles it
+     * (WC-569), but the loader's path-key normaliser closed the placeholder at
+     * the constraint's inner `}` and left a stray brace behind — so the key was
+     * `/api/r/tokens/{}}`, no declaration could ever equal it, and the whole
+     * feature dropped at load.
+     *
+     * A different failure from the literal comparison the other cases exercise:
+     * that one refused a differently-SPELLED parameter, this one refused a
+     * correctly-spelled parameter against a route it could not parse. Both end
+     * in the same silent drop, which is why both are pinned.
+     */
+    public function testATemplatedSubmitIsOwnedWhenTheRouteConstraintCarriesAQuantifier(): void
+    {
+        [$loader] = $this->loadDir(self::$templatedWriteDir, new Router('/v1'));
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+
+        $this->assertArrayHasKey(
+            'r-put-quantifier-constrained',
+            $byId,
+            'A form submitting to a route registered as /api/r/tokens/{id:[a-f0-9]{8}} must be served '
+            . '— the quantifier belongs to the route, and the path key must collapse the whole '
+            . 'placeholder rather than stopping at the brace inside it'
+        );
+        $this->assertSame(
+            '/api/v1/r/tokens/{record}',
+            $byId['r-put-quantifier-constrained']['blocks'][0]['submit']['endpoint']
+        );
+    }
+
+    /** The same rule through `actionButton.action` rather than `form.submit`. */
+    public function testATemplatedActionButtonEndpointIsOwned(): void
+    {
+        [$loader] = $this->loadDir(self::$templatedWriteDir, new Router('/v1'));
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+
+        $this->assertArrayHasKey('r-action-templated', $byId);
+        $this->assertSame(
+            '/api/v1/r/items/{record}/state',
+            $byId['r-action-templated']['blocks'][0]['action']['endpoint']
+        );
+    }
+
+    /**
+     * The permission pin still fires on a normalised key.
+     *
+     * The path normalises onto a route this plugin owns and the block's declared
+     * permission does not equal that route's, so the feature must still drop.
+     * This is the assertion that proves normalising the KEY did not lose the
+     * VALUE the pin reads.
+     */
+    public function testATemplatedSubmitIsStillRefusedWhenThePermissionDoesNotMatchTheRoute(): void
+    {
+        [$loader] = $this->loadDir(self::$templatedWriteDir, new Router('/v1'));
+
+        $ids = array_column($loader->getFrontendFeatures(), 'id');
+
+        $this->assertNotContains(
+            'r-perm-mismatch-templated',
+            $ids,
+            'A templated submit whose block permission differs from the route it normalises onto must '
+            . 'still be DROPPED — the pin is the point of the check, not a side effect of the key'
+        );
+    }
+
+    /**
+     * Normalising parameter NAMES must not turn the ownership gate into a shape
+     * wildcard. Three refusals that have to keep working: a foreign path, one
+     * segment too many, and the wrong verb on the right path.
+     *
+     * @param string $featureId The feature that must be absent.
+     * @param string $why       What it would mean if it were served.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('stillRefusedFeatures')]
+    public function testNormalisingParameterNamesDoesNotWidenTheOwnershipGate(
+        string $featureId,
+        string $why
+    ): void {
+        [$loader] = $this->loadDir(self::$templatedWriteDir, new Router('/v1'));
+
+        $ids = array_column($loader->getFrontendFeatures(), 'id');
+
+        $this->assertNotContains($featureId, $ids, $why);
+    }
+
+    /**
+     * @return array<string, array{0: string, 1: string}>
+     */
+    public static function stillRefusedFeatures(): array
+    {
+        return [
+            'foreign path' => [
+                'r-foreign-templated',
+                'A templated endpoint under a path this plugin never registered must be DROPPED',
+            ],
+            'wrong shape' => [
+                'r-wrong-shape',
+                'One segment more than any registered route has is a different route, not a different '
+                . 'spelling, and must be DROPPED',
+            ],
+            'wrong verb' => [
+                'r-wrong-verb',
+                'The right path with a verb this plugin registered no handler for must be DROPPED',
+            ],
+        ];
+    }
+
+    /** Every drop above is per-feature: the sibling is still served. */
+    public function testTemplatedWriteDropsDoNotKillSiblingFeatures(): void
+    {
+        [$loader] = $this->loadDir(self::$templatedWriteDir, new Router('/v1'));
+
+        $byId = array_column($loader->getFrontendFeatures(), null, 'id');
+        $this->assertArrayHasKey('r-static', $byId);
+    }
+
+    /**
+     * DELETE is recorded in the write-route map and is NOT reachable through
+     * these two props — both facts stated together, because each is misleading
+     * alone.
+     *
+     * `BlockValidator::validateSubmitSpec()` accepts POST, PUT and PATCH only,
+     * so no `form.submit` or `actionButton.action` can ever name a DELETE. The
+     * map records DELETE anyway because it is the ownership basis for `inbox`
+     * actions and `accessGate` checks too, and a map that is the write routes
+     * for two consumers and a subset of them for a third is exactly the split
+     * that produced this bug. Asserted so nobody "fixes" the map by narrowing
+     * it back, and nobody assumes a DELETE submit is now expressible.
+     */
+    public function testDeleteIsNotExpressibleAsASubmitVerb(): void
+    {
+        $result = \Whity\Sdk\Frontend\Blocks\BlockValidator::validate([[
+            'type' => 'form',
+            'submit' => ['method' => 'DELETE', 'endpoint' => '/api/r/items/{record}'],
+            'children' => [['type' => 'submitButton', 'label' => 'Delete']],
+        ]]);
+
+        $this->assertFalse(
+            $result['ok'],
+            "A DELETE 'form.submit.method' is refused by the contract, so widening the loader's write-route "
+            . 'map to DELETE cannot make one expressible'
+        );
+        $this->assertStringContainsString("must be 'POST', 'PUT', or 'PATCH'", implode('; ', $result['errors']));
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

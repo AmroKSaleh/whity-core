@@ -136,6 +136,15 @@ class EnforceTenantIsolation
         // WC-206: /api/version is also unversioned and probe-safe.
         '/api/health',
         '/api/version',
+        // #1049: build identity — which checkout this worker is running, and how
+        // far the schema is behind it. Public and unversioned for the same
+        // reasons as the two above, plus one of its own: the operator asking is
+        // frequently the one who cannot authenticate, because a half-applied
+        // update is what they are diagnosing (the incident behind it had
+        // `profiles.auth_method` unmigrated — the column the login path reads).
+        // Full reasoning, and the one line that undoes it, on
+        // BuildApiHandler's docblock.
+        '/api/build',
         // WC-209: the dynamic OpenAPI document. Unversioned and unauthenticated
         // (matching the static /openapi.json already served by Caddy) — it
         // exposes only route shapes, never tenant data, so it bypasses tenant
@@ -144,6 +153,13 @@ class EnforceTenantIsolation
         // WC-233: public effective branding endpoint — resolves tenant by host,
         // returns only branding fields (never other settings), no auth required.
         '/api/v1/branding',
+        // #1068: how this tenant wants its interface to PRESENT itself (today,
+        // one boolean: whether dates are shown at all). Public for branding's
+        // reason and resolved on branding's ladder — the sign-in screen and the
+        // public status page both render dates before any session exists, so a
+        // gated answer would arrive after the screens it governs. It returns no
+        // tenant data and no other setting.
+        '/api/v1/ui/preferences',
         // KeyHub KiCad plugin native-client login — issues JWTs to the desktop app.
         '/api/v1/keyhub/auth/token',
         // WC-b-device-tokens: device-credential exchange. Self-authenticating via
@@ -207,6 +223,55 @@ class EnforceTenantIsolation
         // but "the next route under this prefix is public unless someone
         // notices" is not a property worth keeping.
         '#^/api/v1/translations/[^/]+/[^/]+$#',
+        // #1036: the PUBLIC document verification page's data source. A courier,
+        // a ministry clerk or a citizen holding a printed decision has no
+        // session and never will — the paper is the whole of their relationship
+        // with this system — so there is nothing here to resolve a tenant from.
+        // The 256-bit token names its own tenant, exactly as an invitation does
+        // above, and every read the handler makes after the lookup binds it.
+        //
+        // ANCHORED to exactly one segment, deliberately, following the lesson
+        // `/api/v1/translations/` records above: an open prefix would make the
+        // next route added under `/document-verifications/` public by default,
+        // and this is the surface where that mistake would be worst.
+        //
+        // GET-only in practice: the route is registered for GET alone, so a
+        // POST to this path is a 404 from the router rather than an
+        // unauthenticated write that got this far.
+        '#^/api/v1/document-verifications/[^/]+$#',
+        // Migration 132: an OPT-IN public form. The person filling in an
+        // external application has no account and, in the case this exists for,
+        // never will — so there is nothing here for this middleware to resolve.
+        // The 256-bit slug names its own tenant, exactly as an invitation and a
+        // verification token do above, and every read and write
+        // {@see \Whity\Api\PublicFormsApiHandler} makes after the lookup binds
+        // the tenant that lookup returned rather than anything the caller said.
+        //
+        // THREE ANCHORED SHAPES, not an open `/api/v1/public/` prefix. An open
+        // prefix is a standing invitation for the next route added beneath it to
+        // become public by accident — the `/api/v1/translations/` lesson three
+        // entries up — and the word "public" in the path makes it likelier here
+        // than anywhere, because it reads as a place to put things rather than as
+        // three specific routes that were each argued for. The third was added a
+        // migration later and had to be spelled out HERE to work at all, which is
+        // exactly the property the anchored form buys.
+        //
+        // The second and third are the only PUBLIC WRITES on this list, which is
+        // why each is spelled exactly and not as an optional trailing segment.
+        // Both are throttled per IP and per form inside the handler, the tenant
+        // never comes from the request, and CsrfGuard still applies to any caller
+        // who arrives carrying an ambient cookie.
+        //
+        // `/uploads` (migration 133) writes BYTES rather than rows, so its bounds
+        // are sized for that: a tighter per-IP ceiling than the submit, a size
+        // limit half the authenticated one, a content-type allow-list checked
+        // against the leading bytes, and a retention sweep that deletes anything
+        // never submitted. It discloses nothing about the tenant — it returns one
+        // opaque reference to the caller's own file — which is what separates it
+        // from the person and unit pickers the public surface still strips.
+        '#^/api/v1/public/forms/[^/]+$#',
+        '#^/api/v1/public/forms/[^/]+/uploads$#',
+        '#^/api/v1/public/forms/[^/]+/submissions$#',
     ];
 
     /**

@@ -25,6 +25,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@amroksaleh/ui/tabs";
 import { Alert, AlertTitle, AlertDescription, AlertAction } from "@amroksaleh/ui/alert";
 import { Button } from "@amroksaleh/ui/button";
 import { useTranslation } from "@amroksaleh/features/i18n";
+import { useDateDisplay } from "@amroksaleh/features/datetime";
 
 interface StatsData {
   totals: {
@@ -91,6 +92,26 @@ const PLATFORM_FETCH_TIMEOUT_MS = 10_000;
 export default function AdminStats() {
   const { apiClient } = useAuth();
   const t = useTranslation("admin");
+  const dates = useDateDisplay();
+
+  /**
+   * The first and last labels under a growth chart, or undefined for no axis.
+   *
+   * #1068: the chart component is a published registry item and cannot reach
+   * either the reader's language or this tenant's preference, so the formatting
+   * happens here and the strip simply does not render when dates are hidden.
+   * A trend still reads as a trend without a scale under it.
+   */
+  const axisLabelsFor = (
+    points: { date: string }[]
+  ): { start: string; end: string } | undefined => {
+    if (points.length === 0) return undefined;
+    const start = dates.date(points[0].date);
+    const end = dates.date(points[points.length - 1].date);
+
+    return start === null || end === null ? undefined : { start, end };
+  };
+
   const [stats, setStats] = useState<StatsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -354,6 +375,7 @@ export default function AdminStats() {
                     }
                     label={t("stats.growth.users.label", "new users")}
                     color="var(--primary)"
+                    axisLabels={axisLabelsFor(stats?.growth.users ?? [])}
                   />
                 )}
               </TabsContent>
@@ -368,6 +390,7 @@ export default function AdminStats() {
                     }
                     label={t("stats.growth.tenants.label", "new tenants")}
                     color="var(--chart-2)"
+                    axisLabels={axisLabelsFor(stats?.growth.tenants ?? [])}
                   />
                 )}
               </TabsContent>
@@ -519,6 +542,14 @@ export default function AdminStats() {
                 {t("stats.environment.timezone", "Timezone")}
               </span>
               <span className="font-medium">
+                {/*
+                  @date-display-ignore: this reads the browser's time ZONE NAME
+                  ("Europe/Berlin"), which is a label for a place, not a date or
+                  a time. Nothing here is formatted from an instant, so
+                  `ui.hide_dates` has nothing to hide — and blanking it would
+                  remove a diagnostic an operator uses to explain why two
+                  machines disagree about what "today" is.
+                */}
                 {Intl.DateTimeFormat().resolvedOptions().timeZone}
               </span>
             </div>

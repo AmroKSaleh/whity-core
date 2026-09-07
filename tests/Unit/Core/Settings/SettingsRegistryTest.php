@@ -35,15 +35,56 @@ final class SettingsRegistryTest extends TestCase
              'mail.events.deletion_enabled', 'mail.events.password_reset_enabled',
              'mail.brand_color', 'mail.footer_text',
              'billing.enforcement_default', 'billing.grace_days',
+             'seats.enforcement', 'seats.count_invited',
+             // #billing: invoicing. Every one differs per deployment, which is
+             // why none is a constant in the invoicing code. Tax defaults to
+             // ZERO rather than to any country's rate — charging tax an
+             // operator is not registered to collect is worse than not
+             // charging it, and a default wrong for everyone outside one
+             // jurisdiction ships unnoticed.
+             'billing.default_currency', 'billing.tax_rate_bp',
+             'billing.tax_label', 'billing.tax_inclusive',
+             'billing.payment_terms_days',
+             'billing.seller_name', 'billing.seller_address',
+             'billing.seller_tax_id',
+             // Numbering is GLOBAL-ONLY: a per-tenant override would make the
+             // (series, number) uniqueness index mean something a tenant admin
+             // can change, which is how a sequence starts issuing duplicates.
+             'billing.invoice_number_format', 'billing.invoice_number_scope',
+             'billing.invoice_number_reset',
+             // #billing — the payment rails and the dunning policy. The rails are
+             // GLOBAL-ONLY: a tenant able to switch on a rail that settles its
+             // own invoices would be the sharpest possible privilege
+             // escalation. The dunning policy is per-tenant, because a
+             // deployment chases its enterprise customers differently from its
+             // self-service ones.
+             'payments.cliq_enabled', 'payments.cliq_alias',
+             'payments.cliq_bank_name', 'payments.cliq_reference_prefix',
+             'payments.mock_enabled',
+             'dunning.retry_schedule_days', 'dunning.lock_after_days',
              'plugins.store_allowed_hosts', 'plugins.store_enabled',
              'documents.render_enabled', 'documents.render_max_rows',
              'documents.render_max_pages', 'documents.render_max_template_bytes',
+             'documents.flow_max_blocks', 'documents.flow_max_table_rows',
+             'documents.flow_max_bytes',
              // #947 item 1: may a render be STORED as a document record? Gates
              // the storage cost, not the render container, so unlike the master
              // switch above it is tenant-overridable.
              'documents.persist_enabled',
              // #947 item 3 - routing ceilings, tenant-overridable like the render ones.
              'documents.routing_max_steps', 'documents.routing_max_recipients_per_step',
+             // #1014: what "this node approved" MEANS when an approval step fans
+             // out to many people. Tenant-overridable for the same reason the
+             // ceilings are, and NOT governance: it grants nobody anything, it
+             // says how many of the people already asked have to say yes.
+             'documents.routing_approval_quorum',
+             // #1054: which channels a routing notification goes out on. The
+             // operator's half of a deliberate split — a route STEP declares
+             // that its people are told rather than asked, and how they are
+             // reached is configuration, or moving a tenant from in-app to
+             // e-mail would mean re-authoring every route that mentions it.
+             'documents.routing_notification_channels',
+             'documents.qr_enabled', 'documents.qr_public_detail',
              // #999: how many people a USER GROUP preview SHOWS beside its
              // (always exact) count. Tenant-overridable — see the governance
              // test below for why this one is not operator-only.
@@ -59,7 +100,14 @@ final class SettingsRegistryTest extends TestCase
              // WC-i18n-feature-flag. The master switch for the whole interface
              // language surface; ENABLED by default (see SettingsRegistry).
              'i18n.enabled',
-             'auth.invitation_ttl_days'],
+             'auth.invitation_ttl_days',
+             // #1068: whether dates and times are shown on screen at all.
+             // Tenant-overridable and NOT governance — it grants nobody
+             // anything and takes nothing away, it says what the interface
+             // volunteers. Appended rather than slotted in beside the other
+             // `ui.`-shaped keys because there are none: this opens the
+             // namespace, and appending keeps the diff to one line.
+             'ui.hide_dates'],
             SettingsRegistry::keys()
         );
     }
@@ -135,7 +183,83 @@ final class SettingsRegistryTest extends TestCase
         self::assertContains('groups.preview_sample_size', SettingsRegistry::tenantTextKeys());
         self::assertFalse(SettingsRegistry::isGlobalOnly('groups.preview_sample_size'));
         self::assertSame('10', SettingsRegistry::defaultFor('groups.preview_sample_size'));
-        self::assertCount(15, SettingsRegistry::tenantTextKeys());
+
+        // #1014's approval quorum is per-tenant overridable too, and its default
+        // is the STRICTEST rule rather than the most convenient one: approving
+        // with too few people is a silent authority failure found in an audit
+        // years later, while requiring too many is a document that visibly stops
+        // and a complaint the same afternoon.
+        self::assertContains('documents.routing_approval_quorum', SettingsRegistry::tenantTextKeys());
+        self::assertFalse(SettingsRegistry::isGlobalOnly('documents.routing_approval_quorum'));
+        self::assertSame('all', SettingsRegistry::defaultFor('documents.routing_approval_quorum'));
+
+        // 17 since #1036: the QR master switch and the public-disclosure level.
+        // Both are per-tenant and NEITHER is governance, which is the claim this
+        // block exists to make rather than assume.
+        //
+        // `documents.qr_enabled` is per-tenant for a reason the render master
+        // switch is NOT: that one asks whether a Chromium container exists on
+        // this machine, which no tenant can answer for itself, while this asks
+        // whether an ORGANISATION publishes verifiable documents. A registry
+        // issuing certificates and a workshop circulating internal memos want
+        // different answers on the same instance.
+        //
+        // `documents.qr_public_detail` is per-tenant because #1036 says in so
+        // many words that what a stranger holding the paper is told is a
+        // TENANT'S decision — some institutions want a holder to see where a
+        // document sits, and some would consider the same sentence a leak.
+        //
+        // Both DEFAULT to the closed position: off, and minimal disclosure. An
+        // operator who sets neither gets exactly today's behaviour.
+        self::assertContains('documents.qr_enabled', SettingsRegistry::tenantTextKeys());
+        self::assertFalse(SettingsRegistry::isGlobalOnly('documents.qr_enabled'));
+        self::assertSame('false', SettingsRegistry::defaultFor('documents.qr_enabled'));
+        self::assertContains('documents.qr_public_detail', SettingsRegistry::tenantTextKeys());
+        self::assertFalse(SettingsRegistry::isGlobalOnly('documents.qr_public_detail'));
+        self::assertSame('minimal', SettingsRegistry::defaultFor('documents.qr_public_detail'));
+        // #1068 added a THIRD level, `undated`, BELOW the default. The pin is
+        // here rather than only in the core pin file because this is the
+        // assertion that says the default did not move when it was added: a
+        // quieter level must not change what an existing tenant discloses.
+        self::assertNull(SettingsRegistry::validate('documents.qr_public_detail', 'undated'));
+        self::assertSame(
+            ['undated', 'minimal', 'stage'],
+            SettingsRegistry::optionsFor('documents.qr_public_detail')
+        );
+        // 18: 16 on develop (#1014's quorum was the sixteenth) plus these two.
+        // 19 since #1054 added documents.routing_notification_channels.
+        self::assertContains('documents.routing_notification_channels', SettingsRegistry::tenantTextKeys());
+        self::assertFalse(SettingsRegistry::isGlobalOnly('documents.routing_notification_channels'));
+        self::assertSame('in_app', SettingsRegistry::defaultFor('documents.routing_notification_channels'));
+
+        // 20 since #1068 added ui.hide_dates. Tenant-overridable rather than
+        // global-only, and the distinction is real: it grants nobody anything
+        // and takes nothing away — a reader who could see a document before
+        // can see it now — so it is a preference, not governance. Two tenants
+        // on one instance answer it differently, which is the test every
+        // per-tenant key in this list passes.
+        //
+        // DEFAULT FALSE, so an instance that never sets it renders exactly the
+        // dates it renders today.
+        self::assertContains('ui.hide_dates', SettingsRegistry::tenantTextKeys());
+        self::assertFalse(SettingsRegistry::isGlobalOnly('ui.hide_dates'));
+        self::assertSame('false', SettingsRegistry::defaultFor('ui.hide_dates'));
+        self::assertSame('bool', SettingsRegistry::typeFor('ui.hide_dates'));
+        // NOT a feature flag: that tab is instance-wide capability toggles with
+        // no per-tenant surface, and a tenant-overridable key sitting there
+        // would give an operator a switch that looks global and is not.
+        self::assertFalse(SettingsRegistry::isFeatureFlag('ui.hide_dates'));
+        // 23 since #1072: the three documents.flow_max_* ceilings are
+        // tenant-overridable on purpose — a tenant issuing hundred-page
+        // submissions and one printing two-page receipts should not be held to
+        // one number. The instance-wide documents.render_enabled switch above
+        // them stays global-only.
+        // 31 since #billing: eight of the eleven invoicing keys are
+        // tenant-overridable — tax treatment and seller identity both differ
+        // per tenant in a white-label deployment. The three numbering keys are
+        // not, for the reason given beside their constants.
+        // 33 since #billing: the two dunning keys are tenant-overridable.
+        self::assertCount(33, SettingsRegistry::tenantTextKeys());
 
         // The desktop-login TTL is per-tenant overridable (NOT global-only) and a
         // plain numeric string key.
@@ -258,8 +382,13 @@ final class SettingsRegistryTest extends TestCase
     public function testDescribePublishesKeyTypeAndDefault(): void
     {
         $describe = SettingsRegistry::describe();
-        // 57 since #999 added groups.preview_sample_size.
-        self::assertCount(57, $describe);
+        // 58 since #1014 added documents.routing_approval_quorum.
+        // 60 since #1036 added documents.qr_enabled + documents.qr_public_detail.
+        // 61 since #1054 added documents.routing_notification_channels.
+        // 62 since #1068 added ui.hide_dates.
+        // 65 since #1072 added the three documents.flow_max_* ceilings.
+        // 67 since seats added seats.enforcement + seats.count_invited.
+        self::assertCount(85, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

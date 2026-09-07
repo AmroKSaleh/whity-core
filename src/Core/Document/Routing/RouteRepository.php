@@ -52,18 +52,37 @@ final class RouteRepository
      * Called only from inside {@see DocumentRouter::issue()}'s transaction — a
      * route with no steps and no `issued` event is not a state this subsystem
      * has a meaning for, so nothing else may create one.
+     *
+     * PROVENANCE IS A CONSTRUCTOR ARGUMENT (#1031, migration 123), and it has to
+     * be: there is no update path on this table, deliberately (see the class
+     * docblock), so "which design was applied" is either written here or is not
+     * written at all. Both parameters are null for a route composed by hand,
+     * which is the original way to start one and stays supported.
+     *
+     * `$templateName` is a SNAPSHOT rather than a join. The design it names is a
+     * living record its author may delete, and a trail that read the name back
+     * through the pointer would go blank on the day somebody tidied up.
      */
-    public function create(int $tenantId, int $documentId, string $title, ?int $createdBy): int
-    {
+    public function create(
+        int $tenantId,
+        int $documentId,
+        string $title,
+        ?int $createdBy,
+        ?int $templateId = null,
+        ?string $templateName = null,
+    ): int {
         $stmt = $this->db->prepare(
-            'INSERT INTO document_routes (tenant_id, document_id, title, created_by, created_at)
-             VALUES (:tenant_id, :document_id, :title, :created_by, NOW())'
+            'INSERT INTO document_routes
+                 (tenant_id, document_id, title, created_by, template_id, template_name, created_at)
+             VALUES (:tenant_id, :document_id, :title, :created_by, :template_id, :template_name, NOW())'
         );
         $stmt->execute([
             ':tenant_id' => $tenantId,
             ':document_id' => $documentId,
             ':title' => $title,
             ':created_by' => $createdBy,
+            ':template_id' => $templateId,
+            ':template_name' => $templateName,
         ]);
 
         return (int) $this->db->lastInsertId();
@@ -78,7 +97,7 @@ final class RouteRepository
     public function findById(int $id, int $tenantId): ?array
     {
         $stmt = $this->db->prepare(
-            'SELECT id, tenant_id, document_id, title, created_by, created_at
+            'SELECT id, tenant_id, document_id, title, created_by, template_id, template_name, created_at
                FROM document_routes
               WHERE id = :id AND tenant_id = :tenant_id'
         );
@@ -102,7 +121,7 @@ final class RouteRepository
     public function listForDocument(int $documentId, int $tenantId): array
     {
         $stmt = $this->db->prepare(
-            'SELECT id, tenant_id, document_id, title, created_by, created_at
+            'SELECT id, tenant_id, document_id, title, created_by, template_id, template_name, created_at
                FROM document_routes
               WHERE tenant_id = :tenant_id AND document_id = :document_id
               ORDER BY id DESC'
@@ -129,6 +148,15 @@ final class RouteRepository
             'document_id' => (int) $row['document_id'],
             'title' => (string) $row['title'],
             'created_by' => $row['created_by'] !== null ? (int) $row['created_by'] : null,
+            // #1031. Null when the route was composed by hand, and null on
+            // `template_id` alone once the design has been deleted — the name
+            // outlives the pointer on purpose.
+            'template_id' => isset($row['template_id']) && $row['template_id'] !== null
+                ? (int) $row['template_id']
+                : null,
+            'template_name' => isset($row['template_name']) && $row['template_name'] !== null
+                ? (string) $row['template_name']
+                : null,
             'created_at' => (string) $row['created_at'],
         ];
     }

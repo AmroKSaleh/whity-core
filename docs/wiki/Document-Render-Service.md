@@ -2,7 +2,9 @@
 
 The server-side PDF tier for the document/label designer: a Node + headless
 Chromium container that loads **the designer's own React renderer** and returns
-PDF bytes at exact millimetre size. It exists so an exported document is the
+PDF bytes at exact millimetre size, **and** a flowing mode that paginates a
+content tree into as many pages as it takes (see [Two render modes](#two-render-modes)).
+The first exists so an exported design is the
 same artefact the author saw on screen, rather than the output of a second,
 hand-rolled renderer that drifts from the canvas — see
 [ADR 0012](../adr/0012-document-render-microservice.md).
@@ -57,8 +59,13 @@ was built from:
 
 ```bash
 curl -s http://render:8130/health
-# {"status":"ok","core_version":"0.3.0","commit":"<sha>"}
+# {"status":"ok","core_version":"0.3.0","commit":"<sha>",
+#  "browser":{"version":"151.0.7922.173","source":"build", ...},
+#  "capabilities":{"status":"ok", ...}}
 ```
+
+The `browser` and `capabilities` halves answer a *different* drift question —
+see [The browser is unpinned](#the-browser-is-unpinned-and-that-is-visible-on-purpose).
 
 `core_version` comes from `src/Core/CoreVersion.php` — the same constant
 `GET /api/health` reports as `version` and `/web-build` reports as
@@ -110,6 +117,9 @@ docker compose --profile render up -d --build
 | `RENDER_READY_TIMEOUT_MS` / `RENDER_NAV_TIMEOUT_MS` | render | `20000` | Waiting for the harness to signal ready / to load. |
 | `RENDER_RATE_LIMIT_MAX` / `_WINDOW_MS` | render | `30` / `60000` | Per-window cap on `POST /render`. |
 | `RENDER_HARD_MAX_ROWS` / `_UNITS` / `_TEMPLATE_BYTES` | render | `2000` / `5000` / 10 MiB | Defence-in-depth ceilings inside the service; the operator-facing limits are the settings below. |
+| `RENDER_PROBE_TIMEOUT_MS` | render | `60000` | Per-step ceiling on the boot-time capability probe. Raise it only if `/health` reports `capabilities.status: "error"` with a launch timeout. |
+| `RENDER_FLOW_REQUIRE_CAPABILITIES` | render | `true` | Whether a **required** capability-probe failure refuses `POST /render/flow` with a `503`. The escape hatch, not a normal setting — see below. |
+| `RENDER_FLOW_CAPABILITY_WAIT_MS` | render | `RENDER_PROBE_TIMEOUT_MS` | How long a flow request waits for a probe that has not landed yet before rendering ungated. |
 
 ---
 
@@ -255,11 +265,419 @@ The release pipeline runs the same shape of check against the published image
 
 ---
 
+## Two render modes
+
+The service has two endpoints, and they take genuinely different documents.
+
+| | `POST /render` — **fixed canvas** | `POST /render/flow` — **flowing** |
+|---|---|---|
+| Input | a designer **template**: pages of absolutely-placed, millimetre-positioned elements | a **content tree**: headings, paragraphs, tables, figures, no positions at all |
+| Page count | known before rendering — one per template page, times the data rows | **not knowable** before rendering; the renderer decides |
+| Margins | none (`margin: 0`); the design owns the whole sheet | configurable, real, and the running header/footer are drawn in them |
+| Renderer | the designer's own React bundle (`dist/harness/`), for pixel parity with the on-screen preview | plain server-generated HTML plus a paginator that runs in the page |
+| Who uses it | the document designer, and verification-code stamping composing into it | anything that assembles content and needs a document out of it |
+
+They share exactly one thing: the Chromium instance. Not the harness, not the
+stylesheet, not the readiness signal, not the page geometry. That separation is
+deliberate — the fixed-canvas mode's output is expected to be unchanged
+forever, and the cheapest way to guarantee that is for the flowing mode to have
+no way to reach it. `test/fixed-canvas-geometry.test.js` pins the fixed mode's
+`@page` rule and `page.pdf()` options so a future change to either is a test
+failure rather than a surprise in someone's certificate.
+
+### Why the flowing mode paginates itself
+
+Chrome paginates flowing content perfectly well. What it will not do is say
+where it put anything: it implements no CSS `target-counter()`, and no DOM API
+reports which printed page an element landed on. So `"Table 34 …… 78"` cannot
+be produced from a document Chrome has paginated, because the 78 does not exist
+anywhere the document can read.
+
+> **Do not re-check that claim with `CSS.supports()` — it lies here.**
+> `CSS.supports('content', 'target-counter(attr(href), page)')` returns **true**
+> on Chromium 151, and the declaration survives in the CSSOM. It is dropped at
+> computed-value time: `getComputedStyle(a, '::after').content` is `"none"` and
+> nothing is printed. Verify at the rendered-output level or you will "disprove"
+> this paragraph and reopen a settled decision.
+
+Chromium 151 does support more paged media than this section once implied, which
+matters if you are choosing where to draw page furniture: `@page` margin boxes,
+`counter(page)` AND `counter(pages)` (so "3 of 12" is native), `@page :first`,
+`@page :left` / `:right`, and named pages all work. What does not: `string-set` /
+`string()` for a running section name, `position: running()`, and `counter(page)`
+in ordinary body content. None of that changes the flowing mode — it prints at
+`margin: 0` with pre-fragmented boxes and draws its bands in-document — but the
+absence of margin-box support is not the reason.
+
+Those facts are now **re-measured at every container start**, because the
+browser they were measured against is not pinned — see
+[The browser is unpinned](#the-browser-is-unpinned-and-that-is-visible-on-purpose).
+If you change the table above, change the probe's expectations with it.
+
+Three ways out were measured on the same generated 130-page document (60
+tables, 90 figures, three generated front-matter lists — `npm run flow:fixture`
+produces it). Times are the median of three warm runs in the real image;
+correctness is the count of front-matter entries whose printed page number
+matches the page the item is actually printed on, read back out of the finished
+PDF by `scripts/verify-flow-pdf.js`.
+
+| Approach | Render time | Entries correct |
+|---|---|---|
+| **Own paginator in the page** (what ships) | **3.7 s** (repeat sessions 3.6–4.3 s) | **294 / 294** |
+| Two-pass, page estimated in the DOM from `offsetTop / pageHeight` | 4.2 s (4.0–4.3 s) | **0 / 294** |
+| Two-pass, page recovered from the first-pass PDF **by text extraction** | 11.8 s (11.6–11.8 s) | 294 / 294 |
+| Two-pass, page recovered from the first-pass PDF **by named destinations** | see correction below — **at parity** | 150 / 150 |
+| Two-pass, first pass laid out *without* the generated list | 37.5 s | **0 / 294** |
+| Paged.js polyfill | see correction below — **collapses on RTL** | n/a |
+
+Run-to-run spread on one host is a few hundred milliseconds; the gaps in that
+table are larger than the noise, which is the only reason it decides anything.
+
+The in-page estimate is the cheap and obvious option and it is **wrong on every
+single line**. `offsetTop / pageHeight` describes a continuous column;
+fragmentation is exactly what departs from one, and every push a `break-inside`
+or an unbreakable row causes accumulates, so the error grows down the document.
+It is the dangerous kind of wrong, because the output looks typeset.
+
+Recovering the numbers from the first-pass PDF is correct. The 11.8 s above is
+the cost of recovering them **by extracting text**, and that is not the only way.
+
+> **Correction (2026-08-31).** Chromium emits a PDF **named destination for every
+> `id` targeted by an internal `<a href="#id">`** — precisely the links a contents
+> list already contains. `pdfjs.getDestinations()` + `getPageIndex()` resolves all
+> 150 anchors of a 110-page document in **14–27 ms**, with **no marker printed in
+> the document and no text extraction**. Measured head-to-head on this repo's own
+> `flow:fixture` through its own `document.js` + `html.js`, two-pass then runs at
+> **0.78× (LTR) to 0.91× (RTL)** of the shipped paginator — at parity or slightly
+> **cheaper**, not three times the cost. It is direction-neutral and verified
+> 150/150 on a fully Arabic document.
+>
+> **So do not defend the shipped design on render time.** The argument that
+> actually holds is below.
+
+> **Correction (2026-08-31).** The size-truncation finding does **not**
+> reproduce. Paged.js 0.4.3 under Chromium 151 paginates LTR correctly and
+> linearly to at least **136 pages** (240 sections, ~35 ms/page), staying within
+> one page of Chromium throughout, and its `target-counter()` rewriting prints
+> real, increasing page numbers.
+>
+> **It collapses on RTL.** A `dir="rtl"` document of 120 sections — 69 pages of
+> content — comes back as **one page**, with every cross-reference printing `1`.
+> No error, no warning. The earlier investigation's fixture defaults to RTL, so
+> what was diagnosed as size-dependent truncation was almost certainly this.
+>
+> That is a **stronger** reason to reject Paged.js, not a weaker one. Arabic and
+> RTL are hard requirements here, and this is the failure mode this service is
+> most careful about elsewhere: output that looks completely typeset and is
+> wholly wrong.
+
+It is not a dependency of this service and never became one.
+
+### The argument that actually decides it
+
+Not render time. **The paginator is plain browser JavaScript with no Puppeteer
+dependency** — `html.js` inlines it into the page with a `<script>` tag. So the
+same algorithm can run in an editor's browser and produce *identical* page
+breaks, because it is ours and it is deterministic.
+
+Under any two-pass scheme the breaks come from Chromium's **print**
+fragmentation, which screen layout cannot reproduce; an editor would have to ask
+the server where the pages fall, for every edit. Owning the algorithm is what
+makes a WYSIWYG flowing editor possible at all. If that requirement is ever
+dropped, two-pass via named destinations is a real, measured, RTL-safe
+alternative at parity cost.
+
+### The trap in generated front matter
+
+A contents list changes the page numbers it prints, because the list itself
+occupies pages. Get this wrong and every number is off by the length of the
+list — which is what happens if the first pass is laid out without the list and
+the numbers are injected afterwards (measured: 294/294 entries wrong, each
+exactly 10 pages early, the length of the front matter).
+
+The paginator handles it by fragmenting the body once — the body's own
+pagination cannot depend on the front matter — then iterating the front matter
+to a fixed point, and only then shifting the recorded anchor pages by the
+front matter's final length. Because a contents entry is a fixed-height,
+non-wrapping row, the list's length in pages does not depend on the numbers it
+prints, so the loop converges on the second pass; a guard rebuilds at the final
+length if it ever did not.
+
+### Exercising it
+
+`documents.render_enabled` defaults to `false`, so a fresh install renders
+nothing and a change here has no natural way to be tested. Everything below
+needs no database, tenant, template or setting:
+
+```bash
+cd render-service && npm ci
+
+# A synthetic ~130-page document: 60 tables, 90 figures, three front-matter
+# lists, Arabic with Latin identifiers throughout. Generated from a seed, so
+# two runs are comparable. No real content of any kind.
+npm run flow:fixture -- --direction rtl --out /tmp/flow.json
+
+curl -sS -X POST http://127.0.0.1:8130/render/flow \
+  -H 'Content-Type: application/json' -H "X-Render-Secret: ${RENDER_SHARED_SECRET}" \
+  --data @/tmp/flow.json -D /tmp/h -o /tmp/flow.pdf
+grep -i x-render-page-count /tmp/h        # the renderer's own count
+
+# The check that matters: open the PDF, find the page each table and figure is
+# actually printed on, read the number printed beside the matching entry, and
+# compare. Also checks the running footer on physical page N says N.
+npm run flow:verify -- --pdf /tmp/flow.pdf --direction rtl
+
+# Bidi as geometry, in a real browser: the page number must land at the LEFT
+# edge of a right-to-left entry and the label at the right, and a Latin
+# identifier inside an Arabic label must keep its own order.
+npm run flow:geometry
+```
+
+All four run in CI, in the `Render microservice` job, against the real image.
+
+### Arabic and RTL
+
+A contents entry is a **flex row**, not a line of mixed text, and every run
+whose script disagrees with the document's direction is wrapped in `<bdi>`
+(`src/flow/bidi.js`, used both in Node and in the page). Both are load-bearing.
+
+Written as running text, a right-to-left entry ending in a Latin page number
+has only bidi-neutral characters — spaces, dots, an em dash — between that
+number and the previous Latin run in the label. The Unicode algorithm resolves a
+neutral run between two left-to-right runs as itself left-to-right, so
+identifier, leader and page number merge into one run and print backwards.
+Measured in Chromium on the string `وصف العنصر — TBL-034 … 78`: as running
+text the page number lands at x 677, to the **right** of the identifier at
+x 566–627, i.e. the line reads "78 … TBL-034". Isolating the number fixes the
+order; as a flex row the number is pinned at the content box's left edge
+regardless. `scripts/check-flow-rtl-geometry.js` asserts this in both
+directions, including the worst case of a caption that *ends* in a Latin run.
+
+### Why `displayHeaderFooter` is not used
+
+Puppeteer's own running header/footer is left switched off in both modes, and
+the flowing mode draws its bands in the document instead. Chromium renders
+those templates in a separate document with its own default stylesheet and no
+access to the page's CSS; it can pass them only `pageNumber`, `totalPages`,
+`title`, `url` and `date`, so a running head cannot name the **section** a page
+belongs to, which is the main reason to have one; and it reserves the bands out
+of the PDF margin, which fights a mode that prints at `margin: 0` with the page
+box drawn in CSS. Drawing them in the document costs nothing, and gives them the
+document's own font, direction and bidi isolation. The requirement — real
+margins, and a running header and footer on every page — is met; the mechanism
+the issue guessed at is not the one that meets it.
+
+### Flowing-mode configuration
+
+| Variable | Default | Notes |
+|---|---|---|
+| `RENDER_FLOW_READY_TIMEOUT_MS` | `180000` | How long pagination may take. It scales with the document, not the request; the fixed mode's 20 s was sized for one designed page. |
+| `RENDER_FLOW_PDF_TIMEOUT_MS` | `180000` | How long `page.pdf()` may take for a flowing document. |
+| `RENDER_FLOW_NAV_TIMEOUT_MS` | `30000` | Loading the generated page. |
+| `RENDER_FLOW_MAX_BLOCKS` | `20000` | Hard ceiling on content blocks. |
+| `RENDER_FLOW_MAX_TABLE_ROWS` | `5000` | Hard ceiling on rows in one table. |
+| `RENDER_FLOW_MAX_BYTES` | 20 MiB | Hard ceiling on the whole payload. Deliberately below express's 25 MiB `json` limit, so an oversized payload is refused by this service with its own error rather than by the body parser. (This row said 40 MiB until 2026-08-31; the code has always said 20 — see `src/flow/document.js`.) |
+
+A render whose pagination overran a page box is **refused**, not returned: an
+overrun means a unit was placed where it does not fit, so at least one recorded
+page number describes a layout that did not happen, and every cross-reference
+after it is suspect.
+
+---
+
+## The browser is unpinned, and that is visible on purpose
+
+`render-service/Dockerfile` installs `chromium` with **no version constraint**,
+so every rebuild takes whatever Debian bookworm ships that day. At the time of
+writing that is **151.0.7922.173** (`151.0.7922.173-1~deb12u1`).
+
+That matters more here than in most services. The flowing mode's paginator is
+~840 lines that measure and fragment content against the browser's own layout,
+guarded by a refuse-on-disagreement check rather than by a specification, and
+every number its design rests on was measured against one build. A Chromium
+upgrade arriving silently through a rebuild can change fragmentation — and the
+failure is not a crash. It is a hundred-page document that paginates
+differently, or the disagreement guard starting to refuse renders that used to
+succeed, with nothing in this repository's history to explain either.
+
+### Why it is not pinned
+
+`chromium=151.0.7922.173-1~deb12u1` would make the build reproducible and would
+**break** the day Debian rotates that version out for a security update, which
+it does routinely. Trading silent behaviour drift for periodic hard build
+failures on a security rebuild is a real trade, and a maintainer may yet decide
+to make it. #1134 did not. It made the drift **visible and loud** instead. If
+you do pin, pin in the Dockerfile *and* update the measured-facts table above,
+because that table is what the probe's expectations are calibrated against.
+
+### 1. The browser is recorded into the image at build time
+
+`render-service/scripts/write-browser-info.js` runs in the Dockerfile's
+`runtime` stage — after the `apt-get`, the only place the browser exists — and
+freezes what was installed into `dist/browser-info.json`. The server reads it
+once at boot, says so in the log, and reports it on `/health`:
+
+```bash
+docker logs whity_render | head -1
+# [whity_render] browser: 151.0.7922.173 (apt 151.0.7922.173-1~deb12u1) at /usr/bin/chromium, recorded 2026-08-31T16:15:03.511Z
+
+curl -s http://localhost:8130/health | jq .browser
+```
+
+```json
+{
+  "version": "151.0.7922.173",
+  "package_version": "151.0.7922.173-1~deb12u1",
+  "banner": "Chromium 151.0.7922.173 built on Debian GNU/Linux 12 (bookworm)",
+  "executable": "/usr/bin/chromium",
+  "recorded_at": "2026-08-31T16:15:03.511Z",
+  "source": "build",
+  "running_version": "151.0.7922.173",
+  "running_banner": "Chrome/151.0.7922.173",
+  "running_matches_build": true
+}
+```
+
+Same shape, and the same rules, as `BuildIdentity` / `GET /api/build` on the PHP
+side (#1049): captured at build time because it cannot be recovered afterwards;
+a `source` field saying **where** the answer came from; `unknown` with nulls as
+a first-class answer, because a plausible-looking wrong version is worse than no
+version. A checkout that never ran `npm run build:browser-info` reports
+`source: "unknown"` — an image build always writes the file and **fails** if it
+cannot.
+
+`running_version` is a *second* reading of the same fact: what the browser
+answered when the boot probe launched it. `running_matches_build: false` means
+the binary under the recorded path is not the one this image installed;
+`null` means one of the two sides could not answer, which is a different
+finding and is reported as one.
+
+**This is the drift signal.** Two images, two `/health` responses, one diff.
+
+### 2. A boot-time capability probe
+
+`render-service/src/capability-probe.js` asserts, once at container start, the
+behaviours the paginator actually relies on. Twelve probes, measured at a level
+where the answer is real — computed style, and the bytes of a rendered PDF —
+never `CSS.supports()`.
+
+| Probe | Level | Expected | Fatal? |
+|---|---|---|:--:|
+| `range-client-rects-per-line` — `Range.getClientRects()` returns one rect per line box | DOM layout | present | **yes** |
+| `range-prefix-bottom-monotonic` — a prefix `Range`'s bottom grows monotonically and reaches the last line | DOM layout | present | **yes** |
+| `range-extract-contents-moves-text` — `extractContents()` moves the prefix out | DOM | present | **yes** |
+| `print-one-page-per-forced-break` — `break-after: page` yields one PDF page per page box | rendered PDF | present | **yes** |
+| `print-honours-css-page-size` — `preferCSSPageSize` prints at the `@page` size in exact mm | rendered PDF | present | **yes** |
+| `css-mm-at-96dpi` — a CSS millimetre lays out at the 96dpi ratio | DOM layout | present | no |
+| `css-target-counter` | computed style | **absent** | no |
+| `css-string-set` | computed style | **absent** | no |
+| `css-string-function` | computed style | **absent** | no |
+| `css-position-running` | computed style | **absent** | no |
+| `css-page-first-pseudo` — `@page :first` gives page 1 its own size | rendered PDF | present | no |
+| `css-named-pages` — a named `@page` gives a marked element its own size | rendered PDF | present | no |
+
+**The rule: a probe is fatal only when the paginator's arithmetic is wrong
+without it.** Three consequences are worth stating, because in each case the
+obvious choice is the wrong one:
+
+- **The missing features are not required to stay missing.** Their absence is
+  the entire reason this service paginates for itself. A Chromium that
+  implements `target-counter()` is an *opportunity* — a much simpler design
+  becomes available — and it must never take the render tier down. It is logged
+  loudly as `notable` and named against #1134.
+- **The paged-media features that work are not required either.** `@page :first`
+  and named pages work today; **neither render mode uses them**. Failing a boot
+  over a feature nothing depends on would make this diagnostic into a new
+  outage source, which is the one thing it must not be.
+- **"Could not determine" is never a failure, and never a success.** An
+  unreadable PDF or a browser that would not launch reports `unknown`; a
+  required probe that came back `unknown` makes the verdict `inconclusive`, not
+  `ok`. Ignorance is not evidence that anything changed, and it is not evidence
+  that nothing did.
+
+### What the verdict does
+
+```bash
+curl -s http://localhost:8130/health | jq '.capabilities | {status, ms, required_failures, notable, unknown}'
+```
+
+| `capabilities.status` | Meaning | Effect on traffic |
+|---|---|---|
+| `ok` | every probe answered and matched | none |
+| `notable` | an informational behaviour changed, in either direction | none — logged loudly |
+| `inconclusive` | a required probe could not be measured | none |
+| `degraded` | a **required** probe disagreed | `POST /render/flow` → `503` naming the probe |
+| `error` | the probe could not run at all | none |
+| `pending` / `not_run` | still running / never started | none |
+
+Only `degraded` refuses anything, and it refuses only the **flowing** mode —
+the one whose correctness rests on how this browser fragments content, and
+whose own paginator already refuses rather than emit page numbers it cannot
+vouch for. `POST /render` (fixed canvas) is deliberately **not** gated: #1134's
+constraint was not to touch that path, and its failure mode — a PDF at the
+wrong physical size — is visible in the first document anyone opens.
+
+Set `RENDER_FLOW_REQUIRE_CAPABILITIES=false` to lift the gate while keeping the
+report. That escape hatch exists because a gate with no way round it is itself
+a new way to be down.
+
+**If the probe itself cannot run, the service starts anyway** and gates
+nothing. A detector that can stop the service converts a diagnostic into an
+outage, and a crash loop is strictly harder to diagnose than a running
+container whose `/health` says the probe could not run. A browser that
+genuinely cannot launch already fails every render with a logged stack and a
+`500`; killing the container adds no information and removes the endpoint you
+would use to find out.
+
+### Cost, and what it does not cost
+
+The probe never blocks `listen()` — the server accepts requests immediately and
+`/health` reports `pending` until the probe lands. Only `POST /render/flow`
+waits for it, and that wait is bounded (`RENDER_FLOW_CAPABILITY_WAIT_MS`).
+
+Its own work is three page loads and two `page.pdf()` calls on trivial
+documents. Measured in the real image on a Docker Desktop host:
+
+```json
+"ms": 5550, "phases": { "launch_ms": 3791, "layout_ms": 504, "geometry_ms": 949, "paged_media_ms": 275 }
+```
+
+**The browser launch dominates and is entirely environmental.** The same image
+on a cold VM — Chromium waiting out dbus timeouts that do not exist on a Linux
+host — took **59 s**, essentially all of it the launch. That is why
+`capabilities.phases` reports the launch separately: before concluding anything
+about this code, look at which part took the time. The probe's own measuring is
+~1.7 s and does not vary.
+
+It launches a browser **of its own** and closes it, rather than warming the
+shared instance in `src/renderer.js`. Two reasons, both load-bearing: a detector
+must not be able to wedge the browser every subsequent render depends on; and
+the idle-memory row in [Measured](#measured) (~32 MB, "Chromium not launched
+yet") is what operators size hosts from, so a deployed-but-unused render
+container must not quietly start carrying ~250 MB.
+
+### What is deliberately not probed
+
+`@page` margin boxes, `counter(page)` and `counter(pages)`. All three manifest
+only as **text** in printed output, and reading that text back honestly needs a
+font-aware PDF parser — `pdfjs-dist` is a devDependency and the runtime image
+installs `--omit=dev`, so a probe built on it would only work outside the image
+it is supposed to check. The available shortcut is asking the CSSOM whether the
+at-rule parsed, which is exactly the class of answer `CSS.supports()` gives, and
+exactly the class of answer this probe refuses to take. Nothing in either render
+mode uses them, so they stay measured by hand and recorded in the table above.
+
+---
+
 ## References
 
 - [ADR 0012 — Document render as a dedicated microservice](../adr/0012-document-render-microservice.md)
 - `render-service/Dockerfile`, `render-service/Dockerfile.dockerignore`
 - `render-service/scripts/build-harness.js` (what gets bundled and why)
+- `render-service/src/flow/` (the flowing mode: payload, HTML, bidi, paginator)
+- `render-service/scripts/generate-flow-fixture.js`, `verify-flow-pdf.js`, `check-flow-rtl-geometry.js`
 - `render-service/scripts/write-build-info.js` (how the image identifies itself)
+- `render-service/scripts/write-browser-info.js`, `render-service/src/browser-info.js` (which browser it was built around)
+- `render-service/src/capability-probe.js` (the boot-time probe, and which probes are fatal)
 - `src/Api/DocumentRenderApiHandler.php`, `src/Core/Document/Render/RenderServiceClient.php`
 - `src/Core/Settings/SettingsRegistry.php` (`documents.render_*`)

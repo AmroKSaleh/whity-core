@@ -150,6 +150,8 @@ class RolesApiHandlerTest extends TestCase
             ['id' => 7, 'name' => 'posts:read'],
             ['id' => 8, 'name' => 'posts:write'],
         ]);
+        // #1040: one lookup of the companion map, on every grant path.
+        $companionLookup = $this->statement(false, []);
         $insertPerms = $this->statement();               // INSERT role_permissions
 
         $pdo = $this->createMock(PDO::class);
@@ -160,6 +162,7 @@ class RolesApiHandlerTest extends TestCase
             $nameCheck,
             $insertRole,
             $resolveByName,
+            $companionLookup,
             $insertPerms
         );
         $pdo->method('lastInsertId')->willReturn('42');
@@ -211,6 +214,8 @@ class RolesApiHandlerTest extends TestCase
         $validateIds = $this->statement(false, [         // SELECT id FROM permissions WHERE id IN
             ['id' => 7], ['id' => 8],
         ]);
+        // #1040: one lookup of the companion map, on every grant path.
+        $companionLookup = $this->statement(false, []);
         $insertPerms = $this->statement();               // INSERT role_permissions
 
         $pdo = $this->createMock(PDO::class);
@@ -218,6 +223,7 @@ class RolesApiHandlerTest extends TestCase
             $nameCheck,
             $insertRole,
             $validateIds,
+            $companionLookup,
             $insertPerms
         );
         $pdo->method('lastInsertId')->willReturn('43');
@@ -465,6 +471,8 @@ class RolesApiHandlerTest extends TestCase
         $roleRow = $this->statement(['id' => 5, 'name' => 'Editor', 'description' => '']);
         $delPerms = $this->statement();
         $resolveByName = $this->statement(false, [['id' => 9, 'name' => 'posts:delete']]);
+        // #1040: one lookup of the companion map, on every grant path.
+        $companionLookup = $this->statement(false, []);
         $insertPerms = $this->statement();
 
         $pdo = $this->createMock(PDO::class);
@@ -473,6 +481,7 @@ class RolesApiHandlerTest extends TestCase
             $roleRow,
             $delPerms,
             $resolveByName,
+            $companionLookup,
             $insertPerms
         );
 

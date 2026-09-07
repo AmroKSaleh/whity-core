@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Settings;
 
 use DateTimeZone;
+use Whity\Core\Document\Routing\RouteQuorum;
 use Whity\Core\Identity\InvitationService;
 
 /**
@@ -161,6 +162,97 @@ final class SettingsRegistry
     public const BILLING_ENFORCEMENT_DEFAULT = 'billing.enforcement_default';
     public const BILLING_GRACE_DAYS = 'billing.grace_days';
 
+    // SEATS (#seats). A tenant buys seats for its people; `members.max` (an
+    // ENTITLEMENT, so a plan sets it per tenant) is how many. These two say how
+    // the instance treats that number, because instances differ on both:
+    //
+    //   - seats.enforcement: what happens when the tenant is at its limit.
+    //     'off' does not count at all, 'warn' counts and reports but never
+    //     refuses, 'block' refuses the addition. Per-tenant overridable.
+    //   - seats.count_invited: does an outstanding INVITATION hold a seat?
+    //     True is the honest default — an invitation is a seat somebody has
+    //     been promised, and not counting it lets a tenant invite a thousand
+    //     people past a limit of ten and reach it the moment they accept.
+    //     Instances that treat a seat as "someone actually working" set it off.
+    public const SEATS_ENFORCEMENT = 'seats.enforcement';
+    public const SEATS_COUNT_INVITED = 'seats.count_invited';
+
+    // INVOICING (#billing). Every one of these differs per deployment, which
+    // is exactly why none of them is a constant in the invoicing code.
+    //
+    // Tax is a RATE IN BASIS POINTS: 16% is 1600 and 7.5% is 750, so a rate
+    // is an integer and never a float. It defaults to ZERO rather than to any
+    // country's rate, because charging tax an operator is not registered to
+    // collect is a worse failure than not charging it, and a default that is
+    // wrong for everyone outside one jurisdiction gets shipped unnoticed.
+    // `tax_label` is what the invoice calls it ('VAT', 'GST', 'Sales Tax').
+    //
+    // `tax_inclusive` says whether quoted prices already contain the tax.
+    // Either way the invoice stores its subtotal NET, so the arithmetic
+    // invariant holds; this only decides how a price is decomposed.
+    //
+    // The SELLER is whoever the invoice is from. Per-tenant overridable, for
+    // white-label deployments where each tenant invoices as itself.
+    public const BILLING_DEFAULT_CURRENCY = 'billing.default_currency';
+    public const BILLING_TAX_RATE_BP = 'billing.tax_rate_bp';
+    public const BILLING_TAX_LABEL = 'billing.tax_label';
+    public const BILLING_TAX_INCLUSIVE = 'billing.tax_inclusive';
+    public const BILLING_PAYMENT_TERMS_DAYS = 'billing.payment_terms_days';
+    public const BILLING_SELLER_NAME = 'billing.seller_name';
+    public const BILLING_SELLER_ADDRESS = 'billing.seller_address';
+    public const BILLING_SELLER_TAX_ID = 'billing.seller_tax_id';
+
+    // NUMBERING is GLOBAL-ONLY, unlike everything above. A per-tenant
+    // override would make the meaning of the (series, number) uniqueness
+    // index depend on a setting a tenant admin can change, which is how a
+    // sequence quietly starts issuing duplicates.
+    //
+    //   format : placeholders {YYYY}, {YY}, {MM} and {SEQ:n} (zero-padded
+    //            to n digits). Anything else is literal.
+    //   scope  : 'shared'     — one sequence for the whole platform, which
+    //                           is correct when the operator is the seller.
+    //            'per_tenant' — one per tenant, for resale deployments where
+    //                           each tenant issues as its own legal seller.
+    //   reset  : when the counter restarts. Most tax authorities expect a
+    //            yearly sequence; 'never' is the safest and least common.
+    public const BILLING_INVOICE_NUMBER_FORMAT = 'billing.invoice_number_format';
+    public const BILLING_INVOICE_NUMBER_SCOPE = 'billing.invoice_number_scope';
+    public const BILLING_INVOICE_NUMBER_RESET = 'billing.invoice_number_reset';
+
+    // PAYMENT RAILS (#billing). Which rails this instance offers, and how the
+    // one real rail is addressed.
+    //
+    // CliQ is Jordan's instant transfer network: the payer pushes money from
+    // their own bank app to an alias and types a reference. So the alias and
+    // the bank name are shown to a customer, and the reference prefix is what
+    // they will see on their statement.
+    //
+    // THE WEBHOOK SECRET IS NOT HERE, deliberately. It follows the SMTP
+    // password's pattern — an `app_settings` key that is NOT a registry key,
+    // encrypted at rest, and therefore never surfaced by GET /settings, which
+    // only iterates registry keys. A shared secret that can be read back over
+    // the settings API is not a shared secret.
+    //
+    // `payments.mock_enabled` exists so a deployment can exercise the whole
+    // lifecycle without a bank. It defaults OFF and is global-only: a tenant
+    // able to turn on a rail that settles its own invoices for free is the
+    // sharpest possible version of a privilege escalation.
+    public const PAYMENTS_CLIQ_ENABLED = 'payments.cliq_enabled';
+    public const PAYMENTS_CLIQ_ALIAS = 'payments.cliq_alias';
+    public const PAYMENTS_CLIQ_BANK_NAME = 'payments.cliq_bank_name';
+    public const PAYMENTS_CLIQ_REFERENCE_PREFIX = 'payments.cliq_reference_prefix';
+    public const PAYMENTS_MOCK_ENABLED = 'payments.mock_enabled';
+
+    // DUNNING (#billing). One setting says the whole retry policy: a list of
+    // day offsets FROM THE DUE DATE, so "1,3,7" is three attempts on days 1,
+    // 3 and 7 rather than 1, 4 and 11. Locking is separate from the last
+    // retry because running out of attempts and losing access are different
+    // events, and the gap between them is where a human still has time to
+    // pay. Both are per-tenant overridable: a deployment will want to chase
+    // its enterprise customers differently from its self-service ones.
+    public const DUNNING_RETRY_SCHEDULE_DAYS = 'dunning.retry_schedule_days';
+    public const DUNNING_LOCK_AFTER_DAYS = 'dunning.lock_after_days';
+
     // Plugin marketplace (WC plugin-store): comma-separated allowlist of trusted
     // store HOSTS the install-from-store endpoint may fetch packages from. EMPTY
     // (default) = the feature is OFF — no store is trusted. This is the PRIMARY
@@ -206,6 +298,36 @@ final class SettingsRegistry
     public const DOCUMENTS_RENDER_MAX_PAGES = 'documents.render_max_pages';
     public const DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES = 'documents.render_max_template_bytes';
 
+    // FLOWING-mode ceilings (#1072). The three keys above bound a fixed-canvas
+    // render, where one template page is one PDF page and the total is therefore
+    // known before anything is sent. A flowing document is defined by NOT having
+    // that property: how many pages a content tree becomes is decided by the
+    // paginator, at render time, from the content. There is consequently no
+    // honest pre-flight page ceiling to enforce, and a post-hoc one would refuse
+    // work already paid for in full — so these bound the INPUT, which is what
+    // can actually be measured in advance.
+    //
+    //   - flow_max_blocks: how many content blocks one tree may carry.
+    //   - flow_max_table_rows: the largest single table in it.
+    //   - flow_max_bytes: the JSON-encoded size of the whole payload.
+    //
+    // The render service enforces its own HARD versions of all three
+    // (RENDER_FLOW_MAX_* in render-service/src/flow/document.js) and these
+    // default to the same numbers, which means core adds no ceiling of its own
+    // until an operator sets one. That is the intended resting state: the point
+    // of these keys is that a ceiling can be lowered FOR ONE TENANT — a tenant
+    // issuing hundred-page submissions and a tenant printing two-page receipts
+    // should not be held to one number — which the service, having no idea
+    // tenants exist, cannot do.
+    //
+    // Raising one ABOVE the service's hard limit is allowed and is not a trap:
+    // the service answers 422 naming the limit, and {@see
+    // \Whity\Core\Document\Render\RenderServiceClient} relays that as a 422
+    // rather than an outage.
+    public const DOCUMENTS_FLOW_MAX_BLOCKS = 'documents.flow_max_blocks';
+    public const DOCUMENTS_FLOW_MAX_TABLE_ROWS = 'documents.flow_max_table_rows';
+    public const DOCUMENTS_FLOW_MAX_BYTES = 'documents.flow_max_bytes';
+
     // Whether a render may be PERSISTED as a document record + a stored
     // artifact (#947 item 1). Distinct from DOCUMENTS_RENDER_ENABLED above,
     // which asks whether the render CONTAINER exists at all; this asks whether
@@ -248,6 +370,105 @@ final class SettingsRegistry
     // three-person approvals want genuinely different numbers.
     public const DOCUMENTS_ROUTING_MAX_STEPS = 'documents.routing_max_steps';
     public const DOCUMENTS_ROUTING_MAX_RECIPIENTS_PER_STEP = 'documents.routing_max_recipients_per_step';
+
+    // What "this node approved" MEANS when the node resolves to a thousand
+    // people (#1014). A route step names a RULE, never a person, so an approval
+    // step can fan out — and the rule for how many of them have to say yes is
+    // the single most consequential value in the feature, because getting it
+    // wrong is INVISIBLE: a document approved by one instructor out of a
+    // thousand looks in every screen and in the trail exactly like a document
+    // that was properly authorised.
+    //
+    // So it is explicit rather than an implicit "any", and it resolves through
+    // the ordinary chain with one extra layer on top: the STEP's own override,
+    // then per-tenant, then global, then the default below. A deployment that
+    // configures nothing gets `all`; a tenant that changes its mind changes every
+    // step at once without a row being rewritten.
+    //
+    // {@see \Whity\Core\Document\Routing\RouteQuorum} carries the argument for
+    // the default, in short: the two ways of being wrong are not symmetric. Too
+    // few approvals is a silent authority failure discovered in an audit years
+    // later; too many is a document that visibly stops and a complaint the same
+    // afternoon. A default protects the deployment where nobody thought about
+    // this, so it is the loud one — and for the ordinary single-approver step
+    // (`the dean signs off`) `all` and `any` are the same rule anyway, so the
+    // default only differs from `any` exactly where `any` is dangerous.
+    public const DOCUMENTS_ROUTING_APPROVAL_QUORUM = 'documents.routing_approval_quorum';
+
+    // HOW a routing event reaches the people it named (#1054) — a
+    // comma-separated list of notification channels, e.g. `in_app,email`.
+    //
+    // THIS IS THE OPERATOR'S HALF OF A DELIBERATE SPLIT, and the split is the
+    // whole reason the key exists rather than a `"delivery": "email"` field on a
+    // route step. A step declares INTENT — *these people are told, and are not
+    // asked to act* — which is a property of the route DESIGN and has to travel
+    // with the template. The CHANNEL is not: it is a fact about how this
+    // organisation reaches its people, and putting it on the step would mean
+    // re-authoring every route in the tenant to move from e-mail to in-app.
+    // Platform declares capability, operator decides presentation.
+    //
+    // TENANT-OVERRIDABLE, because it is exactly the kind of question two tenants
+    // on one instance answer differently: a faculty circulating notices to
+    // instructors who never open the app needs e-mail, and a workshop whose
+    // technicians live in the app does not want the mail volume.
+    //
+    // EMPTY IS A LEGITIMATE VALUE and means "notify nobody" — an operator turning
+    // routing notifications off entirely. That reading is safe in a way that an
+    // empty CEILING would not be (see `positiveSetting()`, where "0" must never
+    // silently mean "no limit"): the failure mode here is a missed notification,
+    // and the trail, the inbox and every folder are unaffected, because none of
+    // them is derived from a notification.
+    public const DOCUMENTS_ROUTING_NOTIFICATION_CHANNELS = 'documents.routing_notification_channels';
+    // The master switch for QR verification codes on documents (#1036), scope 1
+    // of three — the tenant setting, the per-template flag inside
+    // `document_templates.data`, and where the element sits on the page. They
+    // compose in {@see \Whity\Core\Document\Qr\DocumentQrPolicy}, which is also
+    // where the reasoning for the polarity of each one lives.
+    //
+    // TENANT-OVERRIDABLE, unlike DOCUMENTS_RENDER_ENABLED above, and the
+    // difference is real rather than a preference: the render switch asks
+    // whether a Chromium container exists on this machine, which no tenant can
+    // answer for itself. This one asks whether an ORGANISATION publishes
+    // verifiable documents, which is exactly a per-tenant decision — a registry
+    // issuing certificates and a workshop circulating internal memos want
+    // different answers on the same instance.
+    //
+    // Default FALSE. Turning it on publishes an UNAUTHENTICATED verification
+    // surface for that tenant's documents: anyone holding a printed sheet learns
+    // that the organisation issued a document on a date. That discloses nothing
+    // the paper does not already say, which is why it is safe to offer at all —
+    // but it is still a decision about what the organisation says to strangers,
+    // and a default that made it for them would be making it silently.
+    //
+    // Not a FEATURE_FLAG_KEY, deliberately. That tab is instance-wide capability
+    // toggles with no per-tenant surface, and putting a tenant-overridable key
+    // there would give an operator a switch that looks global and is not.
+    public const DOCUMENTS_QR_ENABLED = 'documents.qr_enabled';
+
+    // What the PUBLIC verification page discloses (#1036). The whole vocabulary
+    // and the argument for where it stops are in
+    // {@see \Whity\Core\Document\Qr\VerificationPresenter}.
+    //
+    //   undated — `minimal` with the date removed and nothing else changed:
+    //             genuine or not, the issuing ORGANISATION, and the reference.
+    //             Added by #1068 so a tenant that wants no date on the public
+    //             page can SAY so, rather than acquiring it as a side effect of
+    //             `ui.hide_dates` — which governs its own staff's screens and
+    //             deliberately does not reach here, because a stranger holding
+    //             a printed sheet is a different audience and for them the date
+    //             is doing real work.
+    //   minimal — the default: genuine or not, the issuing ORGANISATION, the
+    //             date, and the reference printed on the paper. Nothing else,
+    //             and every way a code can fail collapses to one answer, so the
+    //             endpoint cannot be asked "does this document exist".
+    //   stage   — adds the current routing verb and its date, and tells a
+    //             withdrawn or superseded code apart from an unrecognised one.
+    //
+    // Tenant-overridable because #1036 is explicit that this is a tenant's
+    // decision: some institutions want a holder to see where a document sits,
+    // and some would consider the same sentence a leak. Defaulting to `minimal`
+    // is defaulting to the version that cannot leak.
+    public const DOCUMENTS_QR_PUBLIC_DETAIL = 'documents.qr_public_detail';
 
     // How many people a USER GROUP preview SHOWS (#999). Not a ceiling on
     // resolution — the count a preview reports is always exact — but the size of
@@ -330,6 +551,49 @@ final class SettingsRegistry
     public const I18N_ENABLED = 'i18n.enabled';
 
     /**
+     * Whether dates and times are shown on screen at all (#1068).
+     *
+     * A DISPLAY decision and nothing else. Every timestamp keeps being written,
+     * keeps being queryable, keeps its place in the audit trail and keeps
+     * travelling on the wire in the API responses this key does not touch. The
+     * screen simply stops printing it. Turning the setting off again brings
+     * every date back, because nothing was ever lost.
+     *
+     * WHY AN INSTITUTION ASKS FOR THIS. Timestamps on ordinary administrative
+     * work invite scrutiny that helps nobody do the job — "why did this sit for
+     * three days" — and the organisations that asked would rather their people
+     * were not answering that question about a form that was simply waiting its
+     * turn. It is a posture about what the interface volunteers, not a claim
+     * that the record does not exist.
+     *
+     * TENANT-OVERRIDABLE, and not governance. It grants nobody anything and
+     * takes nothing away: a reader who could see a document before can see it
+     * now, and one who could not, still cannot. It is exactly the kind of
+     * question two tenants on one instance answer differently — a registry that
+     * wants its clerks judged on throughput and a ministry office that does
+     * not — so it resolves per-tenant ?? global ?? the default below, like every
+     * other tunable here.
+     *
+     * DEFAULT FALSE. An instance that never sets it behaves exactly as it does
+     * today, which is the only default an existing deployment can be upgraded
+     * onto without anybody noticing.
+     *
+     * NOT A FEATURE_FLAG_KEY, deliberately, and for the reason
+     * {@see DOCUMENTS_QR_ENABLED} is not: that tab is instance-wide capability
+     * toggles with no per-tenant surface, and a tenant-overridable key sitting
+     * there would give an operator a switch that looks global and is not.
+     *
+     * IT DOES NOT REACH THE PUBLIC VERIFICATION PAGE. That page has its own
+     * disclosure control, `documents.qr_public_detail`, because a stranger
+     * holding a printed sheet is a different audience from this tenant's staff
+     * and the date is doing real work for them. A tenant that wants no date
+     * there says so with the `undated` level on that key — explicitly, rather
+     * than as a side effect of a preference about its own screens. See
+     * {@see \Whity\Core\Document\Qr\VerificationPresenter}.
+     */
+    public const UI_HIDE_DATES = 'ui.hide_dates';
+
+    /**
      * The asset-kind keys (Tenant Branding). Their stored value is a storage
      * key (or '' when unset). They are NEVER writable via the text PATCH path —
      * uploads go through BrandingService and the binary endpoints.
@@ -388,6 +652,16 @@ final class SettingsRegistry
         self::MAIL_FOOTER_TEXT,
         self::BILLING_ENFORCEMENT_DEFAULT,
         self::BILLING_GRACE_DAYS,
+        self::BILLING_INVOICE_NUMBER_FORMAT,
+        self::BILLING_INVOICE_NUMBER_SCOPE,
+        self::BILLING_INVOICE_NUMBER_RESET,
+        self::PAYMENTS_CLIQ_ENABLED,
+        self::PAYMENTS_CLIQ_ALIAS,
+        self::PAYMENTS_CLIQ_BANK_NAME,
+        self::PAYMENTS_CLIQ_REFERENCE_PREFIX,
+        self::PAYMENTS_MOCK_ENABLED,
+        self::SEATS_ENFORCEMENT,
+        self::SEATS_COUNT_INVITED,
         self::PLUGINS_STORE_ALLOWED_HOSTS,
         self::PLUGINS_STORE_ENABLED,
         // Master on/off switch for the render tier: infrastructure-level (is the
@@ -429,7 +703,12 @@ final class SettingsRegistry
         self::PLUGINS_STORE_ENABLED,
         self::DOCUMENTS_RENDER_ENABLED,
         self::DOCUMENTS_PERSIST_ENABLED,
+        self::DOCUMENTS_QR_ENABLED,
         self::I18N_ENABLED,
+        self::UI_HIDE_DATES,
+        self::BILLING_TAX_INCLUSIVE,
+        self::PAYMENTS_CLIQ_ENABLED,
+        self::PAYMENTS_MOCK_ENABLED,
     ];
 
     /**
@@ -471,6 +750,7 @@ final class SettingsRegistry
      * @var list<string>
      */
     private const FEATURE_FLAG_KEYS = [
+        self::PAYMENTS_CLIQ_ENABLED,
         self::ERROR_TRACKING_ENABLED,
         self::MCP_ENABLED,
         self::SELF_REGISTRATION_ENABLED,
@@ -497,6 +777,24 @@ final class SettingsRegistry
         // the safe global default (never blocks); the operator raises it globally
         // or per-tenant. Kept in sync with SubscriptionService enforcement modes.
         self::BILLING_ENFORCEMENT_DEFAULT => ['off', 'warn', 'block_writes', 'block_all'],
+        // Seat strictness. Three levels rather than the wall's four: a seat
+        // limit is only ever consulted when something is being ADDED, so
+        // "block writes" and "block everything" would be the same rule.
+        self::SEATS_ENFORCEMENT => ['off', 'warn', 'block'],
+        self::BILLING_INVOICE_NUMBER_SCOPE => ['shared', 'per_tenant'],
+        self::BILLING_INVOICE_NUMBER_RESET => ['never', 'yearly', 'monthly'],
+        // What a STRANGER holding a printed document is told when they scan it
+        // (#1036). Two levels rather than a boolean because the second one adds
+        // two distinct disclosures — the routing verb, and telling a withdrawn
+        // code apart from an unrecognised one — and a tenant choosing between
+        // them is choosing a posture, not toggling a field. The vocabulary and
+        // the argument for where it stops are in
+        // {@see \Whity\Core\Document\Qr\VerificationPresenter}.
+        // Listed in ascending order of disclosure, which is not where the
+        // DEFAULT sits: `minimal` is the middle value and stays the default,
+        // because it is what shipped and adding a quieter level must not change
+        // what any existing tenant discloses.
+        self::DOCUMENTS_QR_PUBLIC_DETAIL => ['undated', 'minimal', 'stage'],
         // 'internal' stores errors in this deployment's own database (no extra
         // infrastructure); 'sentry' ships them to any Sentry-PROTOCOL backend —
         // hosted Sentry, or a self-hosted GlitchTip/Bugsink — via the encrypted
@@ -572,6 +870,35 @@ final class SettingsRegistry
         // per-tenant. A past_due tenant keeps access for grace_days days.
         self::BILLING_ENFORCEMENT_DEFAULT => 'warn',
         self::BILLING_GRACE_DAYS => '7',
+        // Seats default SAFE, for the reason the payment wall does: an instance
+        // that never sold a seat must not start refusing members because a
+        // limit it never set has a default. 'warn' counts and reports without
+        // refusing; an operator opts into 'block'.
+        self::SEATS_ENFORCEMENT => 'warn',
+        self::SEATS_COUNT_INVITED => 'true',
+        // Zero tax until an operator says otherwise — see the constant.
+        self::BILLING_DEFAULT_CURRENCY => 'JOD',
+        self::BILLING_TAX_RATE_BP => '0',
+        self::BILLING_TAX_LABEL => '',
+        self::BILLING_TAX_INCLUSIVE => 'false',
+        // Two weeks, the commonest commercial term. Zero means due on issue.
+        self::BILLING_PAYMENT_TERMS_DAYS => '14',
+        self::BILLING_SELLER_NAME => '',
+        self::BILLING_SELLER_ADDRESS => '',
+        self::BILLING_SELLER_TAX_ID => '',
+        self::BILLING_INVOICE_NUMBER_FORMAT => 'INV-{YYYY}-{SEQ:5}',
+        self::BILLING_INVOICE_NUMBER_SCOPE => 'shared',
+        self::BILLING_INVOICE_NUMBER_RESET => 'yearly',
+        // Every rail OFF until an operator configures one. A payment rail
+        // that is on by default is one that can take money before anybody
+        // decided it should.
+        self::PAYMENTS_CLIQ_ENABLED => 'false',
+        self::PAYMENTS_CLIQ_ALIAS => '',
+        self::PAYMENTS_CLIQ_BANK_NAME => '',
+        self::PAYMENTS_CLIQ_REFERENCE_PREFIX => 'WHT-',
+        self::PAYMENTS_MOCK_ENABLED => 'false',
+        self::DUNNING_RETRY_SCHEDULE_DAYS => '1,3,7',
+        self::DUNNING_LOCK_AFTER_DAYS => '14',
         // Empty = install-from-store OFF (no trusted store); operator opts in.
         self::PLUGINS_STORE_ALLOWED_HOSTS => '',
         // Master switch default TRUE (opt-out): the allowlist above is already
@@ -588,6 +915,19 @@ final class SettingsRegistry
         self::DOCUMENTS_RENDER_MAX_PAGES => '2000',
         // 2 MiB.
         self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => '2000000',
+        // The render service's own hard limits, mirrored — see the constants'
+        // note for why matching rather than undercutting is the right default.
+        // These three numbers have a twin in render-service/src/flow/document.js
+        // and DocumentFlowLimitsAgreeTest pins them together, because a ceiling
+        // that drifted apart from the one actually enforced would be discovered
+        // as an unexplained 422 on a payload core had already approved.
+        self::DOCUMENTS_FLOW_MAX_BLOCKS => '20000',
+        self::DOCUMENTS_FLOW_MAX_TABLE_ROWS => '5000',
+        // 20 MiB, and deliberately under express's 25 MiB body limit for the
+        // same reason the service's copy is: a caller over the line should be
+        // told which part of its document was too much, by a layer that knows
+        // what a figure is.
+        self::DOCUMENTS_FLOW_MAX_BYTES => '20971520',
         // Opt-OUT, not opt-in — see the constant's own note.
         self::DOCUMENTS_PERSIST_ENABLED => 'true',
         // 20 steps. Well past the longest real approval chain anybody described
@@ -600,6 +940,32 @@ final class SettingsRegistry
         // being a plausible reading of a single step, and an author who really
         // means to reach a thousand people should say so by raising the limit.
         self::DOCUMENTS_ROUTING_MAX_RECIPIENTS_PER_STEP => '500',
+        // `all`, and the constant above says why at length. It is not a guess at
+        // what most tenants want; it is the reading that fails loudly when it is
+        // wrong, on a value whose other reading fails silently.
+        self::DOCUMENTS_ROUTING_APPROVAL_QUORUM => 'all',
+        // `in_app` alone, and the omission of `email` is the considered half.
+        //
+        // Routing sent no notifications at all before #1054, so whatever goes
+        // here starts happening on every existing route on every deployment the
+        // day it upgrades. An in-app row is free, is read by the person when they
+        // next look, and is the only trace a DELIVERY step's recipient gets at
+        // all — their inbox item is closed the moment it exists. An e-mail is a
+        // send: it costs money, it reaches people outside the app, and switching
+        // it on for every routing act everywhere is not a decision this default
+        // gets to make for an operator who has not read the release note.
+        //
+        // A tenant that wants it — the motivating case for #1054 is precisely a
+        // faculty whose instructors never log in — writes `in_app,email` once,
+        // and every route in that tenant honours it without a single step being
+        // rewritten. Which is the point of the setting.
+        self::DOCUMENTS_ROUTING_NOTIFICATION_CHANNELS => 'in_app',
+        // Off. Turning it on publishes an unauthenticated verification surface
+        // for this tenant's documents — see the constant.
+        self::DOCUMENTS_QR_ENABLED => 'false',
+        // The minimum that satisfies verification. See the constant, and
+        // VerificationPresenter for what each level does and does not say.
+        self::DOCUMENTS_QR_PUBLIC_DETAIL => 'minimal',
         // Ten faces. Enough to recognise a group at a glance — "yes, those are
         // the instructors" — and small enough that nobody mistakes the sample
         // for the list. The COUNT beside it is exact and unbounded, which is
@@ -622,6 +988,11 @@ final class SettingsRegistry
         // A week: long enough to survive a weekend and a missed inbox, short
         // enough that a forwarded link does not stay live for a quarter.
         self::INVITATION_TTL_DAYS => '7',
+        // #1068. OFF: an instance that never sets it renders exactly the dates
+        // it renders today. The opposite default would blank every timestamp on
+        // every screen of every deployment at upgrade time, for a preference
+        // most of them have not expressed.
+        self::UI_HIDE_DATES => 'false',
     ];
 
     /**
@@ -718,6 +1089,21 @@ final class SettingsRegistry
     public static function isGlobalOnly(string $key): bool
     {
         return in_array($key, self::GLOBAL_ONLY_KEYS, true);
+    }
+
+    /**
+     * The curated feature-flag keys, in registry order.
+     *
+     * Exposed so a caller can enumerate the flags rather than only ask about one
+     * at a time. {@see \Whity\Core\Feature\FeatureService} composes this list
+     * with the tenant's entitlements; without an accessor it would have to keep
+     * its own copy, and a second list of the same thing is a list that drifts.
+     *
+     * @return list<string>
+     */
+    public static function featureFlagKeys(): array
+    {
+        return self::FEATURE_FLAG_KEYS;
     }
 
     /**
@@ -886,6 +1272,20 @@ final class SettingsRegistry
             self::MAIL_EVENT_PASSWORD_RESET => self::validateBoolean($value, $key),
             self::BILLING_ENFORCEMENT_DEFAULT => self::validateEnum($key, $value),
             self::BILLING_GRACE_DAYS => self::validateGraceDays($value),
+            self::SEATS_ENFORCEMENT => self::validateEnum($key, $value),
+            self::BILLING_DEFAULT_CURRENCY => self::validateCurrencyCode($value),
+            self::BILLING_TAX_RATE_BP => self::validateTaxRateBasisPoints($value),
+            self::BILLING_TAX_INCLUSIVE => self::validateBoolean($value, self::BILLING_TAX_INCLUSIVE),
+            self::BILLING_PAYMENT_TERMS_DAYS => self::validatePaymentTermsDays($value),
+            self::BILLING_INVOICE_NUMBER_FORMAT => self::validateInvoiceNumberFormat($value),
+            self::BILLING_INVOICE_NUMBER_SCOPE => self::validateEnum($key, $value),
+            self::BILLING_INVOICE_NUMBER_RESET => self::validateEnum($key, $value),
+            self::PAYMENTS_CLIQ_ENABLED => self::validateBoolean($value, self::PAYMENTS_CLIQ_ENABLED),
+            self::PAYMENTS_MOCK_ENABLED => self::validateBoolean($value, self::PAYMENTS_MOCK_ENABLED),
+            self::PAYMENTS_CLIQ_REFERENCE_PREFIX => self::validateCliqReferencePrefix($value),
+            self::DUNNING_RETRY_SCHEDULE_DAYS => \Whity\Core\Billing\DunningSchedule::parseProblem($value),
+            self::DUNNING_LOCK_AFTER_DAYS => self::validateLockAfterDays($value),
+            self::SEATS_COUNT_INVITED => self::validateBoolean($value, self::SEATS_COUNT_INVITED),
             self::MAIL_BRAND_COLOR => self::validateHexColor($value),
             self::MAIL_SMTP_HOST,
             self::MAIL_SMTP_USERNAME,
@@ -897,9 +1297,22 @@ final class SettingsRegistry
             self::DOCUMENTS_RENDER_MAX_ROWS => self::validateRenderMaxRows($value),
             self::DOCUMENTS_RENDER_MAX_PAGES => self::validateRenderMaxPages($value),
             self::DOCUMENTS_RENDER_MAX_TEMPLATE_BYTES => self::validateRenderMaxTemplateBytes($value),
+            // Sanity bounds on the admin-set value, not the enforced ceiling.
+            // The upper ones are an order of magnitude past the service's hard
+            // limits so an operator raising a ceiling is not blocked here by a
+            // second, undocumented one; the lower ones stop a ceiling being set
+            // to zero, which would refuse every render with a message about a
+            // limit nobody meant to impose.
+            self::DOCUMENTS_FLOW_MAX_BLOCKS => self::validateFlowCeiling($key, $value, 1, 200000),
+            self::DOCUMENTS_FLOW_MAX_TABLE_ROWS => self::validateFlowCeiling($key, $value, 1, 100000),
+            self::DOCUMENTS_FLOW_MAX_BYTES => self::validateFlowCeiling($key, $value, 1024, 25 * 1024 * 1024),
             self::DOCUMENTS_PERSIST_ENABLED => self::validateBoolean($value, self::DOCUMENTS_PERSIST_ENABLED),
             self::DOCUMENTS_ROUTING_MAX_STEPS => self::validateRoutingMaxSteps($value),
             self::DOCUMENTS_ROUTING_MAX_RECIPIENTS_PER_STEP => self::validateRoutingMaxRecipients($value),
+            self::DOCUMENTS_ROUTING_APPROVAL_QUORUM => self::validateRoutingApprovalQuorum($value),
+            self::DOCUMENTS_ROUTING_NOTIFICATION_CHANNELS => self::validateRoutingNotificationChannels($value),
+            self::DOCUMENTS_QR_ENABLED => self::validateBoolean($value, self::DOCUMENTS_QR_ENABLED),
+            self::DOCUMENTS_QR_PUBLIC_DETAIL => self::validateEnum($key, $value),
             self::GROUPS_PREVIEW_SAMPLE_SIZE => self::validateGroupsPreviewSampleSize($value),
             self::DATA_TYPES_BULK_MAX_IDS => self::validateBulkMaxIds($value),
             // Error tracking. These five were declared with defaults, types,
@@ -917,6 +1330,25 @@ final class SettingsRegistry
             self::ERROR_TRACKING_RETENTION_DAYS => self::validateRetentionDays($value),
             self::I18N_ENABLED => self::validateBoolean($value, self::I18N_ENABLED),
             self::INVITATION_TTL_DAYS => self::validateInvitationTtlDays($value),
+            self::UI_HIDE_DATES => self::validateBoolean($value, self::UI_HIDE_DATES),
+            // #billing free-text. Declared with defaults and no validate() arm,
+            // these fell straight through to `default` below — so six keys the
+            // registry plainly knows were refused as "Unknown setting key" and
+            // could never be saved. That is the identical defect the error
+            // tracking comment above records, reintroduced two hundred lines
+            // later, which is why `SettingsRegistryValidationArmTest` now
+            // asserts every key can validate its own default.
+            //
+            // Null means "any string is acceptable": a company name, a postal
+            // address, a tax registration and a bank alias are all free-form by
+            // nature, and the only thing worth refusing would be a length the
+            // column cannot hold.
+            self::BILLING_TAX_LABEL,
+            self::BILLING_SELLER_NAME,
+            self::BILLING_SELLER_ADDRESS,
+            self::BILLING_SELLER_TAX_ID,
+            self::PAYMENTS_CLIQ_ALIAS,
+            self::PAYMENTS_CLIQ_BANK_NAME => null,
             default => "Unknown setting key: {$key}",
         };
     }
@@ -1091,6 +1523,96 @@ final class SettingsRegistry
      * @param string $value The validated candidate value.
      * @return string The canonical value to persist.
      */
+    /**
+     * A three-letter ISO 4217 code. Format only: refusing a code we hold no
+     * exponent for would stop an operator selling in an ordinary two-decimal
+     * currency for no reason, and the exponent table's safe default covers it.
+     */
+    /**
+     * The prefix a payer sees, and types back. Letters only, because digits and
+     * punctuation invite exactly the transcription mistakes the reference's
+     * check characters exist to catch.
+     */
+    private static function validateCliqReferencePrefix(string $value): ?string
+    {
+        return preg_match('/^[A-Za-z]{2,8}-?$/', trim($value)) === 1
+            ? null
+            : 'must be two to eight letters, optionally followed by a hyphen (e.g. "WHT-")';
+    }
+
+    /**
+     * The day access is withdrawn. Zero is legitimate — due on receipt, locked
+     * the moment it lapses — and somebody's deliberate choice rather than
+     * something to refuse.
+     */
+    private static function validateLockAfterDays(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', trim($value)) !== 1) {
+            return 'must be a whole number of days after the due date';
+        }
+
+        return (int) $value <= 365 ? null : 'must be at most 365 days';
+    }
+
+    private static function validateCurrencyCode(string $value): ?string
+    {
+        return preg_match('/^[A-Z]{3}$/', strtoupper(trim($value))) === 1
+            ? null
+            : 'must be a three-letter ISO 4217 currency code, such as JOD';
+    }
+
+    /**
+     * Basis points, 0-10000. A rate above 100% is always a units mistake —
+     * somebody typed 16 meaning sixteen per cent and got 0.16%, then corrected
+     * it to 1600% — and both directions are worth catching loudly.
+     */
+    private static function validateTaxRateBasisPoints(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', trim($value)) !== 1) {
+            return 'must be a whole number of basis points (1600 = 16%)';
+        }
+
+        return (int) $value <= 10000
+            ? null
+            : 'must be at most 10000 basis points (100%)';
+    }
+
+    /** Days from issue to due. Zero is legitimate: due on receipt. */
+    private static function validatePaymentTermsDays(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', trim($value)) !== 1) {
+            return 'must be a whole number of days';
+        }
+
+        return (int) $value <= 365 ? null : 'must be at most 365 days';
+    }
+
+    /**
+     * The format must contain a sequence placeholder, or every invoice in a
+     * series gets the same number and the uniqueness index rejects the second
+     * one — at issue time, on a customer's invoice, which is the worst possible
+     * moment to discover a settings typo.
+     */
+    private static function validateInvoiceNumberFormat(string $value): ?string
+    {
+        $trimmed = trim($value);
+
+        if ($trimmed === '') {
+            return 'must not be empty';
+        }
+
+        if (preg_match('/\{SEQ(?::\d+)?\}/', $trimmed) !== 1) {
+            return 'must contain {SEQ} or {SEQ:n}, or every invoice in a series '
+                . 'would be numbered the same';
+        }
+
+        if (strlen($trimmed) > 64) {
+            return 'must fit the 64-character invoice number column';
+        }
+
+        return null;
+    }
+
     public static function normalize(string $key, string $value): string
     {
         return match ($key) {
@@ -1218,6 +1740,82 @@ final class SettingsRegistry
         return null;
     }
 
+    /**
+     * What an approval step's fan-out means: one of the closed quorum vocabulary
+     * (#1014).
+     *
+     * Validated against {@see \Whity\Core\Document\Routing\RouteQuorum} rather
+     * than against a list written out here, so the setting, the CHECK constraint
+     * migration 119 puts on `document_route_steps.decision_quorum` and the engine
+     * cannot drift into admitting three different sets — the failure the routing
+     * ACTION vocabulary already has a dedicated test for.
+     *
+     * There is deliberately no "off" value. A step that should not gate is a step
+     * with `decision` false; a quorum that meant "nobody has to approve" would be
+     * an approval step that approves itself.
+     */
+    private static function validateRoutingApprovalQuorum(string $value): ?string
+    {
+        if (!RouteQuorum::isValid($value)) {
+            return 'documents.routing_approval_quorum must be one of: ' . implode(', ', RouteQuorum::all()) . '.';
+        }
+
+        return null;
+    }
+
+    /**
+     * The channels a routing notification is offered on (#1054): a
+     * comma-separated list of channel slugs, or empty for none.
+     *
+     * VALIDATED FOR SHAPE, NOT FOR MEMBERSHIP, and that asymmetry with
+     * {@see validateRoutingApprovalQuorum()} above is deliberate rather than
+     * laziness. A quorum is a value the ENGINE implements, so the set is closed
+     * and drift between the setting and the engine is a real bug. A channel is
+     * whatever a TRANSPORT has registered for
+     * ({@see \Whity\Core\Notification\TransportRegistry}) — core ships `in_app`
+     * and `email`, and a plugin may register `sms` or `whatsapp` at boot. A
+     * closed list here would refuse the very extension the registry exists to
+     * allow, and it would refuse it in a settings validator, where the author of
+     * the plugin has no way to reach.
+     *
+     * A channel nothing serves is therefore accepted and then simply resolves to
+     * no transport, which the dispatcher already records per delivery — a
+     * visible, per-notification "nothing sent" rather than a settings write that
+     * fails for a channel the operator's own plugin provides.
+     *
+     * EMPTY IS VALID and means "notify nobody". See the constant for why that
+     * reading is safe here and is not safe for a numeric ceiling.
+     */
+    private static function validateRoutingNotificationChannels(string $value): ?string
+    {
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        $channels = array_map('trim', explode(',', $trimmed));
+        if (count($channels) > 8) {
+            return 'documents.routing_notification_channels must name 8 channels or fewer.';
+        }
+
+        foreach ($channels as $channel) {
+            if (preg_match('/^[a-z][a-z0-9_]{0,31}$/', $channel) !== 1) {
+                return "documents.routing_notification_channels: '{$channel}' is not a channel slug "
+                    . '(lower-case letters, digits and underscores, starting with a letter).';
+            }
+        }
+
+        if (count(array_unique($channels)) !== count($channels)) {
+            // Refused rather than de-duplicated. A repeated channel is a typo the
+            // operator can see and fix; silently collapsing it would leave them
+            // believing they had configured something they had not — and the
+            // dispatcher would record one delivery where the list says two.
+            return 'documents.routing_notification_channels names the same channel twice.';
+        }
+
+        return null;
+    }
+
     private static function validateRoutingMaxRecipients(string $value): ?string
     {
         if (preg_match('/^\d+$/', $value) !== 1) {
@@ -1314,6 +1912,36 @@ final class SettingsRegistry
         }
         if ($bytes > 20 * 1024 * 1024) {
             return 'documents.render_max_template_bytes must be 20971520 (20 MiB) or fewer.';
+        }
+
+        return null;
+    }
+
+    /**
+     * The three flowing-mode ceilings (#1072), which differ only in their name
+     * and their sanity bound.
+     *
+     * Written once and parameterised by key, rather than as three near-identical
+     * private methods, because the difference between them carries no meaning —
+     * and three copies is how `documents.render_max_*` ended up with one arm
+     * checking `>= 1` and another `>= 1024` for no recorded reason. The bound
+     * passed in is a sanity limit on the ADMIN-SET VALUE, not the enforced
+     * default: an operator may set any of these ABOVE what the render service
+     * accepts, which is deliberate and safe (the service answers 422 and
+     * {@see \Whity\Core\Document\Render\RenderServiceClient} relays it as one).
+     */
+    private static function validateFlowCeiling(string $key, string $value, int $min, int $max): ?string
+    {
+        if (preg_match('/^\d+$/', $value) !== 1) {
+            return $key . ' must be a whole number.';
+        }
+
+        $number = (int) $value;
+        if ($number < $min) {
+            return $key . ' must be at least ' . $min . '.';
+        }
+        if ($number > $max) {
+            return $key . ' must be ' . $max . ' or fewer.';
         }
 
         return null;

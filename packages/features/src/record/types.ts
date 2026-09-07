@@ -26,6 +26,8 @@
 
 import type { ReactNode } from 'react';
 
+import type { DateDisplay } from '../datetime';
+
 /**
  * Property names that state a decision about the CALLER rather than a property
  * of the RECORD.
@@ -173,8 +175,20 @@ export type RecordFactsFn<TFields> = CallerFlagsIn<TFields> extends never
  * Internal to the shell — it is what {@link RecordFactsFn} resolves to once the
  * fields type is proven clean, and what the shell casts back to in order to call
  * it. Screens should always write `RecordFactsFn`, which is the checked one.
+ *
+ * `dates` is handed in for exactly the reason `t` is (#1068). A projection is
+ * module-scope and pure by design — that is the #895 property that keeps a
+ * permission flag out of its reach — so it cannot call a hook, and a date it
+ * formatted itself would be a date outside the one sanctioned path. The shell
+ * IS a component, so it resolves {@link DateDisplay} once and passes it down,
+ * and a projection that shows a timestamp reads `dates.hidden` to drop the
+ * whole stat rather than leaving a label with an em dash under it.
  */
-export type RecordProjection<TFields> = (fields: TFields, t: RecordTranslate) => RecordStatement;
+export type RecordProjection<TFields> = (
+  fields: TFields,
+  t: RecordTranslate,
+  dates: DateDisplay,
+) => RecordStatement;
 
 /**
  * One reason a caller may or may not edit this record, in the order the screen

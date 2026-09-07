@@ -12,6 +12,7 @@ use Whity\Core\Response;
 use Whity\Core\Taxonomy\TagGroupRepository;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Http\JsonBody;
+use Whity\Http\ListQuery;
 
 /**
  * Tenant-scoped, RBAC-gated CRUD for tag groups (WC-621) — the named buckets
@@ -42,6 +43,30 @@ final class TagGroupsApiHandler
         $this->auditLogger = $auditLogger;
     }
 
+    /**
+     * GET /api/tag-groups — the tenant's tag groups, sortable and searchable.
+     *
+     * PAGINATION IS OPT-IN HERE, AND THAT IS A DECISION (#1102). This endpoint
+     * returned EVERY group before it adopted {@see ListQuery}, and it is not
+     * read only by the admin table: the tags screen fetches it whole to resolve
+     * each tag's `group_id` into a readable label, and the Taxonomy plugin's
+     * block UI uses it as a `referenceSelect` dropdown source. Paginating it
+     * unconditionally would cut both to twenty-five rows with nothing raising an
+     * error — the label map would render `#37` for the groups past the cut and
+     * the dropdown would simply not offer them. The desktop and mobile clients
+     * that also read it are not updated in this repository, so they could not be
+     * fixed in the same change.
+     *
+     * So: a caller that sends `page` or `per_page` gets one page and a
+     * `pagination` envelope; a caller that sends neither gets what it gets
+     * today — every row, and no `pagination` key. The choice is
+     * {@see ListQuery::fromPath()}'s default rather than something this handler
+     * computes.
+     *
+     * `sort`, `dir` and `q` apply either way, which is the actual fix: the admin
+     * table can stop sorting and filtering client-side over a fetched slice
+     * without any client being forced to learn paging first.
+     */
     public function list(Request $request): Response
     {
         $auth = $this->authorize($request, CorePermissions::TAGS_READ);
@@ -50,7 +75,17 @@ final class TagGroupsApiHandler
         }
         [$tenantId] = $auth;
 
-        return Response::json(['data' => $this->groups->listForTenant($tenantId)]);
+        $query = ListQuery::fromPath($request->getPath(), TagGroupRepository::listSpec());
+        $rows = $this->groups->listForTenant($tenantId, $query);
+
+        if (!$query->paginated) {
+            return Response::json(['data' => $rows]);
+        }
+
+        return Response::json([
+            'data' => $rows,
+            'pagination' => $query->meta($this->groups->countForTenant($tenantId, $query)),
+        ]);
     }
 
     /**

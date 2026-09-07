@@ -59,6 +59,7 @@ import { useRouter } from 'next/navigation';
 import { Badge } from '@amroksaleh/ui/badge';
 import { Button } from '@amroksaleh/ui/button';
 import { useTranslation } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { useAuth } from '@/lib/auth-context';
@@ -76,6 +77,7 @@ const DOCUMENT_ROUTING_SOURCE = 'document_routing';
 
 export default function InboxPage() {
   const t = useTranslation('documents');
+  const dates = useDateDisplay();
   const { apiClient } = useAuth();
   const router = useRouter();
 
@@ -147,20 +149,49 @@ export default function InboxPage() {
           const meta = routingMeta(row);
           return (
             <div>
-              {meta === null ? (
-                // An item from a source this screen has no link for. Its title
-                // is rendered as text rather than as a dead link — a link that
-                // goes nowhere is worse than no link (#756).
-                <span className="font-medium text-foreground">{row.title}</span>
-              ) : (
-                <button
-                  type="button"
-                  className="text-start font-medium text-primary underline"
-                  onClick={() => router.push(`/admin/document-routing/${meta.document_id}`)}
-                >
-                  {row.title}
-                </button>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                {meta === null ? (
+                  // An item from a source this screen has no link for. Its title
+                  // is rendered as text rather than as a dead link — a link that
+                  // goes nowhere is worse than no link (#756).
+                  <span className="font-medium text-foreground">{row.title}</span>
+                ) : (
+                  <button
+                    type="button"
+                    className="text-start font-medium text-primary underline"
+                    onClick={() => router.push(`/admin/document-routing/${meta.document_id}`)}
+                  >
+                    {row.title}
+                  </button>
+                )}
+                {/*
+                  A DECISION SAYS SO, NEXT TO THE THING YOU CLICK (#1041).
+
+                  The server already distinguishes the two: a decision item's
+                  status reads "Awaiting your decision" where a circulation one
+                  reads "Forwarded to you". That sentence is the trail's own word
+                  and is rendered verbatim in the Status column below — but it is
+                  ENGLISH, composed in PHP, and there is no key for a translator
+                  to reach. An Arabic reader got the distinction in a language
+                  they may not read, in a column that is one horizontal scroll
+                  away on a phone.
+
+                  So this chip is driven by `meta.decision`, the MACHINE field
+                  #1030 published for exactly this ("a client needs it before it
+                  renders anything"). It is not a re-keying of the server's
+                  sentence — it is a second, translatable rendering of the same
+                  machine fact, placed where the eye already is.
+
+                  Open items only. On a closed one the status is "Done", and
+                  labelling a finished item "Decision" would read as work still
+                  waiting.
+                */}
+                {meta !== null && meta.decision && meta.open && (
+                  <Badge variant="warning-solid" data-slot="inbox-decision">
+                    {t('inbox.decision.badge', 'Decision')}
+                  </Badge>
+                )}
+              </div>
               {row.subtitle !== null && row.subtitle !== '' && (
                 <p className="text-xs text-muted-foreground">{row.subtitle}</p>
               )}
@@ -176,24 +207,39 @@ export default function InboxPage() {
           const meta = routingMeta(row);
           // The qualifier is the SERVER's word, read through the trail event
           // that created the row ("Forwarded to you", "Returned to you",
-          // "Done"). Never re-derived here, and never re-keyed: it is the
-          // trail's own account of what happened to this person.
-          const variant = meta !== null && !meta.open ? 'secondary' : 'warning';
+          // "Awaiting your decision", "Done"). Never re-derived here, and never
+          // re-keyed: it is the trail's own account of what happened to this
+          // person.
+          //
+          // The TINT is this screen's, and an open decision gets its own (#1041).
+          // Amber-on-amber made "awaiting your decision" and "forwarded to you"
+          // the same object at a glance, and they are not the same object: one
+          // asks for a judgement that routes the document somewhere, the other
+          // asks to be read. An approval step that clears at the speed of a
+          // circulation is the whole failure a sign-off exists to prevent.
+          const variant =
+            meta !== null && !meta.open
+              ? 'secondary'
+              : meta !== null && meta.decision
+                ? 'warning-solid'
+                : 'warning';
           return <Badge variant={variant}>{row.status}</Badge>;
         },
       },
-      {
-        id: 'timestamp',
-        header: t('inbox.column.arrived', 'Arrived'),
-        cell: (row) =>
-          row.timestamp === null ? null : (
-            <span className="text-xs text-muted-foreground">
-              {new Date(row.timestamp).toLocaleString()}
-            </span>
-          ),
-      },
+      // #1068: the "Arrived" column goes when this tenant hides dates. The
+      // inbox still lists what is waiting, from which source, in what state,
+      // newest first — and "why did this sit for three days" is precisely the
+      // question the tenants who asked for this setting want off the screen.
+      ...dates.dateColumns<InboxItem>([
+        {
+          id: 'timestamp',
+          header: t('inbox.column.arrived', 'Arrived'),
+          value: (row) => row.timestamp,
+          className: 'text-xs text-muted-foreground',
+        },
+      ]),
     ],
-    [t, router]
+    [t, router, dates]
   );
 
   if (sources.error !== null) {

@@ -1,13 +1,26 @@
 import type { NavTranslate } from "@amroksaleh/features/nav"
 
 /**
- * English strings for the shared feature UI (`DemoCatalogList`/`Detail`,
- * `UnsyncedBanner`, `ConflictResolver`), which resolve i18n keys through an
- * injected {@link NavTranslate}. This template ships no i18n runtime, so we map
- * the known keys to literals and fall back to the key itself for anything
- * unmapped. A localized app would inject its real translator here instead
- * (RTL/Arabic content is already handled by the shared components via
- * `dir="auto"`).
+ * English strings for the shared feature UI that still resolves i18n keys
+ * through an injected {@link NavTranslate} — `UnsyncedBanner`,
+ * `ConflictResolver`, and this template's own enrollment screen.
+ *
+ * This template ships no i18n runtime, so we map the known keys to literals and
+ * fall back to the key itself for anything unmapped. A localized app would
+ * inject its real translator here instead (RTL/Arabic content is already
+ * handled by the shared components via `dir="auto"`).
+ *
+ * `DemoCatalogList`/`Detail` are NO LONGER in that list, and the reason is
+ * worth keeping. Injecting a key-only translator is what made their vocabulary
+ * invisible: `NavTranslate` is `(key: string) => string` with nowhere to put an
+ * English fallback, and a `t` arriving as a prop binds no domain, so the
+ * extractor never saw the keys and `demoCatalog.*` existed in no catalogue —
+ * only in the map below, only in English, only on this device (#984).
+ *
+ * FALLING BACK TO THE KEY IS THE HAZARD, not the safety net. Anything unmapped
+ * here renders its own key at a user. That is survivable for a template with
+ * one screen and a short list; it is why the shared components stopped
+ * accepting an injected translator by default.
  */
 const STRINGS: Record<string, string> = {
   // Enrollment (app-state-provider.tsx). Every string that screen renders
@@ -38,29 +51,17 @@ const STRINGS: Record<string, string> = {
     "The server asked for a tenant but listed none to choose from. Try signing in again.",
   "enroll.tenant.lapsed":
     "That sign-in step expired before a tenant was chosen, or the membership changed. Please sign in again.",
-  // DemoCatalog list
-  "demoCatalog.list.create": "New item",
-  "demoCatalog.list.emptyTitle": "No items yet",
-  "demoCatalog.list.emptyDescription": "Create your first item to get started.",
-  "demoCatalog.list.errorTitle": "Couldn't load the catalog",
-  "demoCatalog.list.error": "Something went wrong loading your items.",
-  "demoCatalog.list.retry": "Retry",
-  // DemoCatalog detail
-  "demoCatalog.detail.createTitle": "New item",
-  "demoCatalog.detail.editTitle": "Edit item",
-  "demoCatalog.detail.nameLabel": "Name",
-  "demoCatalog.detail.descriptionLabel": "Description",
-  "demoCatalog.detail.statusLabel": "Status",
-  "demoCatalog.detail.cancel": "Cancel",
-  "demoCatalog.detail.save": "Save",
-  "demoCatalog.detail.saving": "Saving…",
-  "demoCatalog.detail.back": "Back",
-  "demoCatalog.detail.errorTitle": "Something went wrong",
-  "demoCatalog.detail.notFound": "Item not found.",
-  "demoCatalog.detail.loadError": "Couldn't load this item.",
-  "demoCatalog.detail.saveError": "Couldn't save. Check your input and try again.",
-  "demoCatalog.status.active": "Active",
-  "demoCatalog.status.archived": "Archived",
+  // DemoCatalog strings USED to live here, injected through the `t` prop.
+  // They are gone because the components translate themselves now (#984):
+  // the prop bound no domain, so the extractor could not see the keys and
+  // `demoCatalog.*` reached no catalogue at all — this map was the only place
+  // those strings existed, and only in English.
+  //
+  // This template ships no i18n runtime, so `useTranslation` finds no provider
+  // and returns each call site's English fallback — the same words this map
+  // held. Nothing on screen changed; the strings are now in
+  // `database/i18n/plugin.json` where a translator can reach them, and their
+  // Arabic is committed alongside.
   // UnsyncedBanner
   "sync.banner.synced": "All changes synced",
   "sync.banner.locked": "Session locked — sign in online to continue",

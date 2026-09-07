@@ -90,14 +90,14 @@ jobs:
       - name: Install PHP dependencies
         run: composer install --prefer-dist --no-progress --no-interaction
 
-      # Pull postgres:15-alpine before compose up so Docker Hub flakiness
+      # Pull pgvector/pgvector:pg15 before compose up so Docker Hub flakiness
       # (rate-limit / transient auth timeout) can be retried independently.
       # Three attempts with a backoff are enough to ride out brief outages
       # without burning the 25-minute job timeout on a single hung pull.
       - name: Pull Docker base images (with retry)
         run: |
           for i in 1 2 3; do
-            docker pull postgres:15-alpine && break
+            docker pull pgvector/pgvector:pg15 && break
             echo "Pull attempt $i failed — retrying in 15s..."
             sleep 15
           done

@@ -11,9 +11,11 @@
   "exports": {
     ".": "./src/index.ts",
     "./access-denied": "./src/access-denied.tsx",
-    "./alert-dialog": "./src/alert-dialog.tsx",
     "./alert": "./src/alert.tsx",
+    "./alert-dialog": "./src/alert-dialog.tsx",
     "./app-sidebar": "./src/app-sidebar.tsx",
+    "./audience-group-picker": "./src/audience-group-picker.tsx",
+    "./audience-people-picker": "./src/audience-people-picker.tsx",
     "./badge": "./src/badge.tsx",
     "./beta-warning": "./src/beta-warning.tsx",
     "./bilingual-input": "./src/bilingual-input.tsx",
@@ -25,6 +27,7 @@
     "./collapsible": "./src/collapsible.tsx",
     "./color-card": "./src/color-card.tsx",
     "./color-picker": "./src/color-picker.tsx",
+    "./command-palette": "./src/command-palette.tsx",
     "./data-table": "./src/data-table.tsx",
     "./date-picker": "./src/date-picker.tsx",
     "./dialog": "./src/dialog.tsx",
@@ -32,6 +35,7 @@
     "./documents/blocks": "./src/documents/blocks.ts",
     "./documents/element-content": "./src/documents/element-content.tsx",
     "./documents/element-layer": "./src/documents/element-layer.tsx",
+    "./documents/flow": "./src/documents/flow.ts",
     "./documents/geometry": "./src/documents/geometry.ts",
     "./documents/interpolation": "./src/documents/interpolation.ts",
     "./documents/sheet": "./src/documents/sheet.ts",
@@ -39,16 +43,20 @@
     "./dropdown-menu": "./src/dropdown-menu.tsx",
     "./empty-state": "./src/empty-state.tsx",
     "./form": "./src/form.tsx",
+    "./globals.css": "./src/globals.css",
     "./input": "./src/input.tsx",
     "./locked-screen": "./src/locked-screen.tsx",
     "./math-text": "./src/math-text.tsx",
     "./menu-bar": "./src/menu-bar.tsx",
+    "./money/currency": "./src/money/currency.ts",
     "./page-header": "./src/page-header.tsx",
     "./page-shell": "./src/page-shell.tsx",
     "./pagination": "./src/pagination.tsx",
     "./plugin-card": "./src/plugin-card.tsx",
     "./popover": "./src/popover.tsx",
     "./radio-group": "./src/radio-group.tsx",
+    "./route-flow/editor": "./src/route-flow/editor.tsx",
+    "./route-flow/model": "./src/route-flow/model.ts",
     "./screen-too-small": "./src/screen-too-small.tsx",
     "./select": "./src/select.tsx",
     "./separator": "./src/separator.tsx",
@@ -62,12 +70,12 @@
     "./tabs": "./src/tabs.tsx",
     "./tag-input": "./src/tag-input.tsx",
     "./textarea": "./src/textarea.tsx",
-    "./time-picker": "./src/time-picker.tsx",
-    "./top-nav": "./src/top-nav.tsx",
     "./theme-mode": "./src/theme-mode.ts",
+    "./time-picker": "./src/time-picker.tsx",
     "./tooltip": "./src/tooltip.tsx",
+    "./top-nav": "./src/top-nav.tsx",
     "./utils": "./src/utils.ts",
-    "./globals.css": "./src/globals.css"
+    "./view-toggle": "./src/view-toggle.tsx"
   },
   "files": [
     "src"
@@ -82,7 +90,8 @@
   },
   "dependencies": {
     "@amroksaleh/tokens": "^0.1.0",
-    "@tanstack/react-table": "^8.21.3",
+    "@tanstack/react-table": "^9.2.4",
+    "@xyflow/react": "^12.11.3",
     "bwip-js": "^4.11.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -108,7 +117,7 @@
     "tailwindcss": "^4",
     "tw-animate-css": "^1.4.0",
     "typescript": "^5",
-    "vite": "^8"
+    "vite": "^8.2.2"
   },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"

@@ -156,8 +156,16 @@ class LanguageRegistryIntegrationTest extends TestCase
         ]);
 
         // Query it back via the repository.
+        //
+        // Scoped to the row this test created, NOT to the size of the table.
+        // `assertCount(1, ...)` here was really an assertion that the whole
+        // `common` domain was empty, which was true only for as long as no
+        // language shipped with any strings in it. Migration 121 seeds the
+        // committed catalogues, so the domain now has a few hundred rows and a
+        // count is a statement about the catalogue rather than about this
+        // insert. Re-pinning the number to today's total would break on the
+        // next key anybody adds, in any language.
         $translations = $this->translationRepository->findByLanguageAndDomain($english->id, 'common');
-        $this->assertCount(1, $translations);
         $this->assertArrayHasKey('button.save', $translations);
         $this->assertSame('Save', $translations['button.save']->translation);
     }
@@ -354,6 +362,67 @@ class LanguageRegistryIntegrationTest extends TestCase
 
         // Requesting Arabic should fall back to English.
         $this->assertSame('Save', $this->registry->translate('ar', 'common', 'button.save', 0));
+    }
+
+    /**
+     * Regression: a key missing from a language that HAS other strings in the
+     * same domain must still fall back to English.
+     *
+     * The bug this pins was live and invisible. `translate()` decided whether to
+     * fall back by asking whether the language had the DOMAIN, so the fallback
+     * switched itself off the moment a language had one row in it — and every
+     * key still missing from that domain rendered as its own key, at users.
+     *
+     * It could not be reached while the translations table was effectively
+     * empty, which it was for every language but English. Seeding the committed
+     * catalogues is what made it reachable, and this is the shape that reaches
+     * it: Arabic present in `common`, but not for this particular key.
+     *
+     * That is the ORDINARY state of a translated product, not an edge case. An
+     * English string added today is translated in a later PR; in between, that
+     * domain is partially translated in every other language — which the CI
+     * catalogue gate explicitly permits, reporting missing keys rather than
+     * failing on them.
+     */
+    public function testFallsBackToEnglishForAKeyMissingFromAPartiallyTranslatedDomain(): void
+    {
+        $english = $this->languageRepository->findByCode('en');
+        $arabic = $this->languageRepository->findByCode('ar');
+        $this->assertNotNull($english);
+        $this->assertNotNull($arabic);
+
+        $insert = $this->pdo->prepare(
+            'INSERT INTO translations (language_id, domain, key, translation, tenant_id, created_at, updated_at)
+             VALUES (:language_id, :domain, :key, :translation, NULL, NOW(), NOW())'
+        );
+
+        // Arabic HAS this domain — one key in it, a different one.
+        $insert->execute([
+            ':language_id' => $arabic->id,
+            ':domain' => 'partial',
+            ':key' => 'button.cancel',
+            ':translation' => 'إلغاء',
+        ]);
+        // English has the key Arabic is missing.
+        $insert->execute([
+            ':language_id' => $english->id,
+            ':domain' => 'partial',
+            ':key' => 'button.save',
+            ':translation' => 'Save',
+        ]);
+
+        $this->registry->boot();
+
+        $this->assertSame(
+            'إلغاء',
+            $this->registry->translate('ar', 'partial', 'button.cancel', 0),
+            'The key Arabic does have still resolves to Arabic.'
+        );
+        $this->assertSame(
+            'Save',
+            $this->registry->translate('ar', 'partial', 'button.save', 0),
+            'The key Arabic lacks falls back to English, even though Arabic has other keys in this domain.'
+        );
     }
 
     /**

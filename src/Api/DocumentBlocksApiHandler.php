@@ -113,6 +113,106 @@ final class DocumentBlocksApiHandler
         return Response::json(['data' => $row]);
     }
 
+    /**
+     * GET /api/document-blocks/{id}/usage — WHAT WOULD BREAK if this block
+     * changed or went away.
+     *
+     * A block is POINTER-referenced with Gutenberg synced-pattern semantics, so
+     * editing one propagates to every template that instances it. Delete has a
+     * guard ({@see self::delete()}'s 409); EDIT has none and can have none — it
+     * is a legitimate action whose whole purpose is to propagate. The only
+     * safeguard available is therefore an informed publisher, and that needs a
+     * number and some names BEFORE the edit, not an error after it.
+     *
+     * WHY `total` IS NOT ROW-FILTERED, AND WHY THAT IS THE POINT
+     * ---------------------------------------------------------
+     * `templates` is filtered by {@see DocumentAccessPolicy} — a caller is never
+     * handed the identity of a template it may not see. `total` is NOT: it counts
+     * every referencing template in the tenant, and `hidden` is the difference.
+     *
+     * A visible-only count would be WORSE THAN NO COUNT, which is the reason this
+     * endpoint is shaped this way rather than reusing filterVisible() for both
+     * numbers. A department secretary reaches one department; a block she may
+     * edit can be instanced by templates across the whole faculty. Told "used by
+     * 2 templates" she edits with confidence and silently rewrites seven
+     * documents she cannot see. Told "used by 9, of which you can see 2" she
+     * knows the edit leaves her blast radius.
+     *
+     * The disclosure is a COUNT, scoped to the caller's own tenant, of rows they
+     * already hold documents:read on at the route. No name, no placement, no
+     * permission tag — nothing that narrows down WHICH rows. self::delete()
+     * already discloses strictly more (its 409 proves at least one such row
+     * exists) and has since WC-521; this replaces "something you cannot see says
+     * no" with a number, which is the same fact stated usefully.
+     *
+     * A block the caller may not see 404s, exactly as {@see self::show()} does —
+     * you cannot ask about the usage of a row whose existence is withheld.
+     *
+     * @param array<string, string> $params
+     */
+    public function usage(Request $request, array $params): Response
+    {
+        $ctx = $this->context($request);
+        if ($ctx instanceof Response) {
+            return $ctx;
+        }
+        [$tenantId, $callerId] = $ctx;
+
+        $id = (int) ($params['id'] ?? 0);
+        $block = $this->repo->findById($id, $tenantId);
+        $has = $this->permissionResolver($callerId, $tenantId);
+        $reaches = $this->ouReach->reachFor($tenantId, $callerId);
+        if ($block === null || !$this->policy->canView($block, $callerId, $has, $reaches)) {
+            return Response::error('Block not found', 404);
+        }
+
+        $referencing = $this->templateRepo->referencingTemplates($id, $tenantId);
+        $visible = $this->policy->filterVisible($referencing, $callerId, $has, $reaches);
+
+        // Blocks may now nest blocks (#1186 slice 3), so the templates are no
+        // longer the whole answer. A block held only by another block would
+        // report NO users here and then be refused with a 409 by delete() —
+        // the client/server disagreement the reference scanners are deliberately
+        // kept in parity to avoid, arrived at from the other side.
+        //
+        // Filtered through the same policy as the templates: a viewer must not
+        // learn the names of blocks they cannot see, and `total` counts what
+        // exists while `hidden` says how much of it is being withheld.
+        $nesting = $this->repo->referencingBlocks($id, $tenantId);
+        $visibleNesting = $this->policy->filterVisible($nesting, $callerId, $has, $reaches);
+
+        return Response::json(['data' => [
+            'block_id'  => $id,
+            'total'     => count($referencing) + count($nesting),
+            'hidden'    => (count($referencing) - count($visible))
+                + (count($nesting) - count($visibleNesting)),
+            'blocks'    => array_map(
+                static fn (array $row): array => [
+                    'id'                  => $row['id'],
+                    'name'                => $row['name'],
+                    'scope'               => $row['scope'],
+                    'required_permission' => $row['required_permission'],
+                    'owner_ou_id'         => $row['owner_ou_id'],
+                    'is_system'           => $row['is_system'],
+                    'updated_at'          => $row['updated_at'],
+                ],
+                $visibleNesting,
+            ),
+            'templates' => array_map(
+                static fn (array $row): array => [
+                    'id'                  => $row['id'],
+                    'name'                => $row['name'],
+                    'scope'               => $row['scope'],
+                    'required_permission' => $row['required_permission'],
+                    'owner_ou_id'         => $row['owner_ou_id'],
+                    'is_system'           => $row['is_system'],
+                    'updated_at'          => $row['updated_at'],
+                ],
+                $visible,
+            ),
+        ]]);
+    }
+
     public function create(Request $request): Response
     {
         $ctx = $this->context($request);
@@ -227,9 +327,22 @@ final class DocumentBlocksApiHandler
         $targetOu = array_key_exists('owner_ou_id', $fields)
             ? $fields['owner_ou_id']
             : ($row['owner_ou_id'] ?? null);
-        $becomesShared = array_key_exists('scope', $fields)
-            || array_key_exists('required_permission', $fields)
-            || array_key_exists('owner_ou_id', $fields);
+        // A publish action is one that CHANGES a sharing attribute — not one
+        // that merely mentions it. See the twin in DocumentTemplatesApiHandler.
+        //
+        // This bites HARDER here, because the designer's block save has always
+        // sent the whole object back, `scope` included (web/lib/documents/
+        // blocks.ts). Presence was therefore permanently true on this path, so
+        // an author holding documents:manage but not documents:publish could not
+        // save ANY edit to a tenant-wide or global block — including the seeded
+        // sys-header/sys-footer, the two blocks a tenant is most likely to want
+        // corrected. The 403 blamed publishing for a save that published
+        // nothing.
+        $becomesShared = (array_key_exists('scope', $fields) && $fields['scope'] !== $row['scope'])
+            || (array_key_exists('required_permission', $fields)
+                && $fields['required_permission'] !== $row['required_permission'])
+            || (array_key_exists('owner_ou_id', $fields)
+                && $fields['owner_ou_id'] != ($row['owner_ou_id'] ?? null));
         if ($becomesShared
             && $this->policy->needsPublish(
                 is_string($targetScope) ? $targetScope : null,
@@ -271,6 +384,15 @@ final class DocumentBlocksApiHandler
         // blockInstance pointer held by any template in the tenant.
         if ($this->templateRepo->referencesBlock($id, $tenantId)) {
             return Response::error('Cannot delete a block that is still referenced by a template', 409);
+        }
+
+        // The same guard for the other holder of a pointer (#1186 slice 3).
+        // Blocks may now contain blocks, so "no template uses it" stopped being
+        // the whole question: a logo used only by the letterhead BLOCK would
+        // have passed the check above, been deleted, and left the letterhead
+        // pointing at a row that no longer exists.
+        if ($this->repo->referencesBlock($id, $tenantId)) {
+            return Response::error('Cannot delete a block that is still nested inside another block', 409);
         }
 
         $this->repo->delete($id, $tenantId);

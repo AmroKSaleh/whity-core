@@ -80,6 +80,7 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
       render_service: ${{ steps.filter.outputs.render_service }}
       i18n: ${{ steps.filter.outputs.i18n }}
+      date_display: ${{ steps.filter.outputs.date_display }}
       desktop_host: ${{ steps.filter.outputs.desktop_host }}
     steps:
       - name: Checkout code
@@ -125,7 +126,53 @@ jobs:
               # inside every consumer's build — yet a packages-only PR used to
               # skip this job entirely and ship unverified.
               - 'packages/**'
+              # #1050. `web/jest.config.mjs` roots ALREADY reach into this tree
+              # (added with #932), so its nine suites — 90 tests, all green —
+              # run under the `web` job below. But nothing in this filter
+              # matched the tree they live in, so a PR touching ONLY the
+              # desktop template skipped that job entirely and ran none of
+              # them. The tests were not missing; the trigger was, which is the
+              # worse of the two failures: the suite looks covered, and the
+              # commits least likely to be exercised elsewhere are exactly the
+              # ones that ran nothing.
+              #
+              # Listed file-by-file rather than as `templates/tauri-desktop/**`
+              # so php-host/ (which has its own `desktop_host` filter for the
+              # PHP parity guard) and src-tauri/ (Rust, built only on a release
+              # tag) do not drag a full Next build and two Storybook galleries
+              # along with them.
+              - 'templates/tauri-desktop/src/**'
+              - 'templates/tauri-desktop/index.html'
+              - 'templates/tauri-desktop/package.json'
+              - 'templates/tauri-desktop/tsconfig.json'
+              - 'templates/tauri-desktop/tsconfig.node.json'
+              - 'templates/tauri-desktop/vite.config.ts'
               - 'public/openapi.json'
+              # The ROOT manifest and lockfile. This is an npm workspace, so
+              # they are what actually decides which version of every frontend
+              # dependency gets installed — `web/` has no lockfile of its own.
+              #
+              # THE THIRD TIME THIS FILTER HAS MISSED A TRIGGER, and the same
+              # shape as the two notes above: the job was not missing, the
+              # reason to run it was. A dependency bump changes ONLY these two
+              # files, so every Dependabot PR skipped this job — and with it
+              # `tsc`, `jest`, and the `npm audit` step that lives inside it.
+              # The audit did not run on the only PRs that change what is being
+              # audited.
+              #
+              # That is also how a bump reached develop and stayed unbuilt: the
+              # @tanstack/react-table v8 -> v9 migration (#1126) landed, and the
+              # staging box could not build its frontend for six days with
+              # nothing reporting it. CI would not have caught the install
+              # drift, but it would have run the suites against the new
+              # resolution instead of declaring a lockfile change uninteresting.
+              #
+              # The `backend` filter above has listed composer.json and
+              # composer.lock all along, which is what makes this an oversight
+              # rather than a policy: the same reasoning was applied to PHP and
+              # simply never carried across to the JS side.
+              - 'package.json'
+              - 'package-lock.json'
               - '.github/workflows/automated-tests.yml'
             # ADR 0012: the render service bundles this exact source slice
             # in from the rest of the monorepo (see
@@ -153,6 +200,20 @@ jobs:
               - 'src/Core/i18n/**'
               - 'src/Cli/Commands/I18nCommand.php'
               - 'scripts/ci-i18n-catalog-drift.php'
+              - '.github/workflows/automated-tests.yml'
+            # #1068. Same shape as `i18n` directly above and for the same
+            # reason: the input is the FRONTEND and the guard is PHP, so
+            # `backend` would skip it on exactly the frontend-only PRs that can
+            # introduce a leak, and `frontend` runs a Node job with no PHP.
+            #
+            # `ui.hide_dates` promises a tenant that no date appears anywhere in
+            # the interface, and that promise is falsifiable by a single screen.
+            # A guard that skips on the PR adding that screen is not a guard.
+            date_display:
+              - 'web/**'
+              - 'packages/**'
+              - 'src/Core/Ui/**'
+              - 'scripts/ci-date-display-guard.php'
               - '.github/workflows/automated-tests.yml'
 
   # The whole PHPUnit suite (the `default` testsuite = every *Test.php under
@@ -417,6 +478,34 @@ jobs:
       - name: Tenant-predicate guard
         run: php scripts/ci-tenant-predicate-guard.php
 
+      # Grant-by-role-name guard (#1047): fail when a migration decides who holds
+      # a permission by looking a role up as `WHERE name = 'admin'`.
+      #
+      # STATIC on purpose, and that is the whole point of it. The
+      # permission-holder guard in `postgres-migrations` runs against a database
+      # that job migrated and SEEDED, whose administrative role IS named `admin`
+      # — so every by-name grant lands there and the slug looks held. On a
+      # deployment whose administrator is called something else the same
+      # migration grants nobody, silently, and the capability surfaces as a
+      # screen that answers 200 with no way to navigate to it (#1047). The defect
+      # is invisible on any database CI can build, so this reads the migrations
+      # instead.
+      - name: Grant-by-role-name guard
+        run: php scripts/ci-grant-by-role-name-guard.php
+
+      # Emitted-URL version guard (#1046): fail when a URL RETURNED to a client
+      # is missing the /v1 the router serves it at.
+      #
+      # `Router::versionPrefix()` adds the prefix at REGISTRATION, and
+      # web/lib/api-client.ts passes /api paths through verbatim — so a declared
+      # path is correct written bare and an emitted one is not. Both are
+      # '/api/...' literals, which is why the convention (documented in comments
+      # at four call sites) was not enough: seven emitters read their neighbours
+      # and got it right, one did not, and the document viewer showed an error
+      # box on every first click for a release.
+      - name: Emitted-URL version guard
+        run: php scripts/ci-emitted-url-version-guard.php
+
       # Plugin tenant-isolation conformance kit (WC-194): run the SDK migration
       # linter + tenant-predicate scanner over the in-tree HelloWorld reference
       # plugin, the way an out-of-repo plugin runs it in its own CI. Fails if a
@@ -561,6 +650,50 @@ jobs:
       - name: i18n catalogue drift guard
         run: php scripts/ci-i18n-catalog-drift.php
 
+  # Date-display guard (#1068): fail CI when a date is formatted, or rendered
+  # raw, outside `useDateDisplay()`.
+  #
+  # A tenant may set `ui.hide_dates` and be told that no date or time appears
+  # anywhere in the interface. Unlike most settings that promise is falsifiable
+  # by a SINGLE screen, and the screen that leaks is by definition the one
+  # nobody checked — so consolidating every date onto one path made the promise
+  # true once, and this is what keeps it true.
+  #
+  # Its own job for the reason `i18n-catalogue` above has one: the input it
+  # reads is the FRONTEND and the guard is PHP. Under `backend` it would skip on
+  # every frontend-only PR, which is precisely the PR that adds the next screen.
+  date-display:
+    name: Date-display guard
+    needs: changes
+    if: needs.changes.outputs.date_display == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: mbstring
+          coverage: none
+
+      # Same key as static-analysis, so this job normally restores rather than
+      # resolves — the guard needs the autoloader and nothing else.
+      - name: Cache Composer dependencies
+        uses: actions/cache@v6
+        with:
+          path: vendor
+          key: composer-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-
+
+      - name: Install Dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Date-display guard
+        run: php scripts/ci-date-display-guard.php
+
   # Migrations / seed / idempotency and the Security suite against a real
   # PostgreSQL engine. Measured 3 s of migrate+seed+re-migrate and 33 s of
   # Security — the whole job is well under two minutes, so it no longer has any
@@ -573,7 +706,7 @@ jobs:
 
     services:
       postgres:
-        image: postgres:15-alpine
+        image: pgvector/pgvector:pg15
         env:
           POSTGRES_USER: whity
           POSTGRES_PASSWORD: whity_dev
@@ -657,6 +790,7 @@ jobs:
       - name: Permission-holder guard
         run: php scripts/ci-permission-holder-guard.php
 
+
       # JWT_SECRET and ENCRYPTION_KEY must match the .env written above so that
       # any test that bootstraps the app via public/index.php sees the same values.
       - name: Run Security suite on real PostgreSQL
@@ -696,7 +830,7 @@ jobs:
     # other's schemas.
     services:
       postgres:
-        image: postgres:15-alpine
+        image: pgvector/pgvector:pg15
         env:
           POSTGRES_USER: whity
           POSTGRES_PASSWORD: whity_dev
@@ -853,7 +987,7 @@ jobs:
     # sharing one server would contend on the same advisory lock for no gain.
     services:
       postgres:
-        image: postgres:15-alpine
+        image: pgvector/pgvector:pg15
         env:
           POSTGRES_USER: whity
           POSTGRES_PASSWORD: whity_dev
@@ -1016,6 +1150,103 @@ jobs:
           docker logs whity_render_ci || true
           exit 1
 
+      # The image installs `chromium` unpinned, so the browser can move without
+      # this repository moving (#1134). Two things have to hold on every build:
+      # the image must be able to SAY which browser it has, and the boot probe
+      # must find that browser still behaving the way the flowing mode's
+      # paginator assumes. An image that cannot answer either is exactly the
+      # "reports success without looking" shape this gate exists to prevent.
+      #
+      # `notable` and `inconclusive` PASS on purpose. A capability arriving is
+      # news, not breakage; a probe that could not measure something is not
+      # evidence that anything changed. Only `degraded` (a required behaviour
+      # disagreed) and `error` (the probe could not run) fail.
+      - name: The image must know its browser, and the browser must still behave
+        run: |
+          for _ in $(seq 1 60); do
+            status=$(curl -fsS http://127.0.0.1:18130/health \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin)["capabilities"]["status"])')
+            [ "${status}" = "pending" ] || break
+            sleep 1
+          done
+
+          BODY=$(curl -fsS http://127.0.0.1:18130/health)
+          echo "$BODY" | python3 -m json.tool
+
+          # The body goes in as an ARGUMENT: `python3 -` reads the script from
+          # stdin, so a pipe into it would be swallowed by the heredoc.
+          python3 - "$BODY" <<'PY'
+          import json, sys
+          health = json.loads(sys.argv[1])
+          browser = health["browser"]
+          caps = health["capabilities"]
+
+          if browser["source"] != "build" or not browser["version"]:
+              raise SystemExit(
+                  "::error::The render image cannot say which browser it was built with "
+                  f"(source={browser['source']!r}, version={browser['version']!r}). "
+                  "render-service/scripts/write-browser-info.js should have baked it in."
+              )
+
+          if browser["running_matches_build"] is False:
+              raise SystemExit(
+                  "::error::The browser answering at runtime "
+                  f"({browser['running_version']}) is not the one the build recorded "
+                  f"({browser['version']})."
+              )
+
+          if caps["status"] in ("degraded", "error"):
+              for line in caps["required_failures"] or [caps["error"]]:
+                  print(f"::error::capability probe: {line}")
+              raise SystemExit(f"::error::capability probe status is {caps['status']}")
+
+          # At RUNTIME a probe that never lands gates nothing, deliberately.
+          # In CI it is a failure: a probe that cannot finish inside a minute
+          # on a quiet runner is a probe nobody will get an answer from.
+          if caps["status"] in ("pending", "not_run"):
+              raise SystemExit(f"::error::capability probe never landed (status {caps['status']})")
+
+          print(f"Browser {browser['version']}; capability probe: {caps['status']} in {caps['ms']} ms.")
+          for line in caps["notable"]:
+              print(f"::warning::browser capability changed — {line}")
+          for probe in caps["unknown"]:
+              print(f"::warning::capability probe could not be measured: {probe}")
+          PY
+
+      # The two paged-media facts the boot probe deliberately leaves alone
+      # (#1134): that an `@page` margin box draws at all, and that
+      # `counter(page)` / `counter(pages)` resolve inside one. Both manifest
+      # ONLY as printed glyphs, so reading them back honestly needs a PDF text
+      # extractor — and `pdfjs-dist` is a devDependency, absent from the runtime
+      # image on purpose. Shipping a parser into production to serve a
+      # diagnostic is a poor trade, and asking the CSSOM instead is the same
+      # class of answer as `CSS.supports('content', 'target-counter(…)')`, which
+      # says `true` for a declaration Chromium drops at computed-value time.
+      #
+      # The stages hold opposite halves: the image has the browser and no
+      # parser, this runner has the parser (from `npm ci` above) and no browser.
+      # So the container renders and the runner grades, and neither half can
+      # flatter the other.
+      #
+      # What this protects is the ARGUMENT rather than the product: the flowing
+      # mode draws its furniture in-document and does not use these features, so
+      # nothing breaks if they vanish. But the wiki records them as available
+      # and a future design may lean on them — and this repository has already
+      # had three architectural decisions defended on measurements that no
+      # longer reproduced.
+      - name: Paged-media facts that only exist as printed text
+        run: |
+          # COPIED IN rather than baked into the image. The runtime stage ships
+          # exactly one script (`write-browser-info.js`, which it must run at
+          # build time) and this is a diagnostic — putting it in the image would
+          # be the same trade refused above for the parser. It lands in /app/
+          # scripts because its `require('../src/renderer')` is relative to
+          # itself, and it needs the service's own launch configuration.
+          docker cp render-service/scripts/render-paged-media-probe.js             whity_render_ci:/app/scripts/render-paged-media-probe.js
+          docker exec whity_render_ci node scripts/render-paged-media-probe.js             --out /tmp/paged-media.pdf
+          docker cp whity_render_ci:/tmp/paged-media.pdf /tmp/paged-media.pdf
+          node render-service/scripts/verify-paged-media-text.js --pdf /tmp/paged-media.pdf
+
       # A real render round-trip: text + a math element (KaTeX) + a barcode +
       # Arabic text (the hard cross-cutting RTL requirement). Structural/smoke
       # checks only (per the task brief, exact golden-image pixel diffing is
@@ -1071,6 +1302,133 @@ jobs:
           size=$(stat -c%s /tmp/render-output.pdf)
           echo "PDF size: ${size} bytes"
           test "${size}" -gt 5000
+
+      # ---------------------------------------------------------------------
+      # The FLOWING render mode (#1072).
+      #
+      # `documents.render_enabled` defaults to false, so nothing in a fresh
+      # install ever calls the render tier and a feature here has no natural
+      # way to be exercised. These steps are that way. They generate a
+      # synthetic document of the size this mode exists for — over a hundred
+      # pages, sixty tables, ninety figures, front matter referencing every
+      # one — render it through the real container, and then check the
+      # RESULTING PDF rather than the exit status of the thing that made it.
+      #
+      # The check that matters is the last one: it opens the PDF, finds the
+      # page each table and figure is actually printed on, reads the page
+      # number printed beside the matching front-matter entry, and compares
+      # them. A contents list of ninety plausible-looking wrong numbers is a
+      # worse outcome than no contents list, and only this check can tell the
+      # two apart.
+      - name: Generate the synthetic flowing-document fixture
+        working-directory: render-service
+        run: |
+          node scripts/generate-flow-fixture.js --direction rtl --out /tmp/flow-rtl.json
+          node scripts/generate-flow-fixture.js --direction ltr --out /tmp/flow-ltr.json
+          ls -l /tmp/flow-rtl.json /tmp/flow-ltr.json
+
+      - name: Flowing render round-trip (Arabic/RTL, 130 pages)
+        run: |
+          # `run:` steps are bash -e, so a failing curl would abort before the
+          # status could be read. Disable the abort just long enough to capture
+          # it, then report the ARTEFACT rather than the status.
+          set +e
+          curl -sS -X POST http://127.0.0.1:18130/render/flow \
+            -H 'Content-Type: application/json' \
+            -H 'X-Render-Secret: ci_render_shared_secret_min_32_chars_zz' \
+            --data @/tmp/flow-rtl.json \
+            -D /tmp/flow-rtl.headers \
+            -o /tmp/flow-rtl.pdf
+          curl_status=$?
+          set -e
+          echo "curl exit: ${curl_status}"
+          test "${curl_status}" -eq 0
+
+          # Verify the ARTEFACT, not the status. A Buffer coming back is not
+          # evidence that the document is right.
+          test -s /tmp/flow-rtl.pdf
+          head -c 5 /tmp/flow-rtl.pdf | grep -q '%PDF-'
+          cat /tmp/flow-rtl.headers
+
+          pages=$(tr -d '\r' < /tmp/flow-rtl.headers | awk 'tolower($1)=="x-render-page-count:"{print $2}')
+          front=$(tr -d '\r' < /tmp/flow-rtl.headers | awk 'tolower($1)=="x-render-front-matter-pages:"{print $2}')
+          echo "reported pages: ${pages} (of which ${front} are generated front matter)"
+
+          # The whole point of this mode is a document whose length it decides.
+          # Below a hundred pages the fixture is not exercising pagination at
+          # the size that matters, and a single page means it collapsed.
+          test -n "${pages}"
+          test "${pages}" -ge 120
+          test "${front}" -ge 5
+          echo "FLOW_PAGES=${pages}" >> "$GITHUB_ENV"
+
+      # Per-block LAYOUT, proved by a PAIR (#1186). The paginator packs page
+      # boxes itself inside a real browser, so nothing in the Jest suite can
+      # show it honoured `breakBefore`. Two documents with identical content
+      # and nothing different but the hint can: the same three short
+      # paragraphs, one page without the hints and three pages with them.
+      # A single document would report a number a reader has to trust; the
+      # DIFFERENCE is the evidence, because only the hint can explain it.
+      - name: Flowing render honours per-block layout hints
+        run: |
+          node render-service/scripts/generate-flow-layout-fixture.js --variant plain  --out /tmp/flow-plain.json
+          node render-service/scripts/generate-flow-layout-fixture.js --variant hinted --out /tmp/flow-hinted.json
+
+          render_pages () {
+            curl -fsS -X POST http://127.0.0.1:18130/render/flow -H 'Content-Type: application/json' -H 'X-Render-Secret: ci_render_shared_secret_min_32_chars_zz' --data @"$1" -D "$2" -o "$3"
+            test -s "$3"
+            head -c 5 "$3" | grep -q '%PDF-'
+            # Digits only, so a CRLF header line needs no unescaping here.
+            grep -i '^x-render-page-count:' "$2" | grep -o '[0-9][0-9]*' | head -1
+          }
+
+          plain=$(render_pages /tmp/flow-plain.json /tmp/flow-plain.headers /tmp/flow-plain.pdf)
+          hinted=$(render_pages /tmp/flow-hinted.json /tmp/flow-hinted.headers /tmp/flow-hinted.pdf)
+          echo "pages without hints ${plain} - with breakBefore on two blocks ${hinted}"
+
+          # Three short paragraphs share one page when nothing asks otherwise.
+          # If this stops being 1 the fixture has grown and the comparison
+          # below stops meaning anything.
+          test "${plain}" -eq 1
+          # And each breakBefore claims a page of its own.
+          test "${hinted}" -eq 3
+
+      - name: Flowing render round-trip (LTR)
+        run: |
+          curl -fsS -X POST http://127.0.0.1:18130/render/flow \
+            -H 'Content-Type: application/json' \
+            -H 'X-Render-Secret: ci_render_shared_secret_min_32_chars_zz' \
+            --data @/tmp/flow-ltr.json \
+            -D /tmp/flow-ltr.headers \
+            -o /tmp/flow-ltr.pdf
+          test -s /tmp/flow-ltr.pdf
+          head -c 5 /tmp/flow-ltr.pdf | grep -q '%PDF-'
+          pages=$(tr -d '\r' < /tmp/flow-ltr.headers | awk 'tolower($1)=="x-render-page-count:"{print $2}')
+          echo "reported pages: ${pages}"
+          test "${pages}" -ge 120
+
+      # THE acceptance test. Reads the finished PDFs and checks that the entry
+      # for a given item names the page that item is actually on — plus that
+      # the running footer on physical page N says N.
+      - name: Cross-reference page numbers are CORRECT, read back from the PDF
+        working-directory: render-service
+        run: |
+          node scripts/verify-flow-pdf.js --pdf /tmp/flow-rtl.pdf --direction rtl --expect-pages "${FLOW_PAGES}"
+          node scripts/verify-flow-pdf.js --pdf /tmp/flow-ltr.pdf --direction ltr
+
+      # Bidi is checked as GEOMETRY, in the real image, because that is the
+      # only place the question can be answered: whether a page number lands at
+      # the correct edge of a right-to-left line is about a browser and a flex
+      # row, not about a string. Runs inside the container because that is
+      # where the Arabic fonts are.
+      - name: Arabic/RTL contents-entry and running-head geometry
+        run: |
+          # `scripts/.` — the CONTENTS, not the directory. /app/scripts already
+          # exists in the image (it holds write-browser-info.js, #1134), and
+          # `docker cp <dir> <existing dir>` would nest it as
+          # /app/scripts/scripts rather than merging.
+          docker cp render-service/scripts/. whity_render_ci:/app/scripts
+          docker exec whity_render_ci node scripts/check-flow-rtl-geometry.js
 
       - name: Container logs (always, for debugging)
         if: always()
@@ -1166,6 +1524,29 @@ jobs:
         working-directory: .
         run: npm run typecheck -w @amroksaleh/ui
 
+      # #1050. The `Type check` step above runs under web/'s tsconfig, which
+      # does not include this tree — so the desktop template's own compiler
+      # settings (strict, noUnusedLocals, noUnusedParameters) were enforced
+      # only by `npm run build` in tauri-desktop-release.yml, which fires on a
+      # `tauri-desktop-vX.Y.Z` TAG. Every type error between two releases was
+      # therefore discovered at release time, by whoever cut the release,
+      # rather than on the PR that introduced it.
+      - name: Type check templates/tauri-desktop
+        working-directory: .
+        run: npm run typecheck -w whity-tauri-desktop-template
+
+      # The Vite build, not just tsc, because it is the only check in the repo
+      # that resolves `@amroksaleh/*` through each package's real `exports` map.
+      # web/'s Jest maps those specifiers via tsconfig `paths` and packages/ui
+      # ships raw sources, so a subpath import that the package does not
+      # actually publish type-checks and tests clean everywhere else and breaks
+      # HERE — see the trade-off documented in web/jest.config.mjs.
+      # `vite build` rather than `npm run build -w`, which would re-run the tsc
+      # the previous step already did. ~6s.
+      - name: Build templates/tauri-desktop
+        working-directory: templates/tauri-desktop
+        run: npx vite build
+
       # ESLint gate (WC-122): zero errors required; warnings are tolerated.
       # Runs after the WC-195 debt clearance so the gate starts clean.
       - name: Lint
@@ -1230,6 +1611,7 @@ jobs:
       - static-analysis
       - history-guards
       - i18n-catalogue
+      - date-display
       - postgres-migrations
       - postgres-integration
       - postgres-dialect
@@ -1244,20 +1626,41 @@ jobs:
       # red, and merging is no longer blocked by it. That is the failure this
       # whole job exists to prevent, so it is checked rather than trusted to a
       # comment.
-      - name: The gate covers every job in this workflow
+      #
+      # The SECOND check is the same failure one level down, and it is worse
+      # because it is silent in both directions. A job gated on
+      # a change filter that is not declared in the `changes` job's `outputs:`
+      # reads back as an EMPTY string, never equals 'true', and skips
+      # on every run forever — and a skipped job is a passing job to the gate
+      # above, so nothing goes red. #1068 shipped a guard wired exactly that way
+      # and it was dead on arrival; the only thing that caught it was a person
+      # reading the check list.
+      - name: The gate covers every job, and every filter it gates on exists
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import sys, yaml
-          d = yaml.safe_load(open('.github/workflows/automated-tests.yml'))
+          import re, sys, yaml
+          raw = open('.github/workflows/automated-tests.yml').read()
+          d = yaml.safe_load(raw)
+          failed = False
+
           jobs = set(d['jobs']) - {'gate'}
           needs = set(d['jobs']['gate']['needs'])
-          missing = sorted(jobs - needs)
-          if missing:
-              for j in missing:
-                  print(f"::error::job '{j}' is not in the CI gate's `needs`, so branch protection does not cover it")
-              sys.exit(1)
-          print(f"gate covers all {len(jobs)} job(s)")
+          for j in sorted(jobs - needs):
+              print(f"::error::job '{j}' is not in the CI gate's `needs`, so branch protection does not cover it")
+              failed = True
+          if not failed:
+              print(f"gate covers all {len(jobs)} job(s)")
+
+          declared = set(d['jobs']['changes'].get('outputs') or {})
+          referenced = set(re.findall(r'needs\.changes\.outputs\.([A-Za-z0-9_]+)', raw))
+          for name in sorted(referenced - declared):
+              print(f"::error::`needs.changes.outputs.{name}` is read but not declared in the `changes` job's `outputs:` — it resolves to an empty string, so every job gated on it skips silently and forever")
+              failed = True
+          if referenced <= declared:
+              print(f"every one of {len(referenced)} change filter(s) is declared")
+
+          sys.exit(1 if failed else 0)
           PY
 
       - name: Every required job succeeded or was skipped

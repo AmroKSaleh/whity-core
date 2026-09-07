@@ -3,6 +3,7 @@
 namespace Whity\Tests\Cli;
 
 use PHPUnit\Framework\TestCase;
+use Tests\Support\RequiresConfiguredDatabase;
 use Whity\Cli\Commands\SeedCommand;
 
 /**
@@ -13,32 +14,10 @@ use Whity\Cli\Commands\SeedCommand;
  */
 class SeedCommandTest extends TestCase
 {
-    /**
-     * Check if database is available for testing
-     */
-    private function isDatabaseAvailable(): bool
-    {
-        try {
-            $db_host = $_ENV['DB_HOST'] ?? getenv('DB_HOST') ?? 'localhost';
-            $db_user = $_ENV['DB_USER'] ?? getenv('DB_USER');
-            $db_password = $_ENV['DB_PASSWORD'] ?? getenv('DB_PASSWORD');
-            $db_name = $_ENV['DB_NAME'] ?? getenv('DB_NAME');
-
-            if (!$db_user || !$db_password) {
-                return false;
-            }
-
-            $pdo = new \PDO(
-                "pgsql:host=$db_host;dbname=$db_name",
-                $db_user,
-                $db_password,
-                [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]
-            );
-            return true;
-        } catch (\Throwable $e) {
-            return false;
-        }
-    }
+    // The probe reads DB_PORT, and fails rather than skips when a database is
+    // configured and unreachable — see the trait for why those are two different
+    // situations and only one of them deserves a skip (#1013).
+    use RequiresConfiguredDatabase;
 
     /**
      * Test that SeedCommand can be instantiated
@@ -56,9 +35,9 @@ class SeedCommandTest extends TestCase
      */
     public function testSeedCommandWithDatabase(): void
     {
-        if (!$this->isDatabaseAvailable()) {
-            $this->markTestSkipped('Database not available for testing');
-        }
+        // Skips only when nothing says where a database is; fails loudly when
+        // something does and it is not there.
+        $this->connectToConfiguredDatabase();
 
         $command = new SeedCommand();
 
@@ -141,9 +120,12 @@ class SeedCommandTest extends TestCase
      */
     public function testCommandFailsGracefullyWithoutDatabase(): void
     {
-        // If database is available, skip this test
-        if ($this->isDatabaseAvailable()) {
-            $this->markTestSkipped('Database is available, skipping no-database test');
+        // The inverse question, and the only half of the probe answerable without
+        // opening a socket: this test is about the no-database path, so a
+        // configured database — reachable or not — means there is nothing here
+        // to assert.
+        if (self::aDatabaseIsConfigured()) {
+            $this->markTestSkipped('A database is configured, so the no-database path is not what would run.');
         }
 
         $command = new SeedCommand();

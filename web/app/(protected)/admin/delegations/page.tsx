@@ -40,12 +40,16 @@ export default function DelegationsPage() {
   const [isRevokeOpen, setIsRevokeOpen] = useState(false);
   const [selected, setSelected] = useState<Delegation | null>(null);
 
-  // The backend supports page/per_page but not sort/filter query params, so
-  // sort/filter/pagination all run CLIENT-side over a single fetch — fetching
-  // the backend's own page-size ceiling (100) rather than its default fixes
-  // the previous silent page-1-only truncation for the common case. Tenants
-  // with >100 delegations are still capped until the backend grows real
-  // search/sort support; that's a pre-existing limit, just moved further out.
+  // Sort/filter/pagination all still run CLIENT-side over a single fetch —
+  // fetching the backend's own page-size ceiling (100) rather than its default
+  // fixes the previous silent page-1-only truncation for the common case, and
+  // tenants with >100 delegations remain capped.
+  //
+  // #1102: the backend grew that search/sort support. `GET /api/v1/delegations`
+  // accepts `sort`/`dir` (permission, granteeType, granteeId, scope, status,
+  // grantedAt) and `q` (permission) alongside the existing filters, and reports
+  // a search-filtered total, so this screen can move to server-side sort and
+  // search whenever the table is wired for it.
   const fetchDelegations = useCallback(async () => {
     try {
       setIsLoading(true);

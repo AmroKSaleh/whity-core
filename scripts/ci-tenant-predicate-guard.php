@@ -50,12 +50,30 @@ if ($violations !== []) {
         $relative = str_replace(dirname(__DIR__) . DIRECTORY_SEPARATOR, '', $v['file']);
         $relative = str_replace('\\', '/', $relative);
         fwrite(STDERR, sprintf(
-            "  %s:%d  [%s]\n    %s\n\n",
+            "  %s:%d  [%s]\n    %s\n",
             $relative,
             $v['line'],
             implode(', ', $v['tables']),
             $v['sql']
         ));
+
+        // The author already decided this access was legitimate and wrote the
+        // reason down — the tag is just too far up to apply. Saying "unscoped
+        // query" and stopping sends them to re-argue a settled question; the
+        // fix is to move two lines, and it should say so.
+        if (isset($v['strandedAnnotation'])) {
+            fwrite(STDERR, sprintf(
+                "    NOTE: there IS an ignore annotation at line %d, but only the line carrying\n"
+                . "    the tag counts and the scanner looks at most %d lines above the statement,\n"
+                . "    so it does not apply here. Move the `%s` line to the END of the\n"
+                . "    comment block, directly above the statement, keeping the reason.\n",
+                $v['strandedAnnotation'],
+                TenantPredicateGuard::ANNOTATION_LOOKBACK,
+                TenantPredicateGuard::IGNORE_TAG
+            ));
+        }
+
+        fwrite(STDERR, "\n");
     }
 
     exit(1);

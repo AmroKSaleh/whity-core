@@ -6,7 +6,7 @@ requires only PHP, never `whity-core`. That is what makes a plugin
 distributable across Whity-based applications without dragging a host
 framework along.
 
-## Contract surface (v1.27.0)
+## Contract surface (v1.43.0)
 
 | Type | Since | Purpose |
 | --- | --- | --- |
@@ -26,6 +26,12 @@ framework along.
 | `Whity\Sdk\Testing\TenantIsolationConformanceTestCase` | 1.3 | The shared PHPUnit base case a plugin extends to PROVE its tenant isolation: wires the linter + scanner + a RealEngine schema check. Requires `phpunit/phpunit` (dev-only `suggest`). |
 | `Whity\Sdk\Testing\OfflinePluginHostConformanceTestCase` | 1.27 | The shared PHPUnit base case a plugin extends to PROVE it boots and behaves correctly under an OFFLINE PHP plugin host (no server framework — the shape the Tauri desktop template's bundled FrankenPHP runs plugins under): migrations apply cleanly on the same narrow SQLite dialect shim, declared permissions are well-formed and match every route's `requiredPermission`, a role granted one permission holds exactly that one, and every declared hook runs cleanly on a synthetic payload. Requires `phpunit/phpunit` (dev-only `suggest`), same as the tenant-isolation kit. |
 | `Whity\Sdk\Settings\PluginSettingsInterface` | 1.21 | OPTIONAL declaration of the CONFIGURATION KEYS a plugin owns — key => type (`string`/`bool`/`int`/`enum`), default, constraints, options, localized label, description. The host stores them in ITS OWN `app_settings` / `tenant_settings` tables and resolves them through ITS OWN chain (per-tenant override ?? global default ?? declared default), so a plugin stops rebuilding the settings layer as a private table with no declared keys and no validation. Keys are namespaced under the plugin name the loader supplies (`acme:sync_mode`), so two plugins cannot collide and none can shadow a core key; a declaration whose own `default` fails its own rules is refused at load. Publication on the host's settings screens is an explicit `admin => true` opt-in (those screens are gated on CORE settings permissions, not the plugin's). NOT for credentials: a secret-shaped declaration is refused, since settings are readable TEXT served to anyone holding `settings:read`. |
+| `Whity\Sdk\Render\DocumentRenderer` | 1.41 | The RENDERING SEAM, RESOLVED rather than implemented: `\Whity\app(DocumentRenderer::class)` turns a plugin's structured content into a document. `render()` answers bytes and stores nothing; `issue()` answers a first-class platform document — an id, an immutable artifact, per-tenant storage routing — so routing, verification and the organizer apply without the plugin arranging any of it. `isAvailable()` is the cheap check to make before assembling something expensive. NO METHOD TAKES A TENANT ID: the host reads tenant and actor from its own request-scoped context, so a document built from one tenant's content and filed in another's storage is not expressible. Registered in the HTTP entry point only — see the interface's own note before calling it from a queue worker. |
+| `Whity\Sdk\Render\FlowDocument` | 1.41 | The content a document is assembled from: headings, paragraphs, tables, figures, page breaks, plus generated contents / list-of-tables / list-of-figures front matter, in RTL and LTR. A mutable BUILDER (the one deliberate departure from this SDK's immutable value objects — a hundred-page submission is tens of thousands of blocks and copy-on-append would be quadratic). It refuses only what it must know to build a correct tree — a heading level outside 1-6, a remote figure source, a map row where a list belongs — and leaves everything else to the renderer, which names the offending field. NUMBERING IS NOT SETTABLE: tables, figures and heading numbers are assigned by the renderer in document order, because a caller that numbered its own would have to renumber on every insert and any disagreement with the generated lists would be invisible until somebody read the printed document. |
+| `Whity\Sdk\Render\PageSpec` | 1.41 | Page geometry in MILLIMETRES: the four presets by name (`a4()`, `a5()`, `letter()`, `legal()`), an explicit `ofSize()`, and `withMargins()`. Presets send the NAME rather than the dimensions, so the millimetres stay decided in one place. |
+| `Whity\Sdk\Render\RenderedDocument` | 1.41 | The bytes plus what only the renderer could know: `pageCount`, `frontMatterPages`, and the derived `bodyPageCount()`. A flowing document is defined by not knowing its own length in advance, so this is told rather than computed. |
+| `Whity\Sdk\Render\IssuedDocument` | 1.41 | A rendered document the platform now OWNS: `documentId`, `contentUrl`, page counts, byte size. Deliberately carries NO bytes — they are already stored, and a second copy of a thing whose defining property is that there is one of it is a liability. |
+| `Whity\Sdk\Render\RenderRejectedException` / `RenderUnavailableException` | 1.41 | The two failure modes, kept APART on purpose: the first will never succeed unchanged (a ceiling, a refused tree) and carries a `clientMessage` written to be shown; the second is an outage or a disabled instance, which is the DEFAULT state of a fresh install. A plugin that cannot tell them apart either retries a malformed document forever or gives up on a container that was restarting. |
 
 ## Versioning policy
 
@@ -52,11 +58,85 @@ optional surface existing plugins can ignore —
   [Proving offline-host compatibility](#proving-offline-host-compatibility-127)
   below.
 
+The list above is illustrative, not a changelog. The authoritative,
+version-by-version ledger is the docblock on
+[`Sdk.php`](src/Sdk.php), which every release appends to.
+
 Breaking contract changes require a new major. A plugin declares the SDK range
 it supports via `getSdkConstraint()` (e.g. `'^1.1'`) and, optionally, the host
 CORE range via `getCoreConstraint()` (e.g. `'^0.1'`); the host refuses to load
 a plugin when its own `Sdk::VERSION` or `CoreVersion::VERSION` falls outside the
 respective range — with the reason visible in the admin plugin list.
+
+### What a MINOR version may and may not change
+
+"Additive" is the promise; these are its terms. A plugin pinned `^1.x` and
+loading today must still load on any later `1.y`.
+
+**A minor MAY:**
+
+- add a new optional interface a plugin can choose to implement
+  (`PluginHealthProbesInterface`, `PluginMcpToolsInterface`, …);
+- add an OPTIONAL parameter to an existing method, with a default;
+- add a new value object, exception type, or testing kit;
+- add a new optional key to a declared array shape (a route declaration, a
+  block descriptor), where omitting it preserves the previous behaviour exactly;
+- widen what an existing method accepts.
+
+**A minor MAY NOT:**
+
+- add a method to an existing interface — that breaks every implementer, which
+  is why a new capability arrives as a NEW interface even when an obviously
+  related one already exists;
+- remove or rename anything public, or narrow a parameter or return type;
+- change the meaning of an existing key. Adding `scope` to a descriptor is
+  additive; changing what an ABSENT `scope` means is not, because it silently
+  alters the behaviour of code nobody edited.
+
+The last one is the rule that is easiest to break by accident, because the
+diff looks like a default value rather than a contract change.
+
+### Upgrading a deployment that carries third-party plugins
+
+The gate is enforced at LOAD, per plugin, and it fails closed: a plugin whose
+`getSdkConstraint()` excludes the host's `Sdk::VERSION` is **quarantined** —
+moved to `failed` state with no routes, permissions, hooks, migrations or
+frontend features registered. It does not partially load, and it does not take
+the host down with it.
+
+**After upgrading**, read the state of every installed plugin:
+
+```bash
+curl -s http://<host>/api/plugins | jq '.data[] | {name, version, state, last_error}'
+```
+
+A quarantined plugin is in `state: "failed"` with `last_error.type` of
+`"quarantine"` and a message naming the mismatch:
+
+```
+requires plugin SDK '^2.0', but the host provides 1.43.0
+```
+
+The same message is written to the host's error log at load, so it is visible
+without an authenticated call.
+
+**Before upgrading there is no equivalent probe, and that is a real gap.** A
+plugin's declared `getSdkConstraint()` is evaluated at load but is NOT
+published in the plugin list, so the only way to know whether an installed
+build will survive an upgrade is to read the plugin's own source or its
+distribution metadata. Until that is exposed, the practical check is to stage
+the upgrade somewhere disposable first and read the list above.
+
+A plugin that declares NO constraint is never quarantined by this gate. That
+is deliberate — the declaration is opt-in — but it means such a plugin can load
+against an SDK it was never tested on and fail later, in its own code, on a
+request. Declaring a constraint is how a plugin author converts that into a
+clean refusal at boot.
+
+**Recovering** is a plugin-side change, not a host-side one: publish a build
+whose constraint admits the new SDK, install it, and the plugin loads on the
+next boot. Nothing in the host needs rolling back, because a quarantined
+plugin changed nothing when it failed to load.
 
 ### Declaring frontend features (1.2)
 

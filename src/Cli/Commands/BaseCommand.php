@@ -31,7 +31,7 @@ use Whity\Core\Deployment\DeploymentManager;
 /**
  * Base Command class for CLI commands
  */
-abstract class BaseCommand
+abstract class BaseCommand implements CliCommand, CommandHelp
 {
     /**
      * @var HttpKernel
@@ -50,6 +50,52 @@ abstract class BaseCommand
      * @return int Exit code
      */
     abstract public function execute(array $argv): int;
+
+    /**
+     * Print this command's own help. Return false when it has none written.
+     *
+     * ASKING A COMMAND ABOUT ITSELF MUST NEVER RUN IT. `whity-cli seed --help`
+     * seeded the database: unrecognised options were ignored rather than
+     * rejected and nothing handled `--help`, so a help request executed the
+     * default action. The base seed happens to be idempotent, so that instance
+     * came to no harm — luck, not design.
+     *
+     * The commands that DID handle it only matched `--help` in the first
+     * position, where it reads as the ACTION. So `migrate --help` printed help
+     * and `migrate run --help` ran the migrations; `tenant delete --help` is the
+     * same shape with worse consequences. {@see \Whity\Cli\CliRunner} now
+     * intercepts the flag anywhere in the arguments, before the command is
+     * asked to do anything, and calls this.
+     *
+     * Returning false is honest rather than fatal: the caller prints a generic
+     * usage line. What it must never do is fall through to executing.
+     *
+     * @param string $commandName The name as typed, for a class serving several.
+     */
+    public function printHelp(string $commandName): bool
+    {
+        return false;
+    }
+
+    /**
+     * The options this command accepts, or null when it has not declared them.
+     *
+     * Null means "do not validate", NOT "accepts nothing" — the difference
+     * matters, because a command that has not been audited must keep working
+     * exactly as it does today rather than start rejecting flags somebody
+     * relies on.
+     *
+     * Where a command DOES declare them, {@see \Whity\Cli\CliRunner} refuses an
+     * option outside the list instead of ignoring it. A silently-ignored flag is
+     * the other half of the same defect: `seed --with-fixture` (singular) seeds
+     * without fixtures and reports success.
+     *
+     * @return list<string>|null
+     */
+    public function knownFlags(): ?array
+    {
+        return null;
+    }
 
     /**
      * Setup the application kernel for simulated API calls
@@ -140,6 +186,19 @@ abstract class BaseCommand
         $ouTypeRegistry->registerCoreOuTypes();
         \Whity\register_service(\Whity\Core\Ou\OuTypeRegistry::class, $ouTypeRegistry);
 
+        // TIME-WINDOW TYPE catalogue (#1070), registered as a service for exactly
+        // the same reason. A command is the natural home for period work — an
+        // import that files records against a period, a scheduled close — and a
+        // CLI-only EMPTY catalogue would report that the period kind a plugin
+        // ships does not exist, so the import would file everything against
+        // nothing and look like it had worked.
+        //
+        // Divergence between the two entry points here is the recurring bug class
+        // this repo has already paid for twice (#717, #724).
+        $windowTypeRegistry = new \Whity\Core\TimeWindow\WindowTypeRegistry($hookManager);
+        $windowTypeRegistry->registerCoreWindowTypes();
+        \Whity\register_service(\Whity\Core\TimeWindow\WindowTypeRegistry::class, $windowTypeRegistry);
+
         // Document ROUTING RULE catalogue (#947 item 3), registered as a service
         // for exactly the same reason. A command that issues or advances a route
         // — a scheduled escalation, an import that circulates what it created —
@@ -171,6 +230,25 @@ abstract class BaseCommand
             new \Whity\Core\Group\GroupRuleResolver($groupResolver)
         );
         \Whity\register_service(\Whity\Core\Document\Routing\RoutingRuleRegistry::class, $routingRuleRegistry);
+
+        // EFFECT catalogue (#1032), mirroring public/index.php exactly.
+        //
+        // The CATALOGUE is wired here and the RUNNER is not, and the asymmetry
+        // is deliberate rather than an omission. A catalogue answers "what kinds
+        // exist", which a CLI command validating or describing a route needs and
+        // which must not depend on which entry point is asking — an empty one
+        // here would report every authored effect as an unknown kind.
+        //
+        // The runner is a hook subscriber that fires effects on a routing act,
+        // and it is wired beside RoutingNotifications in the HTTP entry point
+        // only, because that is where RoutingNotifications is. Wiring one
+        // without the other would let a CLI-driven act take its side effects
+        // while telling its own recipients nothing.
+        $routeEffectRegistry = new \Whity\Core\Document\Routing\RouteEffectRegistry();
+        $routeEffectRegistry->registerCoreEffects(
+            new \Whity\Core\Document\Routing\NotifyEffect($routingRuleRegistry)
+        );
+        \Whity\register_service(\Whity\Core\Document\Routing\RouteEffectRegistry::class, $routeEffectRegistry);
 
         // INBOX SOURCE catalogue (#881). Registered with core's routing source
         // already attached, so a command asking "what is awaiting this person"
@@ -358,7 +436,11 @@ abstract class BaseCommand
             // Handed to the loader in BOTH entry points, so a route authored over
             // HTTP against a plugin's kind still resolves when a command advances
             // it.
-            $routingRuleRegistry
+            $routingRuleRegistry,
+            // Plugin-contributed time-window types (#1070). Handed to the loader
+            // in BOTH entry points, so a period kind adopted over HTTP is still
+            // resolvable when a command files something against it.
+            $windowTypeRegistry
         );
         $pluginLoader->load();
 
@@ -388,13 +470,20 @@ abstract class BaseCommand
         // documented commands that were never registered in this router, so
         // they answered 405 — a second, independent defect from the 401, and
         // one the 401 hid completely: nothing reached routing to find out.
-        $router->register('GET',    '/api/tenants',      [$tenantsHandler, 'list'],   'admin');
-        $router->register('POST',   '/api/tenants',      [$tenantsHandler, 'create'], 'admin');
-        $router->register('PATCH',  '/api/tenants/{id}', [$tenantsHandler, 'update'], 'admin');
-        $router->register('DELETE', '/api/tenants/{id}', [$tenantsHandler, 'delete'], 'admin');
+        // #990: gated on the `tenants:*` slugs, mirroring public/index.php. The
+        // mirroring is the point of this block — a route whose gate depends on
+        // which entry point reached it is two rules wearing one name, and the
+        // CLI is the entry point where nobody would notice the difference until
+        // a deployment with a renamed administrative role ran `tenant list`.
+        // The seeded CLI service principal holds the global `admin` role
+        // (migration 107), which migration 138 gives `tenants:read`.
+        $router->register('GET',    '/api/tenants',      [$tenantsHandler, 'list'],   null, null, \Whity\Core\RBAC\CorePermissions::TENANTS_READ);
+        $router->register('POST',   '/api/tenants',      [$tenantsHandler, 'create'], null, null, \Whity\Core\RBAC\CorePermissions::TENANTS_WRITE);
+        $router->register('PATCH',  '/api/tenants/{id}', [$tenantsHandler, 'update'], null, null, \Whity\Core\RBAC\CorePermissions::TENANTS_WRITE);
+        $router->register('DELETE', '/api/tenants/{id}', [$tenantsHandler, 'delete'], null, null, \Whity\Core\RBAC\CorePermissions::TENANTS_DELETE);
 
         $permissionsHandler = new PermissionsApiHandler($db->getPdo());
-        $router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], 'admin');
+        $router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], null, null, \Whity\Core\RBAC\CorePermissions::PERMISSIONS_READ);
 
         // The audit writer reaches this handler for the same reason it is
         // subscribed above: `plugin enable` from a shell installs code into the

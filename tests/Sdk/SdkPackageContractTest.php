@@ -242,9 +242,89 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.38.0',
+            '1.43.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.38 GENERALISES THE RULE VOCABULARY OUT OF ROUTING: AudienceRuleContext and '
+            'SDK 1.43 ADDS HAND-AUTHORED MCP TOOLS: PluginMcpToolsInterface, by which a plugin '
+            . 'contributes tools it writes itself instead of tools the host derives from its '
+            . 'routes. THE GAP: every MCP tool was CRUD-shaped, one per endpoint, because '
+            . 'derivation was all there was. Derived tools stay the default and are right for an '
+            . 'API surface; a WORKFLOW surface is a different thing — fewer tools, each carrying '
+            . 'domain semantics and guardrails no route signature implies. A DESCRIPTOR MUST '
+            . 'DECLARE ITS AUDIENCE (requiredRole, requiredPermission, or an explicit open: true): '
+            . 'a derived tool inherits its route RBAC gate and a route with no permission is '
+            . 'visibly open in the route table, whereas an authored tool has no route, so an '
+            . 'omitted permission would be visible nowhere while being callable by every '
+            . 'authenticated principal — refused at load rather than defaulted. A DERIVED TOOL '
+            . 'WINS A NAME COLLISION, because a route-backed name is already published in the '
+            . 'OpenAPI document and the generated clients; suppressesDerivedMcpTools() is the '
+            . 'deliberate way to take a name, scoped to the plugin OWN routes so it can never '
+            . 'silence core or another plugin. A throwing tool costs its caller an error, not the '
+            . 'dispatcher. Purely additive. '
+            . 'SDK 1.42 ADDS DISCRIMINATED SUB-FORMS: the variant and variantCase blocks. A form '
+            . 'region whose SHAPE depends on the value of another field — variant names a sibling input '
+            . 'as its discriminator, each variantCase declares the value it answers to, and only '
+            . 'the matching one renders. THE GAP: a resource with type-dependent payloads had to be '
+            . 'declared as one hidden section per type using visibleWhen, and hiding does not '
+            . 'change what is submitted — a hidden input keeps its value and still sends it, on '
+            . 'purpose, because the server is authoritative over what it accepts. Thirteen variants '
+            . 'therefore meant thirteen payloads at once. A discriminated union needs the branches '
+            . 'that were NOT chosen to be ABSENT, which is a different meaning and so a different '
+            . 'block rather than a flag on the existing one. THE CASES ARE CHILD BLOCKS, NOT A '
+            . 'cases PROP, because a prop holding nested trees is invisible to every walker — '
+            . 'including the ownership check in the host loader, where an unwalked slot is a source '
+            . 'that never got checked. SIBLING CASES MAY REUSE A FIELD NAME: they are mutually '
+            . 'exclusive, so {kind:number, value:5} and {kind:text, value:x} are one field in two '
+            . 'shapes, which is what a discriminated union is; a duplicate WITHIN one case, or one '
+            . 'colliding with the enclosing form, is still refused. Purely additive. '
+            . 'SDK 1.41 ADDS A RENDERING SEAM: Whity\Sdk\Render\DocumentRenderer, resolved from the '
+            . 'container, turning a plugin\'s structured content into a document — with FlowDocument '
+            . '(a builder for headings, paragraphs, tables, figures and generated contents/tables/'
+            . 'figures lists, in RTL and LTR), PageSpec, and two results: RenderedDocument for bytes '
+            . 'and IssuedDocument for a first-class platform document with an id and an immutable '
+            . 'artifact. THE GAP WAS TOTAL — the SDK had no rendering surface of any kind, so a '
+            . 'plugin holding structured content (an invoice, a certificate, a statement of account, '
+            . 'a compliance submission) either shipped JSON and asked somebody to print a web page '
+            . 'or built its own renderer; neither is an author\'s mistake and both are what a '
+            . 'missing seam produces. THE SIGNATURES CARRY NO TENANT ID, which is a security '
+            . 'property and not an omission: the host reads tenant and actor from its own '
+            . 'request-scoped context, so a document built from one tenant\'s content and filed in '
+            . 'another\'s storage has no expression in this API. Core owns the tenant CEILINGS and '
+            . 'the render service owns what a valid document IS, so neither re-implements the '
+            . 'other. Purely additive; an instance with rendering disabled (the default) answers '
+            . 'RenderUnavailableException rather than failing to load. '
+            . 'SDK 1.40 BRINGS THE FORM PRELOAD INTO THE CONTRACT: form.dataSource, the '
+            . '{method: GET, path} spec the renderer has honoured since #949 and which the '
+            . 'contract never declared. An undeclared prop is neither validated nor stripped — '
+            . 'BlockValidator::validateProps() walks the DECLARED rules rather than the node keys, '
+            . 'and PluginLoader returns the node it was handed — so this path reached the client '
+            . 'exactly as written and was never checked against the routes the plugin registered. '
+            . 'It was the only endpoint a block can name that was not: submit, every source, '
+            . 'inbox.actions and every rowActionList were all ownership-checked. A tree that '
+            . 'validated under 1.39 can therefore be REFUSED under 1.40, but only if its form '
+            . 'preloaded a route the plugin does not own or wrote a dataSource of the wrong shape; '
+            . 'a declaration naming its own GET is unaffected and now gets the version rewrite '
+            . 'every other endpoint already got. '
+            . 'SDK 1.39 ADDS TIME-WINDOW TYPES: PluginWindowTypesInterface, the contribution point '
+            . 'for the KINDS of named period a deployment slices time into. #1070 puts a named, '
+            . 'non-overlapping period that records can be scoped to and rolled up by — and that can '
+            . 'be CLOSED, the way a set of books is closed — into core, because it is a primitive '
+            . 'the platform did not have: everybody who needed one either built their own or did '
+            . 'without, and two implementations of a period disagree the moment both exist with '
+            . 'nothing reporting that they differ. THE VOCABULARY IS THE PART THAT CANNOT BE '
+            . 'CORE\'S — two deployments slice time into words with nothing in common, so a core '
+            . 'enumeration would have to carry both and ship each deployment the other\'s. A plugin '
+            . 'declares KEYS and the defaults a tenant starts from; an administrator ADOPTS one, '
+            . 'and declaring is a catalogue entry rather than a write into anybody\'s tenant. BARE '
+            . 'SLUGS ONLY, as with OU types, so no plugin can mint a bare key and squat on a name a '
+            . 'tenant might want. NESTING IS DECLARABLE, BOUNDARIES ARE NOT: a sub-period sitting '
+            . 'inside a period is structural and knowable, whereas when a period starts and how '
+            . 'long it runs is not, and assuming it is calendar-aligned is the specific error this '
+            . 'concept exists to avoid. A malformed declaration costs that plugin its whole window '
+            . 'vocabulary rather than one type, which is the one place this differs from the '
+            . 'OU-type catalogue: the declarations are interdependent through nesting, so a partial '
+            . 'store would leave parents pointing at nothing. Additive; every tree that validated '
+            . 'under 1.38 still validates. '
+            . 'SDK 1.38 GENERALISES THE RULE VOCABULARY OUT OF ROUTING: AudienceRuleContext and '
             . 'AudienceRuleResolverInterface. #999 adds NAMED USER GROUPS, and a group is not a '
             . 'membership table — it is one of these same rule expressions given a name and stored '
             . 'once, so that "the instructors" is ONE node referenced from many places rather than a '
@@ -826,6 +906,68 @@ final class SdkPackageContractTest extends TestCase
         );
         $this->assertSame('degraded', \Whity\Sdk\Health\ProbeResult::degraded('slow')->status);
         $this->assertSame('down', \Whity\Sdk\Health\ProbeResult::down('gone')->status);
+    }
+
+    /**
+     * SDK 1.41 (#1072): the rendering seam. Unlike the capability interfaces
+     * above, this is one a plugin RESOLVES rather than implements — the same
+     * shape as {@see \Whity\Sdk\Rbac\PermissionResolver} — so what is pinned
+     * here is the contract a plugin type-hints and the guarantees it relies on.
+     */
+    public function testDocumentRenderContributionPointLivesInTheSdk(): void
+    {
+        $this->assertTrue(interface_exists(\Whity\Sdk\Render\DocumentRenderer::class));
+
+        $methods = array_map(
+            static fn (\ReflectionMethod $m): string => $m->getName(),
+            (new \ReflectionClass(\Whity\Sdk\Render\DocumentRenderer::class))->getMethods()
+        );
+        sort($methods);
+        $this->assertSame(['isAvailable', 'issue', 'render'], $methods);
+
+        // THE SECURITY PROPERTY, pinned as a shape rather than a comment: no
+        // method takes a tenant id. The host reads the tenant from its own
+        // request-scoped context, so "render this for tenant 4" is not
+        // expressible — and a future signature that added the parameter back
+        // would fail here rather than quietly reopening the way to build a
+        // document from one tenant's content and file it in another's storage.
+        foreach (['isAvailable', 'issue', 'render'] as $method) {
+            foreach ((new \ReflectionMethod(\Whity\Sdk\Render\DocumentRenderer::class, $method))->getParameters() as $parameter) {
+                $this->assertStringNotContainsStringIgnoringCase(
+                    'tenant',
+                    $parameter->getName(),
+                    "DocumentRenderer::{$method}() must not take a tenant parameter"
+                );
+            }
+        }
+
+        $this->assertTrue(class_exists(\Whity\Sdk\Render\FlowDocument::class));
+        $this->assertTrue(class_exists(\Whity\Sdk\Render\PageSpec::class));
+        $this->assertTrue(class_exists(\Whity\Sdk\Render\RenderedDocument::class));
+        $this->assertTrue(class_exists(\Whity\Sdk\Render\IssuedDocument::class));
+        $this->assertTrue(class_exists(\Whity\Sdk\Render\RenderRejectedException::class));
+        $this->assertTrue(class_exists(\Whity\Sdk\Render\RenderUnavailableException::class));
+
+        // Both results are host-built: a plugin reads them, and a value object
+        // a plugin could mint itself is one a plugin can be mistaken about.
+        foreach ([\Whity\Sdk\Render\RenderedDocument::class, \Whity\Sdk\Render\IssuedDocument::class] as $result) {
+            $this->assertFalse(
+                (new \ReflectionClass($result))->getConstructor()?->isPublic() ?? true,
+                $result . ' must be built through its factory, not constructed by a plugin'
+            );
+        }
+
+        // The two failure modes are DISTINCT types, because a plugin that
+        // cannot tell them apart either retries a malformed document forever or
+        // gives up on a container that was merely restarting.
+        $this->assertNotSame(
+            \Whity\Sdk\Render\RenderRejectedException::class,
+            \Whity\Sdk\Render\RenderUnavailableException::class
+        );
+        $this->assertSame(
+            'too many blocks',
+            \Whity\Sdk\Render\RenderRejectedException::because('too many blocks')->clientMessage
+        );
     }
 
     /**

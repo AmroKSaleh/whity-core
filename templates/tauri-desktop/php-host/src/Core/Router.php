@@ -208,11 +208,33 @@ class Router
 
             $matches = [];
             if (preg_match($route['pattern'], $path, $matches) === 1) {
-                // Extract named parameters
+                // Extract named parameters, PERCENT-DECODED (#1078).
+                //
+                // The same one-line fix as {@see \Whity\Core\Router::match()} in
+                // the canonical `src/Core/Router.php`, which carries the full
+                // reasoning: `rawurldecode` rather than `urldecode` (a `+` is a
+                // literal plus in a path segment), exactly once (an identifier
+                // containing the text `%20` arrives as `%2520`), and applied to
+                // the captured VALUES rather than to the path (so matching and
+                // `{id:\d+}` constraints still see the raw segment).
+                //
+                // Carried here because this host is not a thinner core, it is
+                // the SAME core running offline: it serves the same plugin
+                // routes to the same block trees. Leaving it would have meant
+                // the wrong record on precisely the deployments that run
+                // disconnected — and an Arabic identifier percent-encodes
+                // entirely, so for an institution whose records are named in
+                // Arabic that is not an edge case but every lookup.
+                //
+                // NOTE: this file is a vendored copy that NOTHING GUARDS.
+                // `scripts/ci-vendored-sdk-parity.php` compares `php-host/sdk/src`
+                // against `sdk/src` and stops there, so `php-host/src/Core` can
+                // drift silently — and already had, by at least one method
+                // (`versionedPath`) before this change.
                 $params = [];
                 foreach ($matches as $key => $value) {
                     if (!is_numeric($key)) {
-                        $params[$key] = $value;
+                        $params[$key] = self::decodeSegment($value);
                     }
                 }
 
@@ -303,6 +325,34 @@ class Router
     public function getMiddleware(): array
     {
         return $this->middleware;
+    }
+
+    /**
+     * Percent-decode ONE captured path segment, and never hand back bytes that
+     * are not text.
+     *
+     * The same guard as {@see \Whity\Core\Router::decodeSegment()} in the
+     * canonical `src/Core/Router.php`, which carries the full reasoning:
+     * `rawurldecode('%FF')` is a byte that is valid UTF-8 in no sequence, and a
+     * handler echoing it through `Response::json()` raises
+     * `RuntimeException: JSON encoding failed: Malformed UTF-8 characters`
+     * where the same request previously returned 200. Every real identifier is
+     * UTF-8 by construction, so nothing the decode was written for is affected;
+     * a segment that decodes to something else names no record and is passed
+     * through raw.
+     *
+     * `preg_match('//u', …)` rather than `mb_check_encoding()`: `ext-mbstring`
+     * is not a hard requirement, and PCRE's UTF-8 mode answers the same question
+     * with no extension.
+     *
+     * @param string $value The raw captured segment, still percent-encoded.
+     * @return string The decoded segment, or the raw one when decoding would not yield UTF-8.
+     */
+    private static function decodeSegment(string $value): string
+    {
+        $decoded = rawurldecode($value);
+
+        return preg_match('//u', $decoded) === 1 ? $decoded : $value;
     }
 
     /**

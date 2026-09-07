@@ -6,6 +6,11 @@ namespace Tests\Integration;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Whity\Core\i18n\LanguageRegistry;
+use Whity\Core\i18n\LanguageRepository;
+use Whity\Core\i18n\ServerLabels;
+use Whity\Core\i18n\TranslationRepository;
+use Whity\Core\Tenant\StaticTenantContextAdapter;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Api\SettingsApiHandler;
 use Whity\Auth\RoleChecker;
@@ -103,7 +108,39 @@ final class SettingsApiRealEngineTest extends TestCase
         // ten faces is enough to recognise a departmental group and not enough
         // to recognise a faculty-wide one, and an operator running both should be
         // able to raise one without raising the other.
-        self::assertCount(15, $data['registry']);
+        // 16 since #1014 added documents.routing_approval_quorum - what "this
+        // node approved" MEANS when an approval step fans out to many people.
+        // Per-tenant rather than governance: it grants nobody anything, it says
+        // how many of the people already asked have to say yes, and one tenant
+        // routing three-person sign-offs wants a different answer from one
+        // circulating faculty-wide notices.
+        // 18 since #1036 added documents.qr_enabled (whether this
+        // organisation publishes verifiable documents) and
+        // documents.qr_public_detail (what a stranger holding one is
+        // told). Both per-tenant, both defaulting closed.
+        // 19 since #1054 added documents.routing_notification_channels - which
+        // channels a routing notification is offered on. Per-tenant because it
+        // says how an organisation reaches its people, which is exactly what two
+        // tenants on one instance answer differently; the route step says only
+        // that its people are told rather than asked.
+        // 20 since #1068 added ui.hide_dates - whether dates and times are
+        // shown on screen at all. Per-tenant because it is exactly the kind of
+        // question two tenants on one instance answer differently: a registry
+        // that wants its clerks judged on throughput and a ministry office that
+        // does not. It grants nobody anything, so it is a preference rather
+        // than governance, and it defaults FALSE so an instance that never sets
+        // it behaves exactly as it does today.
+        // 23 since #1072 added the three documents.flow_max_* ceilings — how
+        // many content blocks, how large a single table, and how many bytes a
+        // flowing document may be. Per-tenant for the same reason the rest of
+        // this list is: a tenant issuing hundred-page compliance submissions
+        // and a tenant printing two-page receipts should not be held to one
+        // number, and the render service that enforces the hard limits has no
+        // idea tenants exist. The instance-wide documents.render_enabled switch
+        // above them stays global-only, because whether a whole
+        // browser-bearing container runs is an operator's decision.
+        // 31 since #billing: eight invoicing keys are tenant-overridable.
+        self::assertCount(33, $data['registry']);
         self::assertArrayNotHasKey('auth.self_registration_enabled', $data['effective']);
         self::assertSame([], $data['overridden']);
     }
@@ -424,7 +461,7 @@ final class SettingsApiRealEngineTest extends TestCase
 
         $roleChecker = new RoleChecker($this->databaseFor($this->pdo), $registry);
 
-        return new SettingsApiHandler($service, $roleChecker);
+        return new SettingsApiHandler($service, $roleChecker, $this->serverLabels());
     }
 
     private function databaseFor(PDO $pdo): Database
@@ -531,5 +568,23 @@ final class SettingsApiRealEngineTest extends TestCase
         ");
 
         return $pdo;
+    }
+
+    /**
+     * A translator over an empty schema, so tab names stay as declared.
+     *
+     * `ServerLabels` is `final` and required here on purpose (#1044). Given a
+     * registry with no tables its lookup throws and the helper answers with the
+     * declared English, which is what these assertions expect.
+     */
+    private function serverLabels(): ServerLabels
+    {
+        $pdo = new \PDO('sqlite::memory:');
+
+        return new ServerLabels(new LanguageRegistry(
+            new LanguageRepository($pdo),
+            new TranslationRepository($pdo),
+            new StaticTenantContextAdapter(),
+        ));
     }
 }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { useTranslation } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Button } from '@amroksaleh/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,6 +39,7 @@ export default function AuditLogsPage() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
   const t = useTranslation('admin');
+  const dates = useDateDisplay();
 
   const [entries, setEntries] = useState<AuditLogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -123,12 +125,6 @@ export default function AuditLogsPage() {
     setDraftFilters((prev) => ({ ...prev, [key]: value }));
   };
 
-  const formatTimestamp = (value: string | null): string => {
-    if (!value) return '-';
-    const parsed = new Date(value.replace(' ', 'T'));
-    return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
-  };
-
   const formatTarget = (entry: AuditLogEntry): string => {
     if (!entry.targetType) return '-';
     return entry.targetId !== null
@@ -146,11 +142,23 @@ export default function AuditLogsPage() {
   // are audit records written by the backend (`auth.login.success`, a target
   // type, a metadata blob), i.e. data this screen displays, not source copy.
   const columns: DataTableColumn<AuditLogEntry>[] = [
-    {
-      id: 'time',
-      header: t('auditLogs.table.time', 'Time'),
-      cell: (entry) => formatTimestamp(entry.createdAt),
-    },
+    // #1068: the whole COLUMN goes when this tenant hides dates — header and
+    // cells together. Every other column still says what happened, to what, by
+    // whom and from where, and the rows are still newest-first; a column of em
+    // dashes under a heading that says "Time" would be the screen asking a
+    // question this tenant has said it does not want asked.
+    //
+    // The audit RECORD is untouched. `audit_log.created_at` is still written,
+    // still indexed, still what the export and the API return, and still what
+    // the From/To filters below query on — which is the point of a display
+    // setting: the trail is intact, the screen is quieter.
+    ...dates.dateColumns<AuditLogEntry>([
+      {
+        id: 'time',
+        header: t('auditLogs.table.time', 'Time'),
+        value: (entry) => entry.createdAt,
+      },
+    ]),
     { accessorKey: 'action', header: t('auditLogs.table.action', 'Action') },
     {
       id: 'actor',

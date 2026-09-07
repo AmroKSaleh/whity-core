@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { apiClient as apiClientModule } from './api-client';
+import { SESSION_EXPIRED_EVENT } from './api/client';
 
 interface User {
   id: number;
@@ -122,6 +123,33 @@ export function AuthProvider({ children }: AuthProviderProps) {
     };
 
     initializeAuth();
+  }, []);
+
+  /**
+   * A session that ends MID-VISIT, rather than one that was already over at
+   * mount.
+   *
+   * `initializeAuth` above answers "is there a session now"; `AuthGate` reads
+   * the result and redirects when there is not. Neither runs again. So a token
+   * that expired while somebody was working left them in a fully-rendered
+   * shell where every request 401'd and the sidebar — which turns its own
+   * failed fetch into an empty list — showed no navigation at all. The product
+   * looked featureless rather than signed out.
+   *
+   * The API client fires this only when a refresh is explicitly REFUSED, never
+   * when one fails to reach the server, so a flaky connection cannot sign
+   * anybody out. Clearing the user is all that is needed: `AuthGate` already
+   * knows what a null user means.
+   */
+  useEffect(() => {
+    const onSessionExpired = (): void => {
+      setUser(null);
+      setMemberships([]);
+    };
+
+    window.addEventListener(SESSION_EXPIRED_EVENT, onSessionExpired);
+
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onSessionExpired);
   }, []);
 
   const login = async (email: string, password: string): Promise<void> => {

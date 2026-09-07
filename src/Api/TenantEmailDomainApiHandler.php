@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Api;
 
 use PDO;
+use Whity\Core\Identity\AssignableRole;
 use Whity\Core\Identity\DomainOwnershipVerifier;
 use Whity\Core\Identity\TenantEmailDomainsRepository;
 use Whity\Core\Request;
@@ -26,17 +27,29 @@ use Whity\Http\JsonBody;
  * Routes (registered in public/index.php):
  *   GET    /api/email-domains             → list()
  *   POST   /api/email-domains             → create()
+ *   PATCH  /api/email-domains/{id}        → update()
  *   POST   /api/email-domains/{id}/verify → verify()
  *   DELETE /api/email-domains/{id}        → delete()
  */
 final class TenantEmailDomainApiHandler
 {
+    /**
+     * Names no role and leaks no existence. A tenant probing ids should not be
+     * able to tell "this role belongs to somebody else" from "no such role" —
+     * both are equally not-assignable here, and distinguishing them would turn
+     * this validation into a role enumerator across tenants.
+     */
+    private const FOREIGN_ROLE_MESSAGE =
+        'default_role_id must be a role belonging to this tenant, or a global role';
+
     private TenantEmailDomainsRepository $repo;
+    private AssignableRole $assignableRole;
     private DomainOwnershipVerifier $verifier;
 
     public function __construct(PDO $db, DomainOwnershipVerifier $verifier)
     {
         $this->repo = new TenantEmailDomainsRepository($db);
+        $this->assignableRole = new AssignableRole($db);
         $this->verifier = $verifier;
     }
 
@@ -80,6 +93,9 @@ final class TenantEmailDomainApiHandler
         if ($defaultRoleId <= 0) {
             return Response::error('default_role_id is required and must be a positive integer', 422);
         }
+        if (!$this->assignableRole->isAssignable($defaultRoleId, $tenantId)) {
+            return Response::error(self::FOREIGN_ROLE_MESSAGE, 422);
+        }
 
         $autoProvision = !isset($body['auto_provision']) || (bool) $body['auto_provision'];
 
@@ -94,6 +110,69 @@ final class TenantEmailDomainApiHandler
 
         $row = $this->repo->findById($id, $tenantId);
         return Response::json(['data' => $this->withChallenge($row)], 201);
+    }
+
+    /**
+     * PATCH /api/email-domains/{id} — change what arrivals on this domain become.
+     *
+     * Body: { "default_role_id"?: int, "auto_provision"?: bool } — both optional,
+     * at least one required.
+     *
+     * This route was missing entirely, which made `default_role_id` and
+     * `auto_provision` write-once: the only way to tighten a policy after the
+     * fact was to DELETE the domain and register it again. That is a different
+     * operation with different consequences — it discards the ownership proof
+     * and the continuity of the record — for what an administrator experiences
+     * as an edit.
+     *
+     * @param array<string, string> $params
+     */
+    public function update(Request $request, array $params): Response
+    {
+        $tenantId = TenantContext::getTenantId();
+        if ($tenantId === null) {
+            return Response::error('Tenant context is required', 400);
+        }
+
+        $id = (int) ($params['id'] ?? 0);
+        if ($id <= 0) {
+            return Response::error('A domain id is required', 422);
+        }
+
+        // Read first: a caller who cannot see this row must get the same 404 a
+        // non-existent id gets, rather than learning it exists from a different
+        // error further down.
+        if ($this->repo->findById($id, $tenantId) === null) {
+            return Response::error('Domain not found', 404);
+        }
+
+        $body = JsonBody::parsed($request);
+
+        $defaultRoleId = null;
+        if (array_key_exists('default_role_id', $body)) {
+            $defaultRoleId = (int) $body['default_role_id'];
+            if ($defaultRoleId <= 0) {
+                return Response::error('default_role_id must be a positive integer', 422);
+            }
+            if (!$this->assignableRole->isAssignable($defaultRoleId, $tenantId)) {
+                return Response::error(self::FOREIGN_ROLE_MESSAGE, 422);
+            }
+        }
+
+        $autoProvision = null;
+        if (array_key_exists('auto_provision', $body)) {
+            $autoProvision = (bool) $body['auto_provision'];
+        }
+
+        if ($defaultRoleId === null && $autoProvision === null) {
+            return Response::error('Provide default_role_id, auto_provision, or both', 422);
+        }
+
+        $this->repo->updateSettings($id, $tenantId, $defaultRoleId, $autoProvision);
+
+        $row = $this->repo->findById($id, $tenantId);
+
+        return Response::json(['data' => $this->withChallenge($row)]);
     }
 
     /**

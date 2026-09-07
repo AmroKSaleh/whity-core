@@ -105,12 +105,21 @@ export interface EditorCommandContext {
   batchTotal: number;
   /** True while the editor is repurposed to edit a single block. */
   blockEditing: boolean;
+  /** Which editor owns the document (#1186): absolute canvas, or flowing blocks. */
+  mode: 'canvas' | 'flow';
+  onSwitchMode: (to: 'canvas' | 'flow') => void;
 
   // ── the commands themselves ──
   onNew: () => void;
   onStartFrom: (starterId: string) => void;
   onOpenSaved: (id: string) => void;
   onSave: () => void;
+  /**
+   * Save the open document as a NEW personal template, leaving the original
+   * untouched (#1186 follow-up). Not a variant of Save: Save overwrites a
+   * published template in place for the whole tenant.
+   */
+  onSaveAsCopy: () => void;
   onDeleteSaved: () => void;
   onImport: () => void;
   onExport: () => void;
@@ -283,13 +292,153 @@ function alignToolbarLabels(t: TranslateFn): Record<AlignKind, string> {
   };
 }
 
+/**
+ * The display name of a visibility tier.
+ *
+ * `BLOCK_SCOPES` is a kit constant and carries English labels, which is right —
+ * a kit constant may not reach for a translator. Translating is the consumer's
+ * job. Literal `t()` calls per id, never `t('commands.blockScope.' + id)`: a
+ * computed key is invisible to `i18n:extract` and would never reach a
+ * translator. A scope the kit adds later falls back to its English label.
+ *
+ * EXPORTED, and living here rather than in a helper module of its own, because
+ * templates now name their visibility too (the top bar's badge, the save
+ * toast). A neutral module looked tidier and does not work: `t` arrives as a
+ * parameter there, so `i18n:extract` cannot tell which domain the keys belong
+ * to and fails. The alternative it offers — an `@i18n-keys` block restating all
+ * eight key/English pairs — would put the English in two places that nothing
+ * compares. This file binds `documents` exactly once, so the keys resolve from
+ * the only copy of the text there is.
+ *
+ * The keys keep their `blockScope` names now that templates share them, rather
+ * than churning catalogues that are already translated.
+ */
+export function blockScopeLabel(t: TranslateFn, scope: { id: string; label: string }): string {
+  switch (scope.id) {
+    case 'system':
+      return t('commands.blockScope.system', 'System');
+    case 'personal':
+      return t('commands.blockScope.personal', 'Personal');
+    case 'tenant':
+      return t('commands.blockScope.tenant', 'Tenant-wide');
+    case 'global':
+      return t('commands.blockScope.global', 'Global');
+    default:
+      return scope.label;
+  }
+}
+
+/**
+ * What a successful template save says.
+ *
+ * It names WHO CAN SEE THE RESULT, because the previous message ("Template
+ * saved.") was true of every outcome including the one nobody wanted: filed
+ * personal, visible to its author alone, absent from everyone else's saved list
+ * and from the create-document picker. Nothing anywhere said so, so a tenant
+ * could fill the designer with work and still conclude the feature did not
+ * exist.
+ *
+ * `personal` gets the longer sentence on purpose. It is the default, it is the
+ * surprising one, and it is the only one worth spending a clause telling
+ * somebody how to change.
+ */
+export function savedMessage(t: TranslateFn, scope: string): string {
+  switch (scope) {
+    case 'tenant':
+      return t('designer.template.savedTenant', 'Template saved — everyone in your tenant can see it.');
+    case 'global':
+      return t('designer.template.savedGlobal', 'Template saved — visible to every tenant.');
+    case 'system':
+      return t('designer.template.savedSystem', 'Template saved as a system template.');
+    default:
+      return t(
+        'designer.template.savedPersonal',
+        'Template saved to your own library — only you can see it. Change that in Templates & Blocks.'
+      );
+  }
+}
+
+/**
+ * What a block delete will cost somebody other than the person clicking.
+ *
+ * Returns null when the answer is "nobody" — a personal block is genuinely just
+ * yours, and a warning that fires every time is a warning nobody reads.
+ *
+ * A SEEDED block is called out ahead of its scope, because "the product put
+ * this here" is the more surprising fact and the one that best explains why the
+ * block will come back looking different (or not at all) for the next tenant
+ * that is seeded.
+ */
+export function blockDeleteConsequence(t: TranslateFn, block: DocBlock): string | null {
+  if (block.isSystem) {
+    return t(
+      'designer.block.confirmDeleteSeeded',
+      'This is one of the blocks set up for your organisation, not one somebody here wrote. Deleting it removes it for everyone.'
+    );
+  }
+  switch (block.scope) {
+    case 'tenant':
+      return t(
+        'designer.block.confirmDeleteTenant',
+        'This block is shared with everyone in your tenant. Deleting it removes it for all of them.'
+      );
+    case 'global':
+      return t(
+        'designer.block.confirmDeleteGlobal',
+        'This block is shared with every tenant. Deleting it removes it for all of them.'
+      );
+    case 'system':
+      return t(
+        'designer.block.confirmDeleteSystem',
+        'This is a system block. Deleting it removes it for everyone.'
+      );
+    default:
+      return null;
+  }
+}
+
+/** The same question for a shared TEMPLATE. Only called for a non-personal one. */
+export function sharedTemplateWarning(t: TranslateFn, scope: string): string {
+  return scope === 'global'
+    ? t(
+        'designer.template.confirmDeleteGlobal',
+        'This template is visible to every tenant. Deleting it removes it for all of them.'
+      )
+    : t(
+        'designer.template.confirmDeleteShared',
+        'This template is visible beyond you. Deleting it removes it for everyone who can see it.'
+      );
+}
+
+/**
+ * What a completed block deletion says.
+ *
+ * NOT "deleted from your library". A tenant or global block is not in your
+ * library, it is in everybody's — telling the person who just removed one that
+ * they tidied their own shelf was the most misleading sentence in the flow, and
+ * the only one they see after the fact. It now names the same audience the
+ * confirmation warned about, so the question and the answer agree.
+ */
+export function blockDeletedMessage(t: TranslateFn, scope: string, name: string): string {
+  switch (scope) {
+    case 'tenant':
+      return t('designer.block.deletedTenant', '“{name}” deleted for everyone in your tenant.', { name });
+    case 'global':
+      return t('designer.block.deletedGlobal', '“{name}” deleted for every tenant.', { name });
+    case 'system':
+      return t('designer.block.deletedSystem', '“{name}” deleted for everyone.', { name });
+    default:
+      return t('designer.block.deletedPersonal', '“{name}” deleted from your library.', { name });
+  }
+}
+
 /** Blocks as menu nodes, grouped under a heading per visibility scope. */
-function blockNodes(ctx: EditorCommandContext): MenuBarNode[] {
+function blockNodes(ctx: EditorCommandContext, t: TranslateFn): MenuBarNode[] {
   const out: MenuBarNode[] = [];
   for (const scope of BLOCK_SCOPES) {
     const inScope = ctx.blocks.filter((b) => b.scope === scope.id);
     if (inScope.length === 0) continue;
-    out.push({ kind: 'label', id: `block-scope-${scope.id}`, label: scope.label });
+    out.push({ kind: 'label', id: `block-scope-${scope.id}`, label: blockScopeLabel(t, scope) });
     for (const b of inScope) {
       out.push({
         id: `insert-block-${b.id}`,
@@ -329,6 +478,15 @@ export function buildEditorMenus(ctx: EditorCommandContext, t: TranslateFn): Men
       items: [
         { id: 'new', label: t('commands.file.new', 'New document'), icon: <IconFilePlus />, onSelect: ctx.onNew },
         { id: 'save', label: t('commands.file.save', 'Save'), shortcut: k('save'), disabled: ctx.blockEditing, onSelect: ctx.onSave },
+        {
+          id: 'save-as-copy',
+          label: t('commands.file.saveAsCopy', 'Save as a copy'),
+          // Disabled while editing a block for the same reason Save is: the
+          // editor is showing a block, not the document, so "a copy of this"
+          // would mean something the author did not ask for.
+          disabled: ctx.blockEditing,
+          onSelect: ctx.onSaveAsCopy,
+        },
         { kind: 'separator', id: 'file-sep-1' },
         { id: 'import', label: t('commands.file.import', 'Import JSON…'), onSelect: ctx.onImport },
         { id: 'export', label: t('commands.file.export', 'Export JSON'), onSelect: ctx.onExport },
@@ -381,7 +539,7 @@ export function buildEditorMenus(ctx: EditorCommandContext, t: TranslateFn): Men
           id: 'insert-block',
           label: t('commands.insert.block', 'Block'),
           icon: <IconComponents />,
-          items: blockNodes(ctx),
+          items: blockNodes(ctx, t),
           emptyLabel: t('commands.insert.blockEmpty', 'No blocks in your library'),
         },
         { kind: 'separator', id: 'insert-sep-2' },
@@ -505,6 +663,22 @@ export function buildEditorMenus(ctx: EditorCommandContext, t: TranslateFn): Men
       id: 'view',
       label: t('commands.menu.view', 'View'),
       items: [
+        // #1186. The mode is the first thing in View because it decides what
+        // every other item in the menu even means: grid, rulers and snap are
+        // canvas concepts, and zoom is a canvas verb.
+        {
+          id: 'mode-canvas',
+          label: t('commands.view.modeCanvas', 'Canvas mode (place freely)'),
+          disabled: ctx.mode === 'canvas',
+          onSelect: () => ctx.onSwitchMode('canvas'),
+        },
+        {
+          id: 'mode-flow',
+          label: t('commands.view.modeFlow', 'Document mode (blocks in order)'),
+          disabled: ctx.mode === 'flow',
+          onSelect: () => ctx.onSwitchMode('flow'),
+        },
+        { kind: 'separator', id: 'view-sep-0' },
         { kind: 'checkbox', id: 'preview', label: t('commands.view.preview', 'Preview'), checked: ctx.preview, onCheckedChange: ctx.onTogglePreview },
         { kind: 'separator', id: 'view-sep-1' },
         // Edit-time aids only — preview and print never show them.
@@ -570,7 +744,19 @@ export function buildEditorMenus(ctx: EditorCommandContext, t: TranslateFn): Men
             disabled: s.id === ctx.currentSavedId,
             onSelect: () => ctx.onOpenSaved(s.id),
           })),
-          emptyLabel: t('commands.templates.openSavedEmpty', 'No saved templates yet'),
+          // NOT "no saved templates yet". This list is the server's, already
+          // filtered by RBAC and organisational reach, so an empty one means
+          // "none you can see" — and a template saved here defaults to
+          // creator-only, which makes that the ORDINARY state for everyone but
+          // its author. Claiming none exist sends somebody to build a second
+          // copy of a template that is already there.
+          //
+          // Templates & Blocks says the same thing correctly on the same data;
+          // this is that sentence, in the place an author actually looks.
+          emptyLabel: t(
+            'commands.templates.openSavedEmpty',
+            'No templates you can see. There may be templates filed elsewhere, or saved by other people.'
+          ),
         },
         { kind: 'separator', id: 'templates-sep-2' },
         {
@@ -723,4 +909,32 @@ export function useEditorChrome(ctx: EditorCommandContext): {
   const t = useTranslation('documents');
 
   return { menus: buildEditorMenus(ctx, t), groups: buildEditorToolbar(ctx, t) };
+}
+
+/**
+ * A flow block type's name, for the `/` palette in document mode (#1186).
+ *
+ * Lives here, beside `blockScopeLabel` and `savedMessage`, for the same reason
+ * they do: this file binds the `documents` domain exactly once, so the literal
+ * `t()` keys resolve and `i18n:extract` can see them. A helper module taking
+ * `t` as a parameter cannot be scanned — that is a mistake already made and
+ * recorded once in this file.
+ */
+export function flowBlockLabel(t: TranslateFn, type: string): string {
+  switch (type) {
+    case 'heading':
+      return t('flow.insert.heading', 'Heading');
+    case 'paragraph':
+      return t('flow.insert.paragraph', 'Paragraph');
+    case 'table':
+      return t('flow.insert.table', 'Table');
+    case 'figure':
+      return t('flow.insert.figure', 'Image');
+    case 'pageBreak':
+      return t('flow.insert.pageBreak', 'Page break');
+    case 'spacer':
+      return t('flow.insert.spacer', 'Spacer');
+    default:
+      return type;
+  }
 }

@@ -18,11 +18,30 @@ use Whity\Database\Database;
  *   whity-cli i18n:extract --check    # verify without writing (what CI runs)
  *   whity-cli i18n:sync               # catalogue → the translations table
  *   whity-cli i18n:sync --dry-run     # report what it would insert
+ *   whity-cli i18n:sync --language=ar # database/i18n/ar/ → the same table
+ *   whity-cli i18n:sync --all         # English and every committed locale
+ *   whity-cli i18n:coverage           # per-domain translated/missing, no database
  *
  * The order matters, and so does the direction. `extract` reads code and writes
- * a file; `sync` reads that file and writes rows. Nothing ever flows back: the
- * database holds human work — an edited English string, a finished Arabic
- * translation — and no command here overwrites it.
+ * a file; `sync` reads that file and writes rows. Nothing ever flows back.
+ *
+ * `sync` INSERTS new keys and REFRESHES rows that still say what the file last
+ * said — that second half is #1057, and without it a correction to an existing
+ * string never reached an install that had already been seeded, because the
+ * runtime prefers a stored row over the English in the call site. What it will
+ * not touch is human work: an English string edited in the console, or a
+ * finished Arabic translation, is reported as divergent and left, because saving
+ * a string in /admin/translations clears the row's `source_managed` flag and
+ * `sync`'s UPDATE requires it. Run `--dry-run` first to read every sentence it
+ * would change.
+ *
+ * `--language=` DOES NOT MACHINE-TRANSLATE, and it is worth being explicit about
+ * that, because a flag named for a language on a command that seeds strings
+ * reads like one that might. It seeds a file a person wrote and committed
+ * (`database/i18n/ar/documents.json`), for exactly the same reason English is
+ * seeded from a file: strings that only exist in a database cannot be reviewed
+ * in a diff, cannot ship in the image, and do not survive the database being
+ * rebuilt.
  *
  * WHY NOT A MIGRATION. Migration 091 seeded the first converted screen, which
  * was right for one screen and is wrong for the next forty: every agent
@@ -54,6 +73,7 @@ final class I18nCommand implements NamedSubcommand
         return match ($commandName) {
             'i18n:extract' => $this->extract($baseDir, in_array('--check', $argv, true)),
             'i18n:sync' => $this->sync($baseDir, $argv),
+            'i18n:coverage' => $this->coverage($baseDir, $argv),
             default => $this->usage($commandName),
         };
     }
@@ -157,13 +177,36 @@ final class I18nCommand implements NamedSubcommand
     private function sync(string $baseDir, array $argv): int
     {
         $dryRun = in_array('--dry-run', $argv, true);
-        $catalog = (new TranslationCatalog($baseDir))->read();
+        $catalog = new TranslationCatalog($baseDir);
 
-        if ($catalog === []) {
-            fwrite(STDERR, "FAIL: no catalogue found in " . TranslationCatalog::DIRECTORY
-                . ". Run `php bin/whity-cli i18n:extract` first.\n");
+        try {
+            $languages = self::requestedLanguages($catalog, $argv);
+        } catch (Throwable $e) {
+            fwrite(STDERR, 'FAIL: ' . $e->getMessage() . "\n");
 
             return 2;
+        }
+
+        /** @var array<string, array<string, array<string, string>>> $bundles */
+        $bundles = [];
+        foreach ($languages as $code) {
+            $bundles[$code] = $code === TranslationCatalog::SOURCE_LANGUAGE
+                ? $catalog->read()
+                : $catalog->readLocale($code);
+
+            if ($bundles[$code] === []) {
+                if ($code === TranslationCatalog::SOURCE_LANGUAGE) {
+                    fwrite(STDERR, 'FAIL: no catalogue found in ' . TranslationCatalog::DIRECTORY
+                        . ". Run `php bin/whity-cli i18n:extract` first.\n");
+
+                    return 2;
+                }
+
+                fwrite(STDERR, "FAIL: no catalogue found in " . TranslationCatalog::DIRECTORY . "/{$code}. "
+                    . "A language is seeded from committed files, never invented here.\n");
+
+                return 2;
+            }
         }
 
         try {
@@ -174,44 +217,142 @@ final class I18nCommand implements NamedSubcommand
             return 2;
         }
 
-        try {
-            $report = (new TranslationSync($pdo))->sync($catalog, TranslationCatalog::SOURCE_LANGUAGE, $dryRun);
-        } catch (Throwable $e) {
-            fwrite(STDERR, 'FAIL: ' . $e->getMessage() . "\n");
+        $sync = new TranslationSync($pdo);
 
-            return 1;
+        foreach ($bundles as $code => $bundle) {
+            try {
+                $report = $sync->sync($bundle, $code, $dryRun);
+            } catch (Throwable $e) {
+                fwrite(STDERR, 'FAIL: ' . $e->getMessage() . "\n");
+
+                return 1;
+            }
+
+            self::printSyncReport($report);
         }
 
-        $verb = $dryRun ? 'would insert' : 'inserted';
+        echo "\nEvery language here came from a committed file. English is generated from the call\n"
+            . "sites; the rest are written by hand in " . TranslationCatalog::DIRECTORY . "/<code>/ and\n"
+            . "reviewed in a diff. Per-tenant wording is still an override, made at /admin/translations.\n";
+
+        return 0;
+    }
+
+    /**
+     * Which languages a `sync` invocation covers.
+     *
+     * Default is English alone, which keeps every existing invocation and every
+     * runbook that calls it doing exactly what it did before.
+     *
+     * @param list<string> $argv
+     * @return list<string>
+     */
+    private static function requestedLanguages(TranslationCatalog $catalog, array $argv): array
+    {
+        if (in_array('--all', $argv, true)) {
+            return array_values(array_unique([TranslationCatalog::SOURCE_LANGUAGE, ...$catalog->localeCodes()]));
+        }
+
+        foreach ($argv as $argument) {
+            if (str_starts_with($argument, '--language=')) {
+                $code = substr($argument, strlen('--language='));
+                if ($code === '') {
+                    throw new \RuntimeException('--language= needs a code, e.g. --language=ar');
+                }
+
+                return [$code];
+            }
+        }
+
+        return [TranslationCatalog::SOURCE_LANGUAGE];
+    }
+
+    /**
+     * @param array{
+     *     language: array{code: string, id: int},
+     *     inserted: list<array{domain: string, key: string, text: string}>,
+     *     updated: list<array{domain: string, key: string, from: string, to: string}>,
+     *     present: int,
+     *     divergent: list<array{domain: string, key: string, database: string, source: string}>,
+     *     overridden: array{rows: int, tenants: int},
+     *     dead: list<array{domain: string, key: string, text: string}>,
+     *     unmanaged: array<string, int>,
+     *     dryRun: bool
+     * } $report
+     */
+    private static function printSyncReport(array $report): void
+    {
+        $code = $report['language']['code'];
+
+        // THE HEADLINE IS THREE NUMBERS, AND THE THIRD IS THE POINT.
+        //
+        // This command now both writes and declines to write, and a line saying
+        // "synced" leaves an operator exactly as uncertain as they were before
+        // running it. So the summary separates what arrived (inserted,
+        // refreshed) from what was deliberately left alone (kept), because on a
+        // customised install the second is the number they are actually worried
+        // about — and it is the one that should be non-zero.
+        $kept = count($report['divergent']) + $report['overridden']['rows'];
+
         printf(
-            "%s: %d key(s) %s, %d already present (untouched).\n",
-            $dryRun ? 'DRY RUN' : 'Synced ' . $report['language']['code'],
+            "\n%s [%s]: %d inserted, %d refreshed, %d left alone (%d already matched the file).\n",
+            $report['dryRun'] ? 'DRY RUN' : 'Synced',
+            $code,
             count($report['inserted']),
-            $verb,
-            $report['present']
+            count($report['updated']),
+            $kept,
+            $report['present'] - count($report['updated']) - count($report['divergent'])
         );
 
         foreach (self::groupByDomain($report['inserted']) as $domain => $keys) {
             printf("  + %-24s %d key(s)\n", $domain, count($keys));
-            foreach ($keys as $key) {
-                echo "      {$key}\n";
+        }
+
+        // Printed key by key with both texts, not summarised. A refresh is the
+        // one thing this command does that CHANGES what a user already reads, so
+        // an operator running --dry-run before a deploy has to be able to see
+        // every sentence it would change, not a count of them.
+        if ($report['updated'] !== []) {
+            printf(
+                "\n%d key(s) whose source text changed and whose row nobody had edited — %s to match\n"
+                . "the committed file. This is how a correction reaches an install that was already seeded:\n",
+                count($report['updated']),
+                $report['dryRun'] ? 'would be refreshed' : 'refreshed'
+            );
+            foreach ($report['updated'] as $row) {
+                printf("  ~ %s / %s\n      was: %s\n      now: %s\n", $row['domain'], $row['key'], $row['from'], $row['to']);
             }
         }
 
         if ($report['divergent'] !== []) {
             printf(
-                "\n%d key(s) whose English in the database differs from the source string. LEFT AS THEY ARE —\n"
-                . "someone edited them in the console, and that edit outranks a scan:\n",
+                "\n%d system-default key(s) whose text in the database differs from the committed file.\n"
+                . "LEFT AS THEY ARE — somebody saved them in /admin/translations, which cleared the row's\n"
+                . "`source_managed` flag, and that edit outranks a file. Delete the row in the console if\n"
+                . "you want the file's wording back:\n",
                 count($report['divergent'])
             );
             foreach ($report['divergent'] as $row) {
-                printf("  ~ %s / %s\n      database: %s\n      source:   %s\n", $row['domain'], $row['key'], $row['database'], $row['source']);
+                printf("  ~ %s / %s\n      database: %s\n      file:     %s\n", $row['domain'], $row['key'], $row['database'], $row['source']);
             }
+        }
+
+        // Counted, never listed — the wording belongs to the tenants. See
+        // TranslationSync::tenantOverrides().
+        if ($report['overridden']['rows'] > 0) {
+            printf(
+                "\n%d tenant override row(s) across %d tenant(s) shadow keys in this catalogue, and were\n"
+                . "NOT VISITED. A tenant's wording is a separate row carrying its tenant_id; every statement\n"
+                . "in the sync is scoped to `tenant_id IS NULL`, so a refresh cannot reach one. This number\n"
+                . "staying the same across a deploy is what proves that:\n",
+                $report['overridden']['rows'],
+                $report['overridden']['tenants']
+            );
         }
 
         if ($report['dead'] !== []) {
             printf(
-                "\n%d key(s) in the database that no source file references any more. NOT DELETED — a key\n"
+                "\n%d key(s) in the database that the committed catalogue no longer has. NOT DELETED — a key\n"
                 . "outlives its last call site during a refactor, and the row may hold translations no\n"
                 . "scan can regenerate. Remove them from /admin/translations if they are truly gone:\n",
                 count($report['dead'])
@@ -222,17 +363,108 @@ final class I18nCommand implements NamedSubcommand
         }
 
         if ($report['unmanaged'] !== []) {
-            echo "\nDomains in the database that are not derived from frontend source (plugins, email\n"
-                . "templates, keys added by hand). This command has no opinion about them:\n";
+            echo "\nDomains in the database this catalogue does not cover (plugins, email templates,\n"
+                . "keys added by hand). This command has no opinion about them:\n";
             foreach ($report['unmanaged'] as $domain => $count) {
                 printf("  · %-24s %d key(s)\n", $domain, $count);
             }
         }
+    }
 
-        echo "\nOnly " . TranslationCatalog::SOURCE_LANGUAGE . " is seeded, by design: the English text comes from\n"
-            . "the call site, every other language is human work. Fill the rest in at /admin/translations.\n";
+    /**
+     * Per-domain translated/missing for every committed language.
+     *
+     * Reads files and nothing else, so it runs in CI, in a container with no
+     * database, and on a laptop with the stack down. That matters more than it
+     * sounds: the reason six domains had no Arabic for as long as they did is
+     * that the gap was not a number anybody could see. "Translate everything" has
+     * no finish line; `documents 0/508` has one.
+     *
+     * @param list<string> $argv
+     */
+    private function coverage(string $baseDir, array $argv): int
+    {
+        $catalog = new TranslationCatalog($baseDir);
+        $source = $catalog->read();
+
+        if ($source === []) {
+            fwrite(STDERR, 'FAIL: no catalogue found in ' . TranslationCatalog::DIRECTORY
+                . ". Run `php bin/whity-cli i18n:extract` first.\n");
+
+            return 2;
+        }
+
+        $codes = $catalog->localeCodes();
+        if ($codes === []) {
+            printf(
+                "%d English key(s) across %d domain(s), and no other language is committed.\n",
+                self::keyCount($source),
+                count($source)
+            );
+
+            return 0;
+        }
+
+        $failOnOrphans = in_array('--strict', $argv, true);
+        $orphansSeen = 0;
+
+        foreach ($codes as $code) {
+            $coverage = TranslationCatalog::coverage($source, $catalog->readLocale($code));
+            $orphansSeen += $coverage['orphans'];
+
+            printf("\n%s — %d/%d key(s) translated (%s), %d missing\n",
+                $code,
+                $coverage['translated'],
+                $coverage['total'],
+                self::percentage($coverage['translated'], $coverage['total']),
+                $coverage['missing']
+            );
+            printf("  %-24s %8s %10s %8s\n", 'domain', 'total', 'translated', 'missing');
+            foreach ($coverage['domains'] as $domain => $row) {
+                printf(
+                    "  %-24s %8d %10d %8d   %s\n",
+                    $domain,
+                    $row['total'],
+                    $row['translated'],
+                    $row['missing'],
+                    self::percentage($row['translated'], $row['total'])
+                );
+            }
+
+            foreach ($coverage['domains'] as $domain => $row) {
+                if ($row['orphans'] === []) {
+                    continue;
+                }
+                printf(
+                    "\n  %d orphan key(s) in %s/%s/%s — translated, but no English key of that name\n"
+                    . "  exists any more, so nothing will ever render them:\n",
+                    count($row['orphans']),
+                    TranslationCatalog::DIRECTORY,
+                    $code,
+                    TranslationCatalog::fileNameFor($domain)
+                );
+                foreach ($row['orphans'] as $key) {
+                    echo "    ! {$key}\n";
+                }
+            }
+        }
+
+        if ($failOnOrphans && $orphansSeen > 0) {
+            fwrite(STDERR, "\nFAIL: {$orphansSeen} orphan key(s). Rename or delete them.\n");
+
+            return 1;
+        }
 
         return 0;
+    }
+
+    private static function percentage(int $part, int $whole): string
+    {
+        if ($whole === 0) {
+            return '—';
+        }
+
+        return sprintf('%5.1f%%', ($part / $whole) * 100);
     }
 
     private function usage(string $commandName): int
@@ -240,7 +472,8 @@ final class I18nCommand implements NamedSubcommand
         fwrite(STDERR, "Unknown i18n command: {$commandName}\n");
         fwrite(STDERR, "Usage:\n");
         fwrite(STDERR, "  whity-cli i18n:extract [--check]\n");
-        fwrite(STDERR, "  whity-cli i18n:sync [--dry-run]\n");
+        fwrite(STDERR, "  whity-cli i18n:sync [--dry-run] [--language=<code> | --all]\n");
+        fwrite(STDERR, "  whity-cli i18n:coverage [--strict]\n");
 
         return 2;
     }

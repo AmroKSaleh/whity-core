@@ -86,6 +86,9 @@ const EFFECTIVE = {
   timezone: 'UTC',
   locale: 'en',
   support_email: 'help@acme.test',
+  // #1068. In the fixture because it is in the real payload: the display
+  // preference is a per-tenant key like any other.
+  'ui.hide_dates': 'false',
 };
 
 const REGISTRY = [
@@ -93,6 +96,7 @@ const REGISTRY = [
   { key: 'timezone', type: 'string', default: 'UTC' },
   { key: 'locale', type: 'string', default: 'en' },
   { key: 'support_email', type: 'string', default: '' },
+  { key: 'ui.hide_dates', type: 'bool', default: 'false' },
 ];
 
 const GLOBAL = {
@@ -747,5 +751,64 @@ describe('FeatureFlagsSettingsPage — registry-driven, isFlag-filtered form', (
 
     expect(await screen.findByText(/no feature flags are published/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /save feature flags/i })).toBeDisabled();
+  });
+});
+
+/**
+ * #1068: the display preference on the tenant settings card.
+ *
+ * Rendered from the SERVER's registry descriptor rather than from a hard-coded
+ * control, so the type (a toggle, because the key is a bool) and the default
+ * come from the one place that defines them.
+ */
+describe('AdminSettingsPage - the hide-dates display preference', () => {
+  it('renders it as a toggle, off, and marked inherited until it is set', async () => {
+    grant('settings:read');
+    routeGet(['site_name']);
+    render(<AdminSettingsPage />);
+
+    const toggle = await screen.findByTestId('setting-switch-ui.hide_dates');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByTestId('status-ui.hide_dates')).toHaveTextContent(/inherited/i);
+  });
+
+  it('does not write an override for a toggle nobody touched', async () => {
+    // The assertion that matters. Sending the EFFECTIVE value of an untouched
+    // toggle would create a per-tenant override for something nobody chose, and
+    // "inherited" versus "overridden" is exactly what the badge beside it
+    // reports.
+    grant('settings:read', 'settings:write');
+    routeGet(['site_name']);
+    render(<AdminSettingsPage />);
+
+    await screen.findByTestId('setting-switch-ui.hide_dates');
+    fireEvent.click(screen.getByRole('button', { name: /save tenant settings/i }));
+
+    await waitFor(() => expect(mockApiPatch).toHaveBeenCalled());
+    const call = mockApiPatch.mock.calls.find(
+      (args: unknown[]) => args[0] === '/api/v1/settings'
+    );
+    expect(call).toBeDefined();
+    const body = (call as unknown[])[1] as { body: { settings: Record<string, unknown> } };
+    expect(body.body.settings).not.toHaveProperty('ui.hide_dates');
+  });
+
+  it('sends the literal string true when the reader turns it on', async () => {
+    grant('settings:read', 'settings:write');
+    routeGet(['site_name']);
+    render(<AdminSettingsPage />);
+
+    fireEvent.click(await screen.findByTestId('setting-switch-ui.hide_dates'));
+    fireEvent.click(screen.getByRole('button', { name: /save tenant settings/i }));
+
+    await waitFor(() => expect(mockApiPatch).toHaveBeenCalled());
+    const call = mockApiPatch.mock.calls.find(
+      (args: unknown[]) => args[0] === '/api/v1/settings'
+    );
+    expect(call).toBeDefined();
+    const body = (call as unknown[])[1] as { body: { settings: Record<string, unknown> } };
+    // The literal string, not a JSON boolean: the registry stores 'true'/'false'
+    // as TEXT and refuses anything else.
+    expect(body.body.settings['ui.hide_dates']).toBe('true');
   });
 });

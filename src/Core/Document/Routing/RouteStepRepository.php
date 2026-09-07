@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Document\Routing;
 
 use PDO;
+use Whity\Core\Db\DbBool;
 
 /**
  * Data-access for `document_route_steps` (#947 item 3) — the ordered plan a
@@ -68,6 +69,24 @@ final class RouteStepRepository
      * caller that computed two identical positions gets an integrity error
      * rather than a route whose "next step" is decided by insertion order.
      *
+     * `decision` and `decisionQuorum` are #1014's gate (migration 119). FALSE and
+     * NULL reproduce migration 112's behaviour exactly, which is what every route
+     * authored before that migration carries and what every caller that does not
+     * ask for a gate gets.
+     *
+     * `decisionQuorum` NULL on a decision step is not "no quorum" — it defers to
+     * the settings chain ({@see RouteQuorum}), so a tenant can change the rule
+     * for every step at once without a single row being rewritten.
+     *
+     * `satisfiedBy` is #1054's answer to WHETHER ANYBODY IS ASKED TO ACT here
+     * (migration 125). {@see RouteSatisfaction::ACT} is what every step written
+     * before that migration carries and what every caller that does not ask for
+     * a delivery step gets, so the default reproduces migration 112's behaviour
+     * exactly. It is orthogonal to `decision`, which says what an answer must
+     * CONTAIN once one is required — and the pair that means nothing (a gate
+     * nobody is asked to answer) is refused by
+     * {@see DocumentRouter::validateSteps()} before this method is reached.
+     *
      * @param array<string, mixed> $ruleConfig Validated by the rule's own resolver
      *                                         before this is called.
      */
@@ -78,11 +97,16 @@ final class RouteStepRepository
         string $ruleKind,
         array $ruleConfig,
         ?string $label,
+        bool $decision = false,
+        ?string $decisionQuorum = null,
+        string $satisfiedBy = RouteSatisfaction::ACT,
     ): int {
         $stmt = $this->db->prepare(
             'INSERT INTO document_route_steps
-                 (tenant_id, route_id, position, rule_kind, rule_config, label, created_at)
-             VALUES (:tenant_id, :route_id, :position, :rule_kind, :rule_config, :label, NOW())'
+                 (tenant_id, route_id, position, rule_kind, rule_config, label,
+                  decision, decision_quorum, satisfied_by, created_at)
+             VALUES (:tenant_id, :route_id, :position, :rule_kind, :rule_config, :label,
+                     :decision, :decision_quorum, :satisfied_by, NOW())'
         );
         $stmt->execute([
             ':tenant_id' => $tenantId,
@@ -95,6 +119,18 @@ final class RouteStepRepository
             // decode a list where the resolver expects a map.
             ':rule_config' => $ruleConfig === [] ? '{}' : (string) json_encode($ruleConfig),
             ':label' => $label,
+            // 1/0, never a PHP bool. `execute($params)` binds as PARAM_STR, and
+            // `(string) false` is the EMPTY STRING — which PostgreSQL rejects
+            // outright for a BOOLEAN column while SQLite stores it happily, so
+            // the bug would only ever appear on the real engine. The same
+            // spelling {@see \Whity\Core\Identity\ProfileEmailRepository} uses.
+            ':decision' => $decision ? 1 : 0,
+            ':decision_quorum' => $decisionQuorum,
+            // #1054's satisfaction, CHECK-constrained by migration 125. A plain
+            // string needing no 1/0 dance like `decision` above: the column is
+            // text on both engines, so execute()'s PARAM_STR binding is already
+            // the right one.
+            ':satisfied_by' => $satisfiedBy,
         ]);
 
         return (int) $this->db->lastInsertId();
@@ -108,7 +144,8 @@ final class RouteStepRepository
     public function findById(int $id, int $tenantId): ?array
     {
         $stmt = $this->db->prepare(
-            'SELECT id, tenant_id, route_id, position, rule_kind, rule_config, label, created_at
+            'SELECT id, tenant_id, route_id, position, rule_kind, rule_config, label,
+                    decision, decision_quorum, satisfied_by, created_at
                FROM document_route_steps
               WHERE id = :id AND tenant_id = :tenant_id'
         );
@@ -126,7 +163,8 @@ final class RouteStepRepository
     public function listForRoute(int $routeId, int $tenantId): array
     {
         $stmt = $this->db->prepare(
-            'SELECT id, tenant_id, route_id, position, rule_kind, rule_config, label, created_at
+            'SELECT id, tenant_id, route_id, position, rule_kind, rule_config, label,
+                    decision, decision_quorum, satisfied_by, created_at
                FROM document_route_steps
               WHERE tenant_id = :tenant_id AND route_id = :route_id
               ORDER BY position ASC'
@@ -167,7 +205,8 @@ final class RouteStepRepository
     public function findNext(int $routeId, int $tenantId, int $position): ?array
     {
         $stmt = $this->db->prepare(
-            'SELECT id, tenant_id, route_id, position, rule_kind, rule_config, label, created_at
+            'SELECT id, tenant_id, route_id, position, rule_kind, rule_config, label,
+                    decision, decision_quorum, satisfied_by, created_at
                FROM document_route_steps
               WHERE tenant_id = :tenant_id AND route_id = :route_id AND position > :position
               ORDER BY position ASC
@@ -203,6 +242,24 @@ final class RouteStepRepository
             'rule_kind' => (string) $row['rule_kind'],
             'rule_config' => is_array($decoded) ? $decoded : [],
             'label' => $row['label'] !== null ? (string) $row['label'] : null,
+            // Through DbBool, never a bare cast: the same BOOLEAN comes back as
+            // bool(false) or as '0' depending on ATTR_STRINGIFY_FETCHES, and
+            // scripts/ci-db-bool-guard.php fails a build on the bare form.
+            'decision' => DbBool::of($row['decision'] ?? false),
+            // NULL means "ask the settings chain", not "no quorum".
+            'decision_quorum' => isset($row['decision_quorum']) && $row['decision_quorum'] !== null
+                ? (string) $row['decision_quorum']
+                : null,
+            // #1054: WHAT SETTLES THIS STEP. Normalised through the vocabulary
+            // rather than cast straight out of the row, and a value outside it
+            // falls back to `act` — the SAFE direction. A step whose stored
+            // value is somehow foreign then behaves as an ordinary one (a
+            // document that visibly waits for somebody) rather than as a
+            // delivery step that closes every row and moves on, which would be
+            // the engine acting on a value it could not read.
+            'satisfied_by' => isset($row['satisfied_by']) && RouteSatisfaction::isValid((string) $row['satisfied_by'])
+                ? (string) $row['satisfied_by']
+                : RouteSatisfaction::fallback(),
             'created_at' => (string) $row['created_at'],
         ];
     }

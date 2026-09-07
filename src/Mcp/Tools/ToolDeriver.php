@@ -62,6 +62,18 @@ final class ToolDeriver
     private readonly \Closure $warn;
 
     /**
+     * Plugin namespace prefixes whose routes must NOT be derived into tools
+     * (SDK 1.43 — see {@see \Whity\Sdk\PluginMcpToolsInterface}).
+     *
+     * Settable rather than constructor-injected, because the answer comes from
+     * plugins and plugins load AFTER this object is built — the same reason
+     * `$router` is read lazily at deriveTools() time rather than captured here.
+     *
+     * @var list<string>
+     */
+    private array $suppressedNamespaces = [];
+
+    /**
      * @param list<array<string, mixed>> $staticDeclarations
      *   Core (or any pre-built) route declarations. Each entry must contain at
      *   least: 'method' (string), 'path' (string), 'schema' (array|null).
@@ -86,6 +98,20 @@ final class ToolDeriver
         ?\Closure $warn = null,
     ) {
         $this->warn = $warn ?? static function (string $msg): void { error_log($msg); };
+    }
+
+    /**
+     * @param list<string> $namespacePrefixes
+     */
+    public function suppressNamespaces(array $namespacePrefixes): void
+    {
+        $this->suppressedNamespaces = $namespacePrefixes;
+        // The merged-declaration cache was computed without knowing these, so
+        // it now describes a tool list that includes routes we have just been
+        // told to leave out. Dropping it is not an optimisation detail: a stale
+        // cache here would publish exactly the duplicate tools the suppression
+        // exists to remove.
+        self::clearCache();
     }
 
     /**
@@ -223,9 +249,20 @@ final class ToolDeriver
         if ($this->router !== null) {
             foreach ($this->router->getRoutes() as $route) {
                 $schema = $route['schema'] ?? null;
-                if (is_array($schema) && $schema !== []) {
-                    $declarations[] = $route;
+                if (!is_array($schema) || $schema === []) {
+                    continue;
                 }
+                // SDK 1.43: a plugin that authors its own MCP tools may ask for
+                // its OWN routes not to be derived, so the two surfaces do not
+                // publish two tools for one operation and leave a model to
+                // guess. Matched on `namespacePrefix` — the field a route
+                // actually carries — so the suppression can only ever remove
+                // that plugin's routes, never core's or another plugin's.
+                $prefix = $route['namespacePrefix'] ?? null;
+                if (is_string($prefix) && in_array($prefix, $this->suppressedNamespaces, true)) {
+                    continue;
+                }
+                $declarations[] = $route;
             }
         }
 

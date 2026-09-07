@@ -49,9 +49,16 @@ export {
   blocksById,
   makeBlockFromElements,
   resolveInstance,
+  // #1186 slice 3: blocks nested inside blocks.
+  MAX_BLOCK_DEPTH,
+  blockChildIds,
+  flattenBlock,
+  wouldCycle,
   type BlockScope,
   type DocBlock,
   type DocumentBlockRow,
+  type FlattenDiagnostics,
+  type FlattenResult,
 } from './block-model';
 
 export { PrintDocument } from './print-document';
@@ -84,3 +91,9 @@ export {
 } from './batch';
 export { parseDelimited, parseJsonRows, type ParsedRows } from './csv';
 export { applyPlainTextEdit, normalizeRuns, runsToPlainText, toggleRunFormat } from './rich-text';
+// #1186 slice 1: document mode.
+export { FlowEditor, type FlowEditorProps } from './flow-editor';
+// #1186: the selected block's spacing, page behaviour and width.
+export { FlowBlockSettings, type FlowBlockSettingsProps } from './flow-block-settings';
+// #1186 slice 2: switching a template between the two modes.
+export { canvasToFlow, describeSwitch, flowToCanvas, type SwitchCost } from './mode-switch';

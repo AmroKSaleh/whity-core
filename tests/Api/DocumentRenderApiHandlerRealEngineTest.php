@@ -18,6 +18,7 @@ use Whity\Core\Document\DocumentIssuer;
 use Whity\Core\Document\DocumentRepository;
 use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\Render\DocumentRenderer;
+use Whity\Core\Document\Render\FlowDocumentRenderer;
 use Whity\Core\Ou\OuReachResolver;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
@@ -100,7 +101,10 @@ final class DocumentRenderApiHandlerRealEngineTest extends TestCase
         $renderer = new DocumentRenderer(
             new DocumentBlockRepository($this->pdo),
             $this->settingsService,
-            $this->fakeRender
+            $this->fakeRender,
+            // #1186: the flowing renderer, so a document-mode template takes
+            // the road it needs instead of printing its unused canvas pages.
+            new FlowDocumentRenderer($this->settingsService, $this->fakeRender)
         );
         $documents = new DocumentRepository($this->pdo);
         $artifacts = new DocumentArtifactRepository($this->pdo);
@@ -303,6 +307,175 @@ final class DocumentRenderApiHandlerRealEngineTest extends TestCase
         self::assertSame(200, $res->getStatusCode());
         $blocks = $this->fakeRender->calls[0]['blocks'];
         self::assertArrayHasKey((string) $blockId, (array) $blocks);
+    }
+
+    /**
+     * NESTED blocks reach the payload too (#1186 slice 3).
+     *
+     * The resolution used to scan the TEMPLATE tree once. A block nested inside
+     * another block is referenced from the parent BLOCK'S data — somewhere that
+     * scan never looked — so its id never entered the map, the render harness
+     * looked it up, found nothing, and drew nothing. The PDF would have printed
+     * with a hole in it and no error raised anywhere along the way.
+     */
+    public function testNestedBlockReferencesAreResolvedTransitively(): void
+    {
+        $this->enableRendering();
+        $blockRepo = new DocumentBlockRepository($this->pdo);
+
+        $logoId = $blockRepo->create(self::TENANT, [
+            'name' => 'Logo',
+            'data' => [['id' => 'el1', 'type' => 'text', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'text' => 'ACME', 'style' => []]],
+        ]);
+        $headId = $blockRepo->create(self::TENANT, [
+            'name' => 'Letterhead',
+            'data' => [['id' => 'el2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $logoId]],
+        ]);
+
+        // The TEMPLATE names only the letterhead. The logo is reachable solely
+        // through it — which is exactly the case the single pass missed.
+        $data = $this->minimalTemplateData();
+        $data['pages'][0]['elements'] = [
+            ['id' => 'inst1', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $headId],
+        ];
+        $id = $this->createTemplate(self::OWNER, ['name' => 'Nested', 'data' => $data]);
+
+        self::assertSame(200, $this->render(self::OWNER, $id)->getStatusCode());
+
+        $blocks = (array) $this->fakeRender->calls[0]['blocks'];
+        self::assertArrayHasKey((string) $headId, $blocks);
+        self::assertArrayHasKey((string) $logoId, $blocks, 'the nested block must reach the render payload');
+    }
+
+    /**
+     * A library that contains a cycle must still render. Resolution visits each
+     * block once, so a malformed pointer costs a wrong-looking document rather
+     * than a request that never returns.
+     */
+    public function testACycleBetweenBlocksDoesNotHangTheRender(): void
+    {
+        $this->enableRendering();
+        $blockRepo = new DocumentBlockRepository($this->pdo);
+
+        $aId = $blockRepo->create(self::TENANT, ['name' => 'A', 'data' => []]);
+        $bId = $blockRepo->create(self::TENANT, [
+            'name' => 'B',
+            'data' => [['id' => 'el2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $aId]],
+        ]);
+        // Close the loop: A points back at B.
+        $blockRepo->update($aId, self::TENANT, [
+            'data' => [['id' => 'el1', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $bId]],
+        ]);
+
+        $data = $this->minimalTemplateData();
+        $data['pages'][0]['elements'] = [
+            ['id' => 'inst1', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $aId],
+        ];
+        $id = $this->createTemplate(self::OWNER, ['name' => 'Cyclic', 'data' => $data]);
+
+        self::assertSame(200, $this->render(self::OWNER, $id)->getStatusCode());
+
+        $blocks = (array) $this->fakeRender->calls[0]['blocks'];
+        self::assertArrayHasKey((string) $aId, $blocks);
+        self::assertArrayHasKey((string) $bId, $blocks);
+    }
+
+    // ── document mode: the flowing renderer (#1186) ──────────────────────────
+
+    /**
+     * THE FAILURE THIS BRANCH REMOVES.
+     *
+     * A template in document mode keeps its `pages` tree — both bodies live on
+     * the template so a mode switch is not destructive — and its content lives
+     * in `flow`. Before the branch existed, the render path measured `pages`
+     * and printed it: for a document built entirely in document mode, the blank
+     * starting page. The content was authored, saved, and printed as nothing,
+     * and no error was raised anywhere along the way.
+     */
+    public function testADocumentModeTemplateGoesToTheFlowingRenderer(): void
+    {
+        $this->enableRendering();
+
+        $data = $this->minimalTemplateData();
+        $data['mode'] = 'flow';
+        $data['flow'] = ['blocks' => [['type' => 'paragraph', 'text' => 'Printed at last']]];
+        $id = $this->createTemplate(self::OWNER, ['name' => 'Report', 'data' => $data]);
+
+        self::assertSame(200, $this->render(self::OWNER, $id)->getStatusCode());
+
+        // The FLOW endpoint, not the canvas one.
+        self::assertCount(1, $this->fakeRender->flowCalls);
+        $payload = $this->fakeRender->flowCalls[0];
+        // Field by field, NOT assertSame on the whole array. The template's
+        // `data` round-trips through the database, and on PostgreSQL that
+        // column is jsonb — which does not preserve key order, while SQLite's
+        // TEXT does. An identical-arrays assertion therefore passes on the
+        // default engine and fails on the real one, over a difference that
+        // means nothing: JSON object key order is not semantic.
+        self::assertCount(1, $payload['content']);
+        self::assertSame('paragraph', $payload['content'][0]['type']);
+        self::assertSame('Printed at last', $payload['content'][0]['text']);
+        // And nothing from the canvas body came with it.
+        self::assertArrayNotHasKey('template', $payload);
+    }
+
+    public function testACanvasTemplateStillGoesToTheCanvasRenderer(): void
+    {
+        $this->enableRendering();
+
+        $id = $this->createTemplate(self::OWNER, [
+            'name' => 'Label',
+            'data' => $this->minimalTemplateData(),
+        ]);
+
+        self::assertSame(200, $this->render(self::OWNER, $id)->getStatusCode());
+
+        // A template written before document mode existed carries no `mode` at
+        // all, and the whole existing library is that shape.
+        self::assertCount(0, $this->fakeRender->flowCalls);
+        self::assertArrayHasKey('template', $this->fakeRender->calls[0]);
+    }
+
+    /**
+     * An empty document-mode template is refused with a message about the
+     * DOCUMENT, not relayed from the service as a complaint about an array.
+     * It is the exact state a mode switch leaves behind, so people reach it.
+     */
+    public function testAnEmptyDocumentModeTemplateIsRefusedBeforeTheServiceIsCalled(): void
+    {
+        $this->enableRendering();
+
+        $data = $this->minimalTemplateData();
+        $data['mode'] = 'flow';
+        $data['flow'] = ['blocks' => []];
+        $id = $this->createTemplate(self::OWNER, ['name' => 'Empty', 'data' => $data]);
+
+        $res = $this->render(self::OWNER, $id);
+
+        self::assertSame(422, $res->getStatusCode());
+        self::assertCount(0, $this->fakeRender->calls, 'the service must not be paid for an empty document');
+    }
+
+    /**
+     * The page box carries over. The service's own margin default is
+     * 25/20/25/20, so a template whose author set 10 mm would be silently
+     * reflowed if this were left out.
+     */
+    public function testThePageBoxCarriesOverToTheFlowPayload(): void
+    {
+        $this->enableRendering();
+
+        $data = $this->minimalTemplateData();
+        $data['mode'] = 'flow';
+        $data['page'] = ['widthMm' => 148, 'heightMm' => 210, 'marginMm' => 12, 'background' => '#ffffff'];
+        $data['flow'] = ['blocks' => [['type' => 'paragraph', 'text' => 'x']]];
+        $id = $this->createTemplate(self::OWNER, ['name' => 'A5', 'data' => $data]);
+
+        self::assertSame(200, $this->render(self::OWNER, $id)->getStatusCode());
+
+        $page = $this->fakeRender->flowCalls[0]['page'];
+        self::assertSame(148.0, $page['widthMm']);
+        self::assertSame(12.0, $page['margin']['topMm']);
     }
 
     // ── batch limits ─────────────────────────────────────────────────────────

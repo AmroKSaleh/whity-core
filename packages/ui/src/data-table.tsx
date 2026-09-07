@@ -4,15 +4,32 @@ import * as React from "react"
 import {
   type ColumnDef,
   type ColumnFiltersState,
+  type ColumnVisibilityState,
   type PaginationState,
   type SortingState,
-  type VisibilityState,
+  columnFilteringFeature,
+  columnResizingFeature,
+  columnSizingFeature,
+  columnVisibilityFeature,
+  createCoreRowModel,
+  createFilteredRowModel,
+  createPaginatedRowModel,
+  createSortedRowModel,
+  filterFn_arrIncludes,
+  filterFn_equals,
+  filterFn_inDateRange,
+  filterFn_inNumberRange,
+  filterFn_includesString,
+  filterFn_weakEquals,
   flexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable,
+  globalFilteringFeature,
+  rowPaginationFeature,
+  rowSortingFeature,
+  sortFn_alphanumeric,
+  sortFn_basic,
+  sortFn_datetime,
+  sortFn_text,
+  useTable,
 } from "@tanstack/react-table"
 import {
   IconArrowsSort,
@@ -73,6 +90,76 @@ export interface DataTableServerPagination {
   /** Total row count across all pages — drives the "N entries" label. */
   total: number
   onPaginationChange: (pageIndex: number, pageSize: number) => void
+}
+
+/**
+ * Server-driven sorting: the caller owns the sort column and direction, we
+ * render the header affordances and call back. The same shape of bargain as
+ * {@link DataTableServerPagination}.
+ *
+ * WHY THIS HAS TO EXIST. Without it, a table in server-pagination mode still
+ * sorts CLIENT-side, and the registered `sortedRowModel` sorts THE ROWS IT WAS
+ * HANDED — the twenty five on screen. Clicking "Name" then reorders one page and
+ * presents the result as a sorted list; page 2 re-sorts a different twenty
+ * five. Nothing errors and nothing looks wrong, which is the whole problem:
+ * the reader has no way to tell a sorted list from a sorted page. Screens hit
+ * this already and worked around it by making their columns non-sortable and
+ * moving sort into their own toolbar (see the document library's
+ * `LibraryToolbar`), because the alternative was shipping the untruth.
+ */
+export interface DataTableServerSorting {
+  /** Column id currently sorted, or null for "no column chosen". */
+  sortKey: string | null
+  direction: "asc" | "desc"
+  /**
+   * Called with the NEXT sort when the user clicks a sortable header.
+   *
+   * `sortKey` is null when a column is cycled past descending back to
+   * unsorted (TanStack's default asc → desc → none cycle). `direction` is then
+   * not meaningful — send no `dir` upstream in that case, so the endpoint's own
+   * default ordering applies rather than one this component invented.
+   *
+   * Changing the sort invalidates the current page offset. Resetting to page 1
+   * is the caller's to do, since the caller owns the pagination state.
+   */
+  onSortingChange: (sortKey: string | null, direction: "asc" | "desc") => void
+}
+
+/**
+ * Quiet period before a keystroke becomes a request, in ms.
+ *
+ * Exported so a caller or a test can reach the default by name instead of
+ * re-stating the number, and overridable per table via
+ * {@link DataTableServerSearch.debounceMs} — typing "engineering" is twelve
+ * requests without it.
+ */
+export const DATA_TABLE_SEARCH_DEBOUNCE_MS = 300
+
+/**
+ * Server-driven global search: the caller owns the term, we own the input.
+ *
+ * Same hazard as {@link DataTableServerSorting}: a client-side global filter
+ * over a server-paginated table filters the current page, so a search that
+ * matches nothing on page 1 reports "no results" while the match sits on
+ * page 4.
+ */
+export interface DataTableServerSearch {
+  /**
+   * The term the caller has APPLIED. This is not necessarily what is in the
+   * box: the input keeps its own draft so typing stays responsive while the
+   * request is debounced. An external change to this value (a "clear search"
+   * button elsewhere on the page) is adopted into the box; the echo of our own
+   * callback is not, because adopting it would overwrite whatever was typed
+   * while the request was in flight.
+   */
+  value: string
+  onSearchChange: (value: string) => void
+  /**
+   * Quiet period after typing stops, in ms. Defaults to
+   * {@link DATA_TABLE_SEARCH_DEBOUNCE_MS}. Pass 0 to call back on every
+   * keystroke (the caller is debouncing, or a test wants determinism).
+   */
+  debounceMs?: number
 }
 
 export interface DataTableProps<TData> {
@@ -146,6 +233,23 @@ export interface DataTableProps<TData> {
    * controls and calls back, never re-slices `data` itself).
    */
   pagination?: DataTableServerPagination | { pageSize: number }
+  /**
+   * Omit to let this component sort the rows it holds (the default, and what
+   * every existing caller gets). Pass a {@link DataTableServerSorting} object
+   * when the SERVER sorts: the headers then reflect the caller's state and
+   * report clicks, and the rows are rendered in the order they arrived.
+   */
+  sorting?: DataTableServerSorting
+  /**
+   * Omit to let `enableGlobalFilter` filter the rows it holds. Pass a
+   * {@link DataTableServerSearch} object when the SERVER searches: the same
+   * search box renders (passing this implies it, `enableGlobalFilter` or not)
+   * and reports what is typed, and no row is filtered out locally.
+   *
+   * Per-column filters are deliberately LEFT ALONE by this — see the note on
+   * `manualFiltering` at the `useTable` call.
+   */
+  search?: DataTableServerSearch
   className?: string
 }
 
@@ -153,6 +257,91 @@ function isServerPagination(
   p: DataTableServerPagination | { pageSize: number }
 ): p is DataTableServerPagination {
   return "onPaginationChange" in p
+}
+
+/**
+ * The TanStack v9 feature set this table runs on.
+ *
+ * v9 REPLACED THE v8 `getXRowModel()` OPTIONS WITH EXPLICIT REGISTRATION. In v8
+ * a table got sorting because you passed `getSortedRowModel()`; in v9 it gets
+ * sorting because `rowSortingFeature` is registered here and the matching
+ * `sortedRowModel` factory sits beside it. Nothing is implicit, and a feature
+ * left out of this object does not merely go unused — its options and its slice
+ * of table state stop existing, and TypeScript says so at the call site.
+ *
+ * DECLARED AT MODULE SCOPE because the identity is read on every render and a
+ * fresh object each time would rebuild the table's feature registry for no
+ * reason. It carries no per-table state, so one shared value is correct.
+ *
+ * `columnMeta` is a TYPE-ONLY slot: the value is stripped at runtime and only
+ * its type is used, which is how `meta: { className }` on a column definition
+ * type-checks again. In v8 `meta` was loosely typed and ours assigned by luck;
+ * v9 threads `ExtractColumnMeta<TFeatures>` through, so the shape has to be
+ * declared once — here — rather than asserted at each of the 26 call sites.
+ */
+/**
+ * The feature set's own type, and the row type v9 will accept.
+ *
+ * v9 constrains table data to `RowData` (`Record<string, any> | Array<any>`).
+ * {@link DataTableProps} deliberately does NOT constrain `TData` — 26 call sites
+ * pass plain interfaces, and adding the constraint to the public prop would push
+ * this migration out into every one of them, which is exactly what this rewrite
+ * exists to avoid. So the bridge is here, once, and the props contract is
+ * unchanged.
+ */
+type TableFeatureSet = typeof tableFeatures
+type TableRow<TData> = TData & Record<string, unknown>
+
+const tableFeatures = {
+  columnFilteringFeature,
+  columnResizingFeature,
+  columnSizingFeature,
+  columnVisibilityFeature,
+  globalFilteringFeature,
+  rowPaginationFeature,
+  rowSortingFeature,
+  coreRowModel: createCoreRowModel(),
+  filteredRowModel: createFilteredRowModel(),
+  sortedRowModel: createSortedRowModel(),
+  // Client-side paging is still a supported v9 row model — `createPaginatedRowModel`
+  // is the rename of v8's `getPaginationRowModel`, not a removal. Registering it
+  // unconditionally is safe: with `manualPagination` on, the server owns the
+  // slice and this model is never consulted.
+  paginatedRowModel: createPaginatedRowModel(),
+  /**
+   * THE FILTER AND SORT FUNCTIONS THE AUTO-RESOLVER CAN ASK FOR.
+   *
+   * v9 resolves an unconfigured column to a filter/sort function BY NAME and
+   * looks that name up here. The two halves fail differently, and both quietly:
+   *
+   *  - an unregistered FILTER function returns `undefined`, and the column
+   *    filter becomes a no-op. Typing in the filter box narrows nothing.
+   *  - an unregistered SORT function falls back to `sortFn_basic`, so the
+   *    column still sorts — just wrongly. `basic` compares with `<`, so
+   *    "item 10" lands before "item 2" and case is handled differently from
+   *    the `text`/`alphanumeric` functions v8 chose automatically.
+   *
+   * Neither raises anything outside a development console warning, which is why
+   * these are listed explicitly rather than left to a default that no longer
+   * exists. The six filter functions are exactly the ones the auto-resolver can
+   * pick (string / number / boolean / array / date / fallback); registering the
+   * whole exported registry instead would put every built-in in the bundle.
+   */
+  filterFns: {
+    arrIncludes: filterFn_arrIncludes,
+    equals: filterFn_equals,
+    inDateRange: filterFn_inDateRange,
+    inNumberRange: filterFn_inNumberRange,
+    includesString: filterFn_includesString,
+    weakEquals: filterFn_weakEquals,
+  },
+  sortFns: {
+    alphanumeric: sortFn_alphanumeric,
+    basic: sortFn_basic,
+    datetime: sortFn_datetime,
+    text: sortFn_text,
+  },
+  columnMeta: {} as { className?: string },
 }
 
 export function DataTable<TData>({
@@ -175,21 +364,92 @@ export function DataTable<TData>({
   enableColumnVisibility = false,
   enableColumnResizing = false,
   pagination,
+  sorting: serverSorting,
+  search: serverSearch,
   className,
 }: DataTableProps<TData>) {
-  const [sorting, setSorting] = React.useState<SortingState>([])
+  const [clientSorting, setClientSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
   const [globalFilter, setGlobalFilter] = React.useState("")
-  const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
+  const [columnVisibility, setColumnVisibility] = React.useState<ColumnVisibilityState>({})
 
   const serverMode = pagination != null && isServerPagination(pagination)
+
+  /**
+   * The caller's sort, in the shape TanStack keeps it in. One column at a
+   * time: the server contract this pairs with takes a single `sort` key, so
+   * offering multi-sort in the UI would promise an ordering the request cannot
+   * express.
+   */
+  const sortingState: SortingState = serverSorting
+    ? serverSorting.sortKey
+      ? [{ id: serverSorting.sortKey, desc: serverSorting.direction === "desc" }]
+      : []
+    : clientSorting
   const [clientPagination, setClientPagination] = React.useState<PaginationState>({
     pageIndex: 0,
     pageSize: pagination && !serverMode ? pagination.pageSize : 10,
   })
 
-  const columnDefs = React.useMemo<ColumnDef<TData, unknown>[]>(() => {
-    const defs: ColumnDef<TData, unknown>[] = columns.map((column) => {
+  // What is TYPED, which is not what has been SENT. The box must stay
+  // responsive while the request is debounced, so it renders this draft rather
+  // than `serverSearch.value`; a controlled input bound straight to a value
+  // that only updates after the round trip drops characters typed in between.
+  const appliedSearch = serverSearch?.value ?? ""
+  const [searchDraft, setSearchDraft] = React.useState(appliedSearch)
+  const searchTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The last term we handed to `onSearchChange`. When the caller sets `value`
+  // to exactly this, it is the ECHO of our own callback, not somebody else
+  // changing the search, and adopting it would clobber the characters typed
+  // between the timer firing and the caller re-rendering.
+  const lastEmittedSearch = React.useRef<string | null>(null)
+
+  const clearSearchTimer = () => {
+    if (searchTimer.current !== null) {
+      clearTimeout(searchTimer.current)
+      searchTimer.current = null
+    }
+  }
+
+  React.useEffect(() => {
+    if (lastEmittedSearch.current === appliedSearch) return
+    lastEmittedSearch.current = null
+    // An external change wins over anything still pending — a "clear search"
+    // button elsewhere on the page must not be undone a moment later by a
+    // timer carrying the term it just cleared.
+    clearSearchTimer()
+    setSearchDraft(appliedSearch)
+  }, [appliedSearch])
+
+  // A pending timer outliving the component would call back into an unmounted
+  // caller. Cancelling on unmount is the whole of it.
+  React.useEffect(() => clearSearchTimer, [])
+
+  const handleSearchInput = (next: string) => {
+    if (!serverSearch) {
+      setGlobalFilter(next)
+      return
+    }
+    setSearchDraft(next)
+    clearSearchTimer()
+    const delay = serverSearch.debounceMs ?? DATA_TABLE_SEARCH_DEBOUNCE_MS
+    if (delay <= 0) {
+      lastEmittedSearch.current = next
+      serverSearch.onSearchChange(next)
+      return
+    }
+    searchTimer.current = setTimeout(() => {
+      searchTimer.current = null
+      lastEmittedSearch.current = next
+      serverSearch.onSearchChange(next)
+    }, delay)
+  }
+
+  /** Passing `search` implies the search box, whether or not the flag is set. */
+  const showSearchInput = enableGlobalFilter || serverSearch != null
+
+  const columnDefs = React.useMemo<ColumnDef<TableFeatureSet, TableRow<TData>, unknown>[]>(() => {
+    const defs: ColumnDef<TableFeatureSet, TableRow<TData>, unknown>[] = columns.map((column) => {
       const id = column.id ?? column.accessorKey
       if (!id) {
         throw new Error("DataTable: every column needs an `id` or `accessorKey`")
@@ -230,24 +490,50 @@ export function DataTable<TData>({
     return defs
   }, [columns, rowActions, rowActionsLabel])
 
-  const table = useReactTable({
-    data,
+  const table = useTable<TableFeatureSet, TableRow<TData>>({
+    features: tableFeatures,
+    data: data as TableRow<TData>[],
     columns: columnDefs,
     getRowId: getRowId
       ? (row, index) => getRowId(row, index)
       : undefined,
     state: {
-      sorting,
+      sorting: sortingState,
       columnFilters,
-      globalFilter: enableGlobalFilter ? globalFilter : undefined,
+      // In server-search mode the term never enters table state, so there is
+      // nothing here for TanStack to filter by. See `manualFiltering` below.
+      globalFilter: enableGlobalFilter && !serverSearch ? globalFilter : undefined,
       columnVisibility,
+      // NO PAGINATION MEANS ONE PAGE OF EVERYTHING, SAID EXPLICITLY.
+      //
+      // In v8 a table without pagination simply had no paginated row model, so
+      // `getRowModel()` returned every row. In v9 the row model is registered
+      // on the feature set for the whole component, so it applies here too and
+      // an omitted `pagination` state falls back to the library default of ten
+      // rows — silently hiding row 11 onward on every unpaginated table.
+      //
+      // `pageSize: Infinity` with `pageIndex: 0` is the documented escape:
+      // `createPaginatedRowModel` skips slicing entirely for exactly that pair.
+      // (`manualPagination` does NOT do this — that model never consults it.)
       pagination: serverMode
         ? { pageIndex: pagination.pageIndex, pageSize: pagination.pageSize }
         : pagination
           ? clientPagination
-          : undefined,
+          : { pageIndex: 0, pageSize: Number.POSITIVE_INFINITY },
     },
-    onSortingChange: setSorting,
+    onSortingChange: serverSorting
+      ? (updater) => {
+          const next = typeof updater === "function" ? updater(sortingState) : updater
+          // Single-column, so the head of the list IS the sort. An empty list
+          // is the third click of asc → desc → none: no column chosen, and the
+          // direction that goes with it is not meaningful — see the prop docs.
+          const [next0] = next
+          serverSorting.onSortingChange(
+            next0 ? next0.id : null,
+            next0?.desc ? "desc" : "asc"
+          )
+        }
+      : setClientSorting,
     onColumnFiltersChange: setColumnFilters,
     onGlobalFilterChange: setGlobalFilter,
     onColumnVisibilityChange: setColumnVisibility,
@@ -261,13 +547,48 @@ export function DataTable<TData>({
         }
       : setClientPagination,
     manualPagination: serverMode,
+    /**
+     * THIS is what stops the reordering, not the absence of a row model.
+     *
+     * `sortedRowModel` stays registered on the module-scope `tableFeatures` —
+     * it is shared by every table this component renders, so it cannot be
+     * withheld per-instance the way v8's per-call `getSortedRowModel()` could.
+     * The flag is the per-instance control: v9 gates the pipeline in
+     * `table_getSortedRowModel` (`core/row-models/coreRowModelsFeature.utils.js`,
+     * table-core 9.2.4), which returns the PRE-sorted model when
+     * `manualSorting` is set and never consults the comparator.
+     *
+     * Drop this flag and the headers keep working and the callback keeps
+     * firing, and the rows ALSO get re-sorted locally on top of the server's
+     * order — a sort that is nearly right, which is the hardest kind to notice.
+     */
+    manualSorting: serverSorting != null,
+    /*
+     * NO `manualFiltering`, deliberately, and it is not an oversight.
+     *
+     * Re-checked against v9, because v9 splits `columnFilteringFeature` and
+     * `globalFilteringFeature` into separate features and the split looks like
+     * it should have brought a global-only flag with it. It did not.
+     * `manualFiltering` is still the only one, it is still declared on
+     * `columnFilteringFeature`, and `globalFilteringFeature` has no manual
+     * option at all. The gate is one stage of the shared row-model pipeline —
+     * `table_getFilteredRowModel`, documented as "the row model after column
+     * AND global filtering" — so setting the flag would take the per-column
+     * filter inputs down with the global one, exactly as in v8. Those are used
+     * by around eighteen columns across the admin screens, the users table
+     * included — the first screen expected to adopt server search — and they
+     * would keep rendering and keep accepting text while filtering nothing.
+     *
+     * Keeping the search term out of `state.globalFilter` (above) achieves what
+     * the flag would have achieved for search, and nothing more:
+     * `createFilteredRowModel` treats `undefined` as "no global filter" and
+     * applies none, while column filters go on working client-side.
+     * Server-side column filters are a contract that does not exist yet; when
+     * it does, this is where it lands.
+     */
     pageCount: serverMode ? pagination.pageCount : undefined,
     columnResizeMode: "onChange",
     enableColumnResizing,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: pagination && !serverMode ? getPaginationRowModel() : undefined,
   })
 
   if (overrideContent) {
@@ -285,7 +606,23 @@ export function DataTable<TData>({
     const visibleCount = table.getVisibleLeafColumns().length
     return (
       <div className={cn("rounded-lg border border-border", className)}>
-        <Table aria-label={ariaLabel}>
+        {/* `aria-busy` marks this as the PLACEHOLDER, not the data.
+            It carries the same `aria-label` as the real table — deliberately,
+            so assistive technology names the region consistently while it
+            loads — and the consequence is that `getByRole('table', {name})`
+            matches this skeleton exactly as it matches a populated table. A
+            test written against that selector can be satisfied by five rows of
+            grey bars: it passes when the data arrived, when the folder is
+            empty and the assertion merely won the race, and when the request
+            failed and the retry is in flight. One shipped that way (#1006's
+            "the pane is never simply blank" asserted `toBeVisible()` and
+            `not.toBeEmpty()` and both were true of THIS markup), passed
+            locally, and failed in CI on the one stack where the fetch resolved
+            first — which is the only run that was telling the truth.
+            `aria-busy` is the standard signal for it and is additive, so no
+            existing selector changes. Prefer waiting on a terminal state
+            (a row, or the empty state's own text) over waiting on the table. */}
+        <Table aria-label={ariaLabel} aria-busy="true">
           <TableHeader>
             <TableRow>
               {columns.map((column, index) => (
@@ -319,14 +656,14 @@ export function DataTable<TData>({
 
   return (
     <div className={cn("flex flex-col gap-3", className)}>
-      {(enableGlobalFilter || enableColumnVisibility) && (
+      {(showSearchInput || enableColumnVisibility) && (
         <div className="flex items-center justify-between gap-2">
-          {enableGlobalFilter ? (
+          {showSearchInput ? (
             <div className="relative w-full max-w-xs">
               <IconSearch className="pointer-events-none absolute start-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
-                value={globalFilter}
-                onChange={(event) => setGlobalFilter(event.target.value)}
+                value={serverSearch ? searchDraft : globalFilter}
+                onChange={(event) => handleSearchInput(event.target.value)}
                 placeholder={globalFilterPlaceholder}
                 className="ps-7"
               />
@@ -374,37 +711,125 @@ export function DataTable<TData>({
             <TableHeader>
               {table.getHeaderGroups().map((headerGroup) => (
                 <TableRow key={headerGroup.id}>
-                  {headerGroup.headers.map((header) => (
-                    <TableHead
-                      key={header.id}
-                      style={
-                        enableColumnResizing ? { width: header.getSize(), position: "relative" } : undefined
-                      }
-                      className={cn(
-                        header.column.getCanSort() && "cursor-pointer select-none hover:bg-muted/60"
-                      )}
-                      onClick={header.column.getToggleSortingHandler()}
-                    >
-                      <div className="flex items-center gap-1">
+                  {headerGroup.headers.map((header) => {
+                    const canSort = header.column.getCanSort()
+                    const sorted = header.column.getIsSorted()
+                    const content = (
+                      <>
                         {flexRender(header.column.columnDef.header, header.getContext())}
-                        {header.column.getCanSort() &&
-                          (header.column.getIsSorted() === "asc" ? (
+                        {canSort &&
+                          (sorted === "asc" ? (
                             <IconChevronUp className="size-3.5" />
-                          ) : header.column.getIsSorted() === "desc" ? (
+                          ) : sorted === "desc" ? (
                             <IconChevronDown className="size-3.5" />
                           ) : (
                             <IconArrowsSort className="size-3.5 opacity-40" />
                           ))}
-                      </div>
-                      {enableColumnResizing && header.column.getCanResize() && (
-                        <div
-                          onMouseDown={header.getResizeHandler()}
-                          onTouchStart={header.getResizeHandler()}
-                          className="absolute end-0 top-0 h-full w-1 cursor-col-resize touch-none select-none bg-border/0 hover:bg-ring/50"
-                        />
-                      )}
-                    </TableHead>
-                  ))}
+                      </>
+                    )
+                    return (
+                      <TableHead
+                        key={header.id}
+                        style={
+                          enableColumnResizing ? { width: header.getSize(), position: "relative" } : undefined
+                        }
+                        className={cn(
+                          canSort && "cursor-pointer select-none hover:bg-muted/60"
+                        )}
+                        /**
+                         * WHICH COLUMN IS SORTED, SAID OUT LOUD.
+                         *
+                         * Read straight off `getIsSorted()`, which is fed by
+                         * `state.sorting` — and `sortingState` above resolves that
+                         * from `serverSorting` when the caller owns the sort and from
+                         * `clientSorting` when this component does. One expression
+                         * therefore covers BOTH modes; deriving it from
+                         * `clientSorting` instead would have left every
+                         * server-sorted table (the ones where the header is the only
+                         * route to rows on another page) announcing "not sorted"
+                         * while visibly sorted.
+                         *
+                         * Only on columns that can sort. `aria-sort="none"` on a
+                         * fixed column would advertise a control that is not there.
+                         */
+                        aria-sort={
+                          canSort
+                            ? sorted === "asc"
+                              ? "ascending"
+                              : sorted === "desc"
+                                ? "descending"
+                                : "none"
+                            : undefined
+                        }
+                        /**
+                         * THE HANDLER STAYS ON THE CELL — the button below has none,
+                         * deliberately.
+                         *
+                         * A `<button>` activated by Enter or Space dispatches a real
+                         * `click` that bubbles, so keyboard activation lands on this
+                         * exact handler and does exactly what a mouse click does,
+                         * third-click-back-to-unsorted included. Duplicating the
+                         * handler onto the button instead would fire it twice for
+                         * one mouse click (button, then bubbled to the cell).
+                         *
+                         * Keeping it here also keeps the WHOLE CELL a click target
+                         * rather than shrinking it to the label, which is both the
+                         * behaviour 26 callers already have and what every existing
+                         * test that clicks `getByRole('columnheader')` exercises.
+                         */
+                        onClick={header.column.getToggleSortingHandler()}
+                      >
+                        {canSort ? (
+                          /**
+                           * The focusable, activatable control the cell itself could
+                           * never be (#1129). A `th` takes no keyboard focus and has
+                           * no activation behaviour, so before this a keyboard user
+                           * could not sort ANY admin table at all.
+                           *
+                           * Inside the cell rather than instead of it, matching the
+                           * W3C APG sortable-table pattern: the `th` keeps its
+                           * `columnheader` role and carries `aria-sort`, the button
+                           * carries focus and activation.
+                           *
+                           * NO `aria-label`. It is tempting to name this "Sort by
+                           * Email", but a `columnheader`'s name is computed from its
+                           * contents and an `aria-label` on a descendant REPLACES
+                           * that descendant's contribution — so the cell would stop
+                           * being named "Email" and every
+                           * `getByRole('columnheader', { name })` selector across the
+                           * suites would be asserting against a name no user asked
+                           * for. `aria-sort` already carries the state; the role
+                           * carries the affordance.
+                           *
+                           * `cursor-pointer` is not redundant: Tailwind v4's preflight
+                           * resets buttons to `cursor: default`, which would undo the
+                           * pointer cursor the cell sets.
+                           *
+                           * RTL: `flex` + `gap` + `text-start` are direction-relative,
+                           * so the label leads and the chevron trails on whichever
+                           * side "trailing" means, and the symmetric `-mx-1 px-1`
+                           * has no side to get wrong. The three icons are vertical
+                           * arrows — nothing to mirror.
+                           */
+                          <button
+                            type="button"
+                            className="-mx-1 flex cursor-pointer items-center gap-1 rounded-sm px-1 text-start font-medium tracking-wider text-inherit uppercase outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                          >
+                            {content}
+                          </button>
+                        ) : (
+                          <div className="flex items-center gap-1">{content}</div>
+                        )}
+                        {enableColumnResizing && header.column.getCanResize() && (
+                          <div
+                            onMouseDown={header.getResizeHandler()}
+                            onTouchStart={header.getResizeHandler()}
+                            className="absolute end-0 top-0 h-full w-1 cursor-col-resize touch-none select-none bg-border/0 hover:bg-ring/50"
+                          />
+                        )}
+                      </TableHead>
+                    )
+                  })}
                 </TableRow>
               ))}
               {filterableColumns.length > 0 && (
@@ -455,8 +880,8 @@ export function DataTable<TData>({
 
       {pagination && rows.length > 0 && (
         <Pagination
-          page={table.getState().pagination.pageIndex + 1}
-          perPage={table.getState().pagination.pageSize}
+          page={table.state.pagination.pageIndex + 1}
+          perPage={table.state.pagination.pageSize}
           total={serverMode ? pagination.total : table.getFilteredRowModel().rows.length}
           onPageChange={(nextPage) => table.setPageIndex(nextPage - 1)}
           {...paginationLabels}
@@ -464,4 +889,195 @@ export function DataTable<TData>({
       )}
     </div>
   )
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * The CALLER's half of server mode
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * One list request's page, sort and search — the client mirror of the server's
+ * `ListQuery` (`src/Http/ListQuery.php`).
+ *
+ * `sort`/`dir` and `q` are OPTIONAL, and their absence is meaningful rather than
+ * a default nobody filled in. Sending `sort=` with nothing in it, or `dir=asc`
+ * with no column, would have the endpoint order by something the UI invented;
+ * leaving them out is how a caller says "use your own default order", which is
+ * the only honest thing to say when no column is chosen.
+ */
+export interface DataTableQueryRequest {
+  /** 1-based, the way the endpoints count pages. */
+  page: number
+  perPage: number
+  /** The ENDPOINT's sort key (not the column id) — absent when none is chosen. */
+  sort?: string
+  /** Absent exactly when `sort` is. */
+  dir?: "asc" | "desc"
+  /** Absent when there is nothing to search for. */
+  q?: string
+}
+
+/**
+ * A {@link DataTableQueryRequest} as a query string, no leading `?`.
+ *
+ * Written here rather than at each screen so the "absent means absent" rule
+ * above is applied once: a helper that always set `sort` and `dir` would undo
+ * the whole point of making them optional.
+ */
+export function dataTableQueryString(request: DataTableQueryRequest): string {
+  const params = new URLSearchParams()
+  params.set("page", String(request.page))
+  params.set("per_page", String(request.perPage))
+  if (request.sort !== undefined && request.sort !== "") {
+    params.set("sort", request.sort)
+    params.set("dir", request.dir ?? "asc")
+  }
+  if (request.q !== undefined && request.q !== "") {
+    params.set("q", request.q)
+  }
+  return params.toString()
+}
+
+/** Rows per page for a server-driven admin list, matching the API's own default. */
+export const DEFAULT_DATA_TABLE_PER_PAGE = 25
+
+export interface UseDataTableQueryOptions {
+  /** Rows per request. Defaults to {@link DEFAULT_DATA_TABLE_PER_PAGE}. */
+  perPage?: number
+  /**
+   * The COLUMN ID the table starts sorted by. Omit — the default — to start
+   * with no column chosen, so the first request carries no `sort` and the
+   * reader gets the endpoint's own default ordering. Naming one here just to
+   * restate that default would be a claim the UI cannot keep if the endpoint's
+   * default ever moves.
+   */
+  initialSortKey?: string | null
+  initialDirection?: "asc" | "desc"
+  /**
+   * Column id → the endpoint's `sort` key, for the columns whose names differ.
+   * Identity for anything absent, which is why this holds the RENAMES only.
+   *
+   * The two vocabularies are genuinely separate. A column id is whatever the
+   * screen called it (`accountStatus`, `createdAt`, `ruleLabel`); the sort key
+   * is whatever that endpoint's `ListSpec` declared (`status`, `created`,
+   * `rule`). Getting it wrong is an error nowhere: `ListQuery` reads an unknown
+   * key as "no sort was asked for" and falls back to the endpoint's default, so
+   * the column would look sortable, respond to clicks, and quietly reorder
+   * nothing. Only mark a column `enableSorting` when that endpoint's spec
+   * actually offers the key it maps to.
+   */
+  sortKeys?: Record<string, string>
+  /** Forwarded to {@link DataTableServerSearch.debounceMs}. */
+  searchDebounceMs?: number
+}
+
+/**
+ * The page/sort/search state of ONE server-driven table, plus the three props
+ * {@link DataTable} needs to render it.
+ */
+export interface DataTableQuery {
+  /** What to ask the endpoint for. Thread it through EVERY request. */
+  request: DataTableQueryRequest
+  /** 1-based current page, for a caller that needs it outside `request`. */
+  page: number
+  setPage: (page: number) => void
+  /** Hand straight to `<DataTable sorting={…}>`. */
+  sorting: DataTableServerSorting
+  /** Hand straight to `<DataTable search={…}>`. */
+  search: DataTableServerSearch
+  /** Build `<DataTable pagination={…}>` once the response's totals are known. */
+  pagination: (meta: { total: number; totalPages: number }) => DataTableServerPagination
+}
+
+/**
+ * Hold a server-driven table's page, sort and search in one place.
+ *
+ * WHY A HOOK RATHER THAN THREE `useState` CALLS PER SCREEN. Changing the sort or
+ * the search term invalidates the current page offset, and resetting to page 1
+ * is the CALLER's job because the caller owns the pagination state (see
+ * {@link DataTableServerSorting.onSortingChange}). Written out per screen that
+ * reset is one line every screen has to remember, and nothing notices its
+ * absence until somebody on page 7 searches for a term with three matches and
+ * gets an empty table with nothing on screen explaining it. Here it is written
+ * once and cannot be forgotten.
+ *
+ * It also owns the rule that is easiest to get subtly wrong: a `sortKey` of null
+ * — the third click of asc → desc → none — must send NO `sort` and NO `dir`, so
+ * the endpoint applies its own default ordering rather than one this component
+ * made up.
+ *
+ * Debouncing is NOT here: {@link DataTableServerSearch} already debounces the
+ * input, and a second timer on top would make the table lag a keystroke behind
+ * for no benefit at all.
+ *
+ * ```tsx
+ * const query = useDataTableQuery({ sortKeys: { accountStatus: 'status' } })
+ * const queryString = dataTableQueryString(query.request)
+ * const { data } = useFetch(() => fetchUsers(queryString), [queryString])
+ * <DataTable
+ *   sorting={query.sorting}
+ *   search={query.search}
+ *   pagination={query.pagination({ total, totalPages })}
+ * />
+ * ```
+ */
+export function useDataTableQuery({
+  perPage: initialPerPage = DEFAULT_DATA_TABLE_PER_PAGE,
+  initialSortKey = null,
+  initialDirection = "asc",
+  sortKeys,
+  searchDebounceMs,
+}: UseDataTableQueryOptions = {}): DataTableQuery {
+  const [page, setPage] = React.useState(1)
+  const [perPage, setPerPage] = React.useState(initialPerPage)
+  const [sortKey, setSortKey] = React.useState<string | null>(initialSortKey)
+  const [direction, setDirection] = React.useState<"asc" | "desc">(initialDirection)
+  const [search, setSearch] = React.useState("")
+
+  const endpointSort = sortKey === null ? undefined : (sortKeys?.[sortKey] ?? sortKey)
+
+  const request: DataTableQueryRequest = {
+    page,
+    perPage,
+    ...(endpointSort === undefined ? {} : { sort: endpointSort, dir: direction }),
+    ...(search === "" ? {} : { q: search }),
+  }
+
+  return {
+    request,
+    page,
+    setPage,
+    sorting: {
+      sortKey,
+      direction,
+      onSortingChange: (nextSortKey, nextDirection) => {
+        setSortKey(nextSortKey)
+        setDirection(nextDirection)
+        // The reset this hook exists for. Page 7 of the old ordering is not
+        // page 7 of the new one — it is an arbitrary window into a different
+        // list.
+        setPage(1)
+      },
+    },
+    search: {
+      value: search,
+      debounceMs: searchDebounceMs,
+      onSearchChange: (next) => {
+        setSearch(next)
+        // Same reason, more visibly: a search that narrows the list to three
+        // rows has no page 7 at all, so staying there renders an empty table.
+        setPage(1)
+      },
+    },
+    pagination: ({ total, totalPages }) => ({
+      pageIndex: page - 1,
+      pageSize: perPage,
+      pageCount: totalPages,
+      total,
+      onPaginationChange: (nextPageIndex, nextPageSize) => {
+        setPage(nextPageIndex + 1)
+        setPerPage(nextPageSize)
+      },
+    }),
+  }
 }

@@ -111,6 +111,26 @@ describe('createDocumentDesignerAdapter — templates', () => {
     expect(id).toBe('7');
   });
 
+  // The web twin of this pair lives in web/__tests__/documents-storage.test.ts.
+  // Both clients must agree, because both talk to the same handler, where a
+  // missing scope means "default to personal" on create and "leave it alone" on
+  // update.
+  it('sends a stated scope on create', async () => {
+    const { transport, calls } = fakeTransport(ok({ data: { id: 7 } }));
+
+    await createDocumentDesignerAdapter(transport).saveTemplate(V2_TEMPLATE, undefined, 'tenant');
+
+    expect(calls[0].body).toEqual({ name: 'Invoice', data: V2_TEMPLATE, scope: 'tenant' });
+  });
+
+  it('never sends scope on update, whatever the caller passes', async () => {
+    const { transport, calls } = fakeTransport(ok({ data: { id: 7 } }));
+
+    await createDocumentDesignerAdapter(transport).saveTemplate(V2_TEMPLATE, '7', 'global');
+
+    expect(calls[0].body).toEqual({ name: 'Invoice', data: V2_TEMPLATE });
+  });
+
   it('deletes by id', async () => {
     const { transport, calls } = fakeTransport(ok(null));
 

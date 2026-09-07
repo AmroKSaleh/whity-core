@@ -39,8 +39,11 @@ Three commands, in this order:
 ```bash
 php bin/whity-cli i18n:extract          # source  → database/i18n/<domain>.json
 php bin/whity-cli i18n:extract --check  # verify only (what CI runs)
-php bin/whity-cli i18n:sync             # catalogue → the translations table
+php bin/whity-cli i18n:sync             # catalogue → the translations table (English)
 php bin/whity-cli i18n:sync --dry-run   # report what it would insert
+php bin/whity-cli i18n:sync --language=ar   # database/i18n/ar/ → the same table
+php bin/whity-cli i18n:sync --all       # English and every committed language
+php bin/whity-cli i18n:coverage         # per-domain translated/missing, no database
 ```
 
 Nothing ever flows backwards. The catalogue is a **mirror** of the code — a key
@@ -180,16 +183,43 @@ These files are small and the declaration is right there in the diff.
 
 ---
 
-## English is seeded. Other languages are not.
+## English is generated. Other languages are written by hand.
 
-`i18n:sync` writes **English and nothing else**. It does not machine-translate,
-and it does not copy English into another language's rows.
+`i18n:sync` never machine-translates, and it never copies English into another
+language's rows. That has not changed and must not: a row containing English
+text but claiming to be Arabic is indistinguishable from a finished translation
+— to the coverage report, to the console, and to the reviewer deciding what is
+left. An untranslated key must be *visibly* untranslated, which means having no
+row at all.
 
-This is the point, not a limitation. A row that contains English text but claims
-to be Arabic is indistinguishable from a finished translation — to the coverage
-report, to the console, and to the reviewer who has to decide what still needs
-doing. An untranslated key must be *visibly* untranslated, which means having no
-row at all, so it shows up as missing.
+What HAS changed is where a translation lives before it reaches the database.
+
+```
+database/i18n/<domain>.json        English. GENERATED from t() call sites.
+                                   Never hand-edited. CI fails if it drifts.
+
+database/i18n/<code>/<domain>.json Everything else. HAND-WRITTEN.
+                                   Never generated. Partial by design.
+```
+
+Until that second path existed, English was the only language that **shipped**.
+The catalogue carried English into the release image and `i18n:sync` seeded it;
+Arabic was expected to be typed into `/admin/translations` by a human, per
+deployment, after install. The predictable result was that every deployment
+started English-only and stayed that way, and six of the seven domains had no
+Arabic at all — not because nobody would write it, but because there was
+nowhere to **commit** it. A translation that cannot be committed cannot be
+reviewed, cannot ship in the image, and does not survive a database rebuild.
+
+Locale catalogues live one directory DOWN rather than beside the English, and
+that is load-bearing: `TranslationCatalog::write()` mirrors the source and
+therefore *prunes files it did not expect*. `is_file()` is what makes `ar/`
+invisible to the generated half of the pipeline, so one ordinary `i18n:extract`
+cannot delete every translation anyone has ever written. A unit test pins it.
+
+Migration `121_seed_translation_catalogues` seeds every committed catalogue at
+`migrate run`, because that is the one step every install performs and nothing
+ever ran `i18n:sync` on its own.
 
 The runtime is already built for this: the fallback chain resolves
 tenant override → system default → English → the caller's fallback → the key, so
@@ -277,6 +307,38 @@ source text, so the guarantee is structural rather than a promise about a
 
 ---
 
+## What the CI gate refuses, and what it only counts
+
+`scripts/ci-i18n-catalog-drift.php` guards both halves, but it cannot ask the
+same question of each. English is a projection of the code, so the only
+meaningful question is whether the projection is current. A hand-written
+language has nothing to regenerate from, and its honest answer to "is it
+complete?" is usually *no* — English gains a key the instant a developer writes
+one, and the translation follows in a later PR.
+
+So it **fails** on what is decidable:
+
+| failure | why it is a failure and not a warning |
+|---|---|
+| catalogue drift | the English file no longer matches the `t()` calls that produce it |
+| an unreadable key | a computed key no scanner can enumerate, with no `@i18n-keys` block and no recorded reason |
+| an **orphan** | a key translated in `ar/` that English no longer has. This is what a rename leaves behind, and it is the one failure that *looks like progress*: the file gets longer, the coverage percentage goes **up**, and the screen stays English |
+| an **empty** translation | renders as an empty string — it does **not** fall back to English, so it is strictly worse than leaving the key out |
+| a non-canonical locale file | unsorted or reformatted, which buries the next real change in noise |
+
+and it **reports, never fails,** on missing keys. A gate demanding every
+language be complete would mean no English string could be added without a
+translator in the same PR, and the practical effect of that rule is that people
+stop calling `t()` at all.
+
+`whity-cli i18n:coverage` prints the same per-domain numbers from files alone —
+no database, so it runs in CI, in a container, and on a laptop with the stack
+down. That matters more than it sounds: the reason six domains had no Arabic for
+as long as they did is that the gap was not a number anybody could see.
+"Translate everything" has no finish line; `documents 0/508` has one.
+
+---
+
 ## Files
 
 | path | what it is |
@@ -284,9 +346,11 @@ source text, so the guarantee is structural rather than a promise about a
 | `src/Core/i18n/TranslationKeyExtractor.php` | the scanner: source → keys, and the diagnostics for what it cannot see |
 | `src/Core/i18n/TranslationCatalog.php` | the committed catalogue: read, write, diff |
 | `src/Core/i18n/TranslationSync.php` | catalogue → database, insert-only |
-| `src/Cli/Commands/I18nCommand.php` | `i18n:extract`, `i18n:sync` |
+| `src/Cli/Commands/I18nCommand.php` | `i18n:extract`, `i18n:sync`, `i18n:coverage` |
 | `scripts/ci-i18n-catalog-drift.php` | the CI gate |
-| `database/i18n/*.json` | the catalogue itself — generated, committed, never hand-edited |
+| `database/i18n/*.json` | the English catalogue — generated, committed, never hand-edited |
+| `database/i18n/<code>/*.json` | one language each — hand-written, committed, never generated |
+| `database/migrations/121_seed_translation_catalogues.php` | seeds every committed catalogue at `migrate run` |
 | `packages/features/src/i18n/` | the React side: `useTranslation`, the provider, direction |
 | `docs/wiki/Internationalization.md` | this page |
 

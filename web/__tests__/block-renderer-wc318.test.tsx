@@ -75,7 +75,7 @@ describe('#325 — FormBlock dataSource', () => {
 
   it('pre-populates fields from GET response on mount', async () => {
     mockApiClient.mockResolvedValueOnce(
-      stubResponse(true, 200, { api_key: 'secret-key', site_name: 'Acme Corp' })
+      stubResponse(true, 200, { data: { api_key: 'secret-key', site_name: 'Acme Corp' } })
     );
 
     renderWrapped(<BlockRenderer blocks={[makeFormWithDataSource()]} />);
@@ -117,7 +117,7 @@ describe('#325 — FormBlock dataSource', () => {
   it('pre-populated value is sent unchanged in submit payload when not edited', async () => {
     mockApiClient
       .mockResolvedValueOnce(
-        stubResponse(true, 200, { api_key: 'my-key', site_name: 'Acme' })
+        stubResponse(true, 200, { data: { api_key: 'my-key', site_name: 'Acme' } })
       )
       .mockResolvedValueOnce(stubResponse(true, 200, {}));
 
@@ -211,7 +211,7 @@ describe('#323 — textInput sensitive: true', () => {
 
   it('when dataSource returns the sentinel, field displays sentinel', async () => {
     mockApiClient.mockResolvedValueOnce(
-      stubResponse(true, 200, { api_key: SENTINEL })
+      stubResponse(true, 200, { data: { api_key: SENTINEL } })
     );
 
     renderWrapped(<BlockRenderer blocks={[makeSensitiveFormWithDataSource()]} />);
@@ -223,7 +223,7 @@ describe('#323 — textInput sensitive: true', () => {
 
   it('submitting without changing the sentinel omits the sensitive field from payload', async () => {
     mockApiClient
-      .mockResolvedValueOnce(stubResponse(true, 200, { api_key: SENTINEL }))
+      .mockResolvedValueOnce(stubResponse(true, 200, { data: { api_key: SENTINEL } }))
       .mockResolvedValueOnce(stubResponse(true, 200, {}));
 
     renderWrapped(<BlockRenderer blocks={[makeSensitiveFormWithDataSource()]} />);

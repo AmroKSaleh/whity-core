@@ -288,7 +288,6 @@ class SchemaGenerator
      */
     private function buildCoreFallbackIndex(): array
     {
-        $prefix = $this->router?->getVersionPrefix() ?? '';
         // One shared array rather than a per-route rebuild: components() is a
         // ~2000-line literal and this runs on an unauthenticated endpoint.
         $components = ['components' => CoreApiSchemas::components()];
@@ -297,7 +296,7 @@ class SchemaGenerator
         foreach (CoreApiSchemas::routes() as $route) {
             $path = ($route['unversioned'] ?? false)
                 ? $route['path']
-                : self::applyVersionPrefix($route['path'], $prefix);
+                : ($this->router?->versionedPath($route['path']) ?? $route['path']);
 
             $index[strtoupper($route['method']) . ' ' . self::stripRouteConstraints($path)] =
                 $route['schema'] + $components;
@@ -312,25 +311,6 @@ class SchemaGenerator
     private static function stripRouteConstraints(string $path): string
     {
         return (string) preg_replace('#\{([a-zA-Z_][a-zA-Z0-9_]*)[^{}]*\}#', '{$1}', $path);
-    }
-
-    /**
-     * Insert the version prefix after the first path segment.
-     *
-     * Mirrors Router::versionPrefix(): `/api/users` + `/v1` → `/api/v1/users`.
-     */
-    private static function applyVersionPrefix(string $path, string $versionPrefix): string
-    {
-        if ($versionPrefix === '') {
-            return $path;
-        }
-
-        $pos = strpos($path, '/', 1);
-        if ($pos === false) {
-            return $path . $versionPrefix;
-        }
-
-        return substr($path, 0, $pos) . $versionPrefix . substr($path, $pos);
     }
 
     /**

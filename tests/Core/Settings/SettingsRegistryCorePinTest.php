@@ -82,16 +82,57 @@ final class SettingsRegistryCorePinTest extends TestCase
             'mail.footer_text',
             'billing.enforcement_default',
             'billing.grace_days',
+            'seats.enforcement',
+            'seats.count_invited',
+            // #billing — invoicing. Eight tenant-overridable (tax treatment
+            // and seller identity both differ per tenant in a white-label
+            // deployment) and three global-only (numbering, whose per-tenant
+            // override would make the uniqueness index mean something a tenant
+            // admin can change).
+            'billing.default_currency',
+            'billing.tax_rate_bp',
+            'billing.tax_label',
+            'billing.tax_inclusive',
+            'billing.payment_terms_days',
+            'billing.seller_name',
+            'billing.seller_address',
+            'billing.seller_tax_id',
+            'billing.invoice_number_format',
+            'billing.invoice_number_scope',
+            'billing.invoice_number_reset',
+            // #billing — payment rails (global-only) and dunning (per-tenant).
+            'payments.cliq_enabled',
+            'payments.cliq_alias',
+            'payments.cliq_bank_name',
+            'payments.cliq_reference_prefix',
+            'payments.mock_enabled',
+            'dunning.retry_schedule_days',
+            'dunning.lock_after_days',
             'plugins.store_allowed_hosts',
             'plugins.store_enabled',
             'documents.render_enabled',
             'documents.render_max_rows',
             'documents.render_max_pages',
             'documents.render_max_template_bytes',
+            'documents.flow_max_blocks',
+            'documents.flow_max_table_rows',
+            'documents.flow_max_bytes',
             'documents.persist_enabled',
             // #947 item 3 — routing ceilings, tenant-overridable like the render ones.
             'documents.routing_max_steps',
             'documents.routing_max_recipients_per_step',
+            'documents.routing_approval_quorum',
+            // #1054: which channels a routing notification is offered on.
+            // Tenant-overridable because it is a fact about how an
+            // organisation reaches its people, not about what a route means
+            // — which is why it is here and not a field on a route step.
+            'documents.routing_notification_channels',
+            // #1036: QR verification on documents. Two keys, both
+            // per-tenant, both defaulting closed — the switch is off and
+            // the public page discloses the minimum. This pin firing on
+            // them was the pin working; they are added here deliberately.
+            'documents.qr_enabled',
+            'documents.qr_public_detail',
             // #999 — how many people a USER GROUP preview SHOWS. Not a ceiling
             // on resolution: the count a preview reports is exact and unbounded,
             // this is the size of the sample beside it.
@@ -104,6 +145,11 @@ final class SettingsRegistryCorePinTest extends TestCase
             'error_tracking.retention_days',
             'i18n.enabled',
             'auth.invitation_ttl_days',
+            // #1068. This pin firing on the key was the pin working; it is
+            // added here deliberately. A DISPLAY key: every timestamp keeps
+            // being written, keeps being queryable, keeps its place in the
+            // audit trail. Only the screen changes.
+            'ui.hide_dates',
         ];
     }
 
@@ -189,12 +235,42 @@ final class SettingsRegistryCorePinTest extends TestCase
             'mail.footer_text' => '',
             'billing.enforcement_default' => 'warn',
             'billing.grace_days' => '7',
+            'seats.enforcement' => 'warn',
+            'seats.count_invited' => 'true',
+            // Tax defaults to ZERO, not to any country's rate: charging tax
+            // an operator is not registered to collect is a worse failure than
+            // not charging it, and a default correct for one jurisdiction and
+            // wrong for every other gets shipped unnoticed.
+            'billing.default_currency' => 'JOD',
+            'billing.tax_rate_bp' => '0',
+            'billing.tax_label' => '',
+            'billing.tax_inclusive' => 'false',
+            'billing.payment_terms_days' => '14',
+            'billing.seller_name' => '',
+            'billing.seller_address' => '',
+            'billing.seller_tax_id' => '',
+            'billing.invoice_number_format' => 'INV-{YYYY}-{SEQ:5}',
+            'billing.invoice_number_scope' => 'shared',
+            'billing.invoice_number_reset' => 'yearly',
+            // Every rail OFF until an operator configures one: a payment rail
+            // that is on by default can take money before anybody decided it
+            // should.
+            'payments.cliq_enabled' => 'false',
+            'payments.cliq_alias' => '',
+            'payments.cliq_bank_name' => '',
+            'payments.cliq_reference_prefix' => 'WHT-',
+            'payments.mock_enabled' => 'false',
+            'dunning.retry_schedule_days' => '1,3,7',
+            'dunning.lock_after_days' => '14',
             'plugins.store_allowed_hosts' => '',
             'plugins.store_enabled' => 'true',
             'documents.render_enabled' => 'false',
             'documents.render_max_rows' => '500',
             'documents.render_max_pages' => '2000',
             'documents.render_max_template_bytes' => '2000000',
+            'documents.flow_max_blocks' => '20000',
+            'documents.flow_max_table_rows' => '5000',
+            'documents.flow_max_bytes' => '20971520',
             // #947 item 1. Opt-OUT where documents.render_enabled is opt-in:
             // the master switch is already off by default, so a deployment that
             // reaches this key has turned the render tier on deliberately, and
@@ -208,6 +284,26 @@ final class SettingsRegistryCorePinTest extends TestCase
             // 500, matching the render row ceiling: the point at which "this is
             // a distribution" stops being a plausible reading of one step.
             'documents.routing_max_recipients_per_step' => '500',
+            // #1014. `all` rather than `any`, and the choice is the
+            // feature's most consequential default: approving with too few
+            // people is a SILENT authority failure found in an audit years
+            // later, while requiring too many is a document that visibly
+            // stops and a complaint the same afternoon. Changing this line
+            // changes who can authorise a document, so it should be a
+            // deliberate edit rather than a number that drifted.
+            'documents.routing_approval_quorum' => 'all',
+            // #1054. `in_app` alone. Routing sent no notifications at all
+            // before it, so whatever this says starts happening on every
+            // existing route the day a deployment upgrades — and an e-mail
+            // is a send that costs money and reaches people outside the
+            // app. A tenant that wants it writes `in_app,email` once.
+            'documents.routing_notification_channels' => 'in_app',
+            // #1036. OFF, because turning it on publishes an
+            // unauthenticated verification surface for this tenant's
+            // documents; MINIMAL, because that is the level that cannot
+            // leak where a document sits internally.
+            'documents.qr_enabled' => 'false',
+            'documents.qr_public_detail' => 'minimal',
             // Ten faces: enough to recognise a group at a glance, small enough
             // that nobody mistakes the sample for the list.
             'groups.preview_sample_size' => '10',
@@ -225,6 +321,11 @@ final class SettingsRegistryCorePinTest extends TestCase
             // issuing an invitation is the one that knows how long its own
             // people need to act on it.
             'auth.invitation_ttl_days' => '7',
+            // #1068. OFF. The opposite default would blank every timestamp on
+            // every screen of every deployment at upgrade time, for a
+            // preference most of them have not expressed — which is the same
+            // argument i18n.enabled won above, pointing the other way.
+            'ui.hide_dates' => 'false',
         ];
     }
 
@@ -260,6 +361,19 @@ final class SettingsRegistryCorePinTest extends TestCase
             ['support_email', 'not-an-email', false],
             ['mcp.enabled', 'true', true],
             ['mcp.enabled', '1', false],
+            // #1036. The boolean arm and the enum arm, each with a value the
+            // registry must refuse — a key with no validate() arm falls through
+            // to "Unknown setting key" and 422s on a key the registry knows,
+            // which is the exact bug the error_tracking.* keys shipped with.
+            ['documents.qr_enabled', 'true', true],
+            ['documents.qr_enabled', 'yes', false],
+            ['documents.qr_public_detail', 'stage', true],
+            // #1068's third level, BELOW the default: `minimal` with the date
+            // withheld, so a tenant that wants no date on the PUBLIC page can
+            // say so on this key rather than acquiring it as a side effect of
+            // ui.hide_dates, which deliberately does not reach that page.
+            ['documents.qr_public_detail', 'undated', true],
+            ['documents.qr_public_detail', 'everything', false],
             ['auth.self_registration_enabled', 'false', true],
             ['auth.self_registration_enabled', 'yes', false],
             ['auth.desktop_login_max_hours', '2160', true],
@@ -293,6 +407,22 @@ final class SettingsRegistryCorePinTest extends TestCase
             ['error_tracking.retention_days', 'forever', false],
             ['documents.render_max_template_bytes', '1024', true],
             ['documents.render_max_template_bytes', '1023', false],
+            // The flowing-mode ceilings (#1072). `0` is rejected for the same
+            // reason `data_types.bulk_max_ids` rejects it below: a zero ceiling
+            // refuses every render, which from the outside is indistinguishable
+            // from the render tier being down.
+            ['documents.flow_max_blocks', '1', true],
+            ['documents.flow_max_blocks', '0', false],
+            ['documents.flow_max_blocks', '200001', false],
+            ['documents.flow_max_blocks', 'many', false],
+            ['documents.flow_max_table_rows', '5000', true],
+            ['documents.flow_max_table_rows', '100001', false],
+            // Above the render service's own 20 MiB hard limit, and ACCEPTED on
+            // purpose — the service answers 422 naming its limit and the client
+            // relays that as a 422, so an operator raising this is not silently
+            // handed an outage. Pinned so nobody "tightens" it into one.
+            ['documents.flow_max_bytes', '25165824', true],
+            ['documents.flow_max_bytes', '1023', false],
             // The bulk lifecycle batch ceiling. `0` is rejected rather than
             // clamped: a zero ceiling refuses every batch, which is
             // indistinguishable from the endpoint being broken.
@@ -317,6 +447,14 @@ final class SettingsRegistryCorePinTest extends TestCase
             ['auth.invitation_ttl_days', '0', false],
             ['auth.invitation_ttl_days', '91', false],
             ['auth.invitation_ttl_days', 'a week', false],
+            // #1068. The literal 'true'/'false' contract, for the reason
+            // i18n.enabled has its own line below: a key that quietly began
+            // accepting '1' would read back as unset and display as ON while
+            // the product behaved as OFF.
+            ['ui.hide_dates', 'true', true],
+            ['ui.hide_dates', 'false', true],
+            ['ui.hide_dates', '1', false],
+            ['ui.hide_dates', 'yes', false],
             ['branding_favicon', 'anything', false],
             ['not_a_setting_at_all', 'x', false],
         ];

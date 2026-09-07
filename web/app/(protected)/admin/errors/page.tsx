@@ -17,6 +17,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { useToast } from '@/lib/toast-context';
 import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
+import type { DateDisplay } from '@amroksaleh/features/datetime';
 import { Button } from '@amroksaleh/ui/button';
 import { Badge } from '@amroksaleh/ui/badge';
 import { EmptyState } from '@amroksaleh/ui/empty-state';
@@ -63,24 +65,30 @@ const TABS: { key: ErrorStatus; labelKey: string; label: string }[] = [
 /**
  * How long ago, in the coarsest unit that still reads as a duration.
  *
- * Takes the translate function rather than reaching for the hook: it is a plain
- * function, not a component, and each bucket is its own key so a language can
- * put the number where its grammar needs it.
+ * Takes the translate function and the date path rather than reaching for
+ * either hook: it is a plain function, not a component. Each bucket is its own
+ * key so a language can put the number where its grammar needs it, and the
+ * thresholds live in the shared path (#1068) because this file and the status
+ * page carried the same four of them, character for character.
+ *
+ * Returns null when the tenant hides dates. "2h ago" is a date said less
+ * precisely rather than a middle ground, so it is hidden exactly as an absolute
+ * timestamp is, and the callers below drop their line.
  */
-function when(iso: string, t: TranslateFn): string {
-  const then = new Date(iso.replace(' ', 'T') + (/[Z+]/.test(iso) ? '' : 'Z'));
-  if (Number.isNaN(then.getTime())) return iso;
-  const s = Math.max(0, Math.round((Date.now() - then.getTime()) / 1000));
-  if (s < 90) return t('errors.when.seconds', '{count}s ago', { count: s });
-  if (s < 5400) return t('errors.when.minutes', '{count}m ago', { count: Math.round(s / 60) });
-  if (s < 172800) return t('errors.when.hours', '{count}h ago', { count: Math.round(s / 3600) });
-  return t('errors.when.days', '{count}d ago', { count: Math.round(s / 86400) });
+function when(iso: string, t: TranslateFn, dates: DateDisplay): string | null {
+  return dates.relative(iso, {
+    seconds: (count) => t('errors.when.seconds', '{count}s ago', { count }),
+    minutes: (count) => t('errors.when.minutes', '{count}m ago', { count }),
+    hours: (count) => t('errors.when.hours', '{count}h ago', { count }),
+    days: (count) => t('errors.when.days', '{count}d ago', { count }),
+  });
 }
 
 export default function ErrorsPage() {
   const { has, loading: capsLoading } = useCapabilities();
   const { addToast } = useToast();
   const t = useTranslation('admin');
+  const dates = useDateDisplay();
   const canManage = has('settings:manage');
 
   const [tab, setTab] = useState<ErrorStatus>('unresolved');
@@ -229,14 +237,28 @@ export default function ErrorsPage() {
                     </Badge>
                   </div>
                   <p className="mt-1 truncate text-sm text-muted-foreground">{g.message}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {t('errors.row.lastSeen', '{location} · last seen {when}', {
-                      location: g.file
-                        ? `${g.file}:${g.line ?? 0}`
-                        : t('errors.row.unknownLocation', 'unknown location'),
-                      when: when(g.last_seen_at, t),
-                    })}
-                  </p>
+                  {/*
+                    #1068: the LOCATION survives on its own. It is what an
+                    operator needs to find the code; "· last seen —" would be a
+                    separator with nothing after it.
+                  */}
+                  {(() => {
+                    const location = g.file
+                      ? `${g.file}:${g.line ?? 0}`
+                      : t('errors.row.unknownLocation', 'unknown location');
+                    const lastSeen = when(g.last_seen_at, t, dates);
+
+                    return (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {lastSeen === null
+                          ? location
+                          : t('errors.row.lastSeen', '{location} · last seen {when}', {
+                              location,
+                              when: lastSeen,
+                            })}
+                      </p>
+                    );
+                  })()}
                 </button>
 
                 <div className="flex shrink-0 gap-2">
@@ -259,12 +281,24 @@ export default function ErrorsPage() {
 
               {expanded === g.id ? (
                 <dl className="mt-3 grid gap-1 rounded-lg bg-muted p-3 text-xs">
-                  <div className="flex gap-2">
-                    <dt className="text-muted-foreground">
-                      {t('errors.detail.firstSeen', 'First seen')}
-                    </dt>
-                    <dd>{when(g.first_seen_at, t)}</dd>
-                  </div>
+                  {/*
+                    #1068: the whole <dt>/<dd> pair goes, not just the value —
+                    a term list with a label and nothing beside it reads as a
+                    load that failed.
+                  */}
+                  {(() => {
+                    const firstSeen = when(g.first_seen_at, t, dates);
+                    if (firstSeen === null) return null;
+
+                    return (
+                      <div className="flex gap-2">
+                        <dt className="text-muted-foreground">
+                          {t('errors.detail.firstSeen', 'First seen')}
+                        </dt>
+                        <dd>{firstSeen}</dd>
+                      </div>
+                    );
+                  })()}
                   <div className="flex gap-2">
                     <dt className="text-muted-foreground">
                       {t('errors.detail.message', 'Message')}

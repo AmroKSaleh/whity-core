@@ -50,7 +50,7 @@ use Whity\Database\Database;
  * worker process per plugin, each of them a place core's own queued work could
  * be silently duplicated or dropped.
  */
-final class QueueWorkCommand
+final class QueueWorkCommand implements CliCommand
 {
     private JobRunner $runner;
     private JobRepository $repo;

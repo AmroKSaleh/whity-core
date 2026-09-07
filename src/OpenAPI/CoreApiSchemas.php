@@ -4,11 +4,22 @@ declare(strict_types=1);
 
 namespace Whity\OpenAPI;
 
+use Whity\Core\Convening\AttendanceCapacity;
+use Whity\Core\Convening\AttendanceEntry;
+use Whity\Core\Convening\AttendanceRepository;
+use Whity\Core\Convening\DecisionNumbers;
+use Whity\Core\Convening\DecisionVerdict;
+use Whity\Core\Convening\InvitationStatus;
+use Whity\Core\Convening\MeetingStatus;
+use Whity\Core\Convening\MemberRole;
+use Whity\Core\Document\Organizer\DocumentSortField;
 use Whity\Core\Ou\OuTypeRegistry;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\PasswordPolicy;
 use Whity\Core\Response;
 use Whity\Core\Router;
+use Whity\Core\TimeWindow\WindowState;
+use Whity\Core\TimeWindow\WindowTypeRegistry;
 use Whity\Http\InputLimits;
 
 /**
@@ -89,6 +100,9 @@ final class CoreApiSchemas
             self::tenantRoutes(),
             self::ouRoutes(),
             self::ouTypeRoutes(),
+            self::timeWindowRoutes(),
+            self::formRoutes(),
+            self::conveningRoutes(),
             self::delegationRoutes(),
             self::auditRoutes(),
             self::frontendFeatureRoutes(),
@@ -101,6 +115,7 @@ final class CoreApiSchemas
             self::languageRoutes(),
             self::translationManagementRoutes(),
             self::brandingRoutes(),
+            self::uiPreferenceRoutes(),
             self::themeRoutes(),
             self::identityRoutes(),
             self::meEmailsRoutes(),
@@ -108,13 +123,16 @@ final class CoreApiSchemas
             self::tenantEntitlementRoutes(),
             self::tenantStorageRoutes(),
             self::planRoutes(),
+            self::billingRoutes(),
             self::subscriptionRoutes(),
             self::documentTemplateRoutes(),
             self::documentBlockRoutes(),
             self::documentRecordRoutes(),
             self::documentRoutingRoutes(),
+            self::documentQrRoutes(),
             self::meInboxRoutes(),
             self::userGroupRoutes(),
+            self::documentRouteTemplateRoutes(),
             self::documentCollectionRoutes(),
             self::instanceRoutes(),
             self::twoFactorPolicyRoutes(),
@@ -123,6 +141,7 @@ final class CoreApiSchemas
             self::invitationRoutes(),
             self::twoFactorRecoveryRoutes(),
             self::dataTypeRoutes(),
+            self::reportRoutes(),
             self::resourceRoleGrantRoutes()
         );
     }
@@ -481,6 +500,9 @@ final class CoreApiSchemas
                 'parameters' => [
                     self::queryParam('page', 'integer', '1-indexed page (default 1)'),
                     self::queryParam('per_page', 'integer', 'Page size (default 25, max 100). A client that needs every user must follow the `pagination` envelope to the last page; one request only ever describes page one.'),
+                    self::queryParam('sort', 'string', 'Sort key: `name`, `email`, `role`, `status`, `created` (default), plus `tenant` for a system-tenant caller. `name` and `email` order identically — the name IS the email\'s local part. An unrecognised key is not an error: it falls back to the default, because a client asking for a column it cannot see should get a list rather than a 400.'),
+                    self::queryParam('dir', 'string', 'Sort direction, `asc` or `desc`. Anything else is read as `asc`.'),
+                    self::queryParam('q', 'string', 'Case-insensitive substring match on email or role name. It narrows `pagination.total` too, so the envelope always describes the filtered list.'),
                 ],
                 'responses' => [
                     200 => self::jsonResponse('The users visible to the caller\'s tenant', 'UserListResponse'),
@@ -602,6 +624,9 @@ final class CoreApiSchemas
                 'parameters' => [
                     self::queryParam('page', 'integer', '1-indexed page (default 1)'),
                     self::queryParam('per_page', 'integer', 'Page size (default 25, max 100). A client that needs every role must follow the `pagination` envelope to the last page; one request only ever describes page one.'),
+                    self::queryParam('sort', 'string', 'Sort key: `name`, `description`, or `created` (default, newest first). `permissionCount` is not offered — it is an aggregate the roles screen deliberately does not sort by. An unrecognised key falls back to the default rather than erroring.'),
+                    self::queryParam('dir', 'string', 'Sort direction, `asc` or `desc`. Anything else is read as `asc`.'),
+                    self::queryParam('q', 'string', 'Case-insensitive substring match on role name or description. It narrows `pagination.total` too.'),
                 ],
                 'responses' => [
                     200 => self::jsonResponse('Visible roles with permission counts', 'RoleListResponse'),
@@ -659,6 +684,9 @@ final class CoreApiSchemas
                 'parameters' => [
                     self::queryParam('page', 'integer', '1-indexed page (default 1)'),
                     self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                    self::queryParam('sort', 'string', 'Sort key: `name` (display name), `email`, or `assigned` (default, newest grant first). An unrecognised key falls back to the default rather than erroring.'),
+                    self::queryParam('dir', 'string', 'Sort direction, `asc` or `desc`. Anything else is read as `asc`.'),
+                    self::queryParam('q', 'string', 'Case-insensitive substring match on a holder\'s display name or email. It narrows `pagination.total`, so a searched list\'s total is the number of MATCHING holders and no longer the role\'s headcount.'),
                 ],
                 'responses' => [
                     200 => self::jsonResponse('The role\'s holders with pagination', 'RoleAssignmentListResponse'),
@@ -697,7 +725,12 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Role not found or not manageable by the tenant'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('GET', '/api/permissions', [
+            // #990: the same slug `GET /api/roles/{id}/permissions` uses — what
+            // permissions exist and which a role holds are two halves of one
+            // question, and a caller who may see the second and not the first
+            // cannot read a role editor. Mirrors public/index.php; the spec and
+            // the live router must agree on the gate.
+            self::permissionRoute('GET', '/api/permissions', CorePermissions::PERMISSIONS_READ, [
                 'summary' => 'List the permission catalogue',
                 'tags' => ['roles'],
                 'parameters' => [
@@ -712,19 +745,27 @@ final class CoreApiSchemas
     }
 
     /**
+     * Tenant management, gated on the seeded `tenants:*` permissions rather than
+     * the bare `admin` role (#990) so a deployment that renamed or restructured
+     * its administrative role keeps its own tenants screen. Mirrors the wiring in
+     * public/index.php — the spec and the live router must agree on the gate.
+     *
+     * `tenants:read` was held by NOBODY until migration 138; that grant is what
+     * keeps `GET /api/tenants` reachable after the re-gate.
+     *
      * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
      */
     private static function tenantRoutes(): array
     {
         return [
-            self::adminRoute('GET', '/api/tenants', [
+            self::permissionRoute('GET', '/api/tenants', CorePermissions::TENANTS_READ, [
                 'summary' => 'List tenants (system tenant sees all; others see their own)',
                 'tags' => ['tenants'],
                 'responses' => [
                     200 => self::jsonResponse('Visible tenants with user counts', 'TenantListResponse'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('POST', '/api/tenants', [
+            self::permissionRoute('POST', '/api/tenants', CorePermissions::TENANTS_WRITE, [
                 'summary' => 'Create a tenant (system tenant only)',
                 'tags' => ['tenants'],
                 'request' => 'TenantCreateRequest',
@@ -735,7 +776,7 @@ final class CoreApiSchemas
                     409 => self::errorResponse('Tenant name or slug already exists'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('PATCH', '/api/tenants/{id:\d+}', [
+            self::permissionRoute('PATCH', '/api/tenants/{id:\d+}', CorePermissions::TENANTS_WRITE, [
                 'summary' => 'Update a tenant',
                 'tags' => ['tenants'],
                 'request' => 'TenantUpdateRequest',
@@ -746,7 +787,7 @@ final class CoreApiSchemas
                     409 => self::errorResponse('Tenant name or slug already exists'),
                 ] + self::authErrors(),
             ]),
-            self::adminRoute('DELETE', '/api/tenants/{id:\d+}', [
+            self::permissionRoute('DELETE', '/api/tenants/{id:\d+}', CorePermissions::TENANTS_DELETE, [
                 'summary' => 'Delete a tenant (the system tenant is protected)',
                 'tags' => ['tenants'],
                 'responses' => [
@@ -863,6 +904,760 @@ final class CoreApiSchemas
     }
 
     /**
+     * TIME WINDOWS (#1070) — named, non-overlapping periods a tenant's data can
+     * be scoped to and rolled up by, and which can be closed like a set of books.
+     *
+     * Four permissions rather than the usual pair: reading, writing, CLOSING and
+     * REOPENING are four authorities, and an institution will want the last held
+     * by fewer people than the third.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function timeWindowRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/time-window-types', 'time_windows:read', [
+                'summary' => "List the tenant's period kinds",
+                'description' => 'The tenant\'s own vocabulary of period kinds, ordered by key. '
+                    . '`parent_type_id` is how a kind says which kind it nests inside — a sub-period '
+                    . 'inside a period — and depth is derived from it rather than stored.',
+                'tags' => ['time-windows'],
+                'responses' => [
+                    200 => self::jsonResponse("The tenant's period vocabulary", 'TimeWindowTypeListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/time-window-types/catalog', 'time_windows:read', [
+                'summary' => "List the period kinds declared in code, with this tenant's adoption state",
+                'description' => 'Core and plugin declarations. A plugin\'s keys are namespaced under '
+                    . 'the plugin (`acme:growing_season`); adopting one with POST '
+                    . '/api/v1/time-window-types copies its declared label and nesting in as the '
+                    . "tenant's starting values. A declaration says nothing about WHEN a period runs — "
+                    . 'boundaries are authored per period, never derived from a calendar.',
+                'tags' => ['time-windows'],
+                'responses' => [
+                    200 => self::jsonResponse('The declared catalogue', 'TimeWindowTypeCatalogResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/time-window-types', 'time_windows:write', [
+                'summary' => 'Author a new period kind, or adopt a declared one',
+                'tags' => ['time-windows'],
+                'request' => 'TimeWindowTypeCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created kind', 'TimeWindowTypeResponse'),
+                    409 => self::errorResponse('The tenant already holds this key'),
+                    422 => self::errorResponse(
+                        'Malformed key, a namespaced key no plugin declares, the reserved key `none`, '
+                        . 'or a parent that is not a kind in this tenant'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/time-window-types/{id:\d+}', 'time_windows:write', [
+                'summary' => 'Relabel a period kind, or change what it nests inside',
+                'description' => 'The `key` is immutable — code binds to it, so editing it in place '
+                    . 'would silently repoint every reference at a kind that no longer exists. A '
+                    . 'nesting change that would close a loop is refused.',
+                'tags' => ['time-windows'],
+                'request' => 'TimeWindowTypeUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated kind', 'TimeWindowTypeResponse'),
+                    404 => self::errorResponse('Time window type not found'),
+                    422 => self::errorResponse('No updatable field supplied, or a nesting loop'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/time-window-types/{id:\d+}', 'time_windows:write', [
+                'summary' => 'Delete a period kind',
+                'description' => 'Refused, never forced, while any period is of this kind or any kind '
+                    . 'nests inside it. A period is what records were scoped to and rolled up by, and '
+                    . 'a vocabulary edit does not get to destroy one.',
+                'tags' => ['time-windows'],
+                'responses' => [
+                    200 => self::jsonResponse('Deleted', self::dataEnvelope(self::object(
+                        ['deleted' => ['type' => 'boolean']],
+                        ['deleted']
+                    ))),
+                    404 => self::errorResponse('Time window type not found'),
+                    409 => self::errorResponse('Periods are of this kind, or kinds nest inside it'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/time-windows', 'time_windows:read', [
+                'summary' => 'List periods, and resolve which one contains a date',
+                'description' => '`?type_id=` with `?on=` IS the resolution question — "which period of '
+                    . 'this kind contains this date" — and answers with zero or one period. Zero is a '
+                    . 'real answer: no period covers that date, and no nearest match is invented, '
+                    . 'because attributing a record to a period it does not belong to is worse than '
+                    . 'leaving it unattributed. Ordered by `starts_on`, never by id: a period entered '
+                    . 'out of order has a higher id than periods preceding it.',
+                'tags' => ['time-windows'],
+                'parameters' => [
+                    self::queryParam('type_id', 'integer', 'Restrict to one period kind.'),
+                    self::queryParam('state', 'string', 'Restrict to `open` or `closed`.'),
+                    self::queryParam('on', 'string', 'Keep only periods containing this `YYYY-MM-DD` date.'),
+                    self::queryParam('parent_id', 'integer', 'Restrict to periods nesting inside this one.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The matching periods', 'TimeWindowListResponse'),
+                    422 => self::errorResponse('A malformed filter, or a kind this tenant does not have'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/time-windows', 'time_windows:write', [
+                'summary' => 'Define a period, with explicit boundaries',
+                'description' => 'Boundaries are AUTHORED and inclusive at both ends; nothing derives '
+                    . 'them from a month, a quarter or a parent\'s length. Two periods of one kind may '
+                    . 'not overlap, because a date has to belong to exactly one of them, and a nested '
+                    . "period must sit inside its parent's range and be of the kind its own kind nests "
+                    . 'inside.',
+                'tags' => ['time-windows'],
+                'request' => 'TimeWindowCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created period', 'TimeWindowResponse'),
+                    422 => self::errorResponse(
+                        'Malformed dates, an overlap with another period of the same kind, or a parent '
+                        . 'that is the wrong kind, closed, or does not contain these dates'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/time-windows/{id:\d+}', 'time_windows:read', [
+                'summary' => 'Get one period, with its seal trail',
+                'description' => 'The trail travels with the period because the two facts are never '
+                    . 'wanted apart: "is this closed" is half an answer without "and has it ever been '
+                    . 'reopened, by whom, and why".',
+                'tags' => ['time-windows'],
+                'responses' => [
+                    200 => self::jsonResponse('The period and its trail', 'TimeWindowDetailResponse'),
+                    404 => self::errorResponse('Time window not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/time-windows/{id:\d+}', 'time_windows:write', [
+                'summary' => 'Relabel a period, or move its boundaries',
+                'description' => 'A CLOSED period is refused: moving the boundaries of a sealed period '
+                    . 'is the most effective way there is to unseal it without leaving a trace, since '
+                    . 'the state still reads closed while records that were inside it no longer are. '
+                    . 'Reopen it first, on the record.',
+                'tags' => ['time-windows'],
+                'request' => 'TimeWindowUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated period', 'TimeWindowResponse'),
+                    404 => self::errorResponse('Time window not found'),
+                    422 => self::errorResponse(
+                        'The period is closed, the dates overlap another of the same kind, or the '
+                        . 'change would leave a nested period outside it'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/time-windows/{id:\d+}/close-report', 'time_windows:read', [
+                'summary' => 'What closing this period would seal',
+                'description' => 'The difference between a control and a trap. `open_children` is '
+                    . 'structural and BLOCKS the close; `unfinished` is contributed by whatever holds '
+                    . 'records in the period (through the `time_window.close_report` filter hook) and '
+                    . 'does NOT block — it is told to the person, who decides. `unfinished_reported` '
+                    . 'distinguishes "nothing is unfinished" from "nothing is tracking it", which are '
+                    . 'both an empty list and only one of which is an all-clear. Gated on read rather '
+                    . 'than close: looking changes nothing.',
+                'tags' => ['time-windows'],
+                'responses' => [
+                    200 => self::jsonResponse('The report', 'TimeWindowCloseReportResponse'),
+                    404 => self::errorResponse('Time window not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/time-windows/{id:\d+}/close', 'time_windows:close', [
+                'summary' => 'Close a period — seal it',
+                'description' => 'Refused while any period nested inside it is still open, naming them, '
+                    . 'because a sealed period containing an accruing one is not a seal. Repeat with '
+                    . '`cascade: true` to close them in the same act; each gets its own trail row '
+                    . 'marked as having come from this one, so the trail distinguishes an act somebody '
+                    . 'performed from a consequence of one they performed elsewhere. Closing an '
+                    . 'already-closed period is a no-op rather than an error. The response carries the '
+                    . 'report the close was made against — what was still unfinished at the moment of '
+                    . 'sealing is unrecoverable once the work moves on.',
+                'tags' => ['time-windows'],
+                'request' => 'TimeWindowCloseRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The sealed period and what it sealed', 'TimeWindowCloseResponse'),
+                    404 => self::errorResponse('Time window not found'),
+                    422 => self::errorResponse('Periods nested inside this one are still open'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/time-windows/{id:\d+}/reopen', 'time_windows:reopen', [
+                'summary' => 'Reopen a closed period, on the record',
+                'description' => 'A REASON IS REQUIRED and is recorded permanently. Refusing reopening '
+                    . 'outright sounds safer and is not: an institution that must correct a sealed '
+                    . 'period will do it anyway, somewhere this platform cannot see, and a reopen that '
+                    . 'names who, when and why is strictly better than one that leaves no record. '
+                    . 'Does not reopen nested periods, and is refused while the period containing this '
+                    . 'one is closed — reopen that first.',
+                'tags' => ['time-windows'],
+                'request' => 'TimeWindowReopenRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The reopened period and its trail', 'TimeWindowDetailResponse'),
+                    404 => self::errorResponse('Time window not found'),
+                    422 => self::errorResponse('No reason given, or the period containing this one is closed'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * FORMS (migrations 127/128) — tenant-authored forms, their fields, and the
+     * submissions made against them.
+     *
+     * THREE gates rather than the usual read/write pair, because there are three
+     * audiences and two of them barely overlap: `forms:manage` AUTHORS (an act of
+     * organisational policy), `forms:submit` FILLS IN (the everyday act of the
+     * largest audience in the tenant), `forms:read` READS WHAT CAME BACK (the
+     * approver's job). Folding `:submit` into `:read` is the tempting fold and the
+     * wrong one — it would mean letting somebody file a request also lets them
+     * read everybody else's.
+     *
+     * `/render` is gated on `forms:submit`, NOT `forms:read`, and that is the one
+     * assignment worth checking twice: its response carries the CALLER'S OWN
+     * prefilled details, so it is personalised, and gating it on the
+     * catalogue-reading permission would hand that payload to the wrong audience
+     * while denying it to the right one.
+     *
+     * There is deliberately no DELETE for a form (archive instead — a form is what
+     * a submission was an answer TO) and none for a submission (submit again — it
+     * is what somebody declared while other people acted on it).
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function formRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/forms', 'forms:read', [
+                'summary' => "List the tenant's forms",
+                'description' => 'Newest first. `?status=` narrows to `draft`, `published` or '
+                    . '`archived`. Each row carries `available_transitions` and `accepts_submissions`, '
+                    . 'both DERIVED from the status, so a client rendering the lifecycle controls does '
+                    . 'not have to hold a second copy of the transition table.',
+                'tags' => ['forms'],
+                'parameters' => [
+                    self::queryParam('status', 'string', 'Restrict to one lifecycle state.'),
+                    self::queryParam('limit', 'integer', 'Page size (default 100, max 500).'),
+                    self::queryParam('offset', 'integer', 'Rows to skip.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse("The tenant's forms", 'FormListResponse'),
+                    422 => self::errorResponse('An unrecognised status filter'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/forms', 'forms:manage', [
+                'summary' => 'Author a new form',
+                'description' => 'Always created as a `draft`: a form is never born live, because one '
+                    . 'with no fields yet that accepted submissions would collect empty ones. '
+                    . '`route_template_id` is what makes submissions CIRCULATE — pointed at a design '
+                    . 'from /api/v1/document-route-templates, every submission becomes a document routed '
+                    . 'through the existing engine. Omitted, the form collects and stops there.',
+                'tags' => ['forms'],
+                'request' => 'FormCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created form', 'FormResponse'),
+                    422 => self::errorResponse(
+                        'A malformed or duplicate key, a name in no language, or a route template '
+                        . 'this tenant does not have'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/forms/{id:\d+}', 'forms:read', [
+                'summary' => 'Get one form, with its fields and its submission count',
+                'description' => 'The submission count travels with the form because an author about '
+                    . 'to change a published one needs to know that people have already answered it — '
+                    . 'and a count they have to go and fetch is a count they will not fetch.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The form, its fields and its counts', 'FormDetailResponse'),
+                    404 => self::errorResponse('Form not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/forms/{id:\d+}', 'forms:manage', [
+                'summary' => 'Rename a form, retitle it, or change where its submissions go',
+                'description' => '`form_key` is immutable and a body carrying one is REFUSED, not '
+                    . 'ignored: code and links bind to the key, so editing it in place would silently '
+                    . 'repoint every reference at a form that no longer exists. `status` is likewise '
+                    . 'refused — it moves through /publish and /archive, which are acts rather than '
+                    . 'attribute assignments.',
+                'tags' => ['forms'],
+                'request' => 'FormUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated form', 'FormResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    422 => self::errorResponse('An immutable field, no updatable field, or an unknown route template'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/forms/{id:\d+}/publish', 'forms:manage', [
+                'summary' => 'Make the form live, and mint a version',
+                'description' => 'A form with no fields is REFUSED: publishing one would produce a live '
+                    . 'form that collects nothing, renders as an empty page with a submit button, and '
+                    . 'reports every submission as successful. Publishing increments `version`, and '
+                    . 'every submission stamps the version it was answered against — which lets a '
+                    . 'reader SEE drift between an old answer set and today\'s fields, but does not by '
+                    . 'itself reconstruct the old field list. Idempotent: asking for the state the form '
+                    . 'is already in returns it rather than erroring.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The published form', 'FormResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    409 => self::errorResponse('The form moved under this request — reload and retry'),
+                    422 => self::errorResponse('The transition is not allowed from here, or the form has no fields'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/forms/{id:\d+}/archive', 'forms:manage', [
+                'summary' => 'Stop accepting submissions',
+                'description' => 'Everything already submitted stays exactly where it is; only the door '
+                    . 'closes. REVERSIBLE — republishing is allowed, because retiring a form at the end '
+                    . 'of a cycle and wanting it back at the start of the next one is the ordinary case. '
+                    . 'There is no DELETE at all: a form is what somebody\'s submission was an answer '
+                    . 'TO, and destroying it leaves every submission as a bag of keys with nothing to '
+                    . 'say what they meant.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The archived form', 'FormResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    409 => self::errorResponse('The form moved under this request — reload and retry'),
+                    422 => self::errorResponse('The transition is not allowed from here'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/forms/{id:\d+}/render', 'forms:submit', [
+                'summary' => 'The form as it should be DRAWN for the caller, with their prefilled values',
+                'description' => 'Fields in order, grouped into derived `sections`, plus `prefill` — '
+                    . 'values resolved SERVER-SIDE from the CALLER\'S own saved details so they do not '
+                    . 'retype what the organisation already knows. Prefill is a suggestion, never an '
+                    . 'answer: nothing is recorded until the person submits. `unresolved_prefill` names '
+                    . 'any field whose declared source nothing in this install stores, so an empty box '
+                    . 'is distinguishable from a bug. A form that is not accepting submissions still '
+                    . 'renders — `accepts_submissions` says which — so a person following a link to an '
+                    . 'archived form learns it closed rather than that it never existed.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The form, drawn for this caller', 'FormRenderResponse'),
+                    404 => self::errorResponse('Form not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/forms/{id:\d+}/public-link', 'forms:manage', [
+                'summary' => 'Open this form to people who have no account, minting its public address',
+                'description' =>
+                    'OPT-IN and OFF BY DEFAULT on every form: `public_enabled` is only ever true '
+                    . 'because of this call. It mints a 256-bit random slug and returns the absolute '
+                    . '`public_url` built from it — the ONLY credential the public endpoints have, '
+                    . 'which is why it is random rather than derived from the form id or key: a '
+                    . 'guessable address makes the whole catalogue of an install\'s forms walkable '
+                    . 'with curl. '
+                    . 'REFUSED (422) on a form that is not `published` (a link to one answers 404 to '
+                    . 'everybody who follows it), and on a form carrying a `profile_ref` or `ou_ref` '
+                    . 'field — the reference kinds would make the public submit a MEMBERSHIP ORACLE, '
+                    . 'since the existence check behind them reveals whether a given id belongs to '
+                    . 'this organisation. A `file` field is ACCEPTED (it was refused until migration '
+                    . '134 only because no anonymous upload route existed; a file input asks the '
+                    . 'tenant\'s data nothing, so it cannot answer anything about it). '
+                    . '`opens_at` / `closes_at` are optional; either may be null for "no boundary on '
+                    . 'this side". They are naive local date-times in the instance\'s own clock, and a '
+                    . 'UTC offset is REFUSED rather than silently applied. '
+                    . 'Re-opening after a close mints a DIFFERENT address: a withdrawn link stays '
+                    . 'withdrawn.',
+                'tags' => ['forms'],
+                'request' => 'FormPublicLinkRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The form, with its new public link', 'FormResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    409 => self::errorResponse('The form already has a public link, or it moved under this request'),
+                    422 => self::errorResponse(
+                        'The form is not published, carries a field a stranger could not answer, '
+                        . 'or the window is malformed'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/forms/{id:\d+}/public-link', 'forms:manage', [
+                'summary' => "Close this form's public link",
+                'description' =>
+                    'The slug is DESTROYED, not parked beside a disabled flag, so the old address is '
+                    . 'unresolvable by construction rather than by a check somebody could remove. The '
+                    . 'window dates go with it. IDEMPOTENT: closing a link that is already closed is a '
+                    . '200, because a client that lost a response must be able to retry; '
+                    . '`meta.closed` says whether this call was the one that changed anything. '
+                    . 'Submissions already received are untouched.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The form, with no public link', 'FormPublicLinkClosedResponse'),
+                    404 => self::errorResponse('Form not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/forms/{id:\d+}/uploads', 'forms:submit', array_merge([
+                'summary' => 'Attach a file to a form you are filling in',
+                'description' =>
+                    'MULTIPART, one part named `file`. Returns the `reference` a `file` answer '
+                    . 'carries, plus the filename, the SNIFFED content type, the byte size and the '
+                    . 'server\'s SHA-256 of what it stored. '
+                    . 'Gated `forms:submit` — the same permission as the submit itself, because '
+                    . 'uploading is half of answering. '
+                    . 'ACCEPTS application/pdf, image/png and image/jpeg ONLY, decided by the LEADING '
+                    . 'BYTES: a declared Content-Type that contradicts the bytes is a 422, and a '
+                    . 'declared type is never what gets stored. Office formats are absent on purpose — '
+                    . 'a .docx is indistinguishable from any other ZIP by magic bytes. '
+                    . 'MAXIMUM 10 MiB. '
+                    . 'REFUSED (422) on a form that is not accepting submissions, and on a form with '
+                    . 'no `file` field — so a broad permission cannot be aimed at arbitrary form ids '
+                    . 'as a way into a tenant\'s storage. '
+                    . 'THROTTLED to 20 uploads per caller per hour. '
+                    . 'THE UPLOAD IS SINGLE-USE and expires: it is spent by the first submission that '
+                    . 'names it, and anything never submitted is deleted by the '
+                    . '`form-uploads:sweep` retention job (24 h by default).',
+                'tags' => ['forms'],
+                'responses' => [
+                    201 => self::jsonResponse('The stored file, and the reference to answer with', 'FormUploadResponse'),
+                    400 => self::errorResponse('No file part, or the multipart body could not be read'),
+                    404 => self::errorResponse('Form not found'),
+                    422 => self::errorResponse(
+                        'Too large, not an accepted kind, the form asks for no file, '
+                        . 'or the form is not accepting submissions'
+                    ),
+                    429 => self::errorResponse('Too many uploads from this caller'),
+                    503 => self::errorResponse('The file could not be stored'),
+                ] + self::authErrors(),
+            ], self::formUploadMultipartBody(
+                'The file to attach. PDF, PNG or JPEG, decided by MAGIC BYTES rather than by '
+                . 'filename or Content-Type. Maximum 10 MiB.'
+            ))),
+            [
+                'method' => 'POST',
+                'path' => '/api/public/forms/{slug}/uploads',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => array_merge([
+                    'summary' => 'Attach a file to a publicly-opened form (PUBLIC, unauthenticated, rate-limited)',
+                    'description' =>
+                        'The anonymous half of the upload above, and the route that made `file` fields '
+                        . 'servable on a public form at all. '
+                        . 'A file input is NOT the membership oracle a person or unit picker is: it '
+                        . 'offers no list, resolves no id against this organisation, and returns one '
+                        . 'opaque reference to the caller\'s own bytes — so there is no question about '
+                        . 'the tenant it can be asked. '
+                        . 'THE TENANT IS RESOLVED FROM THE SLUG, and every reason there is no publicly '
+                        . 'served form behind it collapses to the SAME 404 as the render and the '
+                        . 'submit. '
+                        . 'BOUNDED, because what a stranger can spend here is storage: 10 uploads per '
+                        . 'IP per hour, 400 per form per hour across all addresses, and a size ceiling '
+                        . 'of 5 MiB — HALF the authenticated one, so bytes-per-address-per-hour is '
+                        . 'what is capped rather than just the count. Same three accepted kinds, same '
+                        . 'magic-byte check. '
+                        . 'Anything never submitted is deleted by the retention sweep, so an abandoned '
+                        . 'upload costs a day of storage rather than a permanent one.',
+                    'tags' => ['forms'],
+                    'responses' => [
+                        201 => self::jsonResponse('The stored file, and the reference to answer with', 'FormUploadResponse'),
+                        400 => self::errorResponse('No file part, or the multipart body could not be read'),
+                        404 => self::errorResponse('No publicly-open form is served at this address'),
+                        422 => self::errorResponse(
+                            'Too large, not an accepted kind, the form asks for no file, '
+                            . 'or the form is outside its submission window'
+                        ),
+                        429 => self::errorResponse('Too many uploads from this address, or for this form'),
+                        503 => self::errorResponse('Temporarily unavailable'),
+                    ],
+                ], self::formUploadMultipartBody(
+                    'The file to attach. PDF, PNG or JPEG, decided by MAGIC BYTES rather than by '
+                    . 'filename or Content-Type. Maximum 5 MiB on this public surface.'
+                )),
+            ],
+            [
+                'method' => 'GET',
+                'path' => '/api/public/forms/{slug}',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Render a publicly-opened form (PUBLIC, unauthenticated, rate-limited)',
+                    'description' =>
+                        'PUBLIC and unauthenticated by design: the caller is somebody outside the '
+                        . 'organisation — an applicant, a supplier, a member of the public — who has no '
+                        . 'account and does not need one. '
+                        . 'THE TENANT IS RESOLVED FROM THE SLUG, never from a header, a query parameter '
+                        . 'or the Host — all of which are values this caller chooses. '
+                        . 'A malformed slug, an unknown slug, a form whose link was closed, and a form '
+                        . 'that is not published all produce THE SAME 404 with the same sentence, so '
+                        . 'this endpoint cannot be asked which slugs name a real form or whether an '
+                        . 'organisation uses public forms at all. '
+                        . 'The response carries NO id, tenant id, form key, author, route template, '
+                        . 'submission count, status, version or prefill — an anonymous caller has no '
+                        . 'saved details for the platform to pre-fill, and nothing about how the '
+                        . 'organisation works is disclosed. '
+                        . 'Person and unit fields are omitted from the field list, for the reason '
+                        . 'POST /api/v1/forms/{id}/public-link refuses them. FILE fields ARE served: '
+                        . 'attach the bytes at POST /api/v1/public/forms/{slug}/uploads first and put '
+                        . 'the returned `reference` in the answer. '
+                        . 'A form OUTSIDE its submission window still renders, with '
+                        . '`accepts_submissions: false` and the window dates, so somebody holding a '
+                        . 'genuine link is told they are early or late rather than that the link is '
+                        . 'wrong.',
+                    'tags' => ['forms'],
+                    'responses' => [
+                        200 => self::jsonResponse('The form, as a stranger may see it', 'PublicFormResponse'),
+                        404 => self::errorResponse('No publicly-open form is served at this address'),
+                        429 => self::errorResponse('Too many attempts from this address'),
+                        503 => self::errorResponse('Temporarily unavailable'),
+                    ],
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/public/forms/{slug}/submissions',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Submit a publicly-opened form (PUBLIC, unauthenticated, rate-limited)',
+                    'description' =>
+                        'The answers arrive under `data`, keyed by field key, and NOTHING ELSE in the '
+                        . 'body is read — a body that could also set `submitted_by_profile_id`, '
+                        . '`form_version` or a route template would let an anonymous stranger sign a '
+                        . 'declaration in somebody\'s name or aim it at a flow the organisation did not '
+                        . 'choose. '
+                        . 'The submission is recorded with NO SUBMITTER '
+                        . '(`form_submissions.submitted_by_profile_id` is NULL — no sentinel profile, '
+                        . 'because a fake person is something every membership and permission check '
+                        . 'would have to know to special-case). '
+                        . 'It BECOMES A DOCUMENT and circulates through the tenant\'s existing routing '
+                        . 'engine exactly as an internal submission does, which is safe because the '
+                        . 'caller cannot name a route template: it lives on the FORM, is set only by '
+                        . '`forms:manage`, and is never read from a request body. '
+                        . 'Throttled per IP and per form. '
+                        . 'The response is a receipt, not the submission row: no id, no document id, '
+                        . 'no tenant id.',
+                    'tags' => ['forms'],
+                    'request' => 'FormSubmissionCreateRequest',
+                    'responses' => [
+                        201 => self::jsonResponse('Received', 'PublicFormSubmissionResponse'),
+                        404 => self::errorResponse('No publicly-open form is served at this address'),
+                        422 => self::errorResponse(
+                            'An answer failed validation, or the form is outside its submission window'
+                        ),
+                        429 => self::errorResponse('Too many attempts from this address, or for this form'),
+                        503 => self::errorResponse('Temporarily unavailable'),
+                    ],
+                ],
+            ],
+            self::permissionRoute('GET', '/api/form-fields', 'forms:read', [
+                'summary' => "One form's fields, addressed by query param",
+                'description' => 'The same list as GET /api/v1/forms/{id}/fields, reachable by '
+                    . '`?form_id=` so a master-detail picker can drive it — a data-bound block\'s '
+                    . 'params append QUERY params to a fixed source and cannot fill a PATH segment. '
+                    . 'This flat form exists for READS only; every write stays nested under the form, '
+                    . 'which is what makes a delete refuse when the field belongs to a different one. '
+                    . 'An absent or unknown `form_id` returns an empty list, not a 422: the picker '
+                    . 'renders before anybody has chosen.',
+                'tags' => ['forms'],
+                'parameters' => [
+                    self::queryParam('form_id', 'integer', 'The form whose fields to return.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The fields, with the builder vocabularies', 'FormFieldListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/forms/{id:\d+}/fields', 'forms:read', [
+                'summary' => "A form's fields, in authoring order",
+                'description' => 'Ordered by `position`, then `id` — the id tie-break makes the sequence '
+                    . 'TOTAL, since `position` carries no unique index (a drag-reorderable ordinal must '
+                    . 'not, or a two-field swap becomes a three-statement dance). `meta` carries the '
+                    . 'vocabularies a builder renders its pickers from, so a client cannot hold a stale '
+                    . 'copy of the field kinds or the prefill sources.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The fields, with the builder vocabularies', 'FormFieldListResponse'),
+                    404 => self::errorResponse('Form not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/forms/{id:\d+}/fields', 'forms:manage', [
+                'summary' => 'Add a field to a form',
+                'description' => 'Appended AFTER the current maximum position unless one is given: a '
+                    . 'builder that adds a field expects it at the end, where the author is looking. '
+                    . '`select` and `multiselect` require a non-empty `options` list; `profile_ref` and '
+                    . '`ou_ref` accept none, because their choices are RESOLVED from the tenant\'s live '
+                    . 'people and units rather than authored — a pasted roster is wrong by the end of '
+                    . 'the month, still renders, and still reports success. `prefill_source` names a '
+                    . 'rule for reaching the submitter\'s own details and is resolved at render time, '
+                    . 'never stored.',
+                'tags' => ['forms'],
+                'request' => 'FormFieldCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created field', 'FormFieldResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    409 => self::errorResponse('The form is archived, so its fields cannot be changed'),
+                    422 => self::errorResponse(
+                        'A malformed or duplicate key, an unknown kind or prefill source, a '
+                        . 'choice-bearing field with no choices, or an invalid validation pattern'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PUT', '/api/forms/{id:\d+}/fields', 'forms:manage', [
+                'summary' => "Save a form's whole field set at once",
+                'description' => 'Authoring a form is one act of composition, not a sequence of '
+                    . 'independent single-field decisions — an editor that adds, reorders and deletes '
+                    . 'question cards in place cannot rest on per-field calls without inventing a '
+                    . 'client-side transaction and hoping every leg lands. Reconciled by `field_key`, '
+                    . 'which is the stable identity a recorded ANSWER refers to and is deliberately not '
+                    . 'updatable: a key present in both the payload and the stored set is the SAME '
+                    . 'question, edited or moved, while a stored key absent from the payload is a '
+                    . 'question withdrawn — and its answers stay recorded but stop having a label. '
+                    . 'Matching on position instead would rename every question below an insertion and '
+                    . 'silently reattribute its answers. Position comes from the order sent, and the '
+                    . 'whole reconciliation is one transaction.',
+                'tags' => ['forms'],
+                'request' => 'FormFieldSetRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The resulting field set, in order', 'FormFieldListResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    409 => self::errorResponse('The form is archived, so its fields cannot be changed'),
+                    422 => self::errorResponse(
+                        'A malformed or duplicated key, an unknown kind or prefill source, a '
+                        . 'choice-bearing field with no choices, or an invalid validation pattern'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/forms/{id:\d+}/fields/{fieldId:\d+}', 'forms:manage', [
+                'summary' => 'Edit a field, or move it in the order',
+                'description' => '`field_key` is immutable and a body carrying one is REFUSED: answers '
+                    . 'already submitted are keyed by it, so renaming a key in place does not rename '
+                    . 'the answers, it ORPHANS them, silently, while reporting success. `field_type` '
+                    . 'MAY change — fixing text to textarea is a real edit — and options are '
+                    . 're-validated against the new kind in the same request, so a select demoted to '
+                    . 'text cannot keep choices nothing will draw.',
+                'tags' => ['forms'],
+                'request' => 'FormFieldUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated field', 'FormFieldResponse'),
+                    404 => self::errorResponse('Form or field not found'),
+                    409 => self::errorResponse('The form is archived, so its fields cannot be changed'),
+                    422 => self::errorResponse('An immutable field, no updatable field, or an invalid value'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/forms/{id:\d+}/fields/{fieldId:\d+}', 'forms:manage', [
+                'summary' => 'Take a field off a form',
+                'description' => 'Answers already given to it are NOT deleted — they stay in the '
+                    . 'submission and simply stop having a label. That is why an ARCHIVED form refuses '
+                    . 'this: its fields are the only remaining explanation of what its submissions '
+                    . 'answered. The field id is scoped to the form in the path, so a delete addressed '
+                    . 'through the wrong form is a 404 rather than a cross-form deletion.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('Deleted', self::dataEnvelope(self::object(
+                        ['deleted' => ['type' => 'boolean']],
+                        ['deleted']
+                    ))),
+                    404 => self::errorResponse('Form or field not found'),
+                    409 => self::errorResponse('The form is archived, so its fields cannot be changed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/forms/{id:\d+}/submissions', 'forms:submit', [
+                'summary' => 'Submit a form',
+                'description' => 'Answers arrive under `data`, keyed by field key; everything else in '
+                    . 'the body is ignored, because a body that could also set `submitted_by_profile_id` '
+                    . 'would let a caller sign a declaration in somebody else\'s name. On success the '
+                    . 'submission ALSO becomes a core DOCUMENT, so it inherits routing, approvals, the '
+                    . 'inbox, QR verification, artifacts and row-level visibility — and when the form '
+                    . 'names a route template, that document starts circulating in the same '
+                    . 'transaction. `meta.routed` says whether it did, so a client never tells somebody '
+                    . 'their request is on its way when nothing is moving. `meta.ignored_keys` names '
+                    . 'answers that matched no field (a stale client): they are dropped rather than '
+                    . 'refused, so a race nobody caused does not discard everything the person typed.',
+                'tags' => ['forms'],
+                'request' => 'FormSubmissionCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The recorded submission', 'FormSubmissionCreateResponse'),
+                    404 => self::errorResponse('Form not found'),
+                    422 => self::errorResponse(
+                        'The form is not accepting submissions, an answer failed validation, a '
+                        . 'reference names no record in this tenant, or the form\'s route template '
+                        . 'cannot be run as drawn'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/form-submissions', 'forms:read', [
+                'summary' => "List the tenant's submissions",
+                'description' => 'Newest first, optionally narrowed by `form_id` or `submitted_by`. '
+                    . 'Each row carries the form key and name so a list renders without a round trip '
+                    . 'per row. `document_id` is null for a submission to a form with no route template '
+                    . '(it collected, it did not circulate) and for one whose document was later '
+                    . 'deleted — both ordinary states, not failures.',
+                'tags' => ['forms'],
+                'parameters' => [
+                    self::queryParam('form_id', 'integer', 'Restrict to one form.'),
+                    self::queryParam('submitted_by', 'integer', 'Restrict to one submitter.'),
+                    self::queryParam('limit', 'integer', 'Page size (default 50, max 200).'),
+                    self::queryParam('offset', 'integer', 'Rows to skip.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The matching submissions', 'FormSubmissionListResponse'),
+                    422 => self::errorResponse('A form this tenant does not have'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/form-submissions/{id:\d+}', 'forms:read', [
+                'summary' => 'Get one submission, with the fields it was answering',
+                'description' => 'The fields travel with the submission because the two are useless '
+                    . 'apart — an answer of `41` means nothing without the field that says what was '
+                    . 'asked. They are TODAY\'s fields, and `form_version_now` is returned beside the '
+                    . 'submission\'s own `form_version` so a reader can SEE when the two do not line up '
+                    . 'and knows they are looking at drift rather than at a bug.',
+                'tags' => ['forms'],
+                'responses' => [
+                    200 => self::jsonResponse('The submission and its fields', 'FormSubmissionDetailResponse'),
+                    404 => self::errorResponse('Submission not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/me/form-submissions', 'forms:submit', [
+                'summary' => 'The caller\'s own submissions',
+                'description' => 'Only ever the caller\'s rows — the ROUTE decides whose, not a query '
+                    . 'param, so nothing a client omits or changes can widen it. Gated on '
+                    . '`forms:submit` rather than `forms:read` because the rows already name exactly '
+                    . 'one person, so a tenant-wide permission has nothing left to decide; requiring '
+                    . 'the read permission would hide this from precisely the people whose submissions '
+                    . 'are in it. A caller with no profile (a service principal) gets an empty list, '
+                    . 'which is true rather than an authorization failure somebody has to investigate.',
+                'tags' => ['forms'],
+                'parameters' => [
+                    self::queryParam('form_id', 'integer', 'Restrict to one form.'),
+                    self::queryParam('limit', 'integer', 'Page size (default 50, max 200).'),
+                    self::queryParam('offset', 'integer', 'Rows to skip.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The caller\'s submissions', 'FormSubmissionListResponse'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * The `multipart/form-data` request body BOTH form-upload routes declare.
+     *
+     * Under the key `request`, not `requestBody`: #954 records the cost of
+     * getting that wrong — the branding uploads declared a body under the wrong
+     * key, {@see SchemaGenerator::addOperation()} never read it, and both
+     * operations published with no request body at all, so a generated client
+     * could see the endpoint and had no way to learn the part is called `file`.
+     *
+     * ONE helper for two routes because the authenticated and public uploads
+     * take the SAME part with the same name; only the size sentence differs, and
+     * that is the argument. Two copies would eventually disagree about the field
+     * name, which is the one thing a client cannot guess.
+     *
+     * @return array{request: array<string, mixed>}
+     */
+    private static function formUploadMultipartBody(string $description): array
+    {
+        return [
+            'request' => [
+                'required' => true,
+                'content' => [
+                    'multipart/form-data' => [
+                        'schema' => self::object([
+                            'file' => [
+                                'type' => 'string',
+                                'format' => 'binary',
+                                'description' => $description,
+                            ],
+                        ], ['file']),
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
      * The tenant's OU TYPE vocabulary (#822) — the campus/faculty/department
      * levels its tree is built from.
      *
@@ -940,6 +1735,424 @@ final class CoreApiSchemas
                     204 => ['description' => 'Deleted'],
                     404 => self::errorResponse('Organizational unit type not found'),
                     409 => self::errorResponse('Units still carry this type; retry with ?force=true'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * CONVENING (#convening, migrations 130/131): deliberative bodies, their
+     * meetings, and the decisions taken at them.
+     *
+     * THE ONE ROUTE WORTH READING FIRST is
+     * `POST /api/v1/meetings/{id}/agenda/{itemId}/decision`. It is the only
+     * endpoint in this subsystem that can move somebody ELSE's document: where
+     * the agenda item carries a document and that document's route has reached
+     * this body, the decision is applied through the existing routing engine —
+     * `DocumentRouter::act()`, with a verdict, as a person the route actually
+     * asked. Nothing here writes to a routing table.
+     *
+     * PERMISSIONS: `convening:read` for every read, `convening:manage` for the
+     * secretarial acts (agenda, dates, invitations), `convening:decide` for
+     * minuting a decision. Answering an INVITATION is unpermissioned — being
+     * invited is the authorization, the same posture migration 113 takes on
+     * acting on a route that reached you.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function conveningRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/convening-bodies', 'convening:read', [
+                'summary' => "List the tenant's convening bodies",
+                'description' => 'Active bodies first, then by key. A retired body stays readable — '
+                    . 'its minute-book outlives its usefulness — but takes no new meetings.',
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('active', 'string', 'Send `true` to list only active bodies.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse("The tenant's convening bodies", 'ConveningBodyListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/convening-bodies', 'convening:manage', [
+                'summary' => 'Constitute a convening body',
+                'description' => '`body_key` is immutable once set: every decision number the body '
+                    . 'mints quotes it. `name` may be a plain string or an object of language code '
+                    . 'to text — a body has as many real names as it has languages.',
+                'tags' => ['convening'],
+                'request' => 'ConveningBodyCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created body', 'ConveningBodyResponse'),
+                    422 => self::errorResponse('A malformed or already-taken key, or an empty name'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/convening-bodies/{id:\d+}', 'convening:read', [
+                'summary' => 'Get one body, with its current seats',
+                'description' => 'The membership travels with the body because the two are never '
+                    . 'wanted apart. `?history=true` includes PAST seats, which is how a decision '
+                    . 'taken last March is attributed to the body as it was constituted then.',
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('history', 'string', 'Send `true` to include seats that have ended.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The body and its members', 'ConveningBodyDetailResponse'),
+                    404 => self::errorResponse('Convening body not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/convening-bodies/{id:\d+}', 'convening:manage', [
+                'summary' => 'Rename a body, re-home it, retire it or revive it',
+                'description' => '`body_key` is refused: decision numbers already quote it, so '
+                    . 'editing it would leave them naming a body that no longer exists.',
+                'tags' => ['convening'],
+                'request' => 'ConveningBodyUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated body', 'ConveningBodyResponse'),
+                    404 => self::errorResponse('Convening body not found'),
+                    422 => self::errorResponse('No updatable field supplied, or an attempt to change body_key'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/convening-bodies/{id:\d+}', 'convening:manage', [
+                'summary' => 'Delete a convening body',
+                'description' => 'Refused, never forced, once the body has met: deleting it would '
+                    . 'destroy agendas and decisions, some of which have already approved documents. '
+                    . 'A body that has finished its work is deactivated.',
+                'tags' => ['convening'],
+                'responses' => [
+                    200 => self::jsonResponse('Deleted', self::dataEnvelope(self::object(
+                        ['deleted' => ['type' => 'boolean']],
+                        ['deleted']
+                    ))),
+                    404 => self::errorResponse('Convening body not found'),
+                    409 => self::errorResponse('The body has meetings on record'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/convening-bodies/{id:\d+}/members', 'convening:read', [
+                'summary' => "List a body's seats",
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('history', 'string', 'Send `true` to include seats that have ended.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The seats', 'ConveningBodyMemberListResponse'),
+                    404 => self::errorResponse('Convening body not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/convening-bodies/{id:\d+}/members', 'convening:manage', [
+                'summary' => 'Seat somebody on a body, or move the seat they hold',
+                'description' => 'Appointing a current member to a different seat updates the seat '
+                    . 'they already hold rather than closing it and opening another — a chair who '
+                    . 'becomes secretary did not leave the body for an instant.',
+                'tags' => ['convening'],
+                'request' => 'ConveningBodyMemberRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The body\'s current seats', 'ConveningBodyMemberListResponse'),
+                    404 => self::errorResponse('Convening body not found'),
+                    422 => self::errorResponse('A missing profile_id, or a seat outside the vocabulary'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute(
+                'DELETE',
+                '/api/convening-bodies/{id:\d+}/members/{profileId:\d+}',
+                'convening:manage',
+                [
+                    'summary' => 'End somebody\'s seat on a body',
+                    'description' => 'A DEPARTURE, not a deletion: the row is kept with an end date, '
+                        . 'so a decision taken while they sat remains attributable to the body as it '
+                        . 'was then.',
+                    'tags' => ['convening'],
+                    'responses' => [
+                        200 => self::jsonResponse('The remaining seats', 'ConveningBodyMemberListResponse'),
+                        404 => self::errorResponse('That person does not currently sit on this body'),
+                    ] + self::authErrors(),
+                ]
+            ),
+
+            self::permissionRoute('GET', '/api/meetings', 'convening:read', [
+                'summary' => 'List meetings, narrowed by body and status',
+                'description' => 'Most recent first, by id rather than by date: a draft has no date '
+                    . 'at all, and ordering on a nullable column heaps every draft at whichever end '
+                    . 'the engine sorts nulls.',
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('body_id', 'integer', 'Restrict to one convening body.'),
+                    self::queryParam('status', 'string', 'Comma-separated: draft, scheduled, held, cancelled.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The matching meetings', 'MeetingListResponse'),
+                    422 => self::errorResponse('A malformed filter'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/meetings', 'convening:manage', [
+                'summary' => 'Open a meeting on a body, in draft',
+                'description' => 'Always `draft`, never straight to `scheduled`. Scheduling is its '
+                    . 'own act with its own meaning ("this is fixed, tell people"), and a sitting '
+                    . 'must not become scheduled as a side effect of somebody starting an agenda.',
+                'tags' => ['convening'],
+                'request' => 'MeetingCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created meeting', 'MeetingResponse'),
+                    422 => self::errorResponse('No such body, or the body is not active'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/meetings/{id:\d+}', 'convening:read', [
+                'summary' => 'Get one meeting, with its agenda, decisions and invitations',
+                'description' => 'Everything behind one request, because nobody has ever wanted '
+                    . 'three of the four. A screen that fetched them separately would render an '
+                    . 'agenda before it knew which items had been decided.',
+                'tags' => ['convening'],
+                'responses' => [
+                    200 => self::jsonResponse('The whole sitting', 'MeetingDetailResponse'),
+                    404 => self::errorResponse('Meeting not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/meetings/{id:\d+}/schedule', 'convening:manage', [
+                'summary' => 'Fix a date and a place; re-scheduling is the same call',
+                'description' => 'When the sitting had already been announced, EVERYBODY holding an '
+                    . 'invitation is told it moved — including the people who declined, because '
+                    . 'somebody who could not make the old date may well make the new one.',
+                'tags' => ['convening'],
+                'request' => 'MeetingScheduleRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The scheduled meeting', 'MeetingScheduleResponse'),
+                    422 => self::errorResponse('A meeting that is held or cancelled, or an unreadable date'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/meetings/{id:\d+}/hold', 'convening:manage', [
+                'summary' => 'Record that the meeting took place',
+                'description' => 'Terminal: nothing un-holds a meeting, because decisions minuted at '
+                    . 'it may already have advanced somebody\'s document. `held_at` is supplied '
+                    . 'rather than stamped by the server — a body routinely minutes yesterday\'s '
+                    . 'sitting, and the date chooses the year each decision number is minted under.',
+                'tags' => ['convening'],
+                'request' => 'MeetingHoldRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The held meeting', 'MeetingResponse'),
+                    422 => self::errorResponse('A meeting that is already held or was cancelled'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/meetings/{id:\d+}/cancel', 'convening:manage', [
+                'summary' => 'Call off a meeting that has not happened',
+                'description' => 'A state rather than a deletion: a called-off sitting is a fact the '
+                    . 'minute-book needs, and deleting the row would take its agenda with it.',
+                'tags' => ['convening'],
+                'responses' => [
+                    200 => self::jsonResponse('The cancelled meeting', 'MeetingResponse'),
+                    422 => self::errorResponse('A meeting that has already been held'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/meetings/{id:\d+}/invitations', 'convening:manage', [
+                'summary' => "Invite the body's current members",
+                'description' => 'Membership is resolved NOW, not stored earlier — the same '
+                    . 'rule-not-roster principle the routing engine enforces on its steps. '
+                    . 'Idempotent: somebody already invited is not re-invited, not re-notified, and '
+                    . 'does not have their answer reset, so this is safe to call again after a '
+                    . 'person joins the body.',
+                'tags' => ['convening'],
+                'responses' => [
+                    200 => self::jsonResponse('The meeting\'s invitations', 'MeetingInviteResponse'),
+                    422 => self::errorResponse('A draft, held or cancelled meeting, or a body with no members'),
+                ] + self::authErrors(),
+            ]),
+            // No helper: this is the one route in the subsystem with NO
+            // permission, and `permissionRoute()` cannot express that. Spelled
+            // out so the null is visible rather than defaulted.
+            [
+                'method' => 'POST',
+                'path' => '/api/meetings/{id:\d+}/invitations/respond',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Accept, decline, or answer tentatively',
+                    'description' => 'UNPERMISSIONED on purpose: being invited IS the authorization, '
+                        . 'the same posture `/api/me/notifications` takes. The answering person comes '
+                        . 'from the SESSION and never from the request body. `invited` is not among '
+                        . 'the answers — it is the state the system puts the row in, and '
+                        . '"un-answering" means nothing.',
+                    'tags' => ['convening'],
+                    'request' => 'MeetingInvitationRespondRequest',
+                    'responses' => [
+                        200 => self::jsonResponse('Your answer', 'MeetingInvitationResponse'),
+                        403 => self::errorResponse('Answering an invitation requires a signed-in person'),
+                        422 => self::errorResponse('Not an answer, or you hold no invitation to this meeting'),
+                    ],
+                ],
+            ],
+            self::permissionRoute('POST', '/api/meetings/{id:\d+}/agenda', 'convening:manage', [
+                'summary' => 'Put an item — often a document — on a meeting\'s agenda',
+                'description' => 'A draft or scheduled meeting accumulates items freely. Attaching '
+                    . 'to a meeting that has ALREADY BEEN HELD is possible and must be asked for '
+                    . '(`allow_held: true`): it asserts the body considered the item at a sitting '
+                    . 'that is over, which is right for a paper tabled on the day and wrong if you '
+                    . 'meant the next meeting. A cancelled meeting is refused outright.',
+                'tags' => ['convening'],
+                'request' => 'MeetingAgendaItemCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The agenda item', 'MeetingAgendaItemResponse'),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse('A cancelled meeting, or a held meeting without allow_held'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PUT', '/api/meetings/{id:\d+}/agenda/order', 'convening:manage', [
+                'summary' => "Rewrite the whole agenda's order",
+                'description' => 'The list must name every item on the agenda exactly once. A '
+                    . 'partial list describes an order that omits items, and both readings of that '
+                    . '— leave them where they are, or append them — are guesses.',
+                'tags' => ['convening'],
+                'request' => 'MeetingAgendaReorderRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The reordered agenda', 'MeetingAgendaItemListResponse'),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse('The list is not a permutation of this meeting\'s items'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute(
+                'DELETE',
+                '/api/meetings/{id:\d+}/agenda/{itemId:\d+}',
+                'convening:manage',
+                [
+                    'summary' => 'Remove an agenda item, closing the gap it leaves',
+                    'description' => 'Refused once a decision has been recorded against the item: a '
+                        . 'decision may already have approved a document, and deleting what it was '
+                        . 'about would leave it quoting an item nobody can read.',
+                    'tags' => ['convening'],
+                    'responses' => [
+                        200 => self::jsonResponse('Deleted', self::dataEnvelope(self::object(
+                            ['deleted' => ['type' => 'boolean']],
+                            ['deleted']
+                        ))),
+                        404 => self::errorResponse('Agenda item not found on this meeting'),
+                        409 => self::errorResponse('A decision has been recorded against this item'),
+                    ] + self::authErrors(),
+                ]
+            ),
+            self::permissionRoute(
+                'POST',
+                '/api/meetings/{id:\d+}/agenda/{itemId:\d+}/decision',
+                'convening:decide',
+                [
+                    'summary' => "Minute the body's decision, and drive the document's approval route",
+                    'description' => 'THE ONE ENDPOINT HERE THAT CAN MOVE SOMEBODY ELSE\'S DOCUMENT. '
+                        . 'One call allocates the decision number from the platform counter, applies '
+                        . 'the verdict through the existing routing engine, and writes the decision '
+                        . 'row — all three in one transaction, in that order, so a decision can never '
+                        . 'claim an approval the engine refused. Approved advances or fires the '
+                        . 'approve edge; rejected fires the reject edge or goes nowhere; a deferral '
+                        . 'is recorded and moves nothing. The `routing` object always says what '
+                        . 'actually happened, including the ordinary cases where nothing did.',
+                    'tags' => ['convening'],
+                    'request' => 'MeetingDecisionRequest',
+                    'responses' => [
+                        201 => self::jsonResponse('The decision, and what it did', 'MeetingDecisionResponse'),
+                        404 => self::errorResponse('Agenda item not found on this meeting'),
+                        422 => self::errorResponse(
+                            'A meeting that has not been held, a verdict outside the vocabulary, or a '
+                            . 'refusal from the routing engine (returned in its own words)'
+                        ),
+                    ] + self::authErrors(),
+                ]
+            ),
+
+            self::permissionRoute('GET', '/api/agenda-items', 'convening:read', [
+                'summary' => "One meeting's agenda, in order",
+                'description' => 'A FLAT, FILTERED collection read: a tabular client addresses a '
+                    . 'collection with query parameters and cannot build a nested path out of a '
+                    . 'selection. `meeting_id` is required — an unfiltered tenant-wide list is not a '
+                    . 'question anybody asks, and answering one would make a forgotten filter look '
+                    . 'like a working call.',
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('meeting_id', 'integer', 'The meeting whose agenda to read.', true),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The agenda', 'MeetingAgendaItemListResponse'),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse('meeting_id is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/meeting-decisions', 'convening:read', [
+                'summary' => "One meeting's decisions",
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('meeting_id', 'integer', 'The meeting whose decisions to read.', true),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The decisions', 'MeetingDecisionListResponse'),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse('meeting_id is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/meeting-invitations', 'convening:read', [
+                'summary' => "One meeting's invitations and answers",
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('meeting_id', 'integer', 'The meeting whose invitations to read.', true),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The invitations', 'MeetingInvitationListResponse'),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse('meeting_id is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PUT', '/api/meetings/{id:\d+}/attendance', 'convening:manage', [
+                'summary' => 'Record who actually attended a meeting that has been held',
+                'description' => 'A REPLACEMENT of the whole list, which is why it is a PUT: a '
+                    . 'secretary reads a sign-in sheet and asserts the entire set, not a stream of '
+                    . 'arrivals. Anybody omitted is removed from the record of who attended. '
+                    . 'ATTENDANCE IS NOT AN INVITATION ANSWER — an acceptance is a prediction made '
+                    . 'before the sitting and attendance is what happened at it, they disagree '
+                    . 'constantly, and neither overwrites the other. Somebody who was never invited '
+                    . 'can be recorded: give a `profile_id` for a person with an account or an '
+                    . '`attendee_name` for a guest without one. Refused unless the meeting has been '
+                    . 'HELD — attendance taken beforehand is a guess, and the platform already holds '
+                    . 'guesses as invitation answers.',
+                'tags' => ['convening'],
+                'request' => 'MeetingAttendanceRequest',
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'The recorded attendance, and what was counted',
+                        'MeetingAttendanceResponse'
+                    ),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse(
+                        'A meeting that has not been held, an attendee that identifies nobody, a '
+                        . 'duplicated profile, or a capacity outside the vocabulary'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/meeting-attendees', 'convening:read', [
+                'summary' => "One meeting's attendance, and what each attendee had answered",
+                'description' => 'Every row carries `was_invited` and `invitation_status` beside the '
+                    . 'attendance, because the interesting rows are the ones where the two disagree: '
+                    . 'somebody who declined and came anyway, somebody who holds no invitation at '
+                    . 'all. `convening:read` and not `convening:manage`, so that a caller who can '
+                    . "already see this meeting's invitations and decisions is not refused the "
+                    . 'less sensitive fact of who was in the room.',
+                'tags' => ['convening'],
+                'parameters' => [
+                    self::queryParam('meeting_id', 'integer', 'The meeting whose attendance to read.', true),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'The attendance, and what was counted',
+                        'MeetingAttendanceResponse'
+                    ),
+                    404 => self::errorResponse('Meeting not found'),
+                    422 => self::errorResponse('meeting_id is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/documents/{id:\d+}/convening', 'convening:read', [
+                'summary' => 'Which bodies has this document been in front of, and what did they decide?',
+                'description' => 'THE REVERSE READ. Without it the subsystem is invisible from the '
+                    . 'document side: somebody looking at a document that is sitting still has no '
+                    . 'way to discover it is waiting for a body that meets on the 14th.',
+                'tags' => ['convening', 'documents'],
+                'responses' => [
+                    200 => self::jsonResponse(
+                        'Every agenda item naming this document, with its meeting, body and decisions',
+                        'DocumentConveningResponse'
+                    ),
                 ] + self::authErrors(),
             ]),
         ];
@@ -1310,6 +2523,26 @@ final class CoreApiSchemas
                     ],
                 ],
             ],
+            // #1049: build identity — which checkout the worker is RUNNING, as
+            // opposed to the version constant /api/health reports. UNVERSIONED
+            // beside /api/health so a runbook or alert rule survives an API
+            // version bump, and unauthenticated so it is answerable by the
+            // operator diagnosing a half-applied update, who frequently cannot
+            // sign in. Reasoning in full on BuildApiHandler's docblock.
+            [
+                'method' => 'GET',
+                'path' => '/api/build',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'unversioned' => true,
+                'schema' => [
+                    'summary' => 'Build identity of the running backend (the backend half of /web-build)',
+                    'tags' => ['platform-ops'],
+                    'responses' => [
+                        200 => self::jsonResponse('The identity of the running process and the schema state it is in', 'BuildIdentityResponse'),
+                    ],
+                ],
+            ],
             // WC-209: the dynamic OpenAPI document, regenerated from the live
             // router at request time. UNVERSIONED (stored at /api/openapi.json
             // regardless of the version prefix, like /api/health) and
@@ -1569,7 +2802,18 @@ final class CoreApiSchemas
             ]),
             self::permissionRoute('GET', '/api/persons', 'relations:read', [
                 'summary' => 'List persons in the caller\'s tenant',
+                'description' => 'Always paginated — this endpoint already returned one page before it gained '
+                    . 'sort and search, so its default is unchanged. A client that needs every person must follow '
+                    . 'the `pagination` envelope to the last page.',
                 'tags' => ['relations'],
+                'parameters' => [
+                    self::queryParam('q', 'string', 'Case-insensitive substring match on the display name'),
+                    self::queryParam('search', 'string', 'Deprecated spelling of q, kept for existing clients. An explicit q wins.'),
+                    self::queryParam('sort', 'string', 'One of name (default), account, created. An unrecognised key is ignored rather than refused.'),
+                    self::queryParam('dir', 'string', 'asc (default) or desc'),
+                    self::queryParam('page', 'integer', 'Page number (1-based)'),
+                    self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                ],
                 'responses' => [
                     200 => self::jsonResponse('The persons', 'PersonListResponse'),
                     400 => self::errorResponse('Bad request'),
@@ -2070,6 +3314,69 @@ final class CoreApiSchemas
     }
 
     /**
+     * How this tenant wants its interface to PRESENT itself (#1068).
+     *
+     * Public and unauthenticated, exactly like {@see brandingRoutes()} and for
+     * the same two reasons: the login screen and the public status page render
+     * before a session exists, and the answer is a fact about how a page LOOKS
+     * rather than about anything the tenant holds.
+     *
+     * Kept off `/api/v1/settings` deliberately. That surface is gated on
+     * `settings:read` — an administrative right — and a preference governing
+     * every screen has to reach the readers who will never hold it. See
+     * {@see \Whity\Api\UiPreferencesApiHandler}.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function uiPreferenceRoutes(): array
+    {
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/ui/preferences',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Display preferences for the resolved tenant (public)',
+                    'description' =>
+                        'How the interface should PRESENT this tenant, resolved per-tenant then global '
+                        . 'then the registry default. A DISPLAY contract only: nothing behind it is '
+                        . 'filtered, every timestamp is still written, still queryable, still returned by '
+                        . 'every other endpoint and still in the audit trail. A client that ignores this '
+                        . 'answer renders exactly what it renders today. Tenant resolution follows '
+                        . 'branding: the authenticated tenant, else the request host, else the global '
+                        . 'layer. Never fails — an unreachable settings layer answers with the defaults.',
+                    'tags' => ['settings'],
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'The effective display preferences',
+                            [
+                                'type' => 'object',
+                                'properties' => [
+                                    'data' => [
+                                        'type' => 'object',
+                                        'properties' => [
+                                            'hideDates' => [
+                                                'type' => 'boolean',
+                                                'description' =>
+                                                    'When true, no date or time is rendered on any screen '
+                                                    . '(`ui.hide_dates`). It does NOT govern the public '
+                                                    . 'document-verification page, which has its own '
+                                                    . 'disclosure control, `documents.qr_public_detail`.',
+                                            ],
+                                        ],
+                                        'required' => ['hideDates'],
+                                    ],
+                                ],
+                            ]
+                        ),
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
      * Theme Override route declaration (WC-242): a single public GET that
      * proxies to AT MOST ONE installed plugin's own theme-override route (see
      * {@see \Whity\Core\PluginLoader::getThemeOverrideRoute()}). Public and
@@ -2549,6 +3856,16 @@ final class CoreApiSchemas
                 'auto_provision' => self::bool(),
             ], ['domain', 'default_role_id']),
 
+            // A PATCH, so BOTH fields are optional and neither is required: a
+            // caller flipping `auto_provision` must not have to restate a role it
+            // never meant to touch. `domain` is deliberately absent — renaming a
+            // domain is registering a different one, and would silently carry the
+            // old domain's ownership proof to a hostname nobody verified.
+            'TenantEmailDomainUpdateRequest' => self::object([
+                'default_role_id' => self::int(),
+                'auto_provision' => self::bool(),
+            ], []),
+
             // ── Operator per-tenant entitlements (WC-ent) ─────────────────────
             // One catalogue entry: how to render + interpret an entitlement.
             'EntitlementCatalogueEntry' => self::object([
@@ -2759,7 +4076,7 @@ final class CoreApiSchemas
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
             ], ['id', 'tenant_id', 'key', 'display_name', 'created_at', 'updated_at']),
-            'TagGroupListResponse' => self::listEnvelope('TagGroup'),
+            'TagGroupListResponse' => self::optionallyPaginatedListEnvelope('TagGroup'),
             'TagGroupDataResponse' => self::dataEnvelope(SchemaBuilder::ref('TagGroup')),
             // `key` is trimmed before validation and matched against
             // TagGroupsApiHandler::KEY_PATTERN; `RequestSchemaContractTest`
@@ -2787,7 +4104,7 @@ final class CoreApiSchemas
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
             ], ['id', 'tenant_id', 'group_id', 'name', 'created_at', 'updated_at']),
-            'TagListResponse' => self::listEnvelope('Tag'),
+            'TagListResponse' => self::optionallyPaginatedListEnvelope('Tag'),
             'TagDataResponse' => self::dataEnvelope(SchemaBuilder::ref('Tag')),
             'TagCreateRequest' => self::object([
                 'group_id' => self::reference('/api/tag-groups', 'key') + ['minimum' => 1],
@@ -2857,6 +4174,156 @@ final class CoreApiSchemas
                     'additionalProperties' => ['oneOf' => [['type' => 'boolean'], ['type' => 'integer']]],
                 ],
             ], ['id', 'plan_key', 'name', 'is_active', 'sort_order', 'created_at', 'updated_at', 'entitlements']),
+            // What a plan COSTS on particular terms (#billing). Amounts are
+            // MINOR UNITS on the wire exactly as in the database: a boundary
+            // accepting "49.00" would have to decide how many decimal places the
+            // currency has, and that belongs to the currency rather than to an
+            // HTTP handler.
+            'PlanPrice' => self::object([
+                'id' => self::int(),
+                'plan_id' => self::int(),
+                'currency' => self::str(),
+                'unit_amount' => self::int(),
+                'billing_period' => ['type' => 'string', 'enum' => ['month', 'year', 'once']],
+                'is_per_seat' => self::bool(),
+                'is_active' => self::bool(),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'plan_id', 'currency', 'unit_amount', 'billing_period', 'is_per_seat', 'is_active']),
+            // Early birds, offers and promo codes are ONE object (#billing). A
+            // promotion carrying a `code` is typed by the customer; one without
+            // applies automatically to whoever qualifies. Exactly one of
+            // `percent_off` and `amount_off` is set — a database CHECK enforces
+            // it, because a row carrying both would make every caller invent a
+            // precedence rule of its own.
+            'Promotion' => self::object([
+                'id' => self::int(),
+                'name' => self::str(),
+                'code' => self::str(true),
+                'percent_off' => self::int(true),
+                'amount_off' => self::int(true),
+                'currency' => self::str(true),
+                'starts_at' => self::str(true),
+                'ends_at' => self::str(true),
+                'max_redemptions' => self::int(true),
+                'max_redemptions_per_tenant' => self::int(),
+                'is_active' => self::bool(),
+                'redemption_count' => self::int(),
+            ], ['id', 'name', 'code', 'percent_off', 'amount_off', 'currency', 'is_active']),
+            // #billing — an invoice as its own tenant sees it.
+            //
+            // AMOUNTS TRAVEL TWICE: as minor units, which is what anything
+            // computes with, and as a preformatted string, which is what a
+            // screen shows. The second is not redundant — 5000 JOD is 5.000,
+            // and a client that divides by 100 shows every customer an amount
+            // ten times too large. The number of decimal places is a property
+            // of the currency that a client cannot work out for itself.
+            'Invoice' => self::object([
+                'id' => self::int(),
+                'number' => self::str(true),
+                'status' => self::str(),
+                'currency' => self::str(),
+                'subtotal_minor' => self::int(),
+                'discount_minor' => self::int(),
+                'tax_minor' => self::int(),
+                'tax_rate_bp' => self::int(),
+                'tax_label' => self::str(),
+                'total_minor' => self::int(),
+                'amount_paid_minor' => self::int(),
+                'balance_minor' => self::int(),
+                'total_formatted' => self::str(),
+                'balance_formatted' => self::str(),
+                'issued_at' => self::str(true),
+                'due_at' => self::str(true),
+                'paid_at' => self::str(true),
+                'seller_name' => self::str(),
+                'buyer_name' => self::str(),
+            ], ['id', 'status', 'currency', 'total_minor', 'balance_minor', 'total_formatted']),
+            'InvoiceLine' => self::object([
+                'id' => self::int(),
+                'position' => self::int(),
+                'description' => self::str(),
+                'quantity' => self::int(),
+                'unit_amount_minor' => self::int(),
+                'subtotal_minor' => self::int(),
+                'discount_minor' => self::int(),
+                'tax_rate_bp' => self::int(),
+                'tax_minor' => self::int(),
+                'total_minor' => self::int(),
+            ], ['id', 'description', 'quantity', 'total_minor']),
+            // A movement, or an attempted one. Failed and pending attempts are
+            // here too, because "why does it say I have not paid" is answered
+            // by the attempt that failed, not by its absence.
+            'PaymentTransaction' => self::object([
+                'id' => self::int(),
+                'provider' => self::str(),
+                'external_reference' => self::str(true),
+                'status' => self::str(),
+                'amount_minor' => self::int(),
+                'currency' => self::str(),
+                'failure_reason' => self::str(true),
+                'occurred_at' => self::str(),
+            ], ['id', 'provider', 'status', 'amount_minor', 'currency']),
+            'InvoiceDetail' => self::object([
+                'lines' => ['type' => 'array', 'items' => SchemaBuilder::ref('InvoiceLine')],
+                'payments' => ['type' => 'array', 'items' => SchemaBuilder::ref('PaymentTransaction')],
+            ], []),
+            // What a rail can do, so a client offers only what will work.
+            'PaymentMethodOption' => self::object([
+                'provider' => self::str(),
+                'uses_redirect' => self::bool(),
+                'uses_push_transfer' => self::bool(),
+                'supports_stored_methods' => self::bool(),
+                'supports_unattended_charge' => self::bool(),
+            ], ['provider']),
+            // ONE SHAPE FOR EVERY RAIL. `kind` is what a client branches on,
+            // once: send the browser to `redirect_url`, show `reference` and
+            // `display`, or report it already settled. A future card provider
+            // produces `redirect`, which already exists here.
+            'PaymentInstruction' => self::object([
+                'kind' => self::str(),
+                'provider' => self::str(),
+                'reference' => self::str(true),
+                'redirect_url' => self::str(true),
+                'display' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
+                'settled' => self::bool(),
+            ], ['kind', 'provider']),
+            'PayInvoiceRequest' => self::object([
+                'provider' => self::str(),
+                'return_url' => self::str(true),
+            ], ['provider']),
+            'InvoiceListResponse' => self::listEnvelope('Invoice'),
+            'InvoiceResponse' => self::dataEnvelope(SchemaBuilder::ref('Invoice')),
+            'PaymentMethodListResponse' => self::listEnvelope('PaymentMethodOption'),
+            'PaymentInstructionResponse' => self::dataEnvelope(SchemaBuilder::ref('PaymentInstruction')),
+            'WebhookAckResponse' => self::dataEnvelope(self::object([
+                'received' => self::int(),
+                'settled' => self::int(),
+            ], ['received', 'settled'])),
+            'PromotionListResponse' => self::listEnvelope('Promotion'),
+            'PromotionResponse' => self::dataEnvelope(SchemaBuilder::ref('Promotion')),
+            'PromotionCreateRequest' => self::object([
+                'name' => self::str(),
+                'code' => self::str(true),
+                'percent_off' => self::int(true),
+                'amount_off' => self::int(true),
+                'currency' => self::str(true),
+                'starts_at' => self::str(true),
+                'ends_at' => self::str(true),
+                'max_redemptions' => self::int(true),
+                'max_redemptions_per_tenant' => self::int(true),
+                'plan_ids' => ['type' => 'array', 'items' => self::int()],
+            ], ['name']),
+
+            'PlanPriceListResponse' => self::listEnvelope('PlanPrice'),
+            'PlanPriceResponse' => self::dataEnvelope(SchemaBuilder::ref('PlanPrice')),
+            'PlanPriceCreateRequest' => self::object([
+                'currency' => self::str(),
+                'unit_amount' => self::int(),
+                'billing_period' => ['type' => 'string', 'enum' => ['month', 'year', 'once']],
+                'is_per_seat' => self::bool(),
+            ], ['currency', 'unit_amount', 'billing_period']),
+
             'PlanListResponse' => self::listEnvelope('PlanSummary'),
             'PlanResponse' => self::dataEnvelope(SchemaBuilder::ref('Plan')),
             'PlanCreateRequest' => self::object([
@@ -2943,6 +4410,11 @@ final class CoreApiSchemas
                 // Where in the organisation the row is filed (migration 117). null = tenant-wide,
                 // which is what every row was before it and what an unplaced row still is.
                 'owner_ou_id' => self::int(true),
+                // WHICH shipped starter this row is, or null for anything a user made
+                // (#1013). `is_system` says "a system row" and cannot answer it, so a
+                // client rendering a Starter badge off that alone can label the row but
+                // never offer to restore the starter it came from.
+                'starter_key' => self::str(true),
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
             ], ['id', 'tenant_id', 'name', 'data', 'scope', 'is_system', 'created_at', 'updated_at']),
@@ -3062,8 +4534,83 @@ final class CoreApiSchemas
                     'ou_id' => self::int(true),
                     'collection_id' => self::int(true),
                 ], ['key']),
-            ], ['data', 'pagination', 'view']),
+                // The order APPLIED, for the same reason `view.ou_id` is echoed:
+                // `direction` has a per-field default (A-Z for text,
+                // newest-first for a date), so a client that assumed one would
+                // draw its arrow the wrong way round half the time. A null
+                // `field` is the order documents were RECORDED in, which is not
+                // `created_at` under another name -- see
+                // DocumentRepository::orderSql().
+                'sort' => self::object([
+                    // Read from the enum rather than written out, the same way
+                    // the password fields are read from PasswordPolicy: a
+                    // hand-copied list is one that drifts the first time a
+                    // sortable column is added, and a generated client would
+                    // then refuse a value the API accepts.
+                    'field' => [
+                        'type' => 'string',
+                        'nullable' => true,
+                        'enum' => [...array_column(DocumentSortField::cases(), 'value'), null],
+                    ],
+                    'direction' => ['type' => 'string', 'enum' => ['asc', 'desc']],
+                ], ['field', 'direction']),
+            ], ['data', 'pagination', 'view', 'sort']),
             'DocumentResponse' => self::dataEnvelope(SchemaBuilder::ref('Document')),
+
+            // The FRONT DOOR (#947 item 1, the half that was missing). Naming a
+            // template is the only requirement; everything else has a defined
+            // fallback, because a client that knows nothing but the template
+            // should still be able to raise a document from it.
+            //
+            // `dataRows` is the SAME shape the render routes take, deliberately,
+            // and is what the values are STORED as (migration 118,
+            // `documents.variable_data`) rather than a second authoring format
+            // that would have to be converted before it could be rendered. Keys
+            // are the template's own placeholder keys; a key the template does
+            // not declare is a 422 naming it, because a typo silently accepted
+            // renders as the literal text `{{reference}}` in a finished document.
+            //
+            // `render` is a TRI-STATE and its absent case is the common one:
+            // absent = "render if this instance can", true = "I require an
+            // artifact" (503 when it cannot), false = "record only". Omitting it
+            // is what a client that does not care should do.
+            'DocumentCreateRequest' => self::object([
+                'document_template_id' => self::int(),
+                'title' => self::str(true),
+                'dataRows' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']]],
+                'sheet' => ['type' => 'object', 'additionalProperties' => true, 'nullable' => true],
+                'render' => ['type' => 'boolean', 'nullable' => true],
+            ], ['document_template_id']),
+
+            // Why the render outcome is a SIBLING of `data` rather than a status
+            // code, and why `reason` is a closed vocabulary: a 201 means the
+            // document exists, which it does on an instance with no render tier
+            // at all (`documents.render_enabled` defaults to false). A client
+            // deciding whether to offer a "render now" button has to tell
+            // `disabled` (never going to work here) from `unavailable`
+            // (transient, retry) from `declined` (you asked for this), and a
+            // prose message cannot be branched on. Same posture as the routing
+            // create's `resolved`/`delivered` keys.
+            'DocumentCreateResponse' => self::object([
+                'data' => SchemaBuilder::ref('Document'),
+                'render' => self::object([
+                    'attempted' => self::bool(),
+                    'stored' => self::bool(),
+                    'reason' => [
+                        'type' => 'string',
+                        'nullable' => true,
+                        'enum' => [
+                            'declined',
+                            'disabled',
+                            'persist_disabled',
+                            'rejected',
+                            'unavailable',
+                            'storage_unavailable',
+                            null,
+                        ],
+                    ],
+                ], ['attempted', 'stored']),
+            ], ['data', 'render']),
             // The re-render body. Same render inputs as DocumentRenderRequest
             // minus `persist`/`title`: this route ALWAYS persists (that is what
             // it is for) and never renames the record it appends to.
@@ -3099,15 +4646,72 @@ final class CoreApiSchemas
                 'rule_kind' => self::str(),
                 'rule_config' => ['type' => 'object', 'additionalProperties' => true],
                 'label' => self::str(true),
-            ], ['id', 'position', 'rule_kind', 'rule_config']),
+                // #1014. `decision` is whether this step is a GATE - answered
+                // with a verdict rather than a forward. Published rather than
+                // inferred from the edges, because a gate at the END of a route
+                // has no outgoing edge and still demands one.
+                'decision' => self::bool(),
+                // The step's own override of what "this node approved" means when
+                // it fans out to many people. NULL is not "no quorum": it defers
+                // to the tenant's `documents.routing_approval_quorum` setting,
+                // which defaults to `all`.
+                'decision_quorum' => ['type' => 'string', 'enum' => ['all', 'any', 'majority'], 'nullable' => true],
+                // #1054. WHETHER ANYBODY HERE IS ASKED TO ACT. `delivery` means
+                // the people this step reaches are TOLD: their inbox item is
+                // closed by the event that created it and the document carries
+                // straight on. A client needs this before it renders anything —
+                // on such a step Forward, Acknowledge and Return are all 422s.
+                'satisfied_by' => ['type' => 'string', 'enum' => ['act', 'delivery']],
+                // #1037. HOW MANY TIMES A REJECTION HAS SENT THE DOCUMENT BACK
+                // FROM HERE. A backwards reject edge - "to the author, to fix" -
+                // is the most common approval design there is, and nothing
+                // counted the laps: a document on its ninth rejection looked
+                // exactly like one on its first in every surface.
+                //
+                // Derived from the trail's verdict rows rather than stored, so it
+                // cannot disagree with the history it summarises. Always present,
+                // never null: 0 is a real answer, and an absent field would be
+                // ambiguous between "never rejected" and "this server does not
+                // say".
+                'rejection_count' => self::int(),
+            ], ['id', 'position', 'rule_kind', 'rule_config', 'decision', 'satisfied_by', 'rejection_count']),
+            // Where a settled VERDICT sends the document (#1014, migration 119).
+            // A flat list on the route rather than fields on a step, because an
+            // edge is a relationship between two steps and belongs to neither -
+            // and because a node editor reads a node list and an edge list.
+            'DocumentRouteEdge' => self::object([
+                'id' => self::int(),
+                'route_id' => self::int(),
+                'from_step_id' => self::int(),
+                'to_step_id' => self::int(),
+                'verdict' => ['type' => 'string', 'enum' => ['approved', 'rejected']],
+            ], ['id', 'route_id', 'from_step_id', 'to_step_id', 'verdict']),
             'DocumentRoute' => self::object([
                 'id' => self::int(),
                 'document_id' => self::int(),
                 'title' => self::str(),
                 'created_by' => self::int(true),
+                // #1031, migration 123. WHICH DESIGN THIS CIRCULATION CAME FROM.
+                // Both halves are published because neither implies the other:
+                // `template_id` is null for a route composed by hand AND for one
+                // whose design has since been deleted, while `template_name` is
+                // the snapshot taken at issue and survives only the second case.
+                // The steps below are a COPY, not a view - editing the design
+                // afterwards cannot change a circulation already under way.
+                'template_id' => self::int(true),
+                'template_name' => self::str(true),
                 'created_at' => self::str(),
                 'steps' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentRouteStep')],
-            ], ['id', 'document_id', 'title', 'created_at', 'steps']),
+                'edges' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentRouteEdge')],
+                // What a step whose `decision_quorum` is NULL actually does in
+                // this tenant, already resolved through the settings chain
+                // (#1041). Published with the route because the answer lives
+                // behind `settings:read` and the person standing on a decision
+                // step is the least likely person in the tenant to hold it - so
+                // without this a client could not tell an approver whether their
+                // single approval carries the gate or is one of four hundred.
+                'default_quorum' => ['type' => 'string', 'enum' => ['all', 'any', 'majority']],
+            ], ['id', 'document_id', 'title', 'created_at', 'steps', 'edges', 'default_quorum']),
             'DocumentRouteListResponse' => self::listEnvelope('DocumentRoute'),
             // `resolved` and `delivered` are on the envelope rather than on the
             // route, because they describe what THIS request did rather than a
@@ -3131,9 +4735,58 @@ final class CoreApiSchemas
                         'rule_kind' => self::str(),
                         'rule_config' => ['type' => 'object', 'additionalProperties' => true],
                         'label' => self::str(true),
+                        // #1014. `decision` turns the step into a gate. The other
+                        // three are refused outright when it is absent or false -
+                        // a quorum or an edge on a step that produces no verdict
+                        // is a stored intention that silently does nothing.
+                        'decision' => self::bool(true),
+                        'decision_quorum' => [
+                            'type' => 'string',
+                            'enum' => ['all', 'any', 'majority'],
+                            'nullable' => true,
+                        ],
+                        // Targets are named by 1-BASED POSITION in this same
+                        // `steps` array, not by id: while a route is being
+                        // composed its steps have no ids yet, and the position is
+                        // the only handle an author has. Reads publish ids.
+                        // Backwards edges are legal ("rejected goes back to
+                        // step 1 for correction"); an edge onto the step itself
+                        // is not.
+                        'on_approved' => self::int(true),
+                        'on_rejected' => self::int(true),
+                        // #1054. Absent means `act`, which is what every route
+                        // authored before it means. `delivery` is refused
+                        // together with `decision`: a gate needs somebody
+                        // holding the item to answer it, and a delivery step
+                        // closes every item the moment it is sent.
+                        //
+                        // There is no CHANNEL here, deliberately. The step says
+                        // its people are told rather than asked; e-mail versus
+                        // in-app is `documents.routing_notification_channels`,
+                        // so a tenant can change transport without re-authoring
+                        // a single route.
+                        'satisfied_by' => [
+                            'type' => 'string',
+                            'enum' => ['act', 'delivery'],
+                        ],
                     ], ['rule_kind']),
                 ],
             ], ['steps']),
+
+            // #1031. Applying a DESIGN carries the design's id and nothing else -
+            // no steps, deliberately. The stages are read from the template
+            // server-side and converted there, so a client cannot send a
+            // `template_id` beside steps of its own and have the pair recorded as
+            // though the design produced them. The tenant's
+            // `documents.routing_max_steps` is re-checked at this moment, since
+            // the setting can have moved since the design was authored.
+            'DocumentRouteFromTemplateRequest' => self::object([
+                'template_id' => self::int(),
+                // Left out, the ROUTE is named after the DESIGN rather than after
+                // the document - an author who applied "Purchase approval" is
+                // naming the circulation after the flow it follows.
+                'title' => self::str(true),
+            ], ['template_id']),
 
             // The trail. Every field is a COLUMN (migration 112) rather than a
             // JSONB key, because the shape is fixed and known to core - which is
@@ -3154,6 +4807,11 @@ final class CoreApiSchemas
                 // was never involved.
                 'to_ou_id' => self::int(true),
                 'note' => self::str(true),
+                // #1014: what the actor DECIDED, which is a different fact from
+                // what they DID. NULL on every act that decided nothing - every
+                // act on a circulation step, every note, and every event recorded
+                // before migration 119. It never means "not approved".
+                'verdict' => ['type' => 'string', 'enum' => ['approved', 'rejected'], 'nullable' => true],
                 'occurred_at' => self::str(),
             ], ['id', 'document_id', 'route_id', 'action', 'occurred_at']),
             'DocumentTrailListResponse' => self::paginatedListEnvelope('DocumentTrailEvent'),
@@ -3176,8 +4834,17 @@ final class CoreApiSchemas
                 'created_by_event_id' => self::int(),
                 'closed_by_event_id' => self::int(true),
                 'open' => self::bool(),
+                // #1054. TRUE when this row was closed by the document reaching
+                // the person rather than by their acting — the rows a
+                // `satisfied_by: delivery` step opens. Without it a delivery
+                // step's three hundred closed rows read exactly like three
+                // hundred people who acted.
+                'closed_by_delivery' => self::bool(),
                 'created_at' => self::str(),
-            ], ['id', 'document_id', 'route_id', 'step_id', 'profile_id', 'created_by_event_id', 'open', 'created_at']),
+            ], [
+                'id', 'document_id', 'route_id', 'step_id', 'profile_id', 'created_by_event_id',
+                'open', 'closed_by_delivery', 'created_at',
+            ]),
             'DocumentRouteRecipientListResponse' => self::listEnvelope('DocumentRouteRecipient'),
 
             'DocumentRouteActionRequest' => self::object([
@@ -3185,11 +4852,22 @@ final class CoreApiSchemas
                 // Required for `noted` (an empty note records nothing), optional
                 // on the other three.
                 'note' => self::str(true),
+                // #1014. REQUIRED with `acknowledged` on a decision step and
+                // refused everywhere else - including on a circulation step,
+                // where a recorded verdict nothing routes on would read later as
+                // an authorisation that was never asked for.
+                'verdict' => ['type' => 'string', 'enum' => ['approved', 'rejected'], 'nullable' => true],
             ], ['action']),
             'DocumentRouteActionResponse' => self::object([
                 'data' => SchemaBuilder::ref('DocumentTrailEvent'),
                 'resolved' => self::int(),
                 'delivered' => self::int(),
+                // What the STEP concluded, which is NOT what the caller said: a
+                // quorum of `all` means two of three approvals conclude nothing,
+                // and this stays null until the third arrives. On the envelope
+                // rather than on the event for the reason the two counts are - it
+                // describes what this request did, not a property of the record.
+                'decided' => ['type' => 'string', 'enum' => ['approved', 'rejected'], 'nullable' => true],
             ], ['data', 'resolved', 'delivered']),
 
             // -- The inbox (#881, first source contributed by #947 item 3) -----
@@ -3274,10 +4952,29 @@ final class CoreApiSchemas
                 'description' => self::str(),
                 'provenance' => self::str(true),
             ], ['key', 'description']),
+            // A rail SECTION: the heading a set of folders sits under, and where
+            // it goes. Sent because the client used to decide which groups
+            // existed — it admitted two names and silently dropped the rest, so
+            // a folder in a third group reached this payload and never the
+            // screen (#998).
+            'DocumentViewGroup' => self::object([
+                'key' => self::str(),
+                // English, translated by key where a client knows one — the same
+                // rule a view's label follows, and for the same reason: a client
+                // cannot have a translation for a group it has never heard of.
+                'label' => self::str(),
+                'order' => self::int(),
+            ], ['key', 'label', 'order']),
             'DocumentViewListResponse' => self::object([
                 'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentView')],
+                // One entry per group that has at least one available view, in
+                // render order. A group with no folders is not a section; a group
+                // with folders but no declaration still appears, labelled with
+                // its own key, because the one thing this must never do is
+                // decide a view's group is not real.
+                'groups' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentViewGroup')],
                 'unavailable_substrates' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentSubstrate')],
-            ], ['data', 'unavailable_substrates']),
+            ], ['data', 'groups', 'unavailable_substrates']),
 
             // ── Per-user collections (#978) ──────────────────────────────────
             // The one part of the organizer that is stored, because it is the
@@ -3361,6 +5058,123 @@ final class CoreApiSchemas
                 'rule_config' => ['type' => 'object', 'additionalProperties' => true],
             ], ['rule_kind']),
             'UserGroupDeleteResponse' => self::dataEnvelope(self::object([
+                'id' => self::int(),
+                'deleted' => self::bool(),
+            ], ['id', 'deleted'])),
+
+            // #1027 — reusable, BRANCHING ROUTE TEMPLATES: the designs the
+            // node-based flow editor edits. A template is to a route what
+            // `document_templates` is to `documents` — the thing DESIGNED, with a
+            // different lifetime from the thing that HAPPENED.
+            //
+            // `step_count` is the only decoration on a list row. A resolved-people
+            // count is deliberately absent: it would resolve every rule of every
+            // step on every render, and report a number already stale by the time
+            // it was drawn. That count belongs to `POST /api/user-groups/preview`,
+            // one rule at a time, where somebody asked for it.
+            'RouteTemplate' => self::object([
+                'id' => self::int(),
+                'name' => self::str(),
+                'description' => self::str(true),
+                'step_count' => self::int(),
+                // Null once the person who designed it has been deleted. The
+                // design survives them: it is the institution's process, not that
+                // person's private filing.
+                'created_by' => self::int(true),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'name', 'step_count', 'created_at', 'updated_at']),
+            // One stage. It names a RULE and never a person — there is no profile
+            // field here and none in the table behind it, which is what makes
+            // "one node for a thousand instructors" a property of the schema
+            // rather than a convention the editor is trusted to keep.
+            //
+            // `decision` says whether the stage is a GATE. `decision_quorum` says
+            // what "this node approved" means when the rule resolves to a
+            // thousand people, and NULL means "follow the tenant setting" rather
+            // than "no quorum" — the same reading migration 118 gives the
+            // identical column on `document_route_steps`.
+            //
+            // Addressed by `position`, never by a database id: the ids churn on
+            // every save because a graph write replaces rather than diffs, so
+            // publishing one would invite a client to hold it across a save.
+            'RouteTemplateStep' => self::object([
+                'position' => self::int(),
+                'rule_kind' => self::str(),
+                'rule_config' => ['type' => 'object', 'additionalProperties' => true],
+                'label' => self::str(true),
+                'decision' => self::bool(),
+                'decision_quorum' => self::str(true),
+                // #1054, carried on the DESIGN as well as on the instance. A
+                // stage the converter could not carry is a stage the design
+                // silently loses: a delivery stage flattened into a circulation
+                // hands every instructor in a faculty an item nothing can close.
+                'satisfied_by' => ['type' => 'string', 'enum' => ['act', 'delivery']],
+                'canvas_x' => self::int(),
+                'canvas_y' => self::int(),
+                // NOT in the required list, unlike `DocumentRouteStep` above.
+                // This one component serves both the graph RESPONSE and the graph
+                // REQUEST, and a canvas drawn before #1054 does not send the
+                // field: the server reads its absence as `act`, which is what
+                // that design has always meant. Marking it required would make
+                // every existing editor's save read as non-conforming for a value
+                // it correctly has no opinion about.
+                //
+                // (`decision` IS in that list, and is the wart this declines to
+                // copy rather than the precedent it follows.)
+            ], ['position', 'rule_kind', 'rule_config', 'decision']),
+            // One transition, keyed by the verdict that takes it (#1014's
+            // vocabulary, mirrored — `approved` or `rejected`).
+            //
+            // There is NO unconditional edge. A step with no edge for the verdict
+            // it received falls through to the NEXT POSITION on an approval and
+            // ends the chain on a rejection, so a plain linear route is a template
+            // with steps and no edges at all — and the forward arrows an editor
+            // draws come from `position` rather than from stored rows that could
+            // disagree with it.
+            'RouteTemplateEdge' => self::object([
+                'from' => self::int(),
+                'to' => self::int(),
+                'verdict' => self::str(),
+            ], ['from', 'to', 'verdict']),
+            'RouteTemplateListResponse' => self::paginatedListEnvelope('RouteTemplate'),
+            'RouteTemplateResponse' => self::dataEnvelope(SchemaBuilder::ref('RouteTemplate')),
+            // The whole canvas. `default_quorum` and `max_steps` ride along so the
+            // editor can show what an unset quorum will do and how many nodes it
+            // may draw WITHOUT holding `settings:read` — which somebody who may
+            // design a flow need not hold.
+            'RouteTemplateGraphResponse' => self::dataEnvelope(self::object([
+                'id' => self::int(),
+                'name' => self::str(),
+                'description' => self::str(true),
+                'step_count' => self::int(),
+                'default_quorum' => self::str(),
+                'max_steps' => self::int(),
+                'created_by' => self::int(true),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+                'steps' => ['type' => 'array', 'items' => SchemaBuilder::ref('RouteTemplateStep')],
+                'edges' => ['type' => 'array', 'items' => SchemaBuilder::ref('RouteTemplateEdge')],
+            ], ['id', 'name', 'default_quorum', 'max_steps', 'steps', 'edges'])),
+            'RouteTemplateCreateRequest' => self::object([
+                'name' => self::str(),
+                'description' => self::str(true),
+            ], ['name']),
+            // PATCH: omitted fields keep their value. The GRAPH is not here — it
+            // has its own verb, because renaming a design and redrawing it are
+            // different acts, and a PATCH carrying both would make an omitted
+            // `steps` indistinguishable from an author who meant to clear it.
+            'RouteTemplateUpdateRequest' => self::object([
+                'name' => self::str(),
+                'description' => self::str(true),
+            ], []),
+            // PUT: REPLACES. `steps` is required and an empty array is a valid,
+            // meaningful value — an author who really did delete every node.
+            'RouteTemplateGraphRequest' => self::object([
+                'steps' => ['type' => 'array', 'items' => SchemaBuilder::ref('RouteTemplateStep')],
+                'edges' => ['type' => 'array', 'items' => SchemaBuilder::ref('RouteTemplateEdge')],
+            ], ['steps']),
+            'RouteTemplateDeleteResponse' => self::dataEnvelope(self::object([
                 'id' => self::int(),
                 'deleted' => self::bool(),
             ], ['id', 'deleted'])),
@@ -3457,6 +5271,11 @@ final class CoreApiSchemas
                 // Where in the organisation the row is filed (migration 117). null = tenant-wide,
                 // which is what every row was before it and what an unplaced row still is.
                 'owner_ou_id' => self::int(true),
+                // WHICH shipped starter this row is, or null for anything a user made
+                // (#1013). `is_system` says "a system row" and cannot answer it, so a
+                // client rendering a Starter badge off that alone can label the row but
+                // never offer to restore the starter it came from.
+                'starter_key' => self::str(true),
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
             ], ['id', 'tenant_id', 'name', 'data', 'scope', 'is_system', 'created_at', 'updated_at']),
@@ -3480,6 +5299,61 @@ final class CoreApiSchemas
                 'required_permission' => self::str(true),
                 'owner_ou_id' => self::int(true),
             ], []),
+            // What would break if this block changed — the answer a management UI
+            // needs BEFORE offering an edit or a delete, since a block is
+            // pointer-referenced and an edit propagates to every instance.
+            //
+            // `templates` is row-filtered (never the identity of a template the
+            // caller may not see); `total` is NOT, and `hidden` is the difference.
+            // A visible-only total would understate the blast radius of an edit
+            // to exactly the callers whose reach is narrowest — the argument is
+            // written out in full on DocumentBlocksApiHandler::usage().
+            //
+            // `owner_ou_id` is an id, not a name: resolving unit names is
+            // ous:read's job and this route is gated on documents:read, so a
+            // client that cannot read units renders the id rather than being
+            // handed a name this endpoint had no authority to look up.
+            // The FEATURE catalogue (#feature-flags). Three booleans per row on
+            // purpose: "off" is not one condition, and an operator switch and a
+            // missing entitlement need different actions from different people.
+            'Feature' => self::object([
+                // The settings key itself, so a client can join this straight to
+                // the settings catalogue rather than to a second vocabulary.
+                'key' => self::str(),
+                'enabled' => self::bool(),
+                'operator_enabled' => self::bool(),
+                'entitlement' => self::str(true),
+                'entitled' => self::bool(),
+            ], ['key', 'enabled', 'operator_enabled', 'entitlement', 'entitled']),
+            'FeatureListResponse' => self::listEnvelope('Feature'),
+
+            'DocumentBlockUsage' => self::object([
+                'block_id' => self::int(),
+                'total' => self::int(),
+                'hidden' => self::int(),
+                'templates' => ['type' => 'array', 'items' => self::object([
+                    'id' => self::int(),
+                    'name' => self::str(),
+                    'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
+                    'required_permission' => self::str(true),
+                    'owner_ou_id' => self::int(true),
+                    'is_system' => self::bool(),
+                    'updated_at' => self::str(),
+                ], ['id', 'name', 'scope', 'is_system', 'updated_at'])],
+                // The OTHER kind of user (#1186). Blocks may contain blocks, so
+                // a block held only by another block used to report no users
+                // here and then refuse to delete with a 409.
+                'blocks' => ['type' => 'array', 'items' => self::object([
+                    'id' => self::int(),
+                    'name' => self::str(),
+                    'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
+                    'required_permission' => self::str(true),
+                    'owner_ou_id' => self::int(true),
+                    'is_system' => self::bool(),
+                    'updated_at' => self::str(),
+                ], ['id', 'name', 'scope', 'is_system', 'updated_at'])],
+            ], ['block_id', 'total', 'hidden', 'templates', 'blocks']),
+            'DocumentBlockUsageResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentBlockUsage')),
 
             // ── Resource-scoped role grants (WC-712 §3) ───────────────────────
             // `profile_id` nullability carries the meaning, so it is nullable
@@ -3953,6 +5827,922 @@ final class CoreApiSchemas
                 'sort_order' => self::int(),
             ], []) + ['minProperties' => 1],
 
+            // #1070. A period KIND. `key` is the stable identifier code binds
+            // to — bare for a tenant's own vocabulary, `plugin:slug` for one a
+            // plugin contributed. `parent_type_id` is the nesting: which kind
+            // this kind sits inside. There is deliberately no rank column —
+            // a kind's place is expressed by what contains it, which is a
+            // structural fact, rather than by a sort order, which is an opinion.
+            // FORMS (migrations 127/128). `name` and `label` are the bilingual
+            // `{ar?, en?}` object, so Arabic and English are both first-class
+            // rather than one being the "real" value and the other a translation.
+            //
+            // `available_transitions` and `accepts_submissions` are DERIVED from
+            // `status` and are emitted so a client rendering the lifecycle
+            // controls does not carry a second copy of the transition table —
+            // which is how a client ends up offering a control the server refuses.
+            'Form' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'form_key' => self::str(),
+                'name' => self::localizedText(),
+                'description' => self::str(true),
+                'status' => ['type' => 'string', 'enum' => ['draft', 'published', 'archived']],
+                'version' => self::int(),
+                // Null means "collect only, do not circulate" — a legitimate
+                // configuration, not an unset field.
+                'route_template_id' => self::int(true),
+                'created_by_profile_id' => self::int(true),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+                'available_transitions' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'accepts_submissions' => self::bool(),
+                // THE PUBLIC LINK (migration 132). Off by default on every form
+                // in every install: `public_enabled` is only ever true because
+                // somebody holding `forms:manage` called
+                // POST /api/v1/forms/{id}/public-link.
+                'public_enabled' => self::bool(),
+                // 64 hex characters — 256 bits from a CSPRNG. It is the ONLY
+                // credential the public endpoints have, so treat it as one: it is
+                // returned to tenant members (who must be able to hand the link
+                // out) and to nobody else. Null when the form has no link.
+                'public_slug' => self::str(true),
+                // The absolute address the form is served from, composed from the
+                // slug and this instance's own APP_URL rather than stored — an
+                // instance that moves domain must not serve a column pointing at
+                // where it used to live. Null when there is no link, and ALSO
+                // null when the instance has never been told its own address.
+                'public_url' => self::str(true),
+                // The submission window. Either may be null, meaning "no boundary
+                // on this side". Naive local date-times in the instance's own
+                // clock, like every other timestamp in this schema.
+                'public_opens_at' => self::str(true),
+                'public_closes_at' => self::str(true),
+                'public_enabled_at' => self::str(true),
+                'public_enabled_by_profile_id' => self::int(true),
+                // DERIVED, computed by the database against its own clock: is the
+                // form inside its window right now? Emitted so a client does not
+                // compare timestamps in a second timezone and disagree with the
+                // server about whether a link is live.
+                'public_window_open' => self::bool(),
+            ], [
+                'id', 'tenant_id', 'form_key', 'name', 'status', 'version',
+                'available_transitions', 'accepts_submissions', 'public_enabled',
+            ]),
+            'FormResponse' => self::dataEnvelope(SchemaBuilder::ref('Form')),
+            'FormListResponse' => self::listEnvelope('Form'),
+            'FormDetailResponse' => self::dataEnvelope([
+                'allOf' => [
+                    SchemaBuilder::ref('Form'),
+                    self::object([
+                        'fields' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormField')],
+                        'sections' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormSection')],
+                        'submission_count' => self::int(),
+                    ], []),
+                ],
+            ]),
+            // `field_type` mirrors the CHECK constraint on `form_fields` and
+            // FieldType's whitelist; a unit test reads the migration and fails
+            // the moment the three disagree.
+            //
+            // `prefill_backed` is emitted BESIDE `prefill_source` rather than
+            // left for a client to derive: two of the declared sources have no
+            // column in this schema to read, and an author choosing one must see
+            // in the field editor that it will never produce a value — not
+            // discover it as an empty box after publishing.
+            'FormField' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'form_id' => self::int(),
+                'field_key' => self::str(),
+                'field_type' => ['type' => 'string', 'enum' => [
+                    'text', 'textarea', 'number', 'date', 'select',
+                    'multiselect', 'checkbox', 'file', 'profile_ref', 'ou_ref',
+                ]],
+                'label' => self::localizedText(),
+                'help_text' => self::str(true),
+                'is_required' => self::bool(),
+                'options' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormFieldOption')],
+                'validation' => SchemaBuilder::ref('FormFieldValidation'),
+                'prefill_source' => self::str(true),
+                'prefill_backed' => self::bool(),
+                'section_key' => self::str(true),
+                'position' => self::int(),
+                'multi_valued' => self::bool(),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'tenant_id', 'form_id', 'field_key', 'field_type', 'label', 'is_required', 'position']),
+            'FormFieldOption' => self::object([
+                'value' => self::name(nonEmpty: true),
+                'label' => self::localizedText(),
+            ], ['value', 'label']),
+            // Every rule is optional and unknown keys are DROPPED on write rather
+            // than stored: a rule nothing enforces is a promise on the row that no
+            // code keeps. `maxLength` may only TIGHTEN the platform ceiling.
+            'FormFieldValidation' => self::object([
+                'min' => ['type' => 'number'],
+                'max' => ['type' => 'number'],
+                'maxLength' => self::int(),
+                'pattern' => ['type' => 'string', 'maxLength' => 512],
+            ], []),
+            // DERIVED from the fields' `section_key`, never stored. There is no
+            // `form_sections` table, so a section cannot exist with no fields and
+            // a field cannot point at a section that was deleted.
+            'FormSection' => self::object([
+                'key' => self::str(true),
+                'field_keys' => ['type' => 'array', 'items' => ['type' => 'string']],
+            ], ['key', 'field_keys']),
+            'FormFieldResponse' => self::dataEnvelope(SchemaBuilder::ref('FormField')),
+            'FormFieldListResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormField')],
+                'meta' => SchemaBuilder::ref('FormBuilderVocabularies'),
+            ], ['data']),
+            // Served by the server so a builder cannot hold a stale copy of the
+            // field kinds or of which prefill sources actually resolve here.
+            'FormBuilderVocabularies' => self::object([
+                'field_types' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'option_bearing_field_types' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'prefill_sources' => [
+                    'type' => 'array',
+                    'items' => self::object([
+                        'source' => self::str(),
+                        // False means nothing in this install stores that detail,
+                        // so the field starts empty. Declared anyway — omitting it
+                        // would push authors into adding a plain text box and
+                        // making every submitter retype it.
+                        'backed' => self::bool(),
+                        'reason' => self::str(true),
+                    ], ['source', 'backed']),
+                ],
+            ], ['field_types', 'prefill_sources']),
+            'FormCreateRequest' => self::object([
+                'form_key' => [
+                    'type' => 'string',
+                    'minLength' => 1,
+                    'maxLength' => 128,
+                    'pattern' => '^[a-z][a-z0-9_-]*$',
+                ],
+                // A bare string is accepted and read as English: a form named in
+                // one language only is the ordinary case, and demanding the object
+                // shape would 422 a request that meant something perfectly clear.
+                'name' => self::localizedText(),
+                'description' => self::text(),
+                'route_template_id' => self::int(true),
+            ], ['form_key', 'name']),
+            // `form_key` and `status` are absent because both are REFUSED with a
+            // 422 rather than ignored — a caller who sent one meant something, and
+            // dropping it silently would leave them believing a change happened.
+            'FormUpdateRequest' => self::object([
+                'name' => self::localizedText(),
+                'description' => self::text(),
+                'route_template_id' => self::int(true),
+            ], []) + ['minProperties' => 1],
+            'FormFieldCreateRequest' => self::object([
+                'field_key' => [
+                    'type' => 'string',
+                    'minLength' => 1,
+                    'maxLength' => 128,
+                    'pattern' => '^[a-z][a-z0-9_]*$',
+                ],
+                'field_type' => ['type' => 'string', 'enum' => [
+                    'text', 'textarea', 'number', 'date', 'select',
+                    'multiselect', 'checkbox', 'file', 'profile_ref', 'ou_ref',
+                ]],
+                'label' => self::localizedText(),
+                'help_text' => self::text(),
+                'is_required' => self::bool(),
+                'options' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormFieldOption')],
+                'validation' => SchemaBuilder::ref('FormFieldValidation'),
+                'prefill_source' => self::str(true),
+                'section_key' => self::name(),
+                // Absent means the server appends it after the current maximum.
+                'position' => self::int(),
+            ], ['field_key', 'field_type', 'label']),
+            // The WHOLE set, in order. Each entry is a create-shaped field; the
+            // list's order IS the position, so a caller that shows a sequence
+            // does not also have to maintain an integer that agrees with it.
+            'FormFieldSetRequest' => self::object([
+                'fields' => [
+                    'type' => 'array',
+                    'items' => SchemaBuilder::ref('FormFieldCreateRequest'),
+                    'description' => 'Every field the form should have after this call. A stored '
+                        . 'field_key absent from this list is withdrawn; answers already given to it '
+                        . 'stay recorded and stop having a label.',
+                ],
+            ], ['fields']),
+            'FormFieldUpdateRequest' => self::object([
+                'field_type' => ['type' => 'string', 'enum' => [
+                    'text', 'textarea', 'number', 'date', 'select',
+                    'multiselect', 'checkbox', 'file', 'profile_ref', 'ou_ref',
+                ]],
+                'label' => self::localizedText(),
+                'help_text' => self::text(),
+                'is_required' => self::bool(),
+                'options' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormFieldOption')],
+                'validation' => SchemaBuilder::ref('FormFieldValidation'),
+                'prefill_source' => self::str(true),
+                'section_key' => self::name(),
+                'position' => self::int(),
+            ], []) + ['minProperties' => 1],
+            // `prefill` is keyed by FIELD KEY, not by source: two fields may name
+            // the same source and each wants its own entry. It is kept OUT of the
+            // field objects on purpose — a field is the same for everybody and a
+            // prefill value is not, and merging them would produce a payload that
+            // looks cacheable and is not.
+            'FormRenderResponse' => self::dataEnvelope(self::object([
+                'form' => SchemaBuilder::ref('Form'),
+                'fields' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormField')],
+                'sections' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormSection')],
+                'prefill' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
+                'unresolved_prefill' => [
+                    'type' => 'array',
+                    'items' => self::object([
+                        'field_key' => self::str(),
+                        'source' => self::str(),
+                        'reason' => self::str(),
+                    ], ['field_key', 'source', 'reason']),
+                ],
+                'accepts_submissions' => self::bool(),
+            ], ['form', 'fields', 'sections', 'prefill', 'accepts_submissions'])),
+            'FormSubmissionCreateRequest' => self::object([
+                // Answers keyed by field key. Values are typed per the field's
+                // kind — a string, a number, a boolean, or a list of choices —
+                // which is why this is `additionalProperties: true` rather than a
+                // narrower map: one schema cannot express "shaped by another row".
+                'data' => ['type' => 'object', 'additionalProperties' => true],
+            ], ['data']),
+            // ---- the public link (migration 132) ----
+            // Both boundaries optional and either nullable: null means "no
+            // boundary on this side", which is the ordinary case and must not
+            // need a sentinel date. A UTC offset is REFUSED rather than applied —
+            // the column is a naive TIMESTAMP compared against the database's own
+            // clock, so accepting one would move the deadline somebody typed
+            // without saying so.
+            'FormPublicLinkRequest' => self::object([
+                'opens_at' => [
+                    'type' => 'string',
+                    'nullable' => true,
+                    'description' => 'YYYY-MM-DD or YYYY-MM-DD HH:MM[:SS] in the instance\'s own '
+                        . 'time zone. A bare date means the START of that day.',
+                ],
+                'closes_at' => [
+                    'type' => 'string',
+                    'nullable' => true,
+                    'description' => 'Same format. A bare date closes at MIDNIGHT THAT MORNING, so '
+                        . '"all of the 30th" is written as the 31st or as an explicit time.',
+                ],
+            ], []),
+            // `meta.closed` is the honest way to be idempotent: the call always
+            // succeeds, and this says whether it was the one that changed
+            // anything.
+            'FormPublicLinkClosedResponse' => self::object([
+                'data' => SchemaBuilder::ref('Form'),
+                'meta' => self::object(['closed' => self::bool()], ['closed']),
+            ], ['data']),
+            // WHAT A STRANGER SEES. Deliberately NOT `Form` plus omissions — it is
+            // its own, much smaller shape, built key by key, so a column added to
+            // `forms` next year is invisible here unless somebody adds it. No id,
+            // no tenant id, no form key, no author, no route template, no
+            // submission count, no status, no version, and no prefill.
+            'PublicFormResponse' => self::dataEnvelope(self::object([
+                'slug' => self::str(),
+                'name' => self::localizedText(),
+                'description' => self::str(true),
+                'fields' => ['type' => 'array', 'items' => SchemaBuilder::ref('PublicFormField')],
+                'sections' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormSection')],
+                'accepts_submissions' => self::bool(),
+                'opens_at' => self::str(true),
+                'closes_at' => self::str(true),
+            ], ['slug', 'name', 'fields', 'sections', 'accepts_submissions'])),
+            // A field, reduced to what drawing it requires. `id`, `tenant_id` and
+            // `form_id` are internal identifiers a stranger has no use for and
+            // could try elsewhere; `prefill_source` is withheld even though it
+            // holds no value of this caller's, because naming `profile.ou` tells
+            // an outsider the platform models organisational units and that this
+            // form expects one — a free sentence about internals, for a field
+            // that renders identically without it.
+            //
+            // `validation` IS disclosed: the server enforces it either way, so
+            // withholding it only means the person discovers the rule by being
+            // refused.
+            'PublicFormField' => self::object([
+                'field_key' => self::str(),
+                'field_type' => ['type' => 'string', 'enum' => [
+                    'text', 'textarea', 'number', 'date', 'select', 'multiselect', 'checkbox',
+                ]],
+                'label' => self::localizedText(),
+                'help_text' => self::str(true),
+                'is_required' => self::bool(),
+                'options' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+                'validation' => ['type' => 'object', 'additionalProperties' => true],
+                'section_key' => self::str(true),
+                'position' => self::int(),
+                'multi_valued' => self::bool(),
+            ], ['field_key', 'field_type', 'label', 'is_required', 'position']),
+            // A RECEIPT, not the submission row. An anonymous caller gets
+            // confirmation and the timestamp of their own act — never the
+            // submission id, the document id or the tenant id, which would hand
+            // them integers to try against every other surface.
+            // The reference a `file` answer carries, plus what the server saw.
+            // `reference` IS the storage key, and handing it over is safe because
+            // a key is not a capability anywhere in this platform: NO route
+            // accepts one as input. Bytes are read at
+            // GET /api/v1/documents/{id}/artifacts/{artifactId}/content, which
+            // resolves the document through the visibility policy, binds the
+            // artifact to that document AND tenant, and takes the key OFF THE
+            // ROW. And a key from elsewhere cannot become such a row: the submit
+            // path accepts a `file` answer only by CLAIMING an unspent
+            // `form_uploads` row bound to this tenant, this form and this
+            // uploader (migration 133).
+            //
+            // `checksum_sha256` is the server's own hash of the bytes it stored,
+            // returned so a client can verify the upload before committing to a
+            // submission — and recorded onto `document_artifacts` when the upload
+            // is claimed, so "is this the file that was sent" stays answerable.
+            'FormUploadResponse' => self::object([
+                'data' => self::object([
+                    'reference' => self::str(),
+                    'filename' => self::str(true),
+                    'content_type' => self::str(),
+                    'byte_size' => self::int(),
+                    'checksum_sha256' => self::str(),
+                ], ['reference', 'content_type', 'byte_size', 'checksum_sha256']),
+            ], ['data']),
+            'PublicFormSubmissionResponse' => self::object([
+                'data' => self::object([
+                    'received' => self::bool(),
+                    'submitted_at' => self::str(true),
+                ], ['received']),
+                'meta' => self::object([
+                    'routed' => self::bool(),
+                    'ignored_keys' => ['type' => 'array', 'items' => ['type' => 'string']],
+                ], ['routed', 'ignored_keys']),
+            ], ['data']),
+            'FormSubmission' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'form_id' => self::int(),
+                // The version the answers were given against. See the publish
+                // route for exactly what this stamp does and does not promise.
+                'form_version' => self::int(),
+                // NULL has two ordinary causes and neither is an error: a service
+                // principal has no profile, and a submission made through a
+                // PUBLIC LINK (migration 132) has no account behind it at all.
+                // There is no sentinel "anonymous" profile — a fake person is
+                // something every membership check and permission resolution
+                // would have to know to special-case, and the ones that did not
+                // would treat it as real.
+                'submitted_by_profile_id' => self::int(true),
+                // Null is ORDINARY: a form with no route template records the
+                // answers and mints no document, and a document deleted later
+                // leaves the answers untouched.
+                'document_id' => self::int(true),
+                'data' => ['type' => 'object', 'additionalProperties' => true],
+                'submitted_at' => self::str(),
+                'created_at' => self::str(),
+                // Present only on the reads that join `forms`. Absent means "not
+                // fetched by this read", never "empty".
+                'form_key' => self::str(),
+                'form_name' => self::localizedText(),
+            ], ['id', 'tenant_id', 'form_id', 'form_version', 'data', 'submitted_at']),
+            'FormSubmissionListResponse' => self::listEnvelope('FormSubmission'),
+            'FormSubmissionDetailResponse' => self::dataEnvelope([
+                'allOf' => [
+                    SchemaBuilder::ref('FormSubmission'),
+                    self::object([
+                        'fields' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormField')],
+                        'form_version_now' => self::int(true),
+                    ], []),
+                ],
+            ]),
+            'FormSubmissionCreateResponse' => self::object([
+                'data' => SchemaBuilder::ref('FormSubmission'),
+                'meta' => self::object([
+                    'routed' => self::bool(),
+                    'ignored_keys' => ['type' => 'array', 'items' => ['type' => 'string']],
+                ], ['routed', 'ignored_keys']),
+            ], ['data', 'meta']),
+
+            'TimeWindowType' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'key' => self::str(),
+                'label' => self::str(),
+                'parent_type_id' => self::int(true),
+                'source' => self::str(),
+                'created_at' => self::str(true),
+                'updated_at' => self::str(true),
+            ], ['id', 'tenant_id', 'key', 'label', 'parent_type_id', 'source', 'created_at', 'updated_at']),
+            'TimeWindowTypeResponse' => self::dataEnvelope(SchemaBuilder::ref('TimeWindowType')),
+            'TimeWindowTypeListResponse' => self::dataEnvelope([
+                'type' => 'array',
+                'items' => SchemaBuilder::ref('TimeWindowType'),
+            ]),
+            // `parent_key` is already namespaced, because a plugin may only nest
+            // inside its own vocabulary and the prefix is the host's to apply.
+            'TimeWindowTypeCatalogEntry' => self::object([
+                'key' => self::str(),
+                'source' => self::str(),
+                'label' => self::str(),
+                'parent_key' => self::str(true),
+                'adopted' => ['type' => 'boolean'],
+                'adopted_id' => self::int(true),
+            ], ['key', 'source', 'label', 'parent_key', 'adopted', 'adopted_id']),
+            'TimeWindowTypeCatalogResponse' => self::dataEnvelope([
+                'type' => 'array',
+                'items' => SchemaBuilder::ref('TimeWindowTypeCatalogEntry'),
+            ]),
+            'TimeWindowTypeCreateRequest' => self::object([
+                // Trimmed before validation. A NAMESPACED key must already be
+                // declared by a plugin, and the reserved key `none` is always a
+                // 422 — neither is expressible as a pattern.
+                'key' => self::windowTypeKey() + ['minLength' => 1],
+                // Empty, whitespace-only and absent all mean the same: the label
+                // falls back to the declared one, then to the key itself.
+                'label' => self::name(),
+                // Absent inherits the declared nesting when the tenant has
+                // already adopted the parent kind, and otherwise adopts the kind
+                // un-nested — a declaration is a default, not a precondition.
+                'parent_type_id' => self::int(true),
+            ], ['key']),
+            // The key is immutable: it is what code binds to, so editing it in
+            // place would repoint every reference at a kind that no longer
+            // exists. It is absent here rather than declared-and-ignored.
+            'TimeWindowTypeUpdateRequest' => self::object([
+                'label' => self::name(nonEmpty: true),
+                'parent_type_id' => self::int(true),
+            ], []) + ['minProperties' => 1],
+
+            // #1070. One PERIOD. `starts_on` and `ends_on` are DATES, inclusive
+            // at both ends, and they are authored rather than derived: a period
+            // may begin on any day, run for any span, and differ in length from
+            // its siblings. Nothing in the platform computes them from a
+            // calendar, which is the whole point of the concept.
+            'TimeWindow' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'window_type_id' => self::int(),
+                'parent_window_id' => self::int(true),
+                'key' => self::str(),
+                'label' => self::str(),
+                'starts_on' => self::date(),
+                'ends_on' => self::date(),
+                'state' => ['type' => 'string', 'enum' => WindowState::states()],
+                'created_at' => self::str(true),
+                'updated_at' => self::str(true),
+            ], [
+                'id', 'tenant_id', 'window_type_id', 'parent_window_id', 'key', 'label',
+                'starts_on', 'ends_on', 'state', 'created_at', 'updated_at',
+            ]),
+            'TimeWindowResponse' => self::dataEnvelope(SchemaBuilder::ref('TimeWindow')),
+            'TimeWindowListResponse' => self::dataEnvelope([
+                'type' => 'array',
+                'items' => SchemaBuilder::ref('TimeWindow'),
+            ]),
+            // The append-only seal trail. A reopen never amends the close it
+            // undoes; it is a new row that supersedes it, and both remain
+            // readable. `cascaded_from_window_id` says this seal was a
+            // consequence of closing the period named, rather than an act
+            // performed on this one.
+            'TimeWindowStateEvent' => self::object([
+                'id' => self::int(),
+                'window_id' => self::int(),
+                'action' => ['type' => 'string', 'enum' => WindowState::acts()],
+                'actor_profile_id' => self::int(true),
+                'reason' => self::str(true),
+                'cascaded_from_window_id' => self::int(true),
+                'occurred_at' => self::str(),
+            ], [
+                'id', 'window_id', 'action', 'actor_profile_id', 'reason',
+                'cascaded_from_window_id', 'occurred_at',
+            ]),
+            'TimeWindowDetailResponse' => self::dataEnvelope(
+                ['allOf' => [
+                    SchemaBuilder::ref('TimeWindow'),
+                    self::object(
+                        ['trail' => ['type' => 'array', 'items' => SchemaBuilder::ref('TimeWindowStateEvent')]],
+                        ['trail']
+                    ),
+                ]]
+            ),
+            'TimeWindowCreateRequest' => self::object([
+                'window_type_id' => self::int(),
+                'key' => self::name(nonEmpty: true),
+                'label' => self::name(),
+                'starts_on' => self::date(),
+                'ends_on' => self::date(),
+                // Required when the kind nests inside another kind, and refused
+                // when it does not — the kind decides, not the caller.
+                'parent_window_id' => self::int(true),
+            ], ['window_type_id', 'key', 'starts_on', 'ends_on']),
+            'TimeWindowUpdateRequest' => self::object([
+                'label' => self::name(nonEmpty: true),
+                'starts_on' => self::date(),
+                'ends_on' => self::date(),
+                'parent_window_id' => self::int(true),
+            ], []) + ['minProperties' => 1],
+            // Contributed by whatever holds records in the period; core ships no
+            // contributor, so an empty list with `unfinished_reported: false`
+            // means nothing volunteered a count rather than nothing being
+            // unfinished.
+            'TimeWindowUnfinishedGroup' => self::object([
+                'label' => self::str(),
+                'count' => self::int(),
+                'source' => self::str(),
+            ], ['label', 'count', 'source']),
+            'TimeWindowCloseReport' => self::object([
+                'window' => SchemaBuilder::ref('TimeWindow'),
+                'blocked' => ['type' => 'boolean'],
+                'open_children' => ['type' => 'array', 'items' => SchemaBuilder::ref('TimeWindow')],
+                'unfinished' => [
+                    'type' => 'array',
+                    'items' => SchemaBuilder::ref('TimeWindowUnfinishedGroup'),
+                ],
+                'unfinished_total' => self::int(),
+                'unfinished_reported' => ['type' => 'boolean'],
+            ], [
+                'window', 'blocked', 'open_children', 'unfinished',
+                'unfinished_total', 'unfinished_reported',
+            ]),
+            'TimeWindowCloseReportResponse' => self::dataEnvelope(
+                SchemaBuilder::ref('TimeWindowCloseReport')
+            ),
+            'TimeWindowCloseRequest' => self::object([
+                // Optional: sealing a period on schedule is the ordinary case,
+                // and demanding a justification for the ordinary case trains
+                // people to type nothing meaningful.
+                'reason' => self::text(),
+                'cascade' => ['type' => 'boolean'],
+            ], []),
+            'TimeWindowCloseResponse' => self::dataEnvelope(self::object([
+                'window' => SchemaBuilder::ref('TimeWindow'),
+                'closed_ids' => ['type' => 'array', 'items' => self::int()],
+                'report' => SchemaBuilder::ref('TimeWindowCloseReport'),
+            ], ['window', 'closed_ids', 'report'])),
+            'TimeWindowReopenRequest' => self::object([
+                // REQUIRED, unlike a close's. This is the one act that undoes
+                // something other people relied on, and the question afterwards
+                // is never whether it happened but why.
+                'reason' => self::text() + ['minLength' => 1],
+            ], ['reason']),
+
+            // #convening (migrations 130/131). DELIBERATIVE BODIES that meet,
+            // minute numbered decisions, and drive a document's existing approval
+            // route with what they decided.
+            //
+            // `name` and `title` are OBJECTS of language code => text, not
+            // strings: this platform's Arabic/RTL support is not a display
+            // setting, and a body HAS two names of which both are the real one.
+            // `display_name` / `display_title` ride alongside for the surfaces
+            // that can carry only ONE string (a notification subject, a cell in a
+            // server-driven table); a localizing client reads the map and ignores
+            // them.
+            'LocalizedLabel' => [
+                'type' => 'object',
+                'additionalProperties' => self::str(),
+                'description' => 'Language code => text. At least one entry.',
+            ],
+            'ConveningBody' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'body_key' => self::str(),
+                'name' => SchemaBuilder::ref('LocalizedLabel'),
+                'display_name' => self::str(),
+                'ou_id' => self::int(true),
+                'description' => self::str(true),
+                'is_active' => self::bool(),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], [
+                'id', 'tenant_id', 'body_key', 'name', 'display_name', 'ou_id',
+                'description', 'is_active', 'created_at', 'updated_at',
+            ]),
+            // A SEAT, never a permission: holding the chair grants nothing in
+            // RBAC. What it decides is whose name carries the body's decision to
+            // a routing step, among people the route already reached.
+            'ConveningBodyMember' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'body_id' => self::int(),
+                'profile_id' => self::int(),
+                'member_role' => ['type' => 'string', 'enum' => MemberRole::all()],
+                'joined_at' => self::str(),
+                // NULL means "still a member". A departure is recorded rather
+                // than deleted, so a decision taken in March remains attributable
+                // to the body as it was then.
+                'left_at' => self::str(true),
+            ], ['id', 'tenant_id', 'body_id', 'profile_id', 'member_role', 'joined_at', 'left_at']),
+            'ConveningBodyListResponse' => self::listEnvelope('ConveningBody'),
+            'ConveningBodyResponse' => self::dataEnvelope(SchemaBuilder::ref('ConveningBody')),
+            'ConveningBodyDetailResponse' => self::dataEnvelope(
+                ['allOf' => [
+                    SchemaBuilder::ref('ConveningBody'),
+                    self::object(
+                        ['members' => ['type' => 'array', 'items' => SchemaBuilder::ref('ConveningBodyMember')]],
+                        ['members']
+                    ),
+                ]]
+            ),
+            'ConveningBodyMemberListResponse' => self::listEnvelope('ConveningBodyMember'),
+            'ConveningBodyCreateRequest' => self::object([
+                // Lower-case letters, digits, '-' and '_'. Narrow because it is
+                // quoted inside every decision number the body mints, and a key
+                // with a slash or a space produces numbers nobody can quote
+                // unambiguously.
+                'body_key' => self::str() + ['pattern' => '^[a-z0-9][a-z0-9_-]{0,63}$'],
+                'name' => ['oneOf' => [self::str(), SchemaBuilder::ref('LocalizedLabel')]],
+                'ou_id' => self::int(true),
+                'description' => self::text(),
+            ], ['body_key', 'name']),
+            // `body_key` is absent rather than declared-and-ignored: it is
+            // immutable, because decision numbers already quote it.
+            'ConveningBodyUpdateRequest' => self::object([
+                'name' => ['oneOf' => [self::str(), SchemaBuilder::ref('LocalizedLabel')]],
+                'ou_id' => self::int(true),
+                'description' => self::text(),
+                'is_active' => self::bool(),
+            ], []) + ['minProperties' => 1],
+            'ConveningBodyMemberRequest' => self::object([
+                'profile_id' => self::int(),
+                'member_role' => ['type' => 'string', 'enum' => MemberRole::all()],
+            ], ['profile_id']),
+
+            // One SITTING. `scheduled_at` and `held_at` are both nullable and
+            // both real: a draft has neither, a scheduled meeting has the first,
+            // and only a meeting that actually took place has the second.
+            // Nothing derives one from the other.
+            'Meeting' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'body_id' => self::int(),
+                'meeting_number' => self::int(),
+                'title' => SchemaBuilder::ref('LocalizedLabel'),
+                'display_title' => self::str(),
+                'scheduled_at' => self::str(true),
+                'held_at' => self::str(true),
+                'location' => self::str(true),
+                'status' => ['type' => 'string', 'enum' => MeetingStatus::all()],
+                'created_by_profile_id' => self::int(true),
+                'created_at' => self::str(),
+            ], [
+                'id', 'tenant_id', 'body_id', 'meeting_number', 'title', 'display_title',
+                'scheduled_at', 'held_at', 'location', 'status', 'created_by_profile_id', 'created_at',
+            ]),
+            'MeetingAgendaItem' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'meeting_id' => self::int(),
+                'position' => self::int(),
+                'title' => SchemaBuilder::ref('LocalizedLabel'),
+                'display_title' => self::str(),
+                // THE JOIN to the rest of the platform. An item with a document
+                // is an item a decision can move.
+                'document_id' => self::int(true),
+                'notes' => self::str(true),
+                'created_at' => self::str(),
+            ], [
+                'id', 'tenant_id', 'meeting_id', 'position', 'title', 'display_title',
+                'document_id', 'notes', 'created_at',
+            ]),
+            // `verdict` carries a third value the routing engine does not have.
+            // A deferral IS a decision — numbered, minuted — and it is
+            // deliberately not mapped onto approve or reject, because forcing it
+            // onto either would advance a document nobody approved or reject one
+            // nobody refused.
+            //
+            // `route_id` / `route_event_id` are what separate "the body approved
+            // it and the document advanced" from "the body approved it and
+            // nothing moved". Without them those two render identically.
+            'MeetingDecision' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'meeting_id' => self::int(),
+                'agenda_item_id' => self::int(),
+                'decision_number' => self::str(),
+                'verdict' => ['type' => 'string', 'enum' => DecisionVerdict::all()],
+                'rationale' => self::str(true),
+                'decided_at' => self::str(),
+                'recorded_by_profile_id' => self::int(true),
+                'route_id' => self::int(true),
+                'route_event_id' => self::int(true),
+            ], [
+                'id', 'tenant_id', 'meeting_id', 'agenda_item_id', 'decision_number', 'verdict',
+                'rationale', 'decided_at', 'recorded_by_profile_id', 'route_id', 'route_event_id',
+            ]),
+            // `invited` means "has not answered", never "declined" — which is
+            // why `responded_at` is a separate nullable field.
+            'MeetingInvitation' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'meeting_id' => self::int(),
+                'profile_id' => self::int(),
+                'status' => ['type' => 'string', 'enum' => InvitationStatus::all()],
+                'sent_at' => self::str(true),
+                'responded_at' => self::str(true),
+            ], ['id', 'tenant_id', 'meeting_id', 'profile_id', 'status', 'sent_at', 'responded_at']),
+            // WHO WAS IN THE ROOM. A separate record from the invitation, not a
+            // state on it: an acceptance is a PREDICTION made before the sitting
+            // and this is what happened at it, and the two disagree constantly.
+            //
+            // `profile_id` is nullable and `attendee_name` is why: a guest from
+            // outside the institution has no account, and requiring one would
+            // mean either refusing to record them or inventing a person in the
+            // identity system to satisfy a foreign key.
+            //
+            // `was_invited` / `invitation_status` are DERIVED at read time and
+            // are the fields that make the disagreement visible. `was_invited`
+            // false is somebody who came without being asked — the case this
+            // table exists for.
+            'MeetingAttendee' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'meeting_id' => self::int(),
+                'profile_id' => self::int(true),
+                'attendee_name' => self::attendeeName(),
+                'capacity' => ['type' => 'string', 'enum' => AttendanceCapacity::all()],
+                'note' => self::attendanceNote(),
+                'recorded_at' => self::str(),
+                'recorded_by_profile_id' => self::int(true),
+                'was_invited' => self::bool(),
+                'invitation_status' => self::str(true),
+            ], [
+                'id', 'tenant_id', 'meeting_id', 'profile_id', 'attendee_name', 'capacity', 'note',
+                'recorded_at', 'recorded_by_profile_id', 'was_invited', 'invitation_status',
+            ]),
+            // WHAT WAS COUNTED, named so it cannot be mistaken for a quorum
+            // check. `quorum_evaluated` is always false and always present:
+            // Whity holds no quorum rule for any body and evaluates none, and a
+            // bare attendee count on a meeting record reads as "the body was
+            // quorate" on every screen it reaches. A field that only appeared
+            // when something HAD been checked would be one consumers learn to
+            // ignore.
+            'MeetingAttendanceCount' => self::object([
+                'attendees' => self::int(),
+                'attendees_who_held_an_invitation' => self::int(),
+                'attendees_who_did_not' => self::int(),
+                'invitations_issued' => self::int(),
+                'invited_who_did_not_attend' => self::int(),
+                'quorum_evaluated' => self::bool(),
+                'basis' => self::str(),
+            ], [
+                'attendees', 'attendees_who_held_an_invitation', 'attendees_who_did_not',
+                'invitations_issued', 'invited_who_did_not_attend', 'quorum_evaluated', 'basis',
+            ]),
+            'MeetingAttendanceResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingAttendee')],
+                'counted' => SchemaBuilder::ref('MeetingAttendanceCount'),
+            ], ['data', 'counted']),
+            'MeetingAttendanceEntryRequest' => self::object([
+                // ONE of these two identifies the attendee, and a row with
+                // neither is refused. `profile_id` for somebody with an account;
+                // `attendee_name` for a guest who has none.
+                'profile_id' => self::int(true),
+                'attendee_name' => self::attendeeName(),
+                // DESCRIPTIVE ONLY. Nothing branches on it: it is not a
+                // permission, not a vote weight, and not an input to any count
+                // that claims to be a quorum. It exists because an attendance
+                // list on which a substitute is indistinguishable from a member
+                // cannot answer the question anybody asks it afterwards.
+                'capacity' => ['type' => 'string', 'enum' => AttendanceCapacity::all()],
+                'note' => self::attendanceNote(),
+            ], []),
+            'MeetingAttendanceRequest' => self::object([
+                // REQUIRED, and its absence is not an empty list: a client that
+                // forgot the key means something different from one that sent
+                // `[]`, which records that nobody attended. Sending the whole
+                // set REPLACES the stored one.
+                'attendees' => [
+                    'type' => 'array',
+                    'items' => SchemaBuilder::ref('MeetingAttendanceEntryRequest'),
+                    'maxItems' => AttendanceEntry::MAX_ATTENDEES,
+                ],
+            ], ['attendees']),
+            'MeetingListResponse' => self::listEnvelope('Meeting'),
+            'MeetingResponse' => self::dataEnvelope(SchemaBuilder::ref('Meeting')),
+            'MeetingAgendaItemListResponse' => self::listEnvelope('MeetingAgendaItem'),
+            'MeetingAgendaItemResponse' => self::dataEnvelope(SchemaBuilder::ref('MeetingAgendaItem')),
+            'MeetingDecisionListResponse' => self::listEnvelope('MeetingDecision'),
+            'MeetingInvitationListResponse' => self::listEnvelope('MeetingInvitation'),
+            'MeetingInvitationResponse' => self::dataEnvelope(SchemaBuilder::ref('MeetingInvitation')),
+            'MeetingDetailResponse' => self::dataEnvelope(
+                ['allOf' => [
+                    SchemaBuilder::ref('Meeting'),
+                    self::object([
+                        'body' => SchemaBuilder::ref('ConveningBody'),
+                        'agenda' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingAgendaItem')],
+                        'decisions' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingDecision')],
+                        'invitations' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingInvitation')],
+                        // BOTH, and neither derived from the other. Who was
+                        // asked and who came are separate facts recorded at
+                        // different times, and they disagree constantly.
+                        'attendance' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingAttendee')],
+                    ], ['body', 'agenda', 'decisions', 'invitations', 'attendance']),
+                ]]
+            ),
+            'MeetingCreateRequest' => self::object([
+                'body_id' => self::int(),
+                'title' => ['oneOf' => [self::str(), SchemaBuilder::ref('LocalizedLabel')]],
+            ], ['body_id', 'title']),
+            'MeetingScheduleRequest' => self::object([
+                'scheduled_at' => self::str(),
+                'location' => self::name(),
+            ], ['scheduled_at']),
+            'MeetingScheduleResponse' => self::object([
+                'data' => SchemaBuilder::ref('Meeting'),
+                // How many people were told the date moved. Zero is a real
+                // answer: the sitting had not been announced yet.
+                'notified' => self::int(),
+            ], ['data', 'notified']),
+            'MeetingHoldRequest' => self::object([
+                // Supplied rather than defaulted to now(): a body routinely
+                // minutes yesterday's sitting, and a server-stamped date would
+                // put every such meeting — and the YEAR each of its decision
+                // numbers is minted under — on the wrong day.
+                'held_at' => self::str(),
+            ], []),
+            'MeetingInviteResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingInvitation')],
+                // Two numbers, because they answer different questions: how many
+                // people were newly told, and how many already held an invitation
+                // and were deliberately left alone. One count would make a no-op
+                // re-send indistinguishable from a failure.
+                'invited' => self::int(),
+                'already_invited' => self::int(),
+            ], ['data', 'invited', 'already_invited']),
+            'MeetingInvitationRespondRequest' => self::object([
+                'status' => ['type' => 'string', 'enum' => InvitationStatus::responses()],
+            ], ['status']),
+            'MeetingAgendaItemCreateRequest' => self::object([
+                'title' => ['oneOf' => [self::str(), SchemaBuilder::ref('LocalizedLabel')]],
+                'document_id' => self::int(true),
+                'notes' => self::text(),
+                // The EXPLICIT confirmation that an item is being attached to a
+                // sitting that already happened. Allowed, because a paper tabled
+                // on the day is minuted afterwards — and never silent, because
+                // the other reading is somebody on the wrong screen.
+                'allow_held' => self::bool(),
+            ], ['title']),
+            'MeetingAgendaReorderRequest' => self::object([
+                // EVERY item on the agenda, exactly once. A partial list
+                // describes an order that omits some items, and both readings of
+                // that — leave them, or append them — are guesses.
+                'item_ids' => ['type' => 'array', 'items' => self::int(), 'minItems' => 1],
+            ], ['item_ids']),
+            'MeetingDecisionRequest' => self::object([
+                'verdict' => ['type' => 'string', 'enum' => DecisionVerdict::all()],
+                'rationale' => self::text(),
+                // BOTH OF THESE ARE THE INSTITUTION'S TO ASSIGN, and they are
+                // the two halves of one fact: a minute book records that
+                // decision N was taken on date D. Both are written by hand, in
+                // the institution's own format, often weeks after the sitting.
+                //
+                // `decision_number` is a STRING and no shape is imposed —
+                // `CE-CM-2026-014` and `ق.ع/٢٠٢٦/١٤` are both real. What is
+                // bounded is the length and the refusal of characters that are
+                // not text. Omit it (or send an empty string) and one is
+                // allocated from the body's per-year counter exactly as before,
+                // so callers written before this field existed are unaffected.
+                //
+                // A supplied number that another decision in this tenant already
+                // holds is REFUSED, not silently accepted: two minutes under one
+                // number cannot be told apart afterwards, which is the whole
+                // reason a decision has a number.
+                'decision_number' => ['type' => 'string', 'maxLength' => DecisionNumbers::MAX_LENGTH],
+                'decided_at' => self::str(),
+            ], ['verdict']),
+            // WHAT THE DECISION DID, always present beside what it SAID.
+            // `applied` false with a `reason` is an ordinary outcome, not an
+            // error: the item carried no document, the document has no route, the
+            // route never reached this body, or the step it reached is a
+            // circulation rather than a gate.
+            'MeetingDecisionRouting' => self::object([
+                'applied' => self::bool(),
+                'reason' => self::str(),
+                'explanation' => self::str(),
+                'route_id' => self::int(true),
+                'step_id' => self::int(true),
+                'actor_profile_id' => self::int(true),
+                'event_id' => self::int(true),
+                // What the STEP concluded, which is not what this body said:
+                // under a quorum of `all`, the first of three approvals decides
+                // nothing and this is null.
+                'decided' => self::str(true),
+            ], [
+                'applied', 'reason', 'explanation', 'route_id', 'step_id',
+                'actor_profile_id', 'event_id', 'decided',
+            ]),
+            'MeetingDecisionResponse' => self::object([
+                'data' => SchemaBuilder::ref('MeetingDecision'),
+                'routing' => SchemaBuilder::ref('MeetingDecisionRouting'),
+            ], ['data', 'routing']),
+            'DocumentConveningEntry' => self::object([
+                'agenda_item' => SchemaBuilder::ref('MeetingAgendaItem'),
+                'meeting' => SchemaBuilder::ref('Meeting'),
+                'body' => SchemaBuilder::ref('ConveningBody'),
+                'decisions' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingDecision')],
+            ], ['agenda_item', 'meeting', 'body', 'decisions']),
+            'DocumentConveningResponse' => self::listEnvelope('DocumentConveningEntry'),
+
             'Delegation' => $delegation,
             'DelegationListResponse' => self::paginatedListEnvelope('Delegation'),
             'DelegationCreateRequest' => self::object([
@@ -4236,6 +7026,43 @@ final class CoreApiSchemas
                 'db_connected' => self::bool(),
                 'memory_usage_mb' => ['type' => 'number', 'format' => 'float'],
             ], ['status', 'version', 'sdk_version', 'workers_active', 'uptime_seconds', 'db_connected', 'memory_usage_mb']),
+
+            // GET /api/build — top-level (not data-enveloped), like /api/health.
+            //
+            // #1049. Every identifying field is NULLABLE and that is the
+            // contract, not an omission: a deployment that cannot establish its
+            // own commit must say so, because a plausible-looking wrong value is
+            // worse than no value to the monitor comparing this document against
+            // /web-build. `source` names which of the three sources answered, so
+            // a consumer can tell a baked build identity from a checkout read
+            // without inferring it from the presence of a hash.
+            //
+            // No `build_id`: /web-build has one because Next produces a bundle
+            // with an id; PHP loads source, so a second name for the commit
+            // could only ever agree with `commit` or be wrong.
+            'BuildIdentityResponse' => self::object([
+                'commit' => self::str(true),
+                'source' => ['type' => 'string', 'enum' => ['build', 'checkout', 'unknown']],
+                'core_version' => self::str(),
+                'built_at' => self::str(true),
+                'booted_at' => self::str(),
+                'uptime_seconds' => self::int(),
+                'checkout_commit' => self::str(true),
+                'applied_migration_count' => self::int(true),
+                'latest_applied_migration' => self::str(true),
+                'pending_migration_count' => self::int(true),
+            ], [
+                'commit',
+                'source',
+                'core_version',
+                'built_at',
+                'booted_at',
+                'uptime_seconds',
+                'checkout_commit',
+                'applied_migration_count',
+                'latest_applied_migration',
+                'pending_migration_count',
+            ]),
 
             // GET /api/platform/version (WHIT-587)
             'PlatformVersionResponse' => self::object([
@@ -5341,6 +8168,25 @@ final class CoreApiSchemas
                 ],
             ],
             [
+                'method' => 'PATCH',
+                'path' => '/api/email-domains/{id:\d+}',
+                'requiredRole' => 'admin',
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => "Change a domain's default role or whether it auto-provisions",
+                    'tags' => ['email-domains'],
+                    'request' => 'TenantEmailDomainUpdateRequest',
+                    'responses' => [
+                        200 => self::jsonResponse('The updated domain registration', 'TenantEmailDomainResponse'),
+                        400 => self::errorResponse('Tenant context is required'),
+                        404 => self::errorResponse('Domain registration not found'),
+                        422 => self::errorResponse(
+                            'No changes given, or default_role_id is not a role this tenant may assign'
+                        ),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
                 'method' => 'DELETE',
                 'path' => '/api/email-domains/{id:\d+}',
                 'requiredRole' => 'admin',
@@ -5774,7 +8620,20 @@ final class CoreApiSchemas
             // Tag groups ────────────────────────────────────────────────────
             self::permissionRoute('GET', '/api/tag-groups', 'tags:read', [
                 'summary' => 'List this tenant\'s tag groups',
+                'description' => 'Returns EVERY matching group unless `page` or `per_page` is sent, in which case '
+                    . 'one page comes back with a `pagination` envelope. Pagination is opt-in because this list '
+                    . 'also populates dropdowns and the tags screen\'s id-to-label map, which would silently '
+                    . 'truncate; `sort`, `dir` and `q` apply either way. There is no sort by display name: it is '
+                    . 'a bilingual JSON object with no member-extraction syntax common to both supported engines. '
+                    . 'Searching it works.',
                 'tags' => ['taxonomy'],
+                'parameters' => [
+                    self::queryParam('q', 'string', 'Case-insensitive substring match on the group key and its display names'),
+                    self::queryParam('sort', 'string', 'One of key, created, updated. An unrecognised key is ignored rather than refused.'),
+                    self::queryParam('dir', 'string', 'asc (default) or desc'),
+                    self::queryParam('page', 'integer', 'Page number (1-based). Sending it opts this list into pagination.'),
+                    self::queryParam('per_page', 'integer', 'Page size (default 25, max 100). Sending it opts this list into pagination.'),
+                ],
                 'responses' => [
                     200 => self::jsonResponse('Every tag group for this tenant', 'TagGroupListResponse'),
                 ] + self::authErrors(),
@@ -5828,9 +8687,18 @@ final class CoreApiSchemas
             // Tags ──────────────────────────────────────────────────────────
             self::permissionRoute('GET', '/api/tags', 'tags:read', [
                 'summary' => 'List this tenant\'s tags, optionally within a group',
+                'description' => 'Returns EVERY matching tag unless `page` or `per_page` is sent, in which case '
+                    . 'one page comes back with a `pagination` envelope. Pagination is opt-in because this list '
+                    . 'also populates pickers and id-to-label maps that would silently truncate; `sort`, `dir` '
+                    . 'and `q` apply either way.',
                 'tags' => ['taxonomy'],
                 'parameters' => [
                     self::queryParam('group_id', 'integer', 'Only tags in this group'),
+                    self::queryParam('q', 'string', 'Case-insensitive substring match on the tag name and its group\'s key and display name'),
+                    self::queryParam('sort', 'string', 'One of name, group, created. An unrecognised key is ignored rather than refused.'),
+                    self::queryParam('dir', 'string', 'asc (default) or desc'),
+                    self::queryParam('page', 'integer', 'Page number (1-based). Sending it opts this list into pagination.'),
+                    self::queryParam('per_page', 'integer', 'Page size (default 25, max 100). Sending it opts this list into pagination.'),
                 ],
                 'responses' => [
                     200 => self::jsonResponse('Tags for this tenant', 'TagListResponse'),
@@ -5946,9 +8814,209 @@ final class CoreApiSchemas
      *
      * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
      */
+    /**
+     * The tenant's own billing, and the provider callback.
+     *
+     * These are TENANT routes, unlike the plan and promotion catalogues above:
+     * ordinary tenant-scoped permissions, and a tenant sees only its own
+     * invoices. There is no system-tenant gate because there is no
+     * cross-tenant power here.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function billingRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/billing/invoices', 'billing:view', [
+                'summary' => 'This tenant\'s invoices',
+                'description' =>
+                    'Newest first, drafts included — a tenant admin building next month\'s bill '
+                    . 'needs to see it. Every amount arrives BOTH as minor units and preformatted: '
+                    . '5000 JOD is 5.000, and a client that divides by 100 shows a customer ten '
+                    . 'times what they owe. How many decimal places a currency has is not '
+                    . 'something a client can work out for itself.',
+                'tags' => ['billing'],
+                'responses' => [
+                    200 => self::jsonResponse('Invoices with what is still owed on each', 'InvoiceListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/billing/invoices/{id:\d+}', 'billing:view', [
+                'summary' => 'One invoice, its lines and every movement against it',
+                'description' =>
+                    'The payment history includes FAILED and PENDING attempts, not only '
+                    . 'successful ones: "why does it say I have not paid" is answered by the '
+                    . 'attempt that failed, never by its absence.',
+                'tags' => ['billing'],
+                'responses' => [
+                    200 => self::jsonResponse('The invoice, its lines and its payments', 'InvoiceResponse'),
+                    404 => self::errorResponse('No such invoice for this tenant'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/billing/methods', 'billing:view', [
+                'summary' => 'Which payment rails this instance can actually take money with',
+                'description' =>
+                    'CONFIGURED rails only. Offering one that cannot take money produces a button '
+                    . 'whose only outcome is an error the customer cannot act on. Each row says '
+                    . 'what the rail can do — in particular whether it can charge unattended, '
+                    . 'which is the difference between a subscription that renews itself and one '
+                    . 'where the customer must push the money every period.',
+                'tags' => ['billing'],
+                'responses' => [
+                    200 => self::jsonResponse('The rails on offer', 'PaymentMethodListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/billing/invoices/{id:\d+}/pay', 'billing:pay', [
+                'summary' => 'Begin paying an invoice, by any rail',
+                'description' =>
+                    'ONE ENDPOINT FOR EVERY RAIL. Name a provider; the response carries a `kind` '
+                    . 'the client branches on once — send the browser to `redirect_url`, show '
+                    . '`reference` and `display`, or report it already settled. A per-rail '
+                    . 'endpoint would work today and mean a second endpoint, a second client path '
+                    . 'and a second screen the day a card provider is added. '
+                    . 'THE ATTEMPT IS RECORDED BEFORE THE PAYER IS SENT ANYWHERE, so a customer '
+                    . 'who pays and closes the tab has not moved money the platform has no row '
+                    . 'for. '
+                    . 'THIS DOES NOT SETTLE ANYTHING: only a verified provider callback marks an '
+                    . 'invoice paid, because an endpoint that settled on a button press would be '
+                    . 'taking the customer\'s word for it.',
+                'tags' => ['billing'],
+                'request' => 'PayInvoiceRequest',
+                'responses' => [
+                    201 => self::jsonResponse('What the payer must do next', 'PaymentInstructionResponse'),
+                    404 => self::errorResponse('No such invoice for this tenant'),
+                    409 => self::errorResponse('The invoice is not open, or is already paid in full'),
+                    422 => self::errorResponse('That payment method is unavailable on this instance'),
+                    502 => self::errorResponse('The provider could not be reached'),
+                ] + self::authErrors(),
+            ]),
+            [
+                'method' => 'POST',
+                'path' => '/api/payments/webhook/{provider}',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'A payment provider reports that money moved (PUBLIC, signature-verified)',
+                    'description' =>
+                        'UNAUTHENTICATED BY NECESSITY — a bank cannot hold a session. What makes '
+                        . 'it safe is that verification happens inside the adapter BEFORE anything '
+                        . 'is parsed, and there is no way to obtain events from a payload without '
+                        . 'it: the interface has no separate verify step to forget. '
+                        . 'IT IS ALSO OUTSIDE THE PAYMENT WALL, deliberately. The wall answers 402 '
+                        . 'for a tenant that has not paid, so guarding this route would mean the '
+                        . 'payment that lifts the wall can never be recorded — a locked tenant '
+                        . 'would stay locked forever having paid. '
+                        . 'A REDELIVERY ANSWERS 200: providers retry until they get a success, and '
+                        . 'a duplicate is the system working, not an error. So does a verified '
+                        . 'callback carrying nothing we act on.',
+                    'tags' => ['billing'],
+                    'responses' => [
+                        200 => self::jsonResponse('How many movements were read and how many settled', 'WebhookAckResponse'),
+                        400 => self::errorResponse('The payload could not be verified'),
+                        404 => self::errorResponse('No such payment provider on this instance'),
+                        422 => self::errorResponse('Authentic but unintelligible'),
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * The operator's plan catalogue, prices and promotions.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
     private static function planRoutes(): array
     {
         return [
+            self::permissionRoute('GET', '/api/promotions', 'plans:manage', [
+                'summary' => 'Early birds, offers and promo codes (operator)',
+                'description' =>
+                    'One object, three ways of being found: a promotion carrying a `code` must be typed '
+                    . 'by the customer, one without applies automatically to whoever qualifies. Each row '
+                    . 'carries `redemption_count` because "how much of this early bird is left" is the '
+                    . 'question this list is opened to answer, and asking per row would be one request '
+                    . 'each. Retired promotions are included — a campaign that ended is the explanation '
+                    . 'for a discount somebody is querying.',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('Every promotion, live and retired', 'PromotionListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/promotions', 'plans:manage', [
+                'summary' => 'Create a promotion (operator)',
+                'description' =>
+                    'Send `percent_off` OR `amount_off` with a `currency`, never both. A percentage has '
+                    . 'no currency and applies to any price; a fixed amount is an amount of one currency '
+                    . 'and is refused against a price in another, because converting needs a rate nobody '
+                    . 'stored. Amounts are minor units — a decimal is refused rather than rounded to a '
+                    . 'hundredth of the intended discount. Omit `code` for an early bird or offer. '
+                    . 'Omit `plan_ids` to cover every plan, including ones added later. '
+                    . '`max_redemptions_per_tenant` defaults to 1, or one tenant consumes a whole '
+                    . 'early-bird allocation.',
+                'tags' => ['plans'],
+                'request' => 'PromotionCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The new promotion', 'PromotionResponse'),
+                    409 => self::errorResponse('Another live promotion already uses that code'),
+                    422 => self::errorResponse('The promotion cannot be created as described'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/promotions/{id:\d+}', 'plans:manage', [
+                'summary' => 'Retire a promotion (operator)',
+                'description' =>
+                    'RETIRES rather than destroys, and returns the retired row. A redeemed promotion is '
+                    . 'the evidence of why a tenant is paying what they are paying. Retiring also frees '
+                    . 'its code, which operators reuse — the same seasonal name, every year.',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('The retired promotion', 'PromotionResponse'),
+                    404 => self::errorResponse('No such promotion'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/plans/{id:\d+}/prices', 'plans:manage', [
+                'summary' => 'What this plan costs, on every set of terms (operator)',
+                'description' =>
+                    'Includes RETIRED prices. A list of only the live ones cannot explain a charge '
+                    . 'somebody is querying, and that is the question this screen is opened to answer. '
+                    . 'Amounts are minor units — 4900 is 49.00 in a two-decimal currency.',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('Every price this plan has carried', 'PlanPriceListResponse'),
+                    404 => self::errorResponse('No such plan'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/plans/{id:\d+}/prices', 'plans:manage', [
+                'summary' => 'Price this plan on a set of terms (operator)',
+                'description' =>
+                    'A plan may carry many prices — one per currency, billing period and seat basis — '
+                    . 'but only ONE LIVE price per combination of those. A second live price for the '
+                    . 'same terms is refused with 409 rather than accepted, because two of them would '
+                    . 'make the checkout, the invoice and the price list each pick differently and '
+                    . 'somebody be charged an amount no screen displayed. Retire the existing one first. '
+                    . '`unit_amount` must be an integer of minor units; a decimal is refused with 422, '
+                    . 'since 49.9 truncating to 49 is a hundredfold error that looks like a real price.',
+                'tags' => ['plans'],
+                'request' => 'PlanPriceCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The new price', 'PlanPriceResponse'),
+                    404 => self::errorResponse('No such plan'),
+                    409 => self::errorResponse('This plan already has a live price on those terms'),
+                    422 => self::errorResponse('The currency, amount or period cannot be billed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/plans/{id:\d+}/prices/{priceId:\d+}', 'plans:manage', [
+                'summary' => 'Retire a price (operator)',
+                'description' =>
+                    'RETIRES rather than destroys, and returns the retired row. The price is what a past '
+                    . 'charge was made against, so deleting it would throw away the record of what '
+                    . 'somebody was charged; the partial unique index frees its slot the moment it stops '
+                    . 'being active, so a replacement can be created immediately.',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('The retired price', 'PlanPriceResponse'),
+                    404 => self::errorResponse('No such price on this plan'),
+                ] + self::authErrors(),
+            ]),
             self::permissionRoute('GET', '/api/plans', 'plans:manage', [
                 'summary' => 'List subscription plans (operator)',
                 'tags' => ['plans'],
@@ -6188,6 +9256,41 @@ final class CoreApiSchemas
                     ),
                 ] + self::authErrors(),
             ]),
+            // The create route sits on `documents:render` rather than a slug of
+            // its own — migration 113 already argued that a role holding it is
+            // "precisely a role that can bring a document into existence", and a
+            // new `documents:create` would be a permission nobody on any
+            // existing install holds. See public/index.php's registration.
+            self::permissionRoute('POST', '/api/documents', 'documents:render', [
+                'summary' => 'Raise a document from a template, supplying values for its placeholders',
+                'description' =>
+                    'The record is the deliverable and the rendered artifact is opportunistic. '
+                    . '`documents.render_enabled` defaults to FALSE, so on a default install this '
+                    . 'returns a document with no artifact and `content_url: null` — which is a '
+                    . 'complete, routable document, not a degraded one: the values it was raised with '
+                    . 'are stored on the record, and POST /api/documents/{id}/render mints the '
+                    . 'artifact from them if the tier is later switched on. The `render` block says '
+                    . 'what happened. Sending `render: true` turns "could not render" into a 503 '
+                    . 'instead, for a caller who genuinely requires the bytes. A template the caller '
+                    . 'cannot SEE is a 404, never a 403, and the check is the designer\'s own '
+                    . 'visibility policy — creating from a gated template must not be a way to read it.',
+                'tags' => ['documents'],
+                'request' => 'DocumentCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse(
+                        'The document, and whether an artifact was rendered for it',
+                        'DocumentCreateResponse'
+                    ),
+                    404 => self::errorResponse('No such template, or it is not visible to the caller'),
+                    422 => self::errorResponse(
+                        'No template named, a bad dataRows shape, or a value supplied for a '
+                        . 'placeholder the template does not declare'
+                    ),
+                    503 => self::errorResponse(
+                        'render:true was requested and rendering or persistence is disabled on this instance'
+                    ),
+                ] + self::authErrors(),
+            ]),
             self::permissionRoute('GET', '/api/documents', 'documents:read', [
                 'summary' => 'List issued documents visible to the caller (newest first, paginated)',
                 'description' =>
@@ -6206,10 +9309,25 @@ final class CoreApiSchemas
                     ),
                     self::queryParam('collection_id', 'integer', 'Required by the "collection" view'),
                     self::queryParam('q', 'string', 'Case-insensitive substring of the document title'),
+                    self::queryParam(
+                        'sort',
+                        'string',
+                        'Order by one of "title", "created_at" or "template_name". Omit for the order '
+                        . 'documents were recorded in, newest first. An unknown value is a 400 rather '
+                        . 'than an ignored parameter, so a client can never draw a sort indicator on a '
+                        . 'column the rows are not ordered by.'
+                    ),
+                    self::queryParam(
+                        'direction',
+                        'string',
+                        '"asc" or "desc". Defaults per field — ascending for the two text columns, '
+                        . 'descending for created_at — and the order actually applied is echoed back '
+                        . 'in `sort`. Requires `sort`.'
+                    ),
                 ],
                 'responses' => [
                     200 => self::jsonResponse('The documents the caller may see, with pagination', 'DocumentListResponse'),
-                    400 => self::errorResponse('A required view parameter is missing, or ou_id is not a unit in this tenant'),
+                    400 => self::errorResponse('A required view parameter is missing, ou_id is not a unit in this tenant, or the sort is not one this list offers'),
                     404 => self::errorResponse(
                         'No such view, this installation cannot compute it, or the named collection '
                         . 'belongs to somebody else'
@@ -6308,6 +9426,35 @@ final class CoreApiSchemas
                     ),
                 ] + self::authErrors(),
             ]),
+            self::permissionRoute(
+                'POST',
+                '/api/documents/{id:\\d+}/routes/from-template',
+                'documents:route',
+                [
+                    'summary' => 'Apply a route template to a document: copy its stages and branches into a live route',
+                    'tags' => ['documents'],
+                    'request' => 'DocumentRouteFromTemplateRequest',
+                    'responses' => [
+                        201 => self::jsonResponse(
+                            'The issued route with the copied steps and edges, its template provenance, '
+                            . 'and how many recipients the first step resolved to and delivered',
+                            'DocumentRouteResponse'
+                        ),
+                        403 => self::errorResponse(
+                            'The caller may route documents but may not read route templates '
+                            . '(route_templates:read)'
+                        ),
+                        404 => self::errorResponse(
+                            'Document not visible to the caller, or no such template in this tenant'
+                        ),
+                        422 => self::errorResponse(
+                            'A design with no stages, a branch leaving a stage that produces no verdict, '
+                            . 'a rule kind nothing registers any more, or more stages than the tenant\'s '
+                            . 'documents.routing_max_steps allows right now'
+                        ),
+                    ] + self::authErrors(),
+                ]
+            ),
             self::permissionRoute('GET', '/api/documents/{id:\\d+}/routes', 'documents:read', [
                 'summary' => 'List the circulations of a document, newest first, each with its steps',
                 'tags' => ['documents'],
@@ -6424,6 +9571,9 @@ final class CoreApiSchemas
                 'parameters' => [
                     self::queryParam('page', 'integer', '1-indexed page (default 1)'),
                     self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                    self::queryParam('sort', 'string', 'Sort key: `name` (default) or `rule`. `rule` orders by the rule KIND slug, not by the localised label the screen renders — the server cannot order by a string the client computes, but the kind still groups every row that renders the same label together. An unrecognised key falls back to the default rather than erroring.'),
+                    self::queryParam('dir', 'string', 'Sort direction, `asc` or `desc`. Anything else is read as `asc`.'),
+                    self::queryParam('q', 'string', 'Case-insensitive substring match on a group\'s name or description — the two fields rendered verbatim. The rule kind is a slug the screen never shows, so it is not searched. The term narrows `pagination.total` too.'),
                 ],
                 'responses' => [
                     200 => self::jsonResponse('The tenant\'s groups with pagination', 'UserGroupListResponse'),
@@ -6506,6 +9656,121 @@ final class CoreApiSchemas
     }
 
     /**
+     * Document ROUTE TEMPLATES (#1027) — the API the node-based flow editor
+     * speaks.
+     *
+     * A template is a reusable, BRANCHING route DESIGN: the seam migration 112
+     * named ("a `document_route_templates` / `document_route_template_steps`
+     * pair") and migration 120 takes. It is to a route what `document_templates`
+     * is to `documents` — the thing DESIGNED, with a different lifetime from the
+     * thing that HAPPENED, and the append-only trail hangs off the second.
+     *
+     * READING A DESIGN AND DESIGNING ONE ARE SEPARATE PERMISSIONS
+     * -----------------------------------------------------------
+     * `route_templates:read` and `route_templates:write`, not one slug and not
+     * `documents:route`. Routing a document is an everyday act many people
+     * perform; designing the flow every document of a kind will follow is an act
+     * of organisational policy. A clerk who may send a form onward should not
+     * thereby be able to rewrite where every form goes, and collapsing the two
+     * would make that distinction inexpressible.
+     *
+     * THE GRAPH HAS ITS OWN VERB, AND IT IS A PUT
+     * --------------------------------------------
+     * `PATCH /{id}` renames; `PUT /{id}/graph` replaces the canvas. The editor's
+     * unit of work is the whole drawing — an author moves four nodes, deletes
+     * one, draws an edge and presses save — and expressing that as a diff would
+     * mean the client computing which was which, on the side of the wire that
+     * cannot verify it.
+     *
+     * THERE IS NO PREVIEW ROUTE HERE, AND THAT IS THE POINT
+     * -----------------------------------------------------
+     * "How many people does this node reach?" is already answered exactly by
+     * `POST /api/user-groups/preview` (#1003) — a count plus a sample bounded by
+     * `groups.preview_sample_size`. The editor calls it per node. A second
+     * preview would be a second implementation of the resolver's semantics
+     * (active memberships only, the direct membership role, resource-scoped
+     * grants excluded) free to drift from the first in whichever direction was
+     * last edited.
+     *
+     * NOTHING HERE INSTANTIATES A TEMPLATE ONTO A DOCUMENT
+     * ----------------------------------------------------
+     * That needs the engine to follow verdict edges (#1014). A route that
+     * "applied" a branching design today would have to flatten it into a linear
+     * one — silently doing less than the canvas draws, which is the precise
+     * failure the routing subsystem is written against. Filed with migration
+     * 112's own seam rather than half-built.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function documentRouteTemplateRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/document-route-templates', 'route_templates:read', [
+                'summary' => "This tenant's route template DESIGNS, by name (paginated, no people counts)",
+                'tags' => ['document-route-templates'],
+                'parameters' => [
+                    self::queryParam('page', 'integer', '1-indexed page (default 1)'),
+                    self::queryParam('per_page', 'integer', 'Page size (default 25, max 100)'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse("The tenant's route templates with pagination", 'RouteTemplateListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/document-route-templates', 'route_templates:write', [
+                'summary' => 'Start a route template. Created EMPTY — the graph is saved by its own verb',
+                'tags' => ['document-route-templates'],
+                'request' => 'RouteTemplateCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created template', 'RouteTemplateResponse'),
+                    409 => self::errorResponse('A template with that name already exists in this tenant'),
+                    422 => self::errorResponse('A missing, empty or over-long name'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PUT', '/api/document-route-templates/{id:\\d+}/graph', 'route_templates:write', [
+                'summary' => 'REPLACE the template\'s whole graph — every step and every edge, atomically',
+                'tags' => ['document-route-templates'],
+                'request' => 'RouteTemplateGraphRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The saved graph', 'RouteTemplateGraphResponse'),
+                    404 => self::errorResponse('Route template not found in this tenant'),
+                    422 => self::errorResponse(
+                        'A rule kind nothing registered, a config the rule refused, an edge naming a position '
+                        . 'that is not on the canvas, an edge leaving a step that is not a decision, or more '
+                        . 'steps than documents.routing_max_steps allows'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/document-route-templates/{id:\\d+}', 'route_templates:read', [
+                'summary' => 'One design, with its steps, its edges and the quorum an unset step will follow',
+                'tags' => ['document-route-templates'],
+                'responses' => [
+                    200 => self::jsonResponse('The template and its graph', 'RouteTemplateGraphResponse'),
+                    404 => self::errorResponse('Route template not found in this tenant'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/document-route-templates/{id:\\d+}', 'route_templates:write', [
+                'summary' => 'Rename or re-describe a template. The graph is untouched — it has its own verb',
+                'tags' => ['document-route-templates'],
+                'request' => 'RouteTemplateUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The updated template', 'RouteTemplateResponse'),
+                    404 => self::errorResponse('Route template not found in this tenant'),
+                    409 => self::errorResponse('Another template in this tenant already has that name'),
+                    422 => self::errorResponse('An empty or over-long name, or a non-text description'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/document-route-templates/{id:\\d+}', 'route_templates:write', [
+                'summary' => 'Discard a design. Routes already issued from it are untouched — they carry their own steps',
+                'tags' => ['document-route-templates'],
+                'responses' => [
+                    200 => self::jsonResponse('The deleted template id', 'RouteTemplateDeleteResponse'),
+                    404 => self::errorResponse('Route template not found in this tenant'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
      * The caller's INBOX (#881), read one registered source at a time.
      *
      * Self-scoped to the caller's own (tenant, profile) and session-gated with NO
@@ -6566,6 +9831,350 @@ final class CoreApiSchemas
                     ] + self::authErrors(),
                 ],
             ],
+        ];
+    }
+
+    /**
+     * Tabular reports, emitted as documents (#947 item 6).
+     *
+     * Both routes are gated on `documents:render`, and the source is gated a
+     * SECOND time on its own permission inside the handler. The two mean
+     * different things: producing a report spends a headless-browser page and
+     * writes to the tenant's storage, which is what `documents:render` governs;
+     * seeing the rows is governed by whatever already governs reading that
+     * data. There is deliberately no `reports:run` permission — a report is a
+     * READ, and a second vocabulary for it would be a second answer to a
+     * question that already has one.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function reportRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/reports', 'documents:render', [
+                'summary' => 'List the reports this caller may run',
+                'description' => 'FILTERED to what the caller may actually run, not annotated with a '
+                    . 'permitted flag: listing a report over data the caller cannot see would publish '
+                    . 'its existence, and would leave every client to re-implement the same filter '
+                    . 'differently. `required_permission` is carried so a screen can hide what it '
+                    . 'must without asking.',
+                'tags' => ['reports'],
+                'responses' => [
+                    200 => self::jsonResponse('The runnable reports', self::object(
+                        ['data' => ['type' => 'array', 'items' => self::object(
+                            [
+                                'key' => ['type' => 'string'],
+                                'label' => ['type' => 'string'],
+                                'origin' => ['type' => 'string'],
+                                'required_permission' => ['type' => 'string'],
+                            ],
+                            ['key', 'label', 'origin', 'required_permission']
+                        )]],
+                        ['data']
+                    )),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/reports/{source:[a-z][a-z0-9_]*}/document', 'documents:render', [
+                'summary' => 'Run a report and issue it as a document',
+                'description' => 'Runs the named source and renders its rows as a flowing, paginated '
+                    . 'document — a real `documents` record with an immutable artifact, so routing, '
+                    . 'verification and the organizer all apply to it. Bounded by '
+                    . '`documents.flow_max_table_rows`; when the ceiling bites, `truncated` is true '
+                    . 'AND the document says so on its own first page, because a reader holding a '
+                    . 'printed subset has no other way to know it is one. Answers 202 rather than 201 '
+                    . 'when the record was created but the render did not produce an artifact — the '
+                    . 'document exists and can be re-rendered against the same id.',
+                'tags' => ['reports'],
+                'responses' => [
+                    201 => self::jsonResponse('The issued document', self::dataEnvelope(self::object(
+                        [
+                            'document_id' => ['type' => 'integer'],
+                            'title' => ['type' => 'string'],
+                            'page_count' => ['type' => 'integer'],
+                            'row_count' => ['type' => 'integer'],
+                            'total_rows' => ['type' => 'integer'],
+                            'truncated' => ['type' => 'boolean'],
+                            'content_url' => ['type' => 'string', 'nullable' => true],
+                        ],
+                        ['document_id', 'title', 'row_count', 'total_rows', 'truncated']
+                    ))),
+                    202 => self::errorResponse('The document was recorded but no artifact was stored'),
+                    404 => self::errorResponse('No such report, or the caller may not read its data'),
+                    422 => self::errorResponse('The document was refused (a tenant ceiling, or a tree the renderer would not accept)'),
+                    503 => self::errorResponse('The report could not be run, or rendering is unavailable'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * QR verification on documents (#1036) — the public scan surface, and the
+     * authenticated code management beside it.
+     *
+     * THE SECURITY CLAIM THESE SHAPES ENCODE, because an OpenAPI document is
+     * where an integrator forms their model of what a token is worth: the token
+     * IDENTIFIES a document and never AUTHORISES access to one. The public route
+     * has no response field that could carry a document id, and the
+     * `by-verification` route is gated on `documents:read` and answers 404 to a
+     * caller the ordinary visibility policy refuses — the same 404, with the
+     * same sentence, that `GET /api/documents/{id}` gives them.
+     *
+     * Response schemas are declared INLINE rather than as named components.
+     * These four shapes have exactly one consumer each and none is referenced by
+     * another route, so a named component would be a second place to look for a
+     * thing that is only ever read here.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function documentQrRoutes(): array
+    {
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/document-verifications/{token}',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Verify a document from the QR code printed on it (public, rate-limited)',
+                    'description' =>
+                        'PUBLIC and unauthenticated by design: the caller is somebody holding a printed '
+                        . 'sheet, and the paper is the whole of their relationship with this system. '
+                        . 'Always 200. An unknown token, a malformed one, a withdrawn one and a superseded '
+                        . 'one produce the SAME body at the default disclosure level, so this endpoint '
+                        . 'cannot be asked whether a document exists. A tenant may raise '
+                        . '`documents.qr_public_detail` to `stage`, which adds the current routing verb '
+                        . 'and distinguishes a revoked code from an unrecognised one, or LOWER it to '
+                        . '`undated`, which withholds `issued_on` and leaves everything else as '
+                        . '`minimal`. It never returns a '
+                        . 'document id, a title, any content, any recipient, or any name of a person or '
+                        . 'unit — a signed-in reader who wants the record calls '
+                        . 'GET /api/documents/by-verification/{token}, where RBAC decides unchanged.',
+                    'tags' => ['documents'],
+                    'responses' => [
+                        200 => self::jsonResponse(
+                            'Whether the code verifies, and the minimum that makes that meaningful',
+                            [
+                                'type' => 'object',
+                                'properties' => [
+                                    'data' => [
+                                        'type' => 'object',
+                                        'properties' => [
+                                            'verified' => ['type' => 'boolean'],
+                                            'reason' => [
+                                                'type' => 'string',
+                                                'description' =>
+                                                    'Present only when verified is false. `unrecognised` '
+                                                    . 'covers unknown, malformed, withdrawn and superseded '
+                                                    . 'at the default disclosure level.',
+                                                'enum' => ['unrecognised', 'withdrawn', 'superseded'],
+                                            ],
+                                            'revoked_on' => [
+                                                'type' => 'string',
+                                                'nullable' => true,
+                                                'description' => 'Date only, and only at the `stage` level',
+                                            ],
+                                            'reference' => [
+                                                'type' => 'string',
+                                                'description' => 'The short reference printed beneath the code',
+                                            ],
+                                            'issuer' => [
+                                                'type' => 'string',
+                                                'description' => 'The issuing ORGANISATION, never a person or a unit',
+                                            ],
+                                            'issued_on' => [
+                                                'type' => 'string',
+                                                'nullable' => true,
+                                                'description' =>
+                                                    'The issue DATE (YYYY-MM-DD), not a timestamp. ABSENT '
+                                                    . 'at the `undated` disclosure level — absent rather '
+                                                    . 'than null, because null would be a statement about '
+                                                    . 'the document and this is a statement about the page.',
+                                            ],
+                                            'stage' => [
+                                                'type' => 'string',
+                                                'description' => 'Only at the `stage` disclosure level',
+                                                'enum' => ['issued', 'forwarded', 'acknowledged', 'returned', 'noted'],
+                                            ],
+                                            'stage_on' => [
+                                                'type' => 'string',
+                                                'nullable' => true,
+                                                'description' => 'Date only, and only at the `stage` level',
+                                            ],
+                                        ],
+                                        'required' => ['verified'],
+                                    ],
+                                ],
+                            ]
+                        ),
+                        429 => self::errorResponse('Too many verification attempts from this address'),
+                        503 => self::errorResponse('Verification is temporarily unavailable'),
+                    ],
+                ],
+            ],
+            self::permissionRoute('GET', '/api/documents/by-verification/{token}', 'documents:read', [
+                'summary' => 'Resolve a scanned QR code to the record it names, under the existing RBAC',
+                'description' =>
+                    'The scan-through. The token selects a ROW; DocumentVisibilityPolicy then decides, '
+                    . 'unchanged and with no knowledge that a token was involved. A caller without reach '
+                    . 'gets 404 with the same message GET /api/documents/{id} gives them — holding the '
+                    . 'paper confers nothing. A code minted in another tenant collapses into the same 404. '
+                    . '`code_honoured` says whether the printing that got the caller here is still the '
+                    . 'current one.',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The document this code names', [
+                        'type' => 'object',
+                        'properties' => [
+                            'data' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'id' => ['type' => 'integer'],
+                                    'code_honoured' => ['type' => 'boolean'],
+                                ],
+                                'required' => ['id', 'code_honoured'],
+                            ],
+                        ],
+                    ]),
+                    404 => self::errorResponse(
+                        'No such code, or the document it names is not visible to the caller'
+                    ),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/documents/{id:\d+}/qr', 'documents:read', [
+                'summary' => 'The verification code on a document, and the record of it being scanned',
+                'description' =>
+                    'The record page panel. `enabled` composes the tenant setting with the template '
+                    . 'flag; `configured` is separate because "this instance has no public address" and '
+                    . '"this tenant switched it off" are different problems with different fixes. '
+                    . '`token` is null in TWO different states — never minted, and withdrawn — so '
+                    . '`retired` is what separates them: it lists the codes this document has carried '
+                    . 'and stopped honouring, newest first, each with the reason (`withdrawn` or '
+                    . '`superseded`). A retired entry carries the human reference, never the token and '
+                    . 'never a verification URL. '
+                    . 'Anonymous scans appear with `scanner_profile_id: null` and carry nothing else '
+                    . 'about the scanner — no address, no device — because nothing else is stored.',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The live code, if any, and the scan trail', [
+                        'type' => 'object',
+                        'properties' => [
+                            'data' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'enabled' => ['type' => 'boolean'],
+                                    'configured' => ['type' => 'boolean'],
+                                    'token' => [
+                                        'type' => 'object',
+                                        'nullable' => true,
+                                        'properties' => [
+                                            'reference' => ['type' => 'string'],
+                                            'verification_url' => ['type' => 'string'],
+                                            'issued_at' => ['type' => 'string', 'nullable' => true],
+                                            'issued_by' => ['type' => 'integer', 'nullable' => true],
+                                        ],
+                                    ],
+                                    'retired' => [
+                                        'type' => 'object',
+                                        'properties' => [
+                                            'total' => ['type' => 'integer'],
+                                            'recent' => [
+                                                'type' => 'array',
+                                                'items' => [
+                                                    'type' => 'object',
+                                                    'properties' => [
+                                                        'reference' => ['type' => 'string'],
+                                                        'issued_at' => [
+                                                            'type' => 'string',
+                                                            'nullable' => true,
+                                                        ],
+                                                        'revoked_at' => ['type' => 'string'],
+                                                        'revoked_by' => [
+                                                            'type' => 'integer',
+                                                            'nullable' => true,
+                                                        ],
+                                                        'reason' => [
+                                                            'type' => 'string',
+                                                            'enum' => ['withdrawn', 'superseded'],
+                                                        ],
+                                                    ],
+                                                ],
+                                            ],
+                                        ],
+                                    ],
+                                    'scans' => [
+                                        'type' => 'object',
+                                        'properties' => [
+                                            'total' => ['type' => 'integer'],
+                                            'recent' => [
+                                                'type' => 'array',
+                                                'items' => [
+                                                    'type' => 'object',
+                                                    'properties' => [
+                                                        'id' => ['type' => 'integer'],
+                                                        'document_id' => ['type' => 'integer'],
+                                                        'qr_token_id' => ['type' => 'integer'],
+                                                        'scanner_profile_id' => [
+                                                            'type' => 'integer',
+                                                            'nullable' => true,
+                                                        ],
+                                                        'outcome' => [
+                                                            'type' => 'string',
+                                                            'enum' => ['verified', 'refused'],
+                                                        ],
+                                                        'scanned_at' => ['type' => 'string'],
+                                                    ],
+                                                ],
+                                            ],
+                                        ],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ]),
+                    404 => self::errorResponse('No such document, or it is not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/documents/{id:\d+}/qr', 'documents:render', [
+                'summary' => 'Issue a new verification code, retiring the current one',
+                'description' =>
+                    'ALWAYS ROTATES. The previous code is retired as `superseded` in the same '
+                    . 'transaction, so anybody holding an older printing stops being able to confirm it — '
+                    . 'which is the reason to call this, and why re-rendering a document deliberately '
+                    . 'does NOT do it.',
+                'tags' => ['documents'],
+                'responses' => [
+                    201 => self::jsonResponse('The new code', [
+                        'type' => 'object',
+                        'properties' => [
+                            'data' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'reference' => ['type' => 'string'],
+                                    'verification_url' => ['type' => 'string'],
+                                    'issued_at' => ['type' => 'string', 'nullable' => true],
+                                    'issued_by' => ['type' => 'integer', 'nullable' => true],
+                                ],
+                            ],
+                        ],
+                    ]),
+                    404 => self::errorResponse('No such document, or it is not visible to the caller'),
+                    409 => self::errorResponse('QR verification is switched off for this template or tenant'),
+                    503 => self::errorResponse('This instance has no public address configured'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/documents/{id:\d+}/qr', 'documents:render', [
+                'summary' => 'Stop honouring the verification code on a document',
+                'description' =>
+                    'The answer to "paper cannot be recalled". The symbol stays legible on every copy in '
+                    . 'the world and stops confirming anything; the row survives with its timestamps. '
+                    . '204 whether or not a code was live, so a second click is not an error and the '
+                    . 'route does not report whether a document has one.',
+                'tags' => ['documents'],
+                'responses' => [
+                    204 => ['description' => 'The code is no longer honoured'],
+                    404 => self::errorResponse('No such document, or it is not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
         ];
     }
 
@@ -6727,6 +10336,42 @@ final class CoreApiSchemas
                 'tags' => ['documents'],
                 'responses' => [
                     200 => self::jsonResponse('The block', 'DocumentBlockResponse'),
+                    404 => self::errorResponse('Block not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            // Listed after GET /{id} and before the write routes purely for
+            // readability; `usage` is not a digit, so it could never have matched
+            // the /{id:\d+} constraint either way.
+            self::permissionRoute('GET', '/api/features', 'settings:read', [
+                'summary' => 'Feature flags composed with the tenant plan: what this tenant can actually use',
+                'description' =>
+                    'The curated feature flags, keyed by their settings key, resolved for the tenant '
+                    . 'making the request. The settings console already edits the operator half and is '
+                    . 'global and system-tenant-only; this composes it with the tenant PLAN, which that '
+                    . 'surface knows nothing about. Each row carries three booleans rather than one, '
+                    . 'because "off" is not a single condition: `operator_enabled` is the instance switch, '
+                    . '`entitled` is whether the plan includes it where a commercial gate is declared, and '
+                    . '`enabled` is both. One flag would send whoever is looking to the wrong place, since '
+                    . 'an operator setting cannot be fixed by changing a plan, nor a plan in settings.',
+                'tags' => ['settings'],
+                'responses' => [
+                    200 => self::jsonResponse('The feature catalogue for this tenant', 'FeatureListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/document-blocks/{id:\d+}/usage', 'documents:read', [
+                'summary' => 'What would break if this block changed: the templates and blocks that instance it',
+                'description' =>
+                    'A block is POINTER-referenced (a `blockInstance` element), so editing it propagates '
+                    . 'to everything that instances it — and unlike delete, an edit is never refused. '
+                    . 'This is the answer a client needs before offering either action. There are TWO kinds '
+                    . 'of user: `templates`, and `blocks`, since a block may contain another block. Both are '
+                    . 'row-filtered to what the caller may see; `total` counts EVERY reference of both kinds '
+                    . 'in the tenant and `hidden` is the difference, so a caller with narrow reach is told '
+                    . 'the edit reaches further than they can see instead of being quietly understated. '
+                    . '`total > 0` means exactly that a DELETE would be refused with 409.',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The referencing templates and blocks, plus the unfiltered total', 'DocumentBlockUsageResponse'),
                     404 => self::errorResponse('Block not found or not visible to the caller'),
                 ] + self::authErrors(),
             ]),
@@ -6966,6 +10611,29 @@ final class CoreApiSchemas
     }
 
     /**
+     * A list whose `pagination` block appears ONLY when the caller asked to page.
+     *
+     * For an endpoint that returned every row before it adopted the shared list
+     * contract and kept that default (see {@see \Whity\Api\TagsApiHandler::list()}):
+     * `data` is always there, `pagination` is present exactly when `page` or
+     * `per_page` was sent. Declaring it optional rather than required is what
+     * stops a generated client from insisting on a field the unpaginated
+     * response does not carry.
+     *
+     * @return array<string, mixed>
+     */
+    private static function optionallyPaginatedListEnvelope(string $component): array
+    {
+        return self::object(
+            [
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref($component)],
+                'pagination' => SchemaBuilder::ref('Pagination'),
+            ],
+            ['data']
+        );
+    }
+
+    /**
      * @param array<string, mixed> $itemSchema
      * @return array<string, mixed>
      */
@@ -7037,6 +10705,49 @@ final class CoreApiSchemas
      * @param bool $nonEmpty Whether the handler also refuses an empty string.
      * @return array<string, mixed>
      */
+    /**
+     * An ATTENDEE'S typed name: nullable, and bounded by the same column shape
+     * every other VARCHAR(255) identifier is.
+     *
+     * Nullable and not merely optional, because null is the meaningful value —
+     * it is how a row says "this attendee is identified by their profile, not by
+     * a name I typed". {@see self::name()} cannot express that: its flag means
+     * NON-EMPTY, which is the opposite question.
+     *
+     * @return array<string, mixed>
+     */
+    private static function attendeeName(): array
+    {
+        return [
+            'type' => 'string',
+            'maxLength' => AttendanceRepository::NAME_MAX,
+            'nullable' => true,
+        ];
+    }
+
+    /**
+     * The free-text note on one attendance row.
+     *
+     * Bounded at {@see AttendanceEntry::NOTE_MAX} rather than
+     * {@see InputLimits::TEXT_MAX}, because that is what the handler actually
+     * refuses past. A declaration citing the larger bound would let a generated
+     * client build a request the schema calls valid and the API answers 422 to —
+     * the exact drift {@see self::password()} exists to record.
+     *
+     * @return array<string, mixed>
+     */
+    private static function attendanceNote(): array
+    {
+        return [
+            'type' => 'string',
+            'maxLength' => AttendanceEntry::NOTE_MAX,
+            'nullable' => true,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
     private static function name(bool $nonEmpty = false): array
     {
         $schema = ['type' => 'string', 'maxLength' => InputLimits::NAME_MAX];
@@ -7056,6 +10767,42 @@ final class CoreApiSchemas
     private static function text(): array
     {
         return ['type' => 'string', 'maxLength' => InputLimits::TEXT_MAX];
+    }
+
+    /**
+     * A TIME-WINDOW TYPE KEY, as {@see WindowTypeRegistry::isValidKey()} accepts
+     * it: a lowercase slug, optionally namespaced with one colon.
+     *
+     * Not nullable, and no nullable variant exists: unlike an OU type, which a
+     * unit may legitimately not have, a period always has a kind — the key IS
+     * the identity of the row being created.
+     *
+     * @return array<string, mixed>
+     */
+    private static function windowTypeKey(): array
+    {
+        return [
+            'type' => 'string',
+            'maxLength' => WindowTypeRegistry::KEY_MAX_LENGTH,
+            'pattern' => '^[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)?$',
+        ];
+    }
+
+    /**
+     * A calendar DATE, `YYYY-MM-DD`, with no time and no zone.
+     *
+     * A period boundary is a DAY. Rendering it as an instant invites a timezone
+     * to move it, which moves which period a record falls into — the one thing
+     * this subsystem cannot allow to happen quietly. The pattern is enforced as
+     * well as the format because `format` is advisory to most generators, and
+     * the handler additionally refuses a date that merely LOOKS valid
+     * (`2026-02-30` parses in a lenient reader and rolls into March).
+     *
+     * @return array<string, mixed>
+     */
+    private static function date(): array
+    {
+        return ['type' => 'string', 'format' => 'date', 'pattern' => '^\\d{4}-\\d{2}-\\d{2}$'];
     }
 
     /**
@@ -7193,11 +10940,6 @@ final class CoreApiSchemas
      */
     private static function apiPath(string $unversionedPath): string
     {
-        $prefix = (new Router())->getVersionPrefix();
-        $pos = strpos($unversionedPath, '/', 1);
-
-        return $pos === false
-            ? $unversionedPath . $prefix
-            : substr($unversionedPath, 0, $pos) . $prefix . substr($unversionedPath, $pos);
+        return (new Router())->versionedPath($unversionedPath);
     }
 }

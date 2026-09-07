@@ -20,6 +20,23 @@ interface StatsChartProps {
    * `@amroksaleh/features` need not exist.
    */
   tooltipLabel?: (count: number, label: string) => string;
+  /**
+   * The first and last x-axis labels, ALREADY FORMATTED, or omitted to render
+   * no axis strip at all.
+   *
+   * A prop for the reason `tooltipLabel` is one, and then a second reason.
+   * This file is a PUBLISHED registry item installed verbatim downstream, so it
+   * cannot import `@amroksaleh/features` — which means it can reach neither the
+   * reader's resolved language nor the tenant's `ui.hide_dates` preference
+   * (#1068). It used to call `toLocaleDateString(undefined, …)`, i.e. format
+   * two dates in the BROWSER's locale, in a component that had no way to know
+   * it was wrong to.
+   *
+   * Omitting it renders no strip, which is also what the caller does when the
+   * tenant hides dates: a chart is a shape, and it still reads as a rising or
+   * falling one with no dates under it.
+   */
+  axisLabels?: { start: string; end: string };
   color?: string;
 }
 
@@ -28,6 +45,7 @@ export function StatsChart({
   label,
   color = 'currentColor',
   tooltipLabel = (count, term) => `${count} ${term}`,
+  axisLabels,
 }: StatsChartProps) {
   const max = useMemo(() => Math.max(...data.map((d) => d.count), 5), [data]);
 
@@ -61,10 +79,12 @@ export function StatsChart({
           );
         })}
       </div>
-      <div className="flex justify-between mt-2 px-2 text-[10px] text-muted-foreground border-t pt-2">
-        <span>{new Date(data[0].date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
-        <span>{new Date(data[data.length - 1].date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
-      </div>
+      {axisLabels ? (
+        <div className="flex justify-between mt-2 px-2 text-[10px] text-muted-foreground border-t pt-2">
+          <span>{axisLabels.start}</span>
+          <span>{axisLabels.end}</span>
+        </div>
+      ) : null}
     </div>
   );
 }

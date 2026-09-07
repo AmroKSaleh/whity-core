@@ -32,6 +32,9 @@ final class TenantPredicateGuard
      */
     public const IGNORE_TAG = TenantPredicateScanner::IGNORE_TAG;
 
+    /** How many lines above a statement an ignore annotation may sit and still apply. */
+    public const ANNOTATION_LOOKBACK = TenantPredicateScanner::ANNOTATION_LOOKBACK;
+
     private TenantPredicateScanner $scanner;
 
     public function __construct()

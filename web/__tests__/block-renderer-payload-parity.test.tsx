@@ -805,7 +805,7 @@ const PRELOAD_FORM = [
  * it left the form in. Both hosts answer everything 200 — including the
  * truncated `/api/v1/people/`, which is the point: the collection route does
  * not fail, so only "was it asked at all" separates the fix from the bug. */
-type FormOutcome = { paths: string[]; disabled: boolean; unbound: boolean };
+type FormOutcome = { paths: string[]; disabled: boolean; unbound: boolean; seeded: string };
 
 /** Both renderers disable a form through the enclosing `<fieldset disabled>`,
  * and `HTMLInputElement.disabled` reflects only the attribute ON THE INPUT — so
@@ -820,24 +820,46 @@ function effectivelyDisabled(element: HTMLElement): boolean {
 async function webFormOutcome(record?: string): Promise<FormOutcome> {
   cleanup();
   mockApiClient.mockClear();
-  mockApiClient.mockResolvedValue(stubResponse(200, { data: [{ id: '7' }] }));
+  // The platform envelope, and the same body the desktop twin is given below.
+  // #981: web used to spread this whole, seeding a junk `data` key and leaving
+  // `full_name` empty — an enabled, un-prefilled form over a real record.
+  mockApiClient.mockResolvedValue(stubResponse(200, { data: { id: '7', full_name: 'Ada Lovelace' } }));
   const view = renderWeb(<WebBlockRenderer blocks={PRELOAD_FORM as unknown as WebBlock[]} record={record} />);
 
   const input = await screen.findByRole('textbox', { name: /full name/i });
   // Let any effect that wanted to fetch have fired before the paths are read.
   await waitFor(() => expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument());
 
+  // A BOUND form must be given until its preload has actually SEEDED before the
+  // value is read. Waiting for the fieldset to enable is not enough: both
+  // renderers flip out of `loading` and enable in one render, then write the
+  // values in an effect a tick later — so a read at enable-time catches an
+  // input that is still legitimately empty and reports a disagreement that is
+  // really a race. That is what this helper did first, and it accused the
+  // desktop twin of seeding nothing while its own suite proved otherwise.
+  //
+  // Waiting for non-empty does NOT make the assertion self-fulfilling: it only
+  // settles, and the comparison below still has to match, so seeding the WRONG
+  // value fails. A renderer that seeds nothing at all times out here, which is
+  // the right verdict reported as a timeout rather than a mismatch.
+  if (record !== undefined) {
+    await waitFor(() =>
+      expect((screen.getByRole('textbox', { name: /full name/i }) as HTMLInputElement).value).not.toBe('')
+    );
+  }
+
   return {
     paths: mockApiClient.mock.calls.map((call) => String(call[0])),
     disabled: effectivelyDisabled(input),
     unbound: view.container.querySelector('[data-slot="form-unbound"]') !== null,
+    seeded: (screen.getByRole('textbox', { name: /full name/i }) as HTMLInputElement).value,
   };
 }
 
 async function desktopFormOutcome(record?: string): Promise<FormOutcome> {
   cleanup();
   mockInvoke.mockClear();
-  mockInvoke.mockResolvedValue({ status: 200, body: { data: [{ id: '7' }] } });
+  mockInvoke.mockResolvedValue({ status: 200, body: { data: { id: '7', full_name: 'Ada Lovelace' } } });
   const view = render(
     <DesktopBlockRenderer
       feature={{ ...FEATURE, blocks: PRELOAD_FORM as unknown as DesktopBlock[] }}
@@ -848,10 +870,29 @@ async function desktopFormOutcome(record?: string): Promise<FormOutcome> {
   const input = await screen.findByRole('textbox', { name: /full name/i });
   await waitFor(() => expect(screen.getByRole('button', { name: /save/i })).toBeInTheDocument());
 
+  // A BOUND form must be given until its preload has actually SEEDED before the
+  // value is read. Waiting for the fieldset to enable is not enough: both
+  // renderers flip out of `loading` and enable in one render, then write the
+  // values in an effect a tick later — so a read at enable-time catches an
+  // input that is still legitimately empty and reports a disagreement that is
+  // really a race. That is what this helper did first, and it accused the
+  // desktop twin of seeding nothing while its own suite proved otherwise.
+  //
+  // Waiting for non-empty does NOT make the assertion self-fulfilling: it only
+  // settles, and the comparison below still has to match, so seeding the WRONG
+  // value fails. A renderer that seeds nothing at all times out here, which is
+  // the right verdict reported as a timeout rather than a mismatch.
+  if (record !== undefined) {
+    await waitFor(() =>
+      expect((screen.getByRole('textbox', { name: /full name/i }) as HTMLInputElement).value).not.toBe('')
+    );
+  }
+
   return {
     paths: mockInvoke.mock.calls.map(([, args]) => String((args as { path: string }).path)),
     disabled: effectivelyDisabled(input),
     unbound: view.container.querySelector('[data-slot="form-unbound"]') !== null,
+    seeded: (screen.getByRole('textbox', { name: /full name/i }) as HTMLInputElement).value,
   };
 }
 
@@ -884,6 +925,25 @@ describe('web ⇄ desktop form-preload parity (#957)', () => {
       expect(path).not.toContain('{');
       expect(path).not.toContain('%7B');
     }
+  });
+
+  it('agrees on the VALUES a bound preload seeds, not merely on the request', async () => {
+    // #981's durable half. The two renderers already agreed on the REQUEST and
+    // disagreed about what the reply means, so a request-shaped parity test
+    // passed for a release while one platform seeded nothing.
+    //
+    // Both are handed the same `{ data: { full_name } }` body — the envelope
+    // core's own handlers document and the desktop renderer requires. Web used
+    // to spread the body whole: `data` became a field nobody declared and
+    // `full_name` stayed empty, which is an enabled, un-prefilled form over a
+    // real record.
+    const web = await webFormOutcome('7');
+    const desktop = await desktopFormOutcome('7');
+
+    expect(desktop.seeded).toEqual(web.seeded);
+    // Pinned literally as well, so a shared regression in which NEITHER
+    // renderer seeds still fails here rather than agreeing on emptiness.
+    expect(web.seeded).toBe('Ada Lovelace');
   });
 
   it('agrees that an unbound form is disabled and says so, not empty and submittable', async () => {

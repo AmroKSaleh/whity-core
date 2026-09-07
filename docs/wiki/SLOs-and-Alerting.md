@@ -13,9 +13,21 @@ whity-core exposes no `/metrics` endpoint yet, so we measure from the outside by
 hits (proxy → TLS → FrankenPHP worker → DB ping) and returns a structured
 health snapshot (`status`, `db_connected`, `version`, worker/memory/uptime).
 
+A healthy service and a correctly deployed one are two different facts, and
+`/api/health` measures only the first. Its `version` is `CoreVersion::VERSION`,
+a **constant in the source**: identical across every commit between releases,
+so it cannot distinguish a backend running today's checkout from one running a
+three-week-old one, and it says nothing about the schema. **`GET /api/build`**
+(#1049) is the second signal — the commit the workers are actually running,
+when they booted, the commit on disk now, and how many migrations are pending.
+Probing it is what makes `WhitySchemaBehindCode` possible; this project's own
+staging ran for weeks on a database 15 migrations behind its checkout with a
+green availability SLI the whole time.
+
 | SLI | Source | Signal |
 |---|---|---|
 | **Availability** | blackbox probe of `/api/health` | `probe_success == 1` **and** HTTP `200` (HTTP `503` = degraded: worker up, DB down) |
+| **Deployment correctness** | blackbox probe of `/api/build` | body reports `"pending_migration_count":0` — the schema the running code expects has been applied |
 | **Latency (coarse)** | same probe | `probe_duration_seconds` on the cheapest route — an early-warning proxy until per-route histograms exist |
 | **Backup freshness** | `.last-success` marker from `scripts/backup-db.sh` → node_exporter textfile | `whity_backup_last_success_timestamp_seconds` |
 | **TLS validity** | probe | `probe_ssl_earliest_cert_expiry` |
@@ -47,6 +59,7 @@ From [`prometheus-rules.yml`](../../ops/alerting/prometheus-rules.yml):
 | `WhityHealthDegraded` | critical | HTTP 503 for >2m (worker up, DB ping failing) |
 | `WhityHealthUnexpectedStatus` | warning | non-200/503 for >5m |
 | `WhityHealthLatencyHigh` | warning | avg probe RTT >1s over 5m, for >10m |
+| `WhitySchemaBehindCode` | critical | `/api/build` has not reported `pending_migration_count: 0` for >10m |
 | `WhityTlsCertExpiringSoon` | warning | cert expires in <14d |
 | `WhityBackupStale` | critical | no successful backup in >26h |
 | `WhityBackupMetricMissing` | warning | backup metric absent for >1h (exporter/cron down) |
@@ -58,8 +71,9 @@ can't tell them apart unless you accept 503 as a completed probe, which the
 
 ## Wiring it up
 
-1. **Probe** — deploy `blackbox_exporter`; add the `whity_health` module and the
-   `whity-health` scrape job from
+1. **Probe** — deploy `blackbox_exporter`; add the `whity_health` and
+   `whity_build_drift` modules and their `whity-health` / `whity-build-drift`
+   scrape jobs from
    [`blackbox-and-scrape.example.yml`](../../ops/alerting/blackbox-and-scrape.example.yml)
    (set your staging + prod URLs and the exporter address).
 2. **Backup metric** — cron

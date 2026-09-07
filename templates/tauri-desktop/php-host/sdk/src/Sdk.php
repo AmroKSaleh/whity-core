@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.38).
+ * SDK identity (v1.43).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -589,13 +589,155 @@ namespace Whity\Sdk;
  * unchanged and remains the only way to contribute a kind; there is no
  * audience-only declaration, because a rule that can name a set of people can
  * name the recipients of a step.
- * Additive; every tree that validated under 1.37 still validates)
+ * Additive; every tree that validated under 1.37 still validates) ->
+ * 1.39 (TIME-WINDOW TYPES: {@see \Whity\Sdk\TimeWindow\PluginWindowTypesInterface},
+ * the contribution point for the KINDS of named period a deployment slices time
+ * into. #1070 puts a named, non-overlapping period that records can be scoped to
+ * and rolled up by — and that can be CLOSED, the way a set of books is closed —
+ * into core, because it is a primitive the platform did not have and everybody
+ * who needed one either built their own or did without. Two implementations of a
+ * period disagree the moment both exist, and nothing reports that they differ.
+ * THE VOCABULARY IS THE PART THAT CANNOT BE CORE'S. Two deployments slice time
+ * into words with nothing in common — one reasons in a crop year and the growing
+ * seasons inside it, another in a kiln campaign and the firing runs inside it —
+ * so a core enumeration would have to carry both and ship each deployment the
+ * other's. A plugin therefore declares KEYS and the defaults a tenant starts
+ * from, and an administrator ADOPTS one; declaring is a catalogue entry, never a
+ * write into anybody's tenant.
+ * BARE SLUGS ONLY, as with OU types: declare `growing_season`, get
+ * `acme:growing_season`. Two plugins may declare the same slug without
+ * colliding, and no plugin can mint a bare key, because the unprefixed namespace
+ * belongs to core and to the tenant's own vocabulary.
+ * NESTING IS DECLARABLE, BOUNDARIES ARE NOT. A declaration may name the type it
+ * nests inside — a sub-period sitting inside a period is structural and knowable
+ * — but it says nothing about when a period starts, how long it runs, or what
+ * fraction of its parent it occupies, because none of that is knowable and
+ * assuming it is the specific error this concept exists to avoid. Every boundary
+ * is authored per instance, in dates, by somebody who knows. A plugin may only
+ * nest inside its OWN declared types: it does not own another source's type and
+ * cannot know whether a given tenant adopted it.
+ * A malformed declaration costs that plugin its window vocabulary rather than one
+ * type — the one place this differs from the OU-type catalogue, and the nesting
+ * is why: the declarations are interdependent, so storing them one at a time
+ * would either reject a legal forward reference or leave half a hierarchy whose
+ * parents point at nothing.
+ * NO CONTRACT IS PUBLISHED HERE FOR THE CLOSE REPORT. What a close should say is
+ * still unfinished inside a period is contributed through the
+ * `time_window.close_report` FILTER HOOK rather than a typed interface,
+ * deliberately: the shape such an interface should take depends on an open
+ * question this release does not answer — what happens to a record mid-flight
+ * when its period closes — and publishing a vendored, version-pinned contract
+ * before that is publishing one that then has to break.
+ * Additive; every tree that validated under 1.38 still validates) ->
+ * 1.40 (THE FORM PRELOAD JOINS THE CONTRACT: `form.dataSource`, a
+ * `{method: 'GET', path}` spec the renderer has honoured since #949 and which
+ * the contract never declared.
+ *
+ * NOT PURELY ADDITIVE, and the exception is the point. An undeclared prop is
+ * neither validated nor stripped — `BlockValidator::validateProps()` walks the
+ * DECLARED rules rather than the node's keys, and the loader's walk returns the
+ * node it was handed — so `dataSource` reached the client exactly as written,
+ * and its path was never checked against the routes the plugin registered.
+ * Alone among every endpoint a block can name: `submit`, every `source`,
+ * `inbox.actions` and every `rowActionList` were all ownership-checked.
+ *
+ * So a tree that validated under 1.39 can be REFUSED under 1.40 — but only if
+ * its form preloaded a route the plugin does not own, or wrote a `dataSource`
+ * of the wrong shape. A declaration naming the plugin's own GET is unaffected,
+ * and now gets the version rewrite every other endpoint already got, which
+ * fixes the class of preload failure #957 traced to an unversioned path.
+ *
+ * A minor rather than a major: nothing legitimate stops working, and the trees
+ * this refuses are the ones the ownership rule always claimed to cover.) ->
+ * 1.41 (A RENDERING SEAM: {@see \Whity\Sdk\Render\DocumentRenderer}, resolved
+ * from the container, turning a plugin's structured content into a document.
+ * With it {@see \Whity\Sdk\Render\FlowDocument} (a builder — headings,
+ * paragraphs, tables, figures, generated contents/tables/figures lists, RTL and
+ * LTR), {@see \Whity\Sdk\Render\PageSpec}, and the two results:
+ * {@see \Whity\Sdk\Render\RenderedDocument} for bytes and
+ * {@see \Whity\Sdk\Render\IssuedDocument} for a first-class platform document
+ * with an id and an immutable artifact.
+ *
+ * The gap this closes was total: the SDK had no rendering surface of any kind,
+ * so a plugin holding structured content — an invoice, a certificate, a
+ * statement of account, a compliance submission — either shipped JSON and asked
+ * someone to print a web page or built its own renderer. Neither is a plugin
+ * author's mistake; both are what a missing seam produces.
+ *
+ * The signatures carry NO tenant id, which is a security property rather than
+ * an omission: the host reads the tenant and the actor from its own
+ * request-scoped context, so a document built from one tenant's content and
+ * filed in another's storage has no expression in this API.
+ *
+ * VERIFICATION CODES ARE THE PLATFORM'S TO MINT. An issued document carries the
+ * same code a person-issued one does, placed by the host against the document's
+ * own id. FlowDocument publishes no way to author one, so a plugin cannot print
+ * a document that looks verified and resolves to nothing.
+ *
+ * Purely additive. Nothing declared before 1.41 changed, and an instance with
+ * rendering disabled — the default — answers every call with
+ * {@see \Whity\Sdk\Render\RenderUnavailableException} rather than failing to
+ * load.) ->
+ * 1.42 (DISCRIMINATED SUB-FORMS: the `variant` and `variantCase` blocks. A
+ * form region whose SHAPE depends on another field's value — `variant` names a
+ * sibling input as its `discriminator`, each `variantCase` declares the value
+ * it answers to, and only the matching one renders.
+ *
+ * The gap: a resource with type-dependent payloads had to be declared as one
+ * hidden section per type using `visibleWhen`, and hiding does not change what
+ * is submitted — a hidden input keeps its value and still sends it, on purpose,
+ * because the server is authoritative over what it accepts. So thirteen
+ * variants meant thirteen payloads at once. A discriminated union needs the
+ * branches that were not chosen to be ABSENT, which is a different meaning and
+ * therefore a different block rather than a flag on the existing one.
+ *
+ * The cases are CHILD BLOCKS, not a `cases` prop, because a prop holding
+ * nested trees is invisible to every walker — including the host loader's
+ * ownership check, where an unwalked slot is a `source` that never got checked.
+ *
+ * Sibling cases may reuse a field name: they are mutually exclusive, so
+ * `{kind:'number', value: 5}` and `{kind:'text', value: 'x'}` are the same
+ * field in two shapes, which is what a discriminated union is. A duplicate
+ * within one case, or one colliding with the enclosing form, is still refused.
+ *
+ * Purely additive. Nothing declared before 1.42 changed.) ->
+ * 1.43 (HAND-AUTHORED MCP TOOLS: {@see PluginMcpToolsInterface}, by which a
+ * plugin contributes tools it writes itself rather than tools the host derives
+ * from its routes.
+ *
+ * The gap: every MCP tool was CRUD-shaped, one per endpoint, because
+ * derivation is all there was. Derived tools are the right default — near-zero
+ * authoring cost, and the list stays honest as routes change — but they can
+ * only ever describe an API surface. A workflow surface is a different thing:
+ * fewer tools, each carrying domain semantics, instructions and guardrails no
+ * route signature implies. Neither kind subsumes the other, and a platform
+ * hosting third-party plugins wants both.
+ *
+ * A DESCRIPTOR MUST DECLARE ITS AUDIENCE — `requiredRole`, `requiredPermission`
+ * or an explicit `open: true`. A derived tool inherits its route's RBAC gate,
+ * and a route declaring no permission is visibly open in the route table and in
+ * the route-catalogue check; an authored tool has no route, so an omitted
+ * permission would be visible nowhere while being callable by every
+ * authenticated principal. A descriptor declaring none of the three is refused
+ * at load rather than defaulted.
+ *
+ * A DERIVED TOOL WINS A NAME COLLISION, because a route-backed name is already
+ * published in the OpenAPI document and the generated clients, and letting an
+ * authored tool shadow it would leave two descriptions of one name disagreeing.
+ * `suppressesDerivedMcpTools()` is the deliberate way to take the name: it
+ * removes the competitor rather than hiding behind it, and it is scoped to the
+ * plugin's OWN routes so it can never silence core's or another plugin's.
+ *
+ * A throwing tool costs its caller an error, not the dispatcher.
+ *
+ * Purely additive. A plugin that does not implement the interface loads exactly
+ * as before and its routes are derived exactly as before.)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.38.0';
+    public const VERSION = '1.43.0';
 
     /**
      * Static identity only — never instantiated.

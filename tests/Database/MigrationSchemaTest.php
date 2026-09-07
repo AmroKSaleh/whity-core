@@ -133,18 +133,83 @@ final class MigrationSchemaTest extends TestCase
         $this->assertSame($sorted, $prefixes, 'Migration numeric prefixes must be in ascending order.');
         $this->assertSame(count($prefixes), count(array_unique($prefixes)), 'Duplicate migration prefixes detected.');
 
-        // Prefixes must form a contiguous 1..N sequence on main. Feature branches
-        // that run ahead of a concurrent in-flight migration may produce a single
-        // gap (e.g. 037→039 when 038 is on a sibling branch). Tolerate at most one
-        // such gap so the guard still catches accidental prefix collisions or
-        // deletions while remaining merge-friendly.
-        $expected = range(1, max($prefixes));
-        $missing  = array_diff($expected, $prefixes);
-        $this->assertLessThanOrEqual(
-            1,
-            count($missing),
-            'Migration prefixes must be a near-contiguous 1..N sequence (at most one gap for in-flight branches). '
-            . 'Missing prefixes: ' . implode(', ', $missing)
+        // Prefixes must form a contiguous 1..N sequence, EXCEPT near the top,
+        // where a gap means a sibling branch is holding a number this one has run
+        // past.
+        //
+        // WHY POSITION AND NOT A COUNT (#976). This tolerated "at most one gap
+        // anywhere", which encoded a model of the work — one sibling branch,
+        // holding one number — that stopped being true. Eight branches run
+        // concurrently here, and on a day when two of them added migrations (one
+        // adding two) a correctly-numbered branch reported
+        // `Missing prefixes: 108, 109` as though it had DELETED something.
+        //
+        // That failure is worse than a false negative because of what it invites:
+        // the natural reading is "renumber to close the gap", which is exactly
+        // what must not happen — the gap belongs to a sibling, and closing it
+        // creates the collision the guard exists to catch.
+        //
+        // Raising the count would have made the guard worse at its actual job.
+        // The two cases differ by POSITION, not quantity:
+        //
+        //   - an in-flight sibling holds a number just below this branch's own,
+        //     so its gap sits in the last few numbers; and
+        //   - a DELETED migration leaves a gap wherever that file was, which for
+        //     anything already merged is far below the top.
+        //
+        // So gaps are unlimited inside the trailing window and forbidden below
+        // it. A branch may run as far ahead as it likes; removing 050 still
+        // fails.
+        $highest = max($prefixes);
+        $missing = array_values(array_diff(range(1, $highest), $prefixes));
+
+        // Sized to how many migrations can be in flight at once, not to how many
+        // branches exist: only branches that ADD one take a number. Ten is
+        // comfortably above the observed peak (three in one day) and still far
+        // below any merged migration.
+        $inFlightWindow = 10;
+        $windowFloor = $highest - $inFlightWindow;
+
+        // Numbers that were allocated and then abandoned, and will never be
+        // filled. Listing them is the point: 129 was silently eating the old
+        // "at most one gap" tolerance, so the guard had ALREADY been disabled
+        // for in-flight branches before #976 was filed — every sibling gap was
+        // the second one and failed. A permanent hole has to be named, or it
+        // spends a budget meant for something else.
+        //
+        // Verified before listing: 129 appears in no commit and on none of the
+        // 43 remote branches, so nothing is holding it.
+        $permanentlySkipped = [
+            129 => 'allocated on a branch that was renumbered or abandoned; present in no commit and on no branch',
+        ];
+
+        $deleted = array_values(array_filter(
+            $missing,
+            static fn (int $n): bool => $n <= $windowFloor && !isset($permanentlySkipped[$n])
+        ));
+
+        // The list is checked in both directions, so an entry cannot outlive its
+        // reason: if a number here is later USED, the entry is stale and must go.
+        $wronglyListed = array_values(array_intersect(array_keys($permanentlySkipped), $prefixes));
+        $this->assertSame(
+            [],
+            $wronglyListed,
+            'These numbers are listed as permanently skipped but a migration now uses them. '
+            . 'Remove the entry: ' . implode(', ', $wronglyListed)
+        );
+
+        $this->assertSame(
+            [],
+            $deleted,
+            sprintf(
+                'Migration prefixes must be contiguous below %d (the newest %d numbers may be held by '
+                . 'in-flight branches). Missing prefixes far below the top usually mean a migration file '
+                . 'was DELETED or renamed, which rewrites history other deployments have already recorded. '
+                . 'Missing: %s',
+                $windowFloor + 1,
+                $inFlightWindow,
+                implode(', ', $deleted)
+            )
         );
     }
 

@@ -71,17 +71,24 @@ final class RouteEventRepository
      * outside {@see RouteAction::all()} is refused by the database rather than
      * stored as a row nothing renders.
      *
+     * `verdict` (#1014, migration 119) is NULL for every act that said nothing
+     * about approval — which is every act on a circulation step, every `noted`,
+     * and every row written before that migration. It is never a way of saying
+     * "not approved": absence and refusal are different facts, and a reader that
+     * conflated them would invent a rejection for every document ever
+     * circulated. {@see RouteVerdict}.
+     *
      * @param array{route_id: int, step_id?: ?int, actor_profile_id?: ?int, action: string,
-     *              from_ou_id?: ?int, to_ou_id?: ?int, note?: ?string} $event
+     *              from_ou_id?: ?int, to_ou_id?: ?int, note?: ?string, verdict?: ?string} $event
      */
     public function append(int $tenantId, int $documentId, array $event): int
     {
         $stmt = $this->db->prepare(
             'INSERT INTO document_route_events
                  (tenant_id, document_id, route_id, step_id, actor_profile_id,
-                  action, from_ou_id, to_ou_id, note, occurred_at)
+                  action, from_ou_id, to_ou_id, note, verdict, occurred_at)
              VALUES (:tenant_id, :document_id, :route_id, :step_id, :actor_profile_id,
-                     :action, :from_ou_id, :to_ou_id, :note, NOW())'
+                     :action, :from_ou_id, :to_ou_id, :note, :verdict, NOW())'
         );
         $stmt->execute([
             ':tenant_id' => $tenantId,
@@ -93,6 +100,7 @@ final class RouteEventRepository
             ':from_ou_id' => $event['from_ou_id'] ?? null,
             ':to_ou_id' => $event['to_ou_id'] ?? null,
             ':note' => $event['note'] ?? null,
+            ':verdict' => $event['verdict'] ?? null,
         ]);
 
         return (int) $this->db->lastInsertId();
@@ -107,7 +115,7 @@ final class RouteEventRepository
     {
         $stmt = $this->db->prepare(
             'SELECT id, tenant_id, document_id, route_id, step_id, actor_profile_id,
-                    action, from_ou_id, to_ou_id, note, occurred_at
+                    action, from_ou_id, to_ou_id, note, verdict, occurred_at
                FROM document_route_events
               WHERE id = :id AND tenant_id = :tenant_id'
         );
@@ -131,7 +139,7 @@ final class RouteEventRepository
     {
         $stmt = $this->db->prepare(
             'SELECT id, tenant_id, document_id, route_id, step_id, actor_profile_id,
-                    action, from_ou_id, to_ou_id, note, occurred_at
+                    action, from_ou_id, to_ou_id, note, verdict, occurred_at
                FROM document_route_events
               WHERE tenant_id = :tenant_id AND document_id = :document_id
               ORDER BY id ASC
@@ -169,6 +177,58 @@ final class RouteEventRepository
     }
 
     /**
+     * How many times each step has been REJECTED on this route (#1037).
+     *
+     * WHAT THIS MAKES VISIBLE. A rejection is what sends a document backwards —
+     * "to the author, to fix" is the most common approval design there is, and
+     * it produces a cycle the engine fully supports. Nothing counted the laps,
+     * so a document on its ninth rejection looked, in every surface, exactly
+     * like one on its first: one open inbox item, a long trail nobody reads to
+     * the end, and no number anywhere saying it had been round nine times. The
+     * failure is not a runaway — `act()` performs one traversal per human act —
+     * it is a document quietly ping-ponging for six weeks with nobody able to
+     * see why.
+     *
+     * DERIVED, NOT STORED. The trail already holds this: #1014's `verdict`
+     * column records every settled answer, so the count is a GROUP BY over rows
+     * that exist. A stored counter would be a second source of truth that can
+     * disagree with the trail, and the trail is the auditable one.
+     *
+     * ONLY REJECTIONS COUNT. An approval moves the document ON; a rejection is
+     * the verdict that can send it back, so a step's rejection count IS the
+     * number of times it has been round from there. Steps with no rejection are
+     * absent from the map rather than present as zero — the caller defaults, and
+     * a route that has never been rejected produces an empty array instead of a
+     * row per step.
+     *
+     * @return array<int, int> step id => rejections recorded at it
+     */
+    public function rejectionCountsByStep(int $routeId, int $tenantId): array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT step_id, COUNT(*) AS rejections
+               FROM document_route_events
+              WHERE tenant_id = :tenant_id
+                AND route_id = :route_id
+                AND verdict = :verdict
+                AND step_id IS NOT NULL
+              GROUP BY step_id'
+        );
+        $stmt->execute([
+            ':tenant_id' => $tenantId,
+            ':route_id' => $routeId,
+            ':verdict' => RouteVerdict::REJECTED,
+        ]);
+
+        $counts = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $counts[(int) $row['step_id']] = (int) $row['rejections'];
+        }
+
+        return $counts;
+    }
+
+    /**
      * Map a raw row to the typed shape the presenter serialises.
      *
      * @param array<string, mixed> $row
@@ -187,6 +247,9 @@ final class RouteEventRepository
             'from_ou_id' => $row['from_ou_id'] !== null ? (int) $row['from_ou_id'] : null,
             'to_ou_id' => $row['to_ou_id'] !== null ? (int) $row['to_ou_id'] : null,
             'note' => $row['note'] !== null ? (string) $row['note'] : null,
+            // NULL means "this act said nothing about approval", never "not
+            // approved". See append().
+            'verdict' => isset($row['verdict']) && $row['verdict'] !== null ? (string) $row['verdict'] : null,
             'occurred_at' => (string) $row['occurred_at'],
         ];
     }

@@ -256,6 +256,19 @@ class HookManager
      * core callers) must not break because a side-effect event could not be
      * recorded. With no store wired (plugin-loader / CLI) it is a safe no-op.
      *
+     * DELIVERY REQUIRES A RELAY PROCESS, and that is not optional decoration.
+     * This method PERSISTS an event; it runs no listeners itself. They are run
+     * by `whity-cli events:relay` ({@see \Whity\Core\Events\EventRelay}), which
+     * reserves each row, restores its tenant, dispatches, and retries or
+     * dead-letters on failure.
+     *
+     * Until that command existed, this persisted events and nothing read them
+     * (#1063): a listener bound to an async name would have been written,
+     * tested, merged, and silently done nothing in production, while
+     * `event_outbox` grew without bound. If you are relying on an async listener
+     * firing, confirm the relay is running in that deployment — an outbox row is
+     * a record of INTENT, not evidence of delivery.
+     *
      * @param string $eventName The event to dispatch
      * @param array<string, mixed> $payload The event payload
      * @return void

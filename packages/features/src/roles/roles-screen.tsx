@@ -41,7 +41,11 @@
 
 import { useEffect, useState } from 'react';
 import { PageHeader } from '@amroksaleh/ui/page-header';
-import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
+import {
+  DataTable,
+  useDataTableQuery,
+  type DataTableColumn,
+} from '@amroksaleh/ui/data-table';
 import { Badge } from '@amroksaleh/ui/badge';
 import { Button } from '@amroksaleh/ui/button';
 import {
@@ -80,7 +84,20 @@ export function RolesScreen({
   const canDelete = can(ROLES_DELETE);
 
   const [roles, setRoles] = useState<Role[]>([]);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [isLoading, setIsLoading] = useState(true);
+  /**
+   * Whether a response — any response, including an empty page or a failure —
+   * has ever landed.
+   *
+   * DataTable's loading branch replaces the whole table, search box included,
+   * so showing the skeleton on every request would unmount the search input
+   * mid-word and take the caret and the untyped remainder with it. The skeleton
+   * therefore belongs to the FIRST load only; after that a request leaves the
+   * previous page on screen until the next one arrives.
+   */
+  const [everLoaded, setEverLoaded] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -90,33 +107,52 @@ export function RolesScreen({
     { name: string; description: string; permissionIds: number[] } | undefined
   >(undefined);
 
-  // The backend supports page/per_page but not sort/filter query params, so
-  // sort/filter/pagination all run CLIENT-side over a single fetch — the
-  // adapter fetches the backend's own page-size ceiling (100) rather than its
-  // default, fixing the previous silent page-1-only truncation for the common
-  // case. Tenants with >100 roles are still capped until the backend grows real
-  // search/sort support; that's a pre-existing limit, just moved further out.
+  /**
+   * Page, sort and search belong to the SERVER (#1102).
+   *
+   * Until then the adapter fetched `per_page=100` and this screen sorted,
+   * filtered and paged that slice in the browser — so a tenant with more than a
+   * hundred roles had the rest simply missing from the screen, with nothing
+   * saying so.
+   *
+   * The keys are the ones `RolesApiHandler::listSpec()` declares: `name`,
+   * `description` and `created`. Every column id here already IS its key, so
+   * there is no rename map. `permissionCount` is deliberately absent from both
+   * — it is an aggregate over a join, the endpoint does not offer it, and the
+   * column below has said `enableSorting: false` since long before this.
+   */
+  const query = useDataTableQuery();
+  const { page, perPage, sort, dir, q } = query.request;
+
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
     adapter
-      .listRoles()
+      .listRoles({ page, perPage, sort, dir, q })
       .then((data) => {
-        if (!cancelled) setRoles(data);
+        if (cancelled) return;
+        setRoles(data.roles);
+        setTotal(data.total);
+        setTotalPages(data.totalPages);
       })
       .catch(() => {
         if (!cancelled) onNotify?.(t('roles.error.load', 'Failed to fetch roles'), 'error');
       })
       .finally(() => {
-        if (!cancelled) setIsLoading(false);
+        if (cancelled) return;
+        setIsLoading(false);
+        setEverLoaded(true);
       });
     return () => {
       cancelled = true;
     };
-    // Re-run on mount and on explicit refetch only; t/onNotify identity changes
-    // must not refetch (identityTranslate is a stable module-level reference).
+    // The query parts are listed individually rather than as `query.request`,
+    // which is a fresh object on every render and would refetch forever. Re-runs
+    // on mount, on an explicit refetch, and on a page/sort/search change;
+    // t/onNotify identity changes must not refetch (identityTranslate is a
+    // stable module-level reference).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adapter, refreshKey]);
+  }, [adapter, refreshKey, page, perPage, sort, dir, q]);
 
   const fetchRoles = () => setRefreshKey((k) => k + 1);
 
@@ -153,12 +189,17 @@ export function RolesScreen({
     }
   };
 
+  // The per-column filter boxes are gone from `name` and `description`, and
+  // their absence is the same fix as the rest of this change: a column filter
+  // is applied by the table to the rows it holds, which is now ONE page. It
+  // would hide three of the twenty-five on screen and leave every match on page
+  // 2 exactly where it was. The search box above the table replaces them and
+  // asks the server, which matches on the same two fields.
   const columns: DataTableColumn<Role>[] = [
     {
       accessorKey: 'name',
       header: t('roles.table.name', 'Name'),
       enableSorting: true,
-      enableColumnFilter: true,
       // Two things live in this cell.
       //
       // #882: the row's own name opens the record — the affordance a list gets
@@ -202,9 +243,12 @@ export function RolesScreen({
       accessorKey: 'description',
       header: t('roles.table.description', 'Description'),
       enableSorting: true,
-      enableColumnFilter: true,
     },
     {
+      // Not sortable, and now for a second reason as well: the endpoint's
+      // ListSpec offers no key for it, because it is a COUNT over a join rather
+      // than a column. A header wired to a key the server does not know would
+      // click and reorder nothing.
       accessorKey: 'permissionCount',
       header: t('roles.table.permissionCount', 'Permission Count'),
       enableSorting: false,
@@ -318,19 +362,27 @@ export function RolesScreen({
         getRowId={(role) => String(role.id)}
         rowActions={rowActions}
         rowActionsLabel={t('ui.table.actions', 'Actions')}
-        isLoading={isLoading}
-        enableGlobalFilter
+        isLoading={isLoading && !everLoaded}
         globalFilterPlaceholder={t('roles.searchPlaceholder', 'Search roles…')}
+        // Kept though no column is filterable today: the placeholder is this
+        // screen's translation of a shared-table string, and a caller that adds
+        // a filterable column back would otherwise silently get English.
         columnFilterPlaceholder={t('ui.table.columnFilter', 'Filter…')}
         emptyStateTitle={t('ui.table.empty', 'No data available')}
-        pagination={{ pageSize: 10 }}
+        sorting={query.sorting}
+        search={query.search}
+        pagination={query.pagination({ total, totalPages })}
         paginationLabels={{
-          entriesLabel: (total) =>
-            total === 1
+          // The parameters are named apart from this screen's own `total` /
+          // `totalPages` state on purpose: they are what the footer was handed
+          // to render, and reading them as the state would hide the day the two
+          // stop agreeing.
+          entriesLabel: (rowCount) =>
+            rowCount === 1
               ? t('ui.pagination.entry', '1 entry')
-              : t('ui.pagination.entries', '{count} entries', { count: total }),
-          pageLabel: (page, totalPages) =>
-            t('ui.pagination.page', 'page {page} of {total}', { page, total: totalPages }),
+              : t('ui.pagination.entries', '{count} entries', { count: rowCount }),
+          pageLabel: (current, last) =>
+            t('ui.pagination.page', 'page {page} of {total}', { page: current, total: last }),
           navLabel: t('ui.pagination.nav', 'Pagination'),
           previousLabel: t('ui.pagination.previous', 'Previous page'),
           nextLabel: t('ui.pagination.next', 'Next page'),

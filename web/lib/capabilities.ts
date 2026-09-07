@@ -48,6 +48,24 @@ export const TAGS_READ = 'tags:read';
 export const TAGS_MANAGE = 'tags:manage';
 
 /**
+ * The subscription plan CATALOGUE and its prices (#billing).
+ *
+ * A PLATFORM capability: holding it is necessary but not sufficient, because
+ * the endpoints additionally require the caller to be acting in the system
+ * tenant. A regular tenant admin holds it through the global admin role and
+ * would otherwise be able to reprice the product for everybody, so the screen
+ * shows read-only for them and the server refuses the write regardless.
+ */
+export const PLANS_MANAGE = 'plans:manage';
+
+// #billing — a tenant's OWN billing, distinct from the operator capabilities
+// above. Reading the account and spending from it are separate jobs: an
+// accountant who needs the invoice list is not necessarily somebody who may
+// start a payment from it.
+export const BILLING_VIEW = 'billing:view';
+export const BILLING_PAY = 'billing:pay';
+
+/**
  * i18n admin management (WC-583). LANGUAGES_MANAGE is a PLATFORM capability —
  * the backend additionally requires the caller to be acting in the SYSTEM
  * tenant (id 0), since languages carry no tenant_id column at all. A regular
@@ -85,6 +103,106 @@ export const TRANSLATIONS_MANAGE = 'translations:manage';
  *    `roles:read` failed for months.
  */
 export const DOCUMENTS_ROUTE = 'documents:route';
+
+/**
+ * Managing the designer's saved work: templates and reusable blocks.
+ *
+ * Three slugs because the surface has three genuinely different gates, and
+ * collapsing them would either hide the page from people who belong on it or
+ * dangle controls that 403 on submit:
+ *
+ *  - `DOCUMENTS_WRITE` gates rename and delete. Ordinary editing.
+ *  - `DOCUMENTS_PUBLISH` gates every change to WHO CAN SEE a row — its scope,
+ *    its permission tag, and its placement in the organisation. That is the
+ *    server's own split ({@see DocumentAccessPolicy::needsPublish}), which
+ *    treats filing a row at a unit as a publish action even on a personal row,
+ *    so the client must treat placement as a publish control too or the dialog
+ *    will offer a field whose submit is refused.
+ *  - `DOCUMENTS_READ` gates the page itself, via the nav item.
+ *
+ * ALL THREE ARE HELD, verified against a migrated-and-seeded schema rather than
+ * read off the catalogue (a catalogue row is not a holder — that is how
+ * `roles:read` gated a control nobody could use for months). Migration 060
+ * grants documents:read/write/publish/render to the `admin` role, and the
+ * document-demo dataset confirms the split is real and load-bearing: the dean
+ * holds publish, both secretaries hold read+write and NOT publish. So gating
+ * the scope dialog on publish is what makes the two secretaries' screens
+ * differ from the dean's rather than a decorative check.
+ */
+export const DOCUMENTS_READ = 'documents:read';
+export const DOCUMENTS_WRITE = 'documents:write';
+export const DOCUMENTS_PUBLISH = 'documents:publish';
+
+/**
+ * Bringing a document into existence — `POST /api/v1/documents` (#947 item 1).
+ *
+ * NO `documents:create` WAS MINTED, and that is the decision worth recording
+ * where the constant lives, because the obvious-looking alternative is a
+ * lockout. Migration 113 already answered "who may raise a document" when it
+ * chose the audience for `documents:route`: *"`documents:render` is what gates
+ * `persist: true` on the render routes, so a role holding it is precisely a role
+ * that can bring a document into existence"*. A new slug would be a second
+ * answer to that question — and on every install that already exists it would
+ * be a permission NOBODY HOLDS, so the New button would be hidden for the
+ * seeded `admin` role until somebody wrote a grant migration. A catalogue row is
+ * not a holder.
+ *
+ * IT IS HELD. Migration 060 grants `documents:render` to the seeded `admin`
+ * role; four of the five roles in the document demo fixture hold it (the
+ * exception, `demo-secretary`, is the deliberate negative case). Checked against
+ * a freshly migrated schema before this button was gated on it.
+ *
+ * IT DOES NOT MEAN THE RENDER TIER IS RUNNING. The permission and the
+ * `documents.render_enabled` setting answer different questions: this is "may
+ * you raise a document", that is "can this instance produce a PDF". A holder can
+ * create documents on an instance with no render container at all — the record
+ * is the deliverable and the artifact is opportunistic. So do NOT try to infer
+ * one from the other.
+ */
+export const DOCUMENTS_RENDER = 'documents:render';
+
+/**
+ * Document ROUTE TEMPLATES (#1027) — the reusable, branching flow designs the
+ * node-based editor edits.
+ *
+ * Two slugs rather than one, and separate from `documents:route`. Routing a
+ * document is an everyday act many people perform; DESIGNING the flow every
+ * document of a kind will follow is an act of organisational policy, so a clerk
+ * who may send a form onward should not thereby be able to rewrite where every
+ * form goes. Migration 120 grants both to whoever holds `roles:write`, and read
+ * additionally to whoever holds `documents:route` — the people who will PICK a
+ * design when routing.
+ *
+ * The editor gates its write controls on the second; the API enforces both
+ * regardless of what the client renders.
+ */
+export const ROUTE_TEMPLATES_READ = 'route_templates:read';
+export const ROUTE_TEMPLATES_WRITE = 'route_templates:write';
+
+/**
+ * User groups — the named rules that say which people a set contains (#999).
+ *
+ * Two slugs because the server draws the line in two places, and for a reason
+ * worth keeping visible on the client: `groups:read` covers seeing definitions
+ * and asking who a SAVED one resolves to, while `groups:write` additionally
+ * covers `POST /api/v1/user-groups/preview` — resolving an arbitrary rule the
+ * caller just composed. That endpoint answers questions about the organisation
+ * that no stored group asks, so somebody who may only read definitions must not
+ * be able to probe "how many people hold role 4" by inventing rules.
+ *
+ * BOTH ARE HELD on a freshly migrated, freshly seeded install — verified before
+ * gating anything on them, which is the check `roles:read` failed for months.
+ * Migration 116 grants them by CAPABILITY (whoever held `roles:write` or
+ * `documents:route` when it ran) rather than to the `admin` role by name.
+ *
+ * That grant is a snapshot and not a standing implication, which matters here:
+ * a role that acquires `documents:route` AFTER 116 has run — every role the
+ * document demo seeds, for instance — holds it without holding `groups:read`.
+ * So a group picker must degrade with a stated reason rather than assume the
+ * two travel together.
+ */
+export const GROUPS_READ = 'groups:read';
+export const GROUPS_WRITE = 'groups:write';
 
 /**
  * Narrow an unknown `/api/me/capabilities` payload to its permission slugs.

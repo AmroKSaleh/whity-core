@@ -1,0 +1,32 @@
+{
+    "domain": "status",
+    "language": "ar",
+    "notice": "Hand-written translations. Unlike the English catalogue one directory up, this file is NOT generated — it is the source of truth for this language and is edited by hand. Every key must also exist in the English catalogue (CI fails on one that does not); a key absent from here falls back to English at runtime. Seed it with `whity-cli i18n:sync --language=<code>`.",
+    "keys": {
+        "components.checked": "فُحص {when}",
+        "components.heading": "المكوّنات",
+        "components.uptimeWindow": "مدة التشغيل خلال آخر {days} يوم.",
+        "footer": "تعرض هذه الصفحة حالة سلامة هذا التثبيت. وتُحدَّث تلقائياً كل دقيقة.",
+        "headline.degraded": "بعض الأنظمة تعمل بأداء منخفض",
+        "headline.down": "انقطاع في الخدمة",
+        "headline.operational": "جميع الأنظمة تعمل",
+        "headline.unknown": "الحالة غير متاحة",
+        "incidents.duration": "{status} لمدة {minutes} دقيقة",
+        "incidents.heading": "الأعطال الأخيرة",
+        "incidents.none": "لم تُسجَّل أي أعطال خلال آخر {days} يوم.",
+        "label.degraded": "أداء منخفض",
+        "label.down": "متوقّف",
+        "label.operational": "يعمل",
+        "label.unknown": "لا توجد بيانات حديثة",
+        "loading": "جارٍ التحميل…",
+        "title": "حالة الخدمة",
+        "unreachable": "تعذّر الوصول إلى خدمة الحالة من متصفّحك.",
+        "updated": "حُدِّث {when}",
+        "when.days": "منذ {n} يوم",
+        "when.hours": "منذ {n} ساعة",
+        "when.minutes": "منذ {n} دقيقة",
+        "when.never": "أبداً",
+        "when.seconds": "منذ {n} ثانية",
+        "when.unknown": "غير معروف"
+    }
+}

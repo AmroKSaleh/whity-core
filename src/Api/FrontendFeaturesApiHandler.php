@@ -11,6 +11,8 @@ use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Router;
+use Whity\Core\i18n\SchemaLabels;
+use Whity\Core\i18n\ServerLabels;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Sdk\Frontend\Blocks\BlockValidator;
 
@@ -167,22 +169,94 @@ final class FrontendFeaturesApiHandler
     private Router $router;
     private ?LoggerInterface $logger;
 
+    /** @var list<array<string, mixed>> */
+    private array $coreFeatures;
+
+    /**
+     * Serving-time translator for core's own declarations (#1044).
+     *
+     * REQUIRED, and positioned before the optional parameters so it cannot be
+     * forgotten. It was optional for about an hour, and in that hour
+     * `public/index.php` constructed this handler ABOVE the line that builds
+     * the translator — so it silently received null and every convening screen
+     * served English while the catalogue, the tests and the guards were all
+     * green. An optional dependency whose absence is invisible is not a
+     * convenience, it is a way to ship the bug you were fixing.
+     */
+    private ServerLabels $labels;
+
     /**
      * @param PluginLoader        $pluginLoader The live loader carrying the validated descriptors.
      * @param RoleChecker         $roleChecker  Authoritative RBAC resolver for per-caller filtering.
      * @param Router              $router       The live router whose routes back each feature's capabilities.
+     * @param ServerLabels        $labels       Serving-time translator for core's own declarations (#1044).
      * @param LoggerInterface|null $logger      Optional PSR-3 sink for fail-closed omit reasons (WC-226).
+     * @param list<array<string, mixed>> $coreFeatures Descriptors contributed by CORE subsystems rather
+     *        than by a plugin — see the note below. Defaults to none, so every existing construction of
+     *        this handler behaves exactly as before.
      */
     public function __construct(
         PluginLoader $pluginLoader,
         RoleChecker $roleChecker,
         Router $router,
-        ?LoggerInterface $logger = null
+        ServerLabels $labels,
+        ?LoggerInterface $logger = null,
+        array $coreFeatures = []
     ) {
         $this->pluginLoader = $pluginLoader;
         $this->roleChecker = $roleChecker;
         $this->router = $router;
         $this->logger = $logger;
+        $this->coreFeatures = $coreFeatures;
+        $this->labels = $labels;
+    }
+
+    /**
+     * Every descriptor this endpoint serves: core's first, then the plugins'.
+     *
+     * WHY CORE CONTRIBUTES DESCRIPTORS AT ALL
+     * ----------------------------------------
+     * Until the forms engine, every descriptor came from a plugin and core
+     * features got hand-written pages under `web/app/(protected)/admin/...`. That
+     * works for the web and only for the web: the desktop and mobile clients
+     * consume descriptors, so a core feature with a bespoke React page is a core
+     * feature those clients cannot render at all.
+     *
+     * A core descriptor goes through EXACTLY the same gates as a plugin's — the
+     * per-caller permission filter and the fail-closed
+     * {@see BlockValidator::validate()} pass — for the reason those gates exist:
+     * they are not distrust of plugin AUTHORS, they are a guarantee about what
+     * can reach a renderer, and an exemption for code that happens to live in
+     * this repository would make the guarantee conditional on where a tree was
+     * written rather than on whether it is valid.
+     *
+     * Core first so a plugin cannot displace a core screen by id — the merge is
+     * order-preserving and the consumer resolves by id, so whichever comes first
+     * wins the name.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function allFeatures(): array
+    {
+        $core = $this->coreFeatures;
+
+        // Localised HERE, before the permission filter and the block
+        // validation, so every gate downstream sees exactly what the caller
+        // will: a screen whose text was translated after it was validated
+        // would be a screen nothing had validated.
+        //
+        // Core only. A plugin's wording belongs to the plugin's own catalogue
+        // domain, which this handler has no business guessing at.
+        $core = array_map(
+            fn (array $feature): array => SchemaLabels::localise(
+                $feature,
+                SchemaLabels::CORE_DOMAIN,
+                $this->labels
+            ),
+            $core
+        );
+
+        return array_merge($core, $this->pluginLoader->getFrontendFeatures());
     }
 
     /**
@@ -226,7 +300,7 @@ final class FrontendFeaturesApiHandler
             $droppedHere = [];
 
             $data = [];
-            foreach ($this->pluginLoader->getFrontendFeatures() as $feature) {
+            foreach ($this->allFeatures() as $feature) {
                 // Defence in depth: a descriptor without a string permission
                 // can never be exposed (the loader already guarantees one).
                 $permission = $feature['requiredPermission'] ?? null;

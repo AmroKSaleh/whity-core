@@ -219,6 +219,65 @@ describe('InboxPage', () => {
     expect(push).toHaveBeenCalledWith('/admin/document-routing/318');
   });
 
+  it('marks a decision item, in a word this build can translate', async () => {
+    // #1030 supplies both halves and the client ignored both until #1041: the
+    // server's own status sentence ("Awaiting your decision"), and the machine
+    // flag `meta.decision` that a client is meant to read BEFORE it renders
+    // anything, because the acts available differ.
+    wire(
+      [ROUTING_SOURCE],
+      [
+        routingItem({
+          status: 'Awaiting your decision',
+          meta: { ...routingItem().meta, decision: true },
+        }),
+      ]
+    );
+
+    render(<InboxPage />);
+    await waitFor(() => expect(screen.getByText('Purchase order 9912')).toBeInTheDocument());
+
+    // The server's sentence, verbatim, as always.
+    expect(screen.getByText('Awaiting your decision')).toBeInTheDocument();
+    // And a marker of this screen's own, beside the thing you click. The
+    // server's sentence is composed in PHP with no key a translator can reach;
+    // this one has one, which is the difference between the distinction being
+    // available in Arabic and not.
+    const chip = document.querySelector('[data-slot="inbox-decision"]');
+    expect(chip).not.toBeNull();
+    expect(chip?.textContent).toBe('Decision');
+  });
+
+  it('does not mark an ordinary circulation item as a decision', async () => {
+    wire([ROUTING_SOURCE], [routingItem()]);
+
+    render(<InboxPage />);
+    await waitFor(() => expect(screen.getByText('Purchase order 9912')).toBeInTheDocument());
+
+    // The fixture carries no `decision` key at all — the shape a server older
+    // than #1030 sends. Absence is read as false, and the item keeps its link.
+    expect(document.querySelector('[data-slot="inbox-decision"]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Purchase order 9912' })).toBeInTheDocument();
+  });
+
+  it('does not label a decision you have already answered as still waiting', async () => {
+    wire(
+      [ROUTING_SOURCE],
+      [
+        routingItem({
+          status: 'Done',
+          meta: { ...routingItem().meta, decision: true, open: false },
+        }),
+      ]
+    );
+
+    render(<InboxPage />);
+    await waitFor(() => expect(screen.getByText('Purchase order 9912')).toBeInTheDocument());
+
+    expect(screen.getByText('Done')).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="inbox-decision"]')).toBeNull();
+  });
+
   it('renders an item with no routing meta as text, never as a dead link', async () => {
     // An item from another source: the named fields are there, `meta` is not
     // routing's. It must still render — #881's aggregate is source-agnostic.

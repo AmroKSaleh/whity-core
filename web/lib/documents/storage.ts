@@ -56,13 +56,32 @@ export async function listSaved(): Promise<SavedTemplate[]> {
 /** Create (no `id`) or update (existing `id`) a template; returns its id
  *  (the id round-trips through PATCH; a fresh backend id comes back on
  *  create). Throws on failure. */
-export async function saveTemplate(data: DocTemplate, id?: string): Promise<string> {
-  const body = { name: data.name, data: data as unknown as Record<string, unknown> };
+export async function saveTemplate(
+  data: DocTemplate,
+  id?: string,
+  scope?: string,
+): Promise<string> {
+  // `scope` is sent ONLY on create, and only when the caller states one.
+  //
+  // On CREATE the server reads a missing scope as `personal` — creator-only —
+  // which is how every template authored here became invisible to everyone
+  // else. Stating it is the fix.
+  //
+  // On UPDATE it is deliberately still omitted: `DocumentTemplatesApiHandler`
+  // gates its update on `array_key_exists`, so an absent key leaves the stored
+  // scope alone. Sending one from the designer would let a save silently
+  // overwrite a scope somebody set deliberately in Templates & Blocks — where
+  // the control lives, together with OU placement and the permission tag that
+  // belong with it.
+  const body: Record<string, unknown> = {
+    name: data.name,
+    data: data as unknown as Record<string, unknown>,
+  };
 
   if (id !== undefined) {
     const { data: updated, error, response } = await api.PATCH('/api/v1/document-templates/{id}', {
       params: { path: { id: Number(id) } },
-      body,
+      body: body as { name: string; data: Record<string, unknown> },
     });
     if (error !== undefined || !response.ok || updated === undefined) {
       throw new Error(error?.error ?? 'Failed to save template');
@@ -70,7 +89,13 @@ export async function saveTemplate(data: DocTemplate, id?: string): Promise<stri
     return String(updated.data.id);
   }
 
-  const { data: created, error, response } = await api.POST('/api/v1/document-templates', { body });
+  if (scope !== undefined && scope !== '') {
+    body.scope = scope;
+  }
+
+  const { data: created, error, response } = await api.POST('/api/v1/document-templates', {
+    body: body as { name: string; data: Record<string, unknown> },
+  });
   if (error !== undefined || !response.ok || created === undefined) {
     throw new Error(error?.error ?? 'Failed to save template');
   }

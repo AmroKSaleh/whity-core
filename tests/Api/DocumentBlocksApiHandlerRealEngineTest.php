@@ -148,6 +148,42 @@ final class DocumentBlocksApiHandlerRealEngineTest extends TestCase
         self::assertSame(403, $res->getStatusCode(), 'promoting to a shared scope is a publish action');
     }
 
+    /**
+     * SAYING WHAT SOMETHING ALREADY IS IS NOT PUBLISHING IT.
+     *
+     * This was not hypothetical on blocks: the designer's block save has always
+     * sent the whole object back, `scope` included (web/lib/documents/blocks.ts),
+     * and the gate fired on that key merely being PRESENT. So an author holding
+     * documents:write but not documents:publish could not save any edit at all
+     * to a tenant-wide or global block — including the seeded sys-header and
+     * sys-footer, the two blocks a tenant is most likely to want corrected. The
+     * 403 blamed publishing for a save that published nothing.
+     *
+     * The second half is what keeps the first honest: the gate is unchanged for
+     * a real promotion.
+     */
+    public function testRestatingAnUnchangedScopeIsNotAPublishAction(): void
+    {
+        $id = $this->decodeId($this->create(self::OWNER, [
+            'name'  => 'Header',
+            'data'  => [['id' => 'e1', 'type' => 'text']],
+            'scope' => 'tenant',
+        ]));
+
+        $res = $this->patch(self::WRITER, $id, [
+            'name'  => 'Header (fixed typo)',
+            'data'  => [['id' => 'e1', 'type' => 'text']],
+            'scope' => 'tenant',
+        ]);
+        self::assertSame(200, $res->getStatusCode(), 'the designer echoes scope on every block save; that is not publishing');
+
+        self::assertSame(
+            403,
+            $this->patch(self::WRITER, $id, ['scope' => 'global'])->getStatusCode(),
+            'a real promotion is still a publish action'
+        );
+    }
+
     // ── CRUD + validation ─────────────────────────────────────────────────────
 
     public function testCreateValidatesNameAndData(): void
@@ -241,7 +277,315 @@ final class DocumentBlocksApiHandlerRealEngineTest extends TestCase
         self::assertSame(204, $this->delete(self::OWNER, $blockId)->getStatusCode());
     }
 
+    /**
+     * THE INVARIANT. `usage.total > 0` must mean exactly "delete would be
+     * refused", in both directions.
+     *
+     * The two answers come from different queries, and while a block could only
+     * be held by a template they happened to agree. Nesting gave the delete
+     * guard a second source and left usage with one, so a block held only by
+     * another block reported "nothing uses this" and then refused to delete —
+     * the client/server disagreement the reference scanners exist to prevent.
+     */
+    public function testUsageAgreesWithTheDeleteGuardForANestedBlock(): void
+    {
+        $logoId = $this->decodeId($this->create(self::OWNER, ['name' => 'Logo', 'data' => [['id' => 'e1', 'type' => 'image']]]));
+        $this->create(self::OWNER, [
+            'name' => 'Letterhead',
+            'data' => [
+                ['id' => 'e2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $logoId],
+            ],
+        ]);
+
+        $data = $this->usage(self::OWNER, $logoId);
+
+        self::assertSame(1, $data['total'], 'a nesting block is a user of the block');
+        self::assertSame([], $data['templates'], 'no template uses it — that part was always right');
+        self::assertCount(1, (array) $data['blocks']);
+        self::assertSame('Letterhead', ((array) ((array) $data['blocks'])[0])['name']);
+
+        // The other half of the invariant.
+        self::assertSame(409, $this->delete(self::OWNER, $logoId)->getStatusCode());
+    }
+
+    public function testUsageCountsTemplatesAndNestingBlocksTogether(): void
+    {
+        $logoId = $this->decodeId($this->create(self::OWNER, ['name' => 'Logo', 'data' => [['id' => 'e1', 'type' => 'image']]]));
+        $this->create(self::OWNER, [
+            'name' => 'Letterhead',
+            'data' => [
+                ['id' => 'e2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $logoId],
+            ],
+        ]);
+        $this->referencingTemplate('Invoice', $logoId);
+
+        $data = $this->usage(self::OWNER, $logoId);
+
+        // Two users of two different kinds. Counting only one kind is how a
+        // person is told a block is safe to change when it is not.
+        self::assertSame(2, $data['total']);
+        self::assertCount(1, (array) $data['templates']);
+        self::assertCount(1, (array) $data['blocks']);
+    }
+
+    // ── nesting: a block may now hold another block (#1186 slice 3) ──────────
+
+    /**
+     * THE HOLE NESTING OPENED. Before blocks could contain blocks, "no template
+     * references it" was the whole question. It stopped being so the moment a
+     * letterhead could hold a logo: the logo is referenced by nothing a template
+     * scan can see, so the delete would have succeeded and left the letterhead
+     * pointing at a row that is gone — the orphaned pointer this 409 exists to
+     * prevent, arrived at by the guard's own blind spot.
+     */
+    public function testDeleteIsRefusedWhileAnotherBlockNestsIt(): void
+    {
+        $logoId = $this->decodeId($this->create(self::OWNER, ['name' => 'Logo', 'data' => [['id' => 'e1', 'type' => 'image']]]));
+
+        // No TEMPLATE references the logo. Only another block does.
+        $this->create(self::OWNER, [
+            'name' => 'Letterhead',
+            'data' => [
+                ['id' => 'e2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $logoId],
+            ],
+        ]);
+
+        $res = $this->delete(self::OWNER, $logoId);
+        self::assertSame(409, $res->getStatusCode(), 'a block nested inside another block must not be deletable');
+
+        $decoded = json_decode($res->getBody(), true);
+        self::assertIsArray($decoded);
+        self::assertArrayHasKey('error', $decoded);
+        self::assertStringNotContainsString('SQLSTATE', (string) $decoded['error']);
+
+        self::assertSame(200, $this->show(self::OWNER, $logoId)->getStatusCode());
+    }
+
+    public function testDeleteSucceedsOnceTheNestingBlockIsGone(): void
+    {
+        $logoId = $this->decodeId($this->create(self::OWNER, ['name' => 'Logo', 'data' => [['id' => 'e1', 'type' => 'image']]]));
+        $headId = $this->decodeId($this->create(self::OWNER, [
+            'name' => 'Letterhead',
+            'data' => [
+                ['id' => 'e2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $logoId],
+            ],
+        ]));
+
+        self::assertSame(409, $this->delete(self::OWNER, $logoId)->getStatusCode());
+
+        // Remove the holder, and the guard lets go. A guard that stayed latched
+        // would be a leak, not a safeguard.
+        self::assertSame(204, $this->delete(self::OWNER, $headId)->getStatusCode());
+        self::assertSame(204, $this->delete(self::OWNER, $logoId)->getStatusCode());
+    }
+
+    /**
+     * A block that contains ITSELF is malformed, and letting it veto its own
+     * deletion would make the one row somebody most wants to remove the one row
+     * they cannot. The scan excludes the row being deleted for that reason.
+     */
+    public function testABlockContainingItselfCanStillBeDeleted(): void
+    {
+        $id = $this->decodeId($this->create(self::OWNER, ['name' => 'Self', 'data' => [['id' => 'e1', 'type' => 'image']]]));
+
+        $this->pdo->exec(
+            "UPDATE document_blocks SET data = '"
+            . json_encode([['id' => 'e2', 'type' => 'blockInstance', 'blockId' => (string) $id]])
+            . "' WHERE id = " . $id
+        );
+
+        self::assertSame(204, $this->delete(self::OWNER, $id)->getStatusCode());
+    }
+
+    public function testNestingDeleteGuardIsTenantScoped(): void
+    {
+        $logoId = $this->decodeId($this->create(self::OWNER, ['name' => 'Logo', 'data' => [['id' => 'e1', 'type' => 'image']]]));
+
+        // Another TENANT's block naming the same numeric id must not hold this
+        // one hostage — the same isolation the template scan already has.
+        $this->pdo->exec("INSERT INTO tenants (id, name, slug) VALUES (2, 'b', 'b')");
+        (new DocumentBlockRepository($this->pdo))->create(2, [
+            'name' => 'Other tenant letterhead',
+            'data' => [
+                ['id' => 'e2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $logoId],
+            ],
+        ]);
+
+        self::assertSame(204, $this->delete(self::OWNER, $logoId)->getStatusCode());
+    }
+
+    // ── usage: what would break if this block changed ────────────────────────
+
+    /**
+     * The usage answer names the templates that instance the block.
+     */
+    public function testUsageNamesTheReferencingTemplates(): void
+    {
+        $blockId = $this->decodeId($this->create(self::OWNER, [
+            'name' => 'Header', 'data' => [['id' => 'e1', 'type' => 'text']], 'scope' => 'system',
+        ]));
+
+        $this->referencingTemplate('Invoice', $blockId);
+        $this->referencingTemplate('Works order', $blockId);
+        // A third template that points at a DIFFERENT block must not be counted.
+        $this->referencingTemplate('Unrelated', $blockId + 999);
+
+        $usage = $this->usage(self::VIEWER, $blockId);
+        self::assertSame(2, $usage['total']);
+        self::assertSame(0, $usage['hidden']);
+        self::assertSame(
+            ['Invoice', 'Works order'],
+            $this->sortedNames($usage['templates'])
+        );
+    }
+
+    public function testUsageIsZeroForAnUnreferencedBlock(): void
+    {
+        $blockId = $this->decodeId($this->create(self::OWNER, [
+            'name' => 'Orphan', 'data' => [['id' => 'e1', 'type' => 'text']], 'scope' => 'system',
+        ]));
+
+        $usage = $this->usage(self::VIEWER, $blockId);
+        self::assertSame(0, $usage['total']);
+        self::assertSame(0, $usage['hidden']);
+        self::assertSame([], $usage['templates']);
+    }
+
+    /**
+     * THE POINT OF THE ENDPOINT, and the assertion that fails if `total` is ever
+     * "simplified" into a count of the filtered list.
+     *
+     * A department secretary can see and edit an unplaced tenant-wide block. Two
+     * templates instance it: one filed in her own department, one filed in a
+     * department she does not reach. Editing the block rewrites BOTH — so telling
+     * her "1 template uses this" would be a true statement about her visibility
+     * and a false statement about her blast radius. She must be told 2, and told
+     * that 1 of them is not hers to see.
+     */
+    public function testUsageTotalCountsTemplatesTheCallerCannotSeeAndReportsThemAsHidden(): void
+    {
+        $blockId = $this->decodeId($this->create(self::OWNER, [
+            'name' => 'Shared footer', 'data' => [['id' => 'e1', 'type' => 'text']], 'scope' => 'tenant',
+        ]));
+
+        $this->referencingTemplate('Civil works order', $blockId, self::OU_DEPT_A);
+        $this->referencingTemplate('Materials test report', $blockId, self::OU_DEPT_B);
+
+        // The block itself is unplaced, so both secretaries can see (and edit) it.
+        self::assertSame(200, $this->handler->show($this->actAs(self::DEPT_SECRETARY), ['id' => (string) $blockId])->getStatusCode());
+
+        $dept = $this->usage(self::DEPT_SECRETARY, $blockId);
+        self::assertSame(2, $dept['total'], 'the total is every referencing template in the tenant, not just the visible ones');
+        self::assertSame(1, $dept['hidden'], 'the one template she cannot see is reported as hidden, not omitted');
+        self::assertSame(['Civil works order'], $this->sortedNames($dept['templates']), 'she is never handed the identity of the template she may not see');
+
+        // The dean's secretary reaches both departments, so nothing is hidden
+        // from her — same block, same total, different visible set.
+        $dean = $this->usage(self::DEAN_SECRETARY, $blockId);
+        self::assertSame(2, $dean['total']);
+        self::assertSame(0, $dean['hidden']);
+        self::assertSame(['Civil works order', 'Materials test report'], $this->sortedNames($dean['templates']));
+    }
+
+    /**
+     * You cannot ask about the usage of a block whose existence is withheld —
+     * otherwise the endpoint would be a probe for gated rows, since a 404 and a
+     * `total: 0` would be distinguishable.
+     */
+    public function testUsageOnAHiddenBlockReturns404(): void
+    {
+        $blockId = $this->decodeId($this->create(self::OWNER, [
+            'name' => 'Contract clause', 'data' => [['id' => 'e1', 'type' => 'text']],
+            'scope' => 'tenant', 'required_permission' => self::CONTRACTS_PERM,
+        ]));
+        $this->referencingTemplate('Contract', $blockId);
+
+        $res = $this->handler->usage($this->actAs(self::VIEWER), ['id' => (string) $blockId]);
+        self::assertSame(404, $res->getStatusCode());
+    }
+
+    /** Same tenant predicate as the delete guard: another tenant's pointer at the same numeric id is not usage. */
+    public function testUsageIsTenantScoped(): void
+    {
+        $blockId = $this->decodeId($this->create(self::OWNER, [
+            'name' => 'Header', 'data' => [['id' => 'e1', 'type' => 'text']], 'scope' => 'system',
+        ]));
+
+        $this->pdo->exec("INSERT INTO tenants (id, name, slug) VALUES (2, 'b', 'b')");
+        $this->templates->create(2, [
+            'name' => 'Other tenant doc',
+            'data' => $this->treeReferencing($blockId),
+        ]);
+
+        $usage = $this->usage(self::OWNER, $blockId);
+        self::assertSame(0, $usage['total']);
+        self::assertSame([], $usage['templates']);
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────────
+
+    /**
+     * @return array{block_id: int, total: int, hidden: int, templates: list<array<string, mixed>>, blocks: list<array<string, mixed>>}
+     */
+    private function usage(int $userId, int $blockId): array
+    {
+        $res = $this->handler->usage($this->actAs($userId), ['id' => (string) $blockId]);
+        self::assertSame(200, $res->getStatusCode(), $res->getBody());
+        $decoded = json_decode($res->getBody(), true);
+        self::assertIsArray($decoded);
+        self::assertIsArray($decoded['data'] ?? null);
+
+        /** @var array{block_id: int, total: int, hidden: int, templates: list<array<string, mixed>>, blocks: list<array<string, mixed>>} */
+        return $decoded['data'];
+    }
+
+    /**
+     * A minimal v2 template tree whose single element is a `blockInstance`
+     * pointer at $blockId.
+     *
+     * @return array<string, mixed>
+     */
+    private function treeReferencing(int $blockId): array
+    {
+        return [
+            'version' => 2,
+            'pages' => [[
+                'id' => 'p1',
+                'elements' => [
+                    ['id' => 'e2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $blockId],
+                ],
+            ]],
+        ];
+    }
+
+    /**
+     * A tenant-scoped template that instances $blockId, optionally filed at a
+     * unit. Written through the repository rather than the templates HANDLER so
+     * this test class stays about blocks — and `created_by` is left null on
+     * purpose, since an author always reaches their own row and would mask the
+     * placement filter this is here to exercise.
+     */
+    private function referencingTemplate(string $name, int $blockId, ?int $ouId = null): int
+    {
+        return $this->templates->create(self::TENANT, [
+            'name'        => $name,
+            'data'        => $this->treeReferencing($blockId),
+            'scope'       => 'tenant',
+            'owner_ou_id' => $ouId,
+        ]);
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     * @return list<string>
+     */
+    private function sortedNames(array $rows): array
+    {
+        $names = array_map(static fn (array $row): string => (string) $row['name'], $rows);
+        sort($names);
+
+        return array_values($names);
+    }
 
     private function actAs(int $userId): Request
     {

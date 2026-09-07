@@ -255,19 +255,10 @@ final class FederatedIdentityLinker
      */
     private function resolveSafeRoleId(int $claimedRoleId, int $tenantId): ?int
     {
-        $stmt = $this->db->prepare(
-            'SELECT 1 FROM roles WHERE id = :rid AND (tenant_id = :tid OR tenant_id IS NULL)'
-        );
-        $stmt->execute([':rid' => $claimedRoleId, ':tid' => $tenantId]);
-        if ($stmt->fetchColumn() !== false) {
-            return $claimedRoleId;
-        }
-
-        // Fail safe to the base global 'user' role (least privilege).
-        $fallback = $this->db->query("SELECT id FROM roles WHERE name = 'user' AND tenant_id IS NULL LIMIT 1");
-        $id = $fallback !== false ? $fallback->fetchColumn() : false;
-
-        return $id !== false ? (int) $id : null;
+        // Delegated to {@see AssignableRole}, which is where this logic now lives
+        // for all of its callers. It was duplicated by hand, and the other copy
+        // had quietly stopped agreeing with this one.
+        return (new AssignableRole($this->db))->resolveSafe($claimedRoleId, $tenantId);
     }
 
     /**

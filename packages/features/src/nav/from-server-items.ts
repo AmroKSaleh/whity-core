@@ -54,6 +54,25 @@ export interface NavGroupsFromServerItemsOptions {
    * `AppSidebar`, so use it for a short trailing set).
    */
   groupLabel?: (groupId: string) => string | undefined
+  /**
+   * Already-translated label for an item id. Return `undefined` to keep the
+   * one the server sent.
+   *
+   * The server's `label` is a hardcoded English string in the nav registry
+   * (`public/index.php`), NOT a `t()` call — so it never enters the English
+   * catalogue and no translator has ever been able to see it. The visible
+   * result was an Arabic sidebar whose group headings read Overview/Access/
+   * Documents in Arabic and whose page names underneath them stayed
+   * "Documents", "Document Designer", "Templates & Blocks", "Settings".
+   *
+   * Translating on the CLIENT rather than the server, for the same reason
+   * `groupLabel` does: the shell knows which language it is rendering in and
+   * has a translator in hand, whereas the registry is one static array shared
+   * by every request. Returning `undefined` for an id the shell does not know
+   * is what keeps a PLUGIN's contributed item rendering — its label is the only
+   * one anybody has.
+   */
+  itemLabel?: (itemId: string, serverLabel: string) => string | undefined
   /** Turn an icon name into a node. Omit to render items without icons. */
   renderIcon?: (icon: string | undefined) => ReactNode
 }
@@ -112,7 +131,7 @@ export function navGroupsFromServerItems(
   items: readonly ServerNavItem[],
   options: NavGroupsFromServerItemsOptions
 ): AppSidebarNavGroup[] {
-  const { currentPath, groupOrder = [], groupLabel, renderIcon } = options
+  const { currentPath, groupOrder = [], groupLabel, itemLabel, renderIcon } = options
 
   const activeId = mostSpecificActiveItemId(items, currentPath)
 
@@ -158,7 +177,7 @@ export function navGroupsFromServerItems(
     label: groupId === UNGROUPED_NAV_GROUP_ID ? undefined : groupLabel?.(groupId),
     items: buckets.get(groupId)!.map((item) => ({
       id: item.id,
-      label: item.label,
+      label: itemLabel?.(item.id, item.label) ?? item.label,
       href: item.href,
       icon: renderIcon?.(item.icon),
       active: item.id === activeId,

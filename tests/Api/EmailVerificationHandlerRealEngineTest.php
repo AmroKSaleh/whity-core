@@ -10,6 +10,7 @@ use Psr\Log\NullLogger;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Api\EmailVerificationHandler;
 use Whity\Core\Audit\AuditLogger;
+use Whity\Core\Identity\AssignableRole;
 use Whity\Core\Identity\EmailVerificationService;
 use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\Identity\ProfileEmailRepository;
@@ -69,7 +70,8 @@ final class EmailVerificationHandlerRealEngineTest extends TestCase
             new AuditLogger($this->pdo, new NullLogger()),
             new TenantEmailDomainPolicyService(
                 new TenantEmailDomainsRepository($this->pdo),
-                new MembershipRepository($this->pdo)
+                new MembershipRepository($this->pdo),
+                new AssignableRole($this->pdo)
             )
         );
     }

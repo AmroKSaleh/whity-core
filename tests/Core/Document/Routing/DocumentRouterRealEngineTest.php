@@ -13,6 +13,7 @@ use Whity\Core\Group\GroupResolver;
 use Whity\Core\Group\GroupRuleResolver;
 use Whity\Core\Group\UserGroupRepository;
 use Whity\Core\Document\Routing\RouteAction;
+use Whity\Core\Document\Routing\RouteEdgeRepository;
 use Whity\Core\Document\Routing\RouteEventRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\Document\Routing\RouteRepository;
@@ -99,6 +100,7 @@ final class DocumentRouterRealEngineTest extends TestCase
     private RouteStepRepository $steps;
     private RouteEventRepository $events;
     private RouteRecipientRepository $recipients;
+    private RouteEdgeRepository $edges;
     private RoutingRuleRegistry $rules;
     private SettingsService $settings;
 
@@ -109,6 +111,7 @@ final class DocumentRouterRealEngineTest extends TestCase
         $this->steps = new RouteStepRepository($this->pdo);
         $this->events = new RouteEventRepository($this->pdo);
         $this->recipients = new RouteRecipientRepository($this->pdo);
+        $this->edges = new RouteEdgeRepository($this->pdo);
         $this->settings = new SettingsService(
             new GlobalSettingsRepository($this->pdo),
             new TenantSettingsRepository($this->pdo)
@@ -135,6 +138,7 @@ final class DocumentRouterRealEngineTest extends TestCase
             $this->steps,
             $this->events,
             $this->recipients,
+            $this->edges,
             $this->rules,
             $this->settings,
             // No HookManager: the spine emission is a side effect asserted
@@ -462,7 +466,20 @@ final class DocumentRouterRealEngineTest extends TestCase
         sort($methods);
 
         self::assertSame(
-            ['__construct', 'append', 'countForDocument', 'findById', 'listForDocument'],
+            [
+                '__construct',
+                'append',
+                'countForDocument',
+                'findById',
+                'listForDocument',
+                // #1037. A READ: `SELECT … GROUP BY step_id`, deriving the lap
+                // count from the verdict rows already in the trail. Listed here
+                // deliberately rather than the assertion being loosened to
+                // "nothing matching /^(update|delete)/" — an exact list is what
+                // makes a new method a decision somebody makes on purpose, and a
+                // pattern match would have admitted `markCorrected()` silently.
+                'rejectionCountsByStep',
+            ],
             $methods,
             'RouteEventRepository must expose exactly one write (append) and reads. A store that '
             . 'offers an UPDATE is a store where somebody eventually calls it.'
@@ -766,6 +783,7 @@ final class DocumentRouterRealEngineTest extends TestCase
             $this->steps,
             $this->events,
             $this->recipients,
+            $this->edges,
             $this->rules,
             $this->settings,
             $hooks

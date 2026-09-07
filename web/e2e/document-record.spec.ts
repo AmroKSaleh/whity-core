@@ -107,6 +107,26 @@ test.describe('the library links into the record', () => {
     await expect(page.getByRole('heading', { name: 'Documents' }).first()).toBeVisible();
 
     const rows = page.locator('[data-testid^="document-row-"]');
+    // Settle BEFORE counting. `count()` does not auto-wait, and the heading this
+    // test waits on is painted while the list request is still in flight — so on
+    // a stack that HAS documents the count was taken at zero and the test below
+    // skipped itself with a reason that was not true. Caught on a seeded stack
+    // with five documents in the library, reporting "no issued documents".
+    //
+    // That is the skip guard failing in the direction that looks fine: a skip
+    // reads as "correctly not applicable" in the report, so the one assertion
+    // pinning that a title links to its record had stopped running without
+    // anybody seeing a red. Racing the first row against the empty state gives a
+    // real settle point and keeps the legitimate skip intact — a stack with no
+    // documents still reaches the branch below, just deliberately.
+    await Promise.race([
+      rows.first().waitFor({ state: 'attached', timeout: 15_000 }),
+      page.getByText(/No documents in this folder|not starred anything/).first()
+        .waitFor({ state: 'visible', timeout: 15_000 }),
+    ]).catch(() => {
+      // Neither appeared: fall through to the count, which is then honestly zero
+      // and skips with its stated reason rather than hanging the spec.
+    });
     const count = await rows.count();
 
     // An EXPLICIT, reported skip rather than a silent branch. Issuing a document

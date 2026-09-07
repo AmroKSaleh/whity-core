@@ -35,7 +35,7 @@ services:
     command: ["php", "-v"]
 
   pg:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
     environment:
       POSTGRES_DB: whity_core
       POSTGRES_USER: whity

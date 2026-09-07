@@ -46,6 +46,7 @@ import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { IconMenu2, IconSend } from '@tabler/icons-react';
 import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
 import { useRoleOptions } from './use-role-options';
 
 /**
@@ -103,6 +104,7 @@ export function InvitationsPanel() {
   const { addToast } = useToast();
   const { hasPermission } = useCapabilities();
   const t = useTranslation('admin');
+  const dates = useDateDisplay();
 
   const canRead = hasPermission(USERS_READ);
   const canWrite = hasPermission(USERS_WRITE);
@@ -212,16 +214,25 @@ export function InvitationsPanel() {
         </Badge>
       ),
     },
-    {
-      accessorKey: 'expires_at',
-      header: t('invitations.table.expiresAt', 'Expires'),
-      enableSorting: true,
-    },
-    {
-      accessorKey: 'created_at',
-      header: t('invitations.table.createdAt', 'Sent'),
-      enableSorting: true,
-    },
+    // #1068: both go together, and both were rendering the raw wire string
+    // before it — `accessorKey` with no `cell` is `String(value)`. The STATUS
+    // column above still says whether an invitation is live, which is the
+    // question this panel exists to answer; the resend and withdraw actions
+    // are gated on that status and not on a date.
+    ...dates.dateColumns<Invitation>([
+      {
+        id: 'expires_at',
+        header: t('invitations.table.expiresAt', 'Expires'),
+        value: (invitation) => invitation.expires_at,
+        enableSorting: true,
+      },
+      {
+        id: 'created_at',
+        header: t('invitations.table.createdAt', 'Sent'),
+        value: (invitation) => invitation.created_at,
+        enableSorting: true,
+      },
+    ]),
   ];
 
   const rowActions = (invitation: Invitation) => {

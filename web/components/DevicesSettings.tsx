@@ -5,6 +5,7 @@ import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { Button } from '@amroksaleh/ui/button';
 import { useTranslation } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
 import { deviceDisplayName } from '@/lib/device-label';
 import { IconDeviceMobile } from '@tabler/icons-react';
 
@@ -34,15 +35,11 @@ interface DeviceCredential {
   created_at: string;
 }
 
-function formatWhen(value: string): string {
-  const parsed = Date.parse(value.replace(' ', 'T') + 'Z');
-  return Number.isNaN(parsed) ? value : new Date(parsed).toLocaleString();
-}
-
 export function DevicesSettings() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
   const t = useTranslation('auth');
+  const dates = useDateDisplay();
   const [devices, setDevices] = useState<DeviceCredential[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -128,13 +125,30 @@ export function DevicesSettings() {
                     <p className="text-sm font-medium text-foreground truncate">
                       {deviceDisplayName(device.name, device.platform)}
                     </p>
-                    <p className="text-xs text-muted-foreground">
-                      {device.last_seen_at
-                        ? t('devices.lastUsed', 'Last used {when}', {
-                            when: formatWhen(device.last_seen_at),
-                          })
-                        : t('devices.neverUsed', 'Never used')}
-                    </p>
+                    {/*
+                      #1068: "Never used" is still said — it is a fact about the
+                      device, not a date — while "Last used <when>" simply
+                      disappears, because the device NAME above it is what
+                      identifies the row and the revoke button beside it works
+                      the same either way.
+                    */}
+                    {(() => {
+                      const lastUsed = dates.dateTime(device.last_seen_at);
+                      if (device.last_seen_at === null) {
+                        return (
+                          <p className="text-xs text-muted-foreground">
+                            {t('devices.neverUsed', 'Never used')}
+                          </p>
+                        );
+                      }
+                      if (lastUsed === null) return null;
+
+                      return (
+                        <p className="text-xs text-muted-foreground">
+                          {t('devices.lastUsed', 'Last used {when}', { when: lastUsed })}
+                        </p>
+                      );
+                    })()}
                   </div>
                 </div>
                 <Button

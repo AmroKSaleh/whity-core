@@ -196,18 +196,61 @@ export function Sidebar() {
     [t],
   );
 
+  // The same literal-`t()` discipline as the group headings above, for the
+  // same reason and one more: an item's `label` arrives from
+  // `GET /api/v1/navigation`, where it is a hardcoded English string in the
+  // registry rather than a `t()` call. Nothing scans that registry, so none of
+  // these names has ever reached the catalogue — which is why an Arabic sidebar
+  // used to read its GROUP headings in Arabic and every PAGE name under them in
+  // English.
+  //
+  // Keyed by the server's stable item `id`, never by its English text, so
+  // rewording a label upstream is a translation edit and not a key rename. An
+  // id this map does not know keeps the server's label: that is the case for
+  // every plugin-contributed entry, whose name is a plugin's to give.
+  const itemLabels = useMemo<Record<string, string>>(
+    () => ({
+      dashboard: t('sidebar.item.dashboard', 'Dashboard'),
+      inbox: t('sidebar.item.inbox', 'Inbox'),
+      users: t('sidebar.item.users', 'Users'),
+      roles: t('sidebar.item.roles', 'Roles'),
+      ous: t('sidebar.item.ous', 'Organizational Units'),
+      delegations: t('sidebar.item.delegations', 'Delegations'),
+      relations: t('sidebar.item.relations', 'Family Relations'),
+      'tag-groups': t('sidebar.item.tagGroups', 'Tag Groups'),
+      tags: t('sidebar.item.tags', 'Tags'),
+      tenants: t('sidebar.item.tenants', 'Tenants'),
+      'audit-logs': t('sidebar.item.auditLogs', 'Audit Logs'),
+      errors: t('sidebar.item.errors', 'Errors'),
+      plugins: t('sidebar.item.plugins', 'Plugins'),
+      'plugin-store': t('sidebar.item.pluginStore', 'Plugin Store'),
+      'website-settings': t('sidebar.item.websiteSettings', 'Website Settings'),
+      documents: t('sidebar.item.documentDesigner', 'Document Designer'),
+      'document-library': t('sidebar.item.documentLibrary', 'Documents'),
+      'document-templates': t('sidebar.item.documentTemplates', 'Templates & Blocks'),
+      'approval-gating': t('sidebar.item.approvalGating', 'Approval Gating'),
+      'ai-principals': t('sidebar.item.aiPrincipals', 'AI Principals'),
+      'mcp-tools': t('sidebar.item.mcpTools', 'MCP Tools'),
+      languages: t('sidebar.item.languages', 'Languages'),
+      translations: t('sidebar.item.translations', 'Translations'),
+      settings: t('sidebar.item.settings', 'Settings'),
+    }),
+    [t],
+  );
+
   const groups = useMemo(
     () =>
       navGroupsFromServerItems(navItems, {
         currentPath: pathname,
         groupOrder: NAV_GROUP_ORDER,
         groupLabel: (groupId) => groupLabels[groupId] ?? prettifyGroupId(groupId),
+        itemLabel: (itemId) => itemLabels[itemId],
         renderIcon: (icon) => {
           const IconComponent = resolveIcon(icon);
           return <IconComponent size={20} />;
         },
       }),
-    [navItems, pathname, groupLabels],
+    [navItems, pathname, groupLabels, itemLabels],
   );
 
   const handleLogout = () => {

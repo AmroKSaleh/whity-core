@@ -1,6 +1,23 @@
 services:
   postgres:
-    image: postgres:15-alpine
+    # pgvector/pgvector:pg15 — stock postgres:15 plus the `vector` extension, so
+    # a plugin can declare a vector column for similarity search. The extension
+    # is AVAILABLE, not enabled: a plugin still runs
+    # `CREATE EXTENSION IF NOT EXISTS vector` in its own migration, so a
+    # deployment that wants none carries none.
+    #
+    # UPGRADING AN EXISTING DATABASE NEEDS A REINDEX. This image is Debian
+    # (glibc); postgres:15-alpine was musl, and the two sort text differently:
+    #
+    #     musl  -> Banana, Cherry, apple, date
+    #     glibc -> apple, Banana, Cherry, date
+    #
+    # Same data, same collation name (en_US.utf8), different order. Postgres
+    # does NOT warn, because musl records no collation version for it to
+    # compare against — so every index on a text column is silently wrong until
+    # rebuilt. On an existing volume, run `REINDEX DATABASE <name>;` once after
+    # the swap. A fresh database is unaffected.
+    image: pgvector/pgvector:pg15
     container_name: whity_postgres
     environment:
       POSTGRES_USER: ${DB_USER:-whity}
@@ -134,10 +151,18 @@ services:
       - sh
       - -c
       - |
-        echo "[cron] revoked-tokens cleanup scheduler started (daily)";
+        echo "[cron] maintenance scheduler started (daily)";
         while true; do
           echo "[cron] $$(date -u +%FT%TZ) running revoked-tokens:cleanup";
           php public/index.php revoked-tokens:cleanup || echo "[cron] cleanup failed (will retry next cycle)";
+          # The other half of the form-upload feature (migration 134): a `file`
+          # answer's bytes are written BEFORE the submission exists, so every
+          # abandoned form leaves an object nothing references. Run in the SAME
+          # loop rather than as a second service — it is the same kind of job at
+          # the same cadence, and a second container would be one more thing an
+          # operator has to know to start.
+          echo "[cron] $$(date -u +%FT%TZ) running form-uploads:sweep";
+          php public/index.php form-uploads:sweep || echo "[cron] form-upload sweep failed (will retry next cycle)";
           sleep 86400;
         done
 

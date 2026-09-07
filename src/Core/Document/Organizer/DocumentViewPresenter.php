@@ -58,6 +58,28 @@ final class DocumentViewPresenter
     }
 
     /**
+     * A rail section: the heading a set of folders sits under, and where it goes.
+     *
+     * Sent because the client used to own both — it filtered views to the two
+     * group names it knew and titled the sections itself, so a third group was
+     * computed, reported, and then dropped on the way to the screen (#998). A
+     * client that reads this renders whatever the server says exists.
+     *
+     * @return array<string, mixed>
+     */
+    public static function group(DocumentViewGroup $group): array
+    {
+        return [
+            'key' => $group->key,
+            // English default, translated by key where a client knows one —
+            // exactly as a view's label is, and for the same reason: a client
+            // cannot have a translation for a group it has never heard of.
+            'label' => $group->label,
+            'order' => $group->order,
+        ];
+    }
+
+    /**
      * A fact source this installation does not have, with what would supply it.
      *
      * @return array<string, mixed>

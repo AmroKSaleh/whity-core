@@ -22,6 +22,7 @@ import {
 } from '@amroksaleh/ui/select';
 import { IconPlus, IconShieldLock, IconTrash } from '@tabler/icons-react';
 import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
 import { SettingsTabs } from '../settings-tabs';
 import { SECURITY_MANAGE, errorMessage, type AddToast } from '../settings-shared';
 import type { components } from '@/lib/api/schema';
@@ -511,15 +512,9 @@ function PolicyFormCard({
   );
 }
 
-function formatDeadline(epochSeconds: number | null): string {
-  if (epochSeconds === null) {
-    return '—';
-  }
-  return new Date(epochSeconds * 1000).toLocaleString();
-}
-
 function EnrollmentStatusSection({ refreshKey }: { refreshKey: number }) {
   const t = useTranslation('admin');
+  const dates = useDateDisplay();
   const { data, error } = useFetch<StatusEntry[]>(async () => {
     const { data: body, error: statusError } = await api.GET('/api/v1/2fa-policies/status');
     if (body === undefined) {
@@ -551,15 +546,26 @@ function EnrollmentStatusSection({ refreshKey }: { refreshKey: number }) {
         </Badge>
       ),
     },
-    {
-      id: 'enforcement_deadline',
-      header: t('settings.security.status.column.deadline', 'Enforcement deadline'),
-      cell: (row) => (
-        <span className="text-sm text-muted-foreground">
-          {row.enrolled ? '—' : formatDeadline(row.enforcement_deadline)}
-        </span>
-      ),
-    },
+    // #1068: the deadline column goes when this tenant hides dates. The
+    // "2FA status" column beside it still says who is enrolled and who is not,
+    // which is what an administrator opens this table to see; a date the
+    // tenant has asked not to display is not worth a column of em dashes.
+    //
+    // The epoch is seconds, so it is converted here rather than in the shared
+    // formatter — every other timestamp in the product travels as a wire
+    // string, and teaching the one path to guess between the two encodings
+    // would make it guess wrong on a plausible year-1970 date.
+    ...dates.dateColumns<StatusEntry>([
+      {
+        id: 'enforcement_deadline',
+        header: t('settings.security.status.column.deadline', 'Enforcement deadline'),
+        value: (row) =>
+          row.enrolled || row.enforcement_deadline === null
+            ? null
+            : new Date(row.enforcement_deadline * 1000).toISOString(),
+        className: 'text-sm text-muted-foreground',
+      },
+    ]),
   ];
 
   return (

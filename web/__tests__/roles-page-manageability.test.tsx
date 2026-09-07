@@ -44,6 +44,12 @@ const EDIT_TOOLTIP = 'Global base roles can only be edited by the system tenant.
 const DELETE_TOOLTIP =
   'Global base roles can only be deleted by the system tenant.';
 
+/**
+ * `listRoles` answers a PAGE since #1102 — the rows plus the full count — so a
+ * fake that resolved a bare array would no longer satisfy the adapter.
+ */
+const rolesPage = (roles: Role[]) => ({ roles, total: roles.length, totalPages: 1 });
+
 /** English-fallback translator: returns the caller-supplied source string. */
 const t = (_key: string, fallback?: string) => fallback ?? _key;
 /** Caller holds both write capabilities so only manageability differs. */
@@ -51,7 +57,7 @@ const can = () => true;
 
 function fakeAdapter(over: Partial<RolesAdapter> = {}): RolesAdapter {
   return {
-    listRoles: jest.fn().mockResolvedValue([]),
+    listRoles: jest.fn().mockResolvedValue(rolesPage([])),
     getRole: jest.fn().mockResolvedValue({ ...MANAGEABLE_ROLE, permissions: [] }),
     getRolePermissions: jest.fn().mockResolvedValue([]),
     getRoleAssignments: jest.fn().mockResolvedValue({ assignments: [], total: 0 }),
@@ -79,7 +85,9 @@ async function openRowMenu(roleName: string): Promise<HTMLElement> {
 
 describe('RolesScreen per-row manageability gating (WC-222)', () => {
   it('renders Edit/Delete ENABLED for a manageable role and opens the RECORD on click', async () => {
-    const adapter = fakeAdapter({ listRoles: jest.fn().mockResolvedValue([MANAGEABLE_ROLE]) });
+    const adapter = fakeAdapter({
+      listRoles: jest.fn().mockResolvedValue(rolesPage([MANAGEABLE_ROLE])),
+    });
     const user = userEvent.setup();
     const onOpenRecord = jest.fn();
 
@@ -110,7 +118,9 @@ describe('RolesScreen per-row manageability gating (WC-222)', () => {
   });
 
   it('renders Edit/Delete DISABLED with an explanatory tooltip for a non-manageable global role', async () => {
-    const adapter = fakeAdapter({ listRoles: jest.fn().mockResolvedValue([GLOBAL_ROLE]) });
+    const adapter = fakeAdapter({
+      listRoles: jest.fn().mockResolvedValue(rolesPage([GLOBAL_ROLE])),
+    });
 
     render(
       <RolesScreen
@@ -138,7 +148,9 @@ describe('RolesScreen per-row manageability gating (WC-222)', () => {
   });
 
   it('does NOT navigate to the record when a disabled action is clicked', async () => {
-    const adapter = fakeAdapter({ listRoles: jest.fn().mockResolvedValue([GLOBAL_ROLE]) });
+    const adapter = fakeAdapter({
+      listRoles: jest.fn().mockResolvedValue(rolesPage([GLOBAL_ROLE])),
+    });
     const user = userEvent.setup();
     const onOpenRecord = jest.fn();
 

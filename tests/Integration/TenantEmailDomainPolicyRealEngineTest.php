@@ -9,6 +9,7 @@ use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Core\Identity\MembershipRepository;
 use Whity\Core\Identity\ProfileEmailRepository;
+use Whity\Core\Identity\AssignableRole;
 use Whity\Core\Identity\TenantEmailDomainPolicyService;
 use Whity\Core\Identity\TenantEmailDomainsRepository;
 
@@ -35,7 +36,7 @@ final class TenantEmailDomainPolicyRealEngineTest extends TestCase
         $this->domains = new TenantEmailDomainsRepository($this->pdo);
         $this->memberships = new MembershipRepository($this->pdo);
         $this->emails = new ProfileEmailRepository($this->pdo);
-        $this->policy = new TenantEmailDomainPolicyService($this->domains, $this->memberships);
+        $this->policy = new TenantEmailDomainPolicyService($this->domains, $this->memberships, new AssignableRole($this->pdo));
     }
 
     private function col(string $sql): mixed

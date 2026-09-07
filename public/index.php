@@ -86,6 +86,52 @@ if ($isCli && isset($argv[1])) {
         exit(0);
     }
 
+    // The retention sweep for form attachments nobody ever submitted (migration
+    // 134). A `file` answer's bytes are written BEFORE the submission exists —
+    // they have to be — so every abandoned form leaves an object no row will
+    // ever reference. See \Whity\Core\Form\FormUploadSweeper for why a TTL beats
+    // the alternatives, and docs/wiki/Cron-Operations.md for the schedule.
+    //
+    // THE DRIVER IS BUILT THE SAME WAY THE HTTP PATH BUILDS IT, and that is
+    // load-bearing rather than ceremony: an entitled tenant's uploads live in
+    // that tenant's own bucket, so a sweep holding only the platform default
+    // would delete the rows and then fail to find the objects — reporting a
+    // successful sweep while the storage bill kept growing. Six lines to get
+    // the same TenantRoutingStorageDriver the writes used.
+    if ($command === 'form-uploads:sweep') {
+        $db = \Whity\Database\Database::connect();
+        $sweepPdo = $db->getPdo();
+        $sweepSettings = new \Whity\Core\Settings\SettingsService(
+            new \Whity\Core\Settings\GlobalSettingsRepository($sweepPdo),
+            new \Whity\Core\Settings\TenantSettingsRepository($sweepPdo)
+        );
+        $sweepDefaultDriver = \Whity\Storage\StorageDriverFactory::fromSettings(
+            $sweepSettings,
+            $_ENV,
+            getenv('STORAGE_ROOT') ?: (dirname(__DIR__) . '/storage')
+        );
+        $sweepDriver = new \Whity\Storage\TenantRoutingStorageDriver(
+            $sweepDefaultDriver,
+            new \Whity\Storage\TenantStorageResolver(
+                $sweepDefaultDriver,
+                new \Whity\Storage\TenantStorageConfigRepository($sweepPdo),
+                new \Whity\Core\Entitlement\EntitlementService(
+                    new \Whity\Core\Entitlement\TenantEntitlementRepository($sweepPdo)
+                ),
+                \Whity\Core\Security\EncryptedSecretStore::fromEnv($_ENV)
+            )
+        );
+        $sweepCommand = new \Whity\Commands\FormUploadsSweepCommand(
+            new \Whity\Core\Form\FormUploadSweeper(
+                new \Whity\Core\Form\FormUploadRepository($sweepPdo),
+                $sweepDriver
+            )
+        );
+        array_shift($argv); // Remove script name
+        array_shift($argv); // Remove 'form-uploads:sweep'
+        exit($sweepCommand->execute($argv));
+    }
+
     if ($command === 'update:check') {
         $updateCheckCommand = new \Whity\Cli\Commands\UpdateCheckCommand();
         array_shift($argv); // Remove script name
@@ -123,6 +169,7 @@ if ($isCli && isset($argv[1])) {
     echo "  migrate                    Manage database migrations\n";
     echo "  seed                       Seed database with default data\n";
     echo "  revoked-tokens:cleanup     Cleanup expired revoked tokens\n";
+    echo "  form-uploads:sweep         Delete form attachments nobody ever submitted\n";
     echo "  update:check               Compare the core version against the latest GitHub release\n";
     echo "  queue:work                 Run the durable async job worker loop\n";
     echo "  schedule:run               Run the cron-tick scheduler (exactly-once per minute)\n";
@@ -173,6 +220,7 @@ use Whity\Api\MeCapabilitiesApiHandler;
 use Whity\Api\PermittedActionsApiHandler;
 use Whity\Api\NavigationApiHandler;
 use Whity\Api\HealthApiHandler;
+use Whity\Api\BuildApiHandler;
 use Whity\Api\OpenApiHandler;
 use Whity\Api\IdentityProvidersApiHandler;
 use Whity\Api\TenantEmailDomainApiHandler;
@@ -222,6 +270,7 @@ use Whity\Mcp\Prompts\PromptsListHandler;
 use Whity\Mcp\Resources\ResourceDeriver;
 use Whity\Mcp\Resources\ResourcesListHandler;
 use Whity\Mcp\Resources\ResourcesReadHandler;
+use Whity\Mcp\Tools\AuthoredToolRegistry;
 use Whity\Mcp\Tools\ToolDeriver;
 use Whity\Mcp\Tools\ToolsCallHandler;
 use Whity\Mcp\Tools\ToolsListHandler;
@@ -378,6 +427,22 @@ $ouTypeRegistry = new \Whity\Core\Ou\OuTypeRegistry($hookManager);
 $ouTypeRegistry->registerCoreOuTypes();
 \Whity\register_service(\Whity\Core\Ou\OuTypeRegistry::class, $ouTypeRegistry); // @phpstan-ignore-line
 
+// 4c-ante-quater. TIME-WINDOW TYPE catalogue (#1070): which KINDS of named
+// period a plugin may contribute to a tenant's vocabulary, and how those kinds
+// nest. Exactly the shape of the OU-type catalogue above and for exactly the
+// same reason: a period vocabulary is tenant data (one deployment reasons in a
+// crop year and its growing seasons, another in a kiln campaign and its firing
+// runs) and a core enumeration would have to contain both.
+//
+// This catalogue is NOT the vocabulary — that is per-tenant data in
+// `time_window_types` (migration 126). This governs only which keys CODE may
+// contribute, and registering it as a service is what keeps
+// `GET /api/v1/time-window-types/catalog` from telling an administrator that
+// the type their plugin ships does not exist.
+$windowTypeRegistry = new \Whity\Core\TimeWindow\WindowTypeRegistry($hookManager);
+$windowTypeRegistry->registerCoreWindowTypes();
+\Whity\register_service(\Whity\Core\TimeWindow\WindowTypeRegistry::class, $windowTypeRegistry); // @phpstan-ignore-line
+
 // 4c-ante-bis. Document ROUTING RULE catalogue (#947 item 3): WHICH rule kinds a
 // route step may name. Core owns two, `role` and `role_below_actor`, and both are
 // generic in the strong sense — every deployment has roles and every deployment
@@ -422,6 +487,24 @@ $routingRuleRegistry->registerCoreRoutingRules(
     new \Whity\Core\Group\GroupRuleResolver($groupResolver)
 );
 \Whity\register_service(\Whity\Core\Document\Routing\RoutingRuleRegistry::class, $routingRuleRegistry); // @phpstan-ignore-line
+
+// 4b-bis. WHAT A ROUTING STAGE DOES TO THE WORLD (#1032) — the sibling
+// catalogue migration 112 specified, beside the rule registry above.
+//
+// Core ships one kind, `notify`, and its audience is a RULE resolved through
+// the registry on the line above rather than a stored list of people: a list is
+// resolved once when the route is authored and is wrong from the first
+// reorganisation onwards, which is the argument the rule registry itself is
+// built on.
+//
+// The catalogue is registered here; the ENGINE that runs these is wired further
+// down beside RoutingNotifications, because it needs the notification
+// dispatcher and because both must run AFTER the router's transaction commits.
+$routeEffectRegistry = new \Whity\Core\Document\Routing\RouteEffectRegistry();
+$routeEffectRegistry->registerCoreEffects(
+    new \Whity\Core\Document\Routing\NotifyEffect($routingRuleRegistry)
+);
+\Whity\register_service(\Whity\Core\Document\Routing\RouteEffectRegistry::class, $routeEffectRegistry); // @phpstan-ignore-line
 
 // 4c-ante-ter. INBOX SOURCE catalogue (#881). The inbox surface belongs to this
 // registry rather than to any one subsystem: routing's recipient rows ARE an
@@ -572,8 +655,13 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'icon' => 'lock',
         'group' => 'access',
         'order' => 2,
-        // WC-175 (#191): mirrors GET /api/roles, gated on the 'admin' ROLE.
-        'requiredRole' => 'admin',
+        // Mirrors GET /api/roles, which #988 moved from the 'admin' ROLE NAME to
+        // the `roles:read` SLUG. This item was left behind and kept asserting the
+        // role, so an instance whose administrative role has been renamed — the
+        // whole point of a white-labelled platform — held `roles:read`, could use
+        // the Roles screen, and never saw the link to it. A nav item that mirrors
+        // a route has to mirror the gate, not the gate the route used to have.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::ROLES_READ,
     ];
     $items[] = [
         'id' => 'ous',
@@ -636,6 +724,64 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'order' => 3,
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::TAGS_READ,
     ];
+    // FORMS (migrations 127/128). Three entries because they are three jobs done
+    // by three audiences — see CorePermissions' FORMS_* block — and each gates on
+    // the permission its own screen's primary fetch requires, so a link somebody
+    // can see is a link that works.
+    //
+    // The hrefs point at `/admin/x/{featureId}`, the descriptor host, because
+    // these screens are `screen:'blocks'` descriptors rather than hand-written
+    // pages ({@see \Whity\Core\Form\FormFrontendFeatures}) — which is what lets
+    // the desktop and mobile clients render them at all.
+    //
+    // Registered HERE rather than left to PluginNavigationBridge: that bridge
+    // reads PluginLoader, and these descriptors are core's, not a plugin's. The
+    // ids therefore carry no `plugin-` prefix, and cannot collide with one.
+    $items[] = [
+        'id' => 'forms-builder',
+        'label' => 'Form Builder',
+        'icon' => 'forms',
+        'href' => '/admin/x/' . \Whity\Core\Form\FormFrontendFeatures::BUILDER_ID,
+        'group' => 'records',
+        // Group-local, a unique positive integer (#1007/#1010 — a fractional
+        // order is silently skipped by a regroup that matches integers, and a
+        // test now enforces the invariant). 1 = Family Relations, 2 = Tag Groups,
+        // 3 = Tags, so this is 4 and the catalogue below it is 5.
+        'order' => 4,
+        // Mirrors POST /api/v1/forms, gated forms:manage. Authoring a form is
+        // organisational policy — deciding what everyone must declare — so this
+        // entry is deliberately NOT visible to the far larger audience that only
+        // fills forms in.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::FORMS_MANAGE,
+    ];
+    $items[] = [
+        'id' => 'forms-catalog',
+        'label' => 'Forms',
+        'icon' => 'clipboard-list',
+        'href' => '/admin/x/' . \Whity\Core\Form\FormFrontendFeatures::CATALOG_ID,
+        'group' => 'records',
+        'order' => 5,
+        // Mirrors GET /api/v1/forms and /api/v1/form-submissions, both gated
+        // forms:read — the approver's permission, not the author's.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::FORMS_READ,
+    ];
+    $items[] = [
+        'id' => 'my-form-submissions',
+        'label' => 'My Submissions',
+        'icon' => 'file-check',
+        'href' => '/admin/x/' . \Whity\Core\Form\FormFrontendFeatures::MY_SUBMISSIONS_ID,
+        'group' => 'overview',
+        // In `overview` beside Dashboard (1) and Inbox (2) rather than in
+        // `records`: this is a surface a person opens about THEIR OWN work, like
+        // the inbox above it, where the entries in `records` are things somebody
+        // administers on behalf of the tenant.
+        'order' => 3,
+        // Mirrors GET /api/v1/me/form-submissions, gated forms:submit rather than
+        // forms:read — the rows already name exactly one person, so requiring the
+        // tenant-wide read permission would hide this from precisely the people
+        // whose submissions are in it.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::FORMS_SUBMIT,
+    ];
     $items[] = [
         'id' => 'tenants',
         'label' => 'Tenants',
@@ -643,8 +789,80 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'icon' => 'building',
         'group' => 'access',
         'order' => 5,
-        // WC-175 (#191): mirrors GET /api/tenants, gated on the 'admin' ROLE.
-        'requiredRole' => 'admin',
+        // #990: mirrors GET /api/tenants, now gated on tenants:read (migration
+        // 138 grants it to every role that may write or delete a tenant).
+        // requiredRole is cleared so the item follows the route it mirrors rather
+        // than drifting from it — a nav entry that gates on a role name while the
+        // route behind it gates on a slug is how a deployment with a renamed
+        // administrative role ends up holding the permission and never seeing the
+        // link, which is the "menu with a hole in it" failure #1047 describes.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::TENANTS_READ,
+    ];
+    $items[] = [
+        'id' => 'tenant-billing',
+        'label' => 'Billing',
+        'href' => '/billing',
+        'icon' => 'receipt',
+        // `system`, beside website settings and languages: this is the tenant
+        // administering its own account. It is NOT `access` — that group holds
+        // the OPERATOR's plan catalogue and promotions, which decide what
+        // somebody else is charged.
+        'group' => 'system',
+        // 6 — orders are unique within a group, and 1-5 are taken.
+        'order' => 6,
+        // Gated on the same slug as the route behind it. A nav entry that gated
+        // on a role name while the route gates on a slug is how a deployment
+        // with a renamed administrative role ends up holding the permission and
+        // never seeing the link.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::BILLING_VIEW,
+    ];
+    $items[] = [
+        'id' => 'promotions',
+        'label' => 'Promotions',
+        'href' => '/admin/promotions',
+        'icon' => 'discount',
+        'group' => 'access',
+        // 8 — orders are unique within a group, and 7 is billing.
+        'order' => 8,
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::PLANS_MANAGE,
+    ];
+    $items[] = [
+        'id' => 'billing',
+        'label' => 'Plans & pricing',
+        'href' => '/admin/billing',
+        'icon' => 'receipt',
+        'group' => 'access',
+        // 7, not 6: `user-groups` holds 6 and orders must be unique within a
+        // group — CoreNavigationRegistrationTest fails a collision, because two
+        // items sharing an order sit in whatever sequence the array happened to
+        // be built in, and that is a menu whose shape changes when an unrelated
+        // item is added.
+        'order' => 7,
+        // Mirrors GET /api/plans, which gates on plans:manage. The ROUTE
+        // additionally requires the system tenant, and the screen shows
+        // read-only without that — a nav item cannot express "and the system
+        // tenant", so it follows the permission its API declares and the server
+        // refuses the writes regardless. Showing the catalogue to a tenant admin
+        // who cannot change it is better than a link that 403s.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::PLANS_MANAGE,
+    ];
+    $items[] = [
+        'id' => 'user-groups',
+        'label' => 'User Groups',
+        'href' => '/admin/user-groups',
+        'icon' => 'users-group',
+        'group' => 'access',
+        'order' => 6,
+        // #1015: mirrors GET /api/user-groups, which is where the page's primary
+        // fetch goes, so the link and the screen behind it cannot disagree about
+        // who belongs here.
+        //
+        // In `access` beside Users, Roles and Delegations rather than in
+        // `documents`, even though routing is what named groups were built for: a
+        // group is a statement about PEOPLE, it is reusable by anything that needs
+        // an audience, and filing it under the first consumer would make the
+        // second one look like an intruder.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::GROUPS_READ,
     ];
     $items[] = [
         'id' => 'audit-logs',
@@ -769,6 +987,58 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         // permission-aware client hides it; the API enforces it, and row-level
         // visibility is enforced on top of that by DocumentVisibilityPolicy.
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::DOCUMENTS_READ,
+    ];
+    $items[] = [
+        'id' => 'document-templates',
+        'label' => 'Templates & Blocks',
+        'href' => '/admin/document-templates',
+        'icon' => 'layout-grid',
+        'group' => 'documents',
+        // Group-local, a unique positive integer (#1007/#1010 — a fractional
+        // order is silently skipped by a regroup that matches integers, and a
+        // test now enforces the invariant). 1 = Documents, 2 = Document
+        // Designer, 3 = Approval Gating, so this is 4.
+        'order' => 4,
+        // The GOVERNANCE surface for the designer's saved work: who can see a
+        // template or block and why, where it is filed, what instances a block.
+        // A third documents entry rather than a tab on the designer, for the
+        // reason the designer/organizer split already records — the designer is
+        // a full-screen editor in the `(editor)` route group with no app sidebar,
+        // so it has nowhere to put an admin table, and re-scoping a template is
+        // not something you do while drawing on a canvas.
+        //
+        // Mirrors GET /api/document-templates + /api/document-blocks, both gated
+        // documents:read, so the nav item gates on the same permission. Rename
+        // and delete are gated documents:write and re-scoping/publishing on
+        // documents:publish, per-control on the page; the API enforces all three
+        // regardless of what the client renders.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::DOCUMENTS_READ,
+    ];
+    $items[] = [
+        'id' => 'document-route-templates',
+        'label' => 'Route Templates',
+        'href' => '/admin/document-route-templates',
+        'icon' => 'sitemap',
+        'group' => 'documents',
+        // Group-local, a unique positive integer (#1007/#1010 — a fractional
+        // order is silently skipped by a regroup that matches integers, and a
+        // test now enforces the invariant). 1 = Document Library, 2 = Documents,
+        // 3 = Approval Gating, 4 = Templates & Blocks, so this is 5.
+        'order' => 5,
+        // The node-based flow editor (#1027): the reusable, branching designs a
+        // document travels. A sibling of "Templates & Blocks" rather than a tab
+        // on it, because the two answer different questions about different
+        // records — that one governs what a document LOOKS like, this one governs
+        // where it GOES, and they are edited by different people.
+        //
+        // Gates on route_templates:read, which is what GET
+        // /api/document-route-templates requires. Designing is gated
+        // route_templates:write per-control on the page, and the API enforces it
+        // regardless of what the client renders — a clerk who may route a
+        // document should not thereby be able to rewrite where every document
+        // goes. Migration 120 grants both to whoever holds `roles:write`, and
+        // read additionally to whoever holds `documents:route`.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::ROUTE_TEMPLATES_READ,
     ];
     $items[] = [
         'id' => 'approval-gating',
@@ -921,7 +1191,10 @@ $kernel = new HttpKernel($router, $rbacMiddleware);
 // suite) is never throttled — operators tighten them per deployment.
 $rateLimitEnabled    = (($_ENV['RATE_LIMIT_ENABLED'] ?? '1') !== '0');
 $rateLimitStore      = new SharedStoreRateLimitStore(new DatabaseSharedStore($db->getPdo()));
-$rateLimitExemptPaths = ['/api/health', '/api/version', '/api/openapi.json'];
+// #1049: /api/build joins the infrastructure probes. A monitor that compares it
+// against /web-build on an interval is the intended consumer, and a throttled
+// 429 there is indistinguishable from the drift it is watching for.
+$rateLimitExemptPaths = ['/api/health', '/api/version', '/api/openapi.json', '/api/build'];
 
 $preAuthRateLimiter = new RateLimitMiddleware(
     $rateLimitStore,
@@ -1013,7 +1286,11 @@ $pluginLoader = new PluginLoader(
     // Plugin-contributed document routing rules (#947 item 3, SDK 1.36): built at
     // step 4c-ante-bis above. Same stamping rule — a plugin declares WHICH kinds,
     // never WHO said so, which is what stops it shadowing `role`.
-    $routingRuleRegistry
+    $routingRuleRegistry,
+    // Plugin-contributed time-window types (#1070): built at step
+    // 4c-ante-quater above. Same stamping rule again — a plugin declares WHICH
+    // kinds of period it brings, never that a tenant uses them.
+    $windowTypeRegistry
 );
 
 // 9b. Initialize deployment manager
@@ -1120,7 +1397,12 @@ $kernel->use(new \Whity\Http\Middleware\PaymentWall(
         $settingsService
     ),
     enabled: (($_ENV['BILLING_WALL_ENABLED'] ?? '1') !== '0'),
-    exemptPrefixes: ['/api/v1/subscription'],
+    // A LOCKED TENANT MUST STILL BE ABLE TO PAY, and a provider must still be
+    // able to tell us they did. Guarding either of these would be a deadlock
+    // dressed as security: the wall answers 402, so the payment that would
+    // lift the wall can never be made or recorded, and the tenant stays
+    // locked forever having paid.
+    exemptPrefixes: ['/api/v1/subscription', '/api/v1/billing', '/api/v1/payments'],
     billingUrl: ($_ENV['BILLING_URL'] ?? getenv('BILLING_URL')) ?: null,
     logger: $logger,
 ));
@@ -1182,7 +1464,8 @@ $router->register('POST', '/api/register', [$registerHandler, 'register'], null)
 // having to remember to.
 $emailDomainPolicy = new TenantEmailDomainPolicyService(
     new TenantEmailDomainsRepository($db->getPdo()),
-    new MembershipRepository($db->getPdo(), $hookManager)
+    new MembershipRepository($db->getPdo(), $hookManager),
+    new \Whity\Core\Identity\AssignableRole($db->getPdo())
 );
 $emailVerificationHandler = new EmailVerificationHandler(
     $emailVerificationService,
@@ -1451,13 +1734,35 @@ $router->register('DELETE', '/api/roles/{id:\d+}/permissions', [$rolesHandler, '
 $router->register('GET', '/api/roles/{id:\d+}/assignments', [$rolesHandler, 'assignments'], null, null, \Whity\Core\RBAC\CorePermissions::ROLES_READ);
 
 $tenantsHandler = new TenantsApiHandler($db->getPdo(), $hookManager);
-$router->register('GET', '/api/tenants', [$tenantsHandler, 'list'], 'admin');
-$router->register('POST', '/api/tenants', [$tenantsHandler, 'create'], 'admin');
-$router->register('PATCH', '/api/tenants/{id:\d+}', [$tenantsHandler, 'update'], 'admin');
-$router->register('DELETE', '/api/tenants/{id:\d+}', [$tenantsHandler, 'delete'], 'admin');
+// Tenants are gated on PERMISSION SLUGS, not on the `admin` role name (#990),
+// for the reason the roles block above states: a role is a row a deployment may
+// rename or replace, a slug is a contract. `tenants:read/write/delete` have been
+// in the catalogue since migration 002 and describe exactly these four routes,
+// so this is the mechanical half of #990 — no vocabulary is invented here.
+//
+// `tenants:read` was in the catalogue and held by NOBODY until migration 138,
+// which grants it to every role already holding `tenants:write` or
+// `tenants:delete`. Without that migration this block locks the seeded admin out
+// of the tenant list — the second instance of the `roles:read` orphan #977 hit,
+// one group over, and the one way this change goes badly.
+$router->register('GET', '/api/tenants', [$tenantsHandler, 'list'], null, null, CorePermissions::TENANTS_READ);
+$router->register('POST', '/api/tenants', [$tenantsHandler, 'create'], null, null, CorePermissions::TENANTS_WRITE);
+$router->register('PATCH', '/api/tenants/{id:\d+}', [$tenantsHandler, 'update'], null, null, CorePermissions::TENANTS_WRITE);
+// Deletion keeps its own slug rather than folding into `tenants:write`: the
+// vocabulary already exists, `admin` already holds it, and `roles:*`/`users:*`
+// draw the same line.
+$router->register('DELETE', '/api/tenants/{id:\d+}', [$tenantsHandler, 'delete'], null, null, CorePermissions::TENANTS_DELETE);
 
 $permissionsHandler = new PermissionsApiHandler($db->getPdo());
-$router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], 'admin');
+// The permission CATALOGUE, gated on `permissions:read` (#990) — the same slug
+// `GET /api/roles/{id}/permissions` already uses, because they answer two halves
+// of one question: what permissions exist, and which of them a role holds. A
+// caller who may see the second and not the first cannot read a role editor.
+//
+// Held today by every role holding `roles:write` (migration 110), which includes
+// the seeded admin, so no grant migration is needed for this one — verified
+// against a freshly migrated database rather than assumed.
+$router->register('GET', '/api/permissions', [$permissionsHandler, 'list'], null, null, CorePermissions::PERMISSIONS_READ);
 
 // Navigation menu items (WC-175, #191). Registered with NO required
 // role/permission — any authenticated caller may ask which menu items they may
@@ -1510,7 +1815,61 @@ $router->register('POST', '/api/me/permitted-actions', [$permittedActionsHandler
 // WC-226: pass $logger so a plugin's `screen:'blocks'` feature whose block tree
 // fails host validation is dropped fail-closed with a structured, secret-free
 // reason (feature id + validator errors) — never leaked to the client.
-$frontendFeaturesHandler = new FrontendFeaturesApiHandler($pluginLoader, $roleChecker, $router, $logger);
+
+// FORMS (migrations 127/128): core's own `screen:'blocks'` descriptors — the
+// form builder, the form catalogue, and one person's own submissions. They are
+// passed as the fifth argument rather than being hand-written React pages
+// because the desktop and mobile clients render descriptors and cannot render a
+// bespoke page, and they go through the SAME per-caller permission filter and
+// the same fail-closed block validation as any plugin's. See
+// FormFrontendFeatures and FrontendFeaturesApiHandler::allFeatures().
+
+// #convening: CORE-declared `screen:'blocks'` features. The loader's validator
+// refuses any PLUGIN descriptor gated on a core permission ("core names are not
+// plugin-ownable"), which is right for a plugin and left core with nowhere to
+// declare a schema-driven screen of its own. These are appended to the plugin
+// list and go through the SAME per-caller permission filter, the SAME
+// fail-closed block validation and the SAME capability resolution — see the
+// handler's docblock. Their API paths are emitted through
+// Router::versionedPath(), because a block `source` is a URL a browser fetches
+// rather than a route registration.
+$languageRepository = new \Whity\Core\i18n\LanguageRepository($db->getPdo());
+$translationRepository = new \Whity\Core\i18n\TranslationRepository($db->getPdo());
+$languageRegistry = new \Whity\Core\i18n\LanguageRegistry(
+    $languageRepository,
+    $translationRepository,
+    new \Whity\Core\Tenant\StaticTenantContextAdapter()
+);
+// A missing/unseeded languages table must not take the whole API down: the
+// registry falls back to returning the key itself, so boot failure degrades
+// translation only.
+try {
+    $languageRegistry->boot();
+} catch (\Throwable $e) {
+    error_log("[whity] LanguageRegistry boot failed (continuing untranslated): {$e->getMessage()}");
+}
+
+// #1044: the serving-time translator for strings the SERVER declares — rule-kind
+// labels, schema-driven screen text — which reach the client already worded and so
+// are never touched by a screen's own `t()`.
+//
+// Built HERE, above its first consumer. It was first written further down, beside
+// the language middleware, where it read better and was undefined at this line:
+// the handler took null and served English while every check stayed green.
+$serverLabels = new \Whity\Core\i18n\ServerLabels($languageRegistry);
+
+$frontendFeaturesHandler = new FrontendFeaturesApiHandler(
+    $pluginLoader,
+    $roleChecker,
+    $router,
+    // #1044: core's own declarations answer in the caller's language.
+    $serverLabels,
+    $logger,
+    array_merge(
+        \Whity\Core\Form\FormFrontendFeatures::all(),
+        \Whity\Core\Convening\ConveningFeatures::all($router)
+    )
+);
 $router->register('GET', '/api/frontend/features', [$frontendFeaturesHandler, 'list'], null);
 
 // Health monitoring endpoint (WC-4). Registered UNVERSIONED so load-balancer
@@ -1522,6 +1881,38 @@ $router->register('GET', '/api/frontend/features', [$frontendFeaturesHandler, 'l
 // $bootTimestamp drives the reported worker uptime.
 $healthHandler = new HealthApiHandler($db, $bootTimestamp);
 $router->registerUnversioned('GET', '/api/health', [$healthHandler, 'handle']);
+
+// Build identity (#1049). The backend's equivalent of the web tier's
+// /web-build: WHICH CHECKOUT this worker is running, when it booted, and how
+// far the schema is behind it. /api/health cannot answer that — it reports
+// CoreVersion::VERSION, a constant in the source, which is identical across
+// every commit between releases and so moves with the code whether or not the
+// code was deployed. A backend four days behind and a database 15 migrations
+// behind its checkout were both found by hand, under a green health probe.
+//
+// A SIBLING ROUTE, not more keys on /api/health: the schema fields cost a table
+// scan plus a directory listing, and the liveness probe an orchestrator restarts
+// containers over must stay dependency-light. Same reason /web-build is its own
+// route rather than a field on something already being polled.
+//
+// UNVERSIONED beside /api/health and /api/version, and unauthenticated for the
+// reason spelled out on BuildApiHandler's docblock: the operator diagnosing
+// drift is often the one who CANNOT sign in (the concrete incident had the
+// login path's own column unmigrated), and the check is a two-probe comparison
+// against /web-build, which is served unauthenticated by another tier.
+//
+// $bootTimestamp is shared with the health handler on purpose — one worker, one
+// boot, one answer. The identity itself is resolved ONCE inside the constructor,
+// here at boot: re-reading it per request would report the checkout on DISK,
+// which is the thing that moves, and would be confidently wrong exactly when it
+// mattered.
+$buildHandler = new BuildApiHandler(
+    $db,
+    dirname(__DIR__),
+    __DIR__ . '/../database/migrations',
+    $bootTimestamp
+);
+$router->registerUnversioned('GET', '/api/build', [$buildHandler, 'handle']);
 
 // WC-status-page: the public service-status surface behind /status. Registered
 // versioned (bare path — the router prepends /v1) and, like /api/health,
@@ -1708,6 +2099,51 @@ $router->register('GET', '/api/ou-types/{id:\d+}', [$ouTypesHandler, 'get'], nul
 $router->register('PATCH', '/api/ou-types/{id:\d+}', [$ouTypesHandler, 'update'], null, null, CorePermissions::OUS_WRITE);
 $router->register('DELETE', '/api/ou-types/{id:\d+}', [$ouTypesHandler, 'delete'], null, null, CorePermissions::OUS_WRITE);
 
+// 12a-bis. TIME WINDOWS (#1070) — named, non-overlapping periods a tenant's data
+// can be scoped to and rolled up by, and which can be closed like a set of
+// books.
+//
+// FOUR gates, not the usual read/write pair, because these are four
+// authorities. `:close` is a control an operator exercises routinely and other
+// people then rely on; `:reopen` undoes a seal they relied on, and an
+// institution will want it held by fewer people. Migration 126 grants all four
+// by CAPABILITY — to whoever already holds the corresponding settings
+// capability — rather than to the role literally named `admin`, which is the
+// #834 hazard (a deployment on a custom administrative role silently losing a
+// capability on upgrade).
+//
+// The close REPORT is gated on read rather than close: seeing what a period
+// still holds is the information somebody needs in order to ask for the close,
+// and looking changes nothing.
+//
+// There is deliberately no DELETE. A period is what records were scoped to;
+// removing one makes every roll-up that named it unreproducible.
+$timeWindowTypesHandler = new \Whity\Api\TimeWindowTypesApiHandler(
+    new \Whity\Core\TimeWindow\WindowTypeRepository($db->getPdo()),
+    $windowTypeRegistry
+);
+$router->register('GET', '/api/time-window-types', [$timeWindowTypesHandler, 'list'], null, null, CorePermissions::TIME_WINDOWS_READ);
+$router->register('GET', '/api/time-window-types/catalog', [$timeWindowTypesHandler, 'catalog'], null, null, CorePermissions::TIME_WINDOWS_READ);
+$router->register('POST', '/api/time-window-types', [$timeWindowTypesHandler, 'create'], null, null, CorePermissions::TIME_WINDOWS_WRITE);
+$router->register('PATCH', '/api/time-window-types/{id:\d+}', [$timeWindowTypesHandler, 'update'], null, null, CorePermissions::TIME_WINDOWS_WRITE);
+$router->register('DELETE', '/api/time-window-types/{id:\d+}', [$timeWindowTypesHandler, 'delete'], null, null, CorePermissions::TIME_WINDOWS_WRITE);
+
+$timeWindowTypeRepository = new \Whity\Core\TimeWindow\WindowTypeRepository($db->getPdo());
+$timeWindowRepository = new \Whity\Core\TimeWindow\TimeWindowRepository($db->getPdo(), $timeWindowTypeRepository);
+$timeWindowsHandler = new \Whity\Api\TimeWindowsApiHandler(
+    $timeWindowRepository,
+    $timeWindowTypeRepository,
+    new \Whity\Core\TimeWindow\WindowCloseReporter($timeWindowRepository, $hookManager)
+);
+$router->register('GET', '/api/time-windows', [$timeWindowsHandler, 'list'], null, null, CorePermissions::TIME_WINDOWS_READ);
+$router->register('POST', '/api/time-windows', [$timeWindowsHandler, 'create'], null, null, CorePermissions::TIME_WINDOWS_WRITE);
+$router->register('GET', '/api/time-windows/{id:\d+}', [$timeWindowsHandler, 'show'], null, null, CorePermissions::TIME_WINDOWS_READ);
+$router->register('PATCH', '/api/time-windows/{id:\d+}', [$timeWindowsHandler, 'update'], null, null, CorePermissions::TIME_WINDOWS_WRITE);
+$router->register('GET', '/api/time-windows/{id:\d+}/close-report', [$timeWindowsHandler, 'closeReport'], null, null, CorePermissions::TIME_WINDOWS_READ);
+$router->register('POST', '/api/time-windows/{id:\d+}/close', [$timeWindowsHandler, 'close'], null, null, CorePermissions::TIME_WINDOWS_CLOSE);
+$router->register('POST', '/api/time-windows/{id:\d+}/reopen', [$timeWindowsHandler, 'reopen'], null, null, CorePermissions::TIME_WINDOWS_REOPEN);
+
+
 // 12b. Register permission delegations API handler (WC-34). Gated on the
 // delegation:manage permission (6th positional arg; requiredRole stays null so
 // RbacMiddleware enforces the permission). The runtime subset-of-own-permissions
@@ -1737,7 +2173,12 @@ $router->register('GET', '/api/me/audit-logs', [$auditLogHandler, 'listOwn'], nu
 // SettingsService and its repositories; the tenant always comes from
 // TenantContext, so a caller can only edit its own tenant's overrides.
 // ($settingsService is constructed once, earlier, near the register handler.)
-$settingsHandler = new \Whity\Api\SettingsApiHandler($settingsService, $roleChecker);
+$settingsHandler = new \Whity\Api\SettingsApiHandler(
+    $settingsService,
+    $roleChecker,
+    // #1044: the settings tab names answer in the caller's language.
+    $serverLabels
+);
 $router->register('GET',   '/api/settings',        [$settingsHandler, 'get'],         null, null, CorePermissions::SETTINGS_READ);
 $router->register('PATCH', '/api/settings',        [$settingsHandler, 'patch'],       null, null, CorePermissions::SETTINGS_WRITE);
 $router->register('GET',   '/api/settings/global', [$settingsHandler, 'getGlobal'],   null, null, CorePermissions::SETTINGS_MANAGE);
@@ -1771,21 +2212,27 @@ $router->register('PUT',   '/api/settings/error-tracking/dsn', [$errorsHandler, 
 // PATCH /api/v1/settings/language — authenticated, updates user's language preference.
 // Language preference is stored per-profile (language_code column) and follows the user across
 // all tenant memberships. NULL = use tenant default, explicit code = user's choice.
-$languageRepository = new \Whity\Core\i18n\LanguageRepository($db->getPdo());
-$translationRepository = new \Whity\Core\i18n\TranslationRepository($db->getPdo());
-$languageRegistry = new \Whity\Core\i18n\LanguageRegistry(
-    $languageRepository,
-    $translationRepository,
-    new \Whity\Core\Tenant\StaticTenantContextAdapter()
-);
-// A missing/unseeded languages table must not take the whole API down: the
-// registry falls back to returning the key itself, so boot failure degrades
-// translation only.
-try {
-    $languageRegistry->boot();
-} catch (\Throwable $e) {
-    error_log("[whity] LanguageRegistry boot failed (continuing untranslated): {$e->getMessage()}");
-}
+// The registry, its repositories and the boot above now live beside the
+// frontend-features handler, which needs the translator built from them and is
+// constructed earlier in this file. Moved rather than duplicated: two registries
+// would mean two caches and two answers about the current language.
+
+// #1044: TELL THE SERVER WHICH LANGUAGE TO ANSWER IN.
+//
+// `LanguageRegistry` has carried a current language since it was written and
+// nothing ever set it — only tests — so `getTranslator()` returned English to
+// every caller in every tenant. Any server-side translation built on it would
+// have looked right in review and changed nothing a user sees.
+//
+// Registered HERE rather than beside the other middlewares because the registry
+// does not exist until this point. `$kernel->use()` order is execution order, so
+// this still runs after tenant isolation has resolved the caller — which it must,
+// since the preference is read from that caller's own profile. The payment wall
+// above is registered late for the same reason and documents the same property.
+$kernel->use(new \Whity\Http\Middleware\ResolveLanguage(
+    new \Whity\Core\i18n\RequestLanguageResolver($db->getPdo(), $languageRegistry, $settingsService),
+    $languageRegistry,
+));
 
 // Registered versioned (bare paths) so the router prepends /v1 itself —
 // writing '/api/v1/...' here would double-prefix to '/api/v1/v1/...'.
@@ -1855,6 +2302,17 @@ $tenantEntitlementsHandler = new \Whity\Api\TenantEntitlementsApiHandler(
     $entitlementService,
     $roleChecker
 );
+// 13a-quater. The FEATURE catalogue (#feature-flags): which major subsystems
+// this build has, and whether each is available to the CALLER'S tenant.
+//
+// Keeps no state. Every answer is composed from the settings switch the
+// subsystem itself reads and, where one is declared, the tenant's entitlement —
+// so a flag can never disagree with the thing it describes. Built after
+// $entitlementService above because it needs it, and PHP does not hoist.
+$featureService = new \Whity\Core\Feature\FeatureService($settingsService, $entitlementService);
+$featuresHandler = new \Whity\Api\FeaturesApiHandler($featureService);
+$router->register('GET', '/api/features', [$featuresHandler, 'list'], null, null, CorePermissions::SETTINGS_READ);
+
 $router->register('GET',   '/api/tenants/{id:\d+}/entitlements', [$tenantEntitlementsHandler, 'get'],   null, null, CorePermissions::ENTITLEMENTS_MANAGE);
 $router->register('PATCH', '/api/tenants/{id:\d+}/entitlements', [$tenantEntitlementsHandler, 'patch'], null, null, CorePermissions::ENTITLEMENTS_MANAGE);
 
@@ -1906,6 +2364,118 @@ $router->register('GET',    '/api/plans/{id:\d+}',              [$plansHandler, 
 $router->register('PATCH',  '/api/plans/{id:\d+}',              [$plansHandler, 'update'],          null, null, CorePermissions::PLANS_MANAGE);
 $router->register('DELETE', '/api/plans/{id:\d+}',              [$plansHandler, 'destroy'],         null, null, CorePermissions::PLANS_MANAGE);
 $router->register('PUT',    '/api/plans/{id:\d+}/entitlements', [$plansHandler, 'setEntitlements'], null, null, CorePermissions::PLANS_MANAGE);
+
+// What each plan COSTS. Same gate as the catalogue above — `plans:manage` AND
+// the system tenant — because a price is a platform-wide commercial fact, and a
+// tenant admin holding the permission through the global admin role would
+// otherwise be able to reprice the product for everybody.
+//
+// DELETE retires rather than destroys: the row is what a past charge was made
+// against, and the partial unique index frees its slot the moment it stops being
+// active.
+$planPricesHandler = new \Whity\Api\PlanPricesApiHandler(
+    new \Whity\Core\Plan\PlanPriceRepository($db->getPdo()),
+    new \Whity\Core\Plan\PlanRepository($db->getPdo()),
+    $roleChecker
+);
+$router->register('GET',    '/api/plans/{id:\d+}/prices',                  [$planPricesHandler, 'list'],   null, null, CorePermissions::PLANS_MANAGE);
+$router->register('POST',   '/api/plans/{id:\d+}/prices',                  [$planPricesHandler, 'create'], null, null, CorePermissions::PLANS_MANAGE);
+$router->register('DELETE', '/api/plans/{id:\d+}/prices/{priceId:\d+}',    [$planPricesHandler, 'retire'], null, null, CorePermissions::PLANS_MANAGE);
+
+// #billing — the payment rails this instance offers.
+//
+// BUILT FROM SETTINGS, NOT FROM ENV, because which rails an instance runs is an
+// operator decision made in the product rather than a deployment decision made
+// in a file. The CliQ webhook secret is the exception: it lives in the
+// encrypted-secret store under a key that is deliberately NOT a SettingsRegistry
+// key, exactly as the SMTP password does, so it can never be read back through
+// GET /settings.
+//
+// A RAIL THAT IS OFF IS NOT REGISTERED AT ALL. The registry's `available()`
+// already filters unconfigured ones, but not registering an rail an operator
+// has switched off means its webhook route answers 404 rather than accepting
+// callbacks for a rail nobody is using.
+$paymentProviders = new \Whity\Core\Payment\PaymentProviderRegistry();
+$globalPaymentSettings = $settingsService->getGlobal();
+
+if (($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ_ENABLED] ?? 'false') === 'true') {
+    $paymentProviders->register(new \Whity\Core\Payment\Cliq\CliqPaymentProvider(
+        (string) ($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ_ALIAS] ?? ''),
+        (string) ($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ_BANK_NAME] ?? ''),
+        (string) ($globalSettingsRepository->get(\Whity\Core\Payment\Cliq\CliqSecrets::WEBHOOK_SECRET_KEY) ?? ''),
+        (string) ($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ_REFERENCE_PREFIX] ?? 'WHT-'),
+    ));
+}
+
+// The fake rail, for a deployment exercising the lifecycle without a bank. OFF
+// by default and global-only: a tenant able to switch on a rail that settles
+// its own invoices for free is the sharpest possible privilege escalation.
+if (($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_MOCK_ENABLED] ?? 'false') === 'true') {
+    $paymentProviders->register(new \Whity\Core\Payment\MockPaymentProvider(
+        (string) ($globalSettingsRepository->get(\Whity\Core\Payment\Cliq\CliqSecrets::MOCK_SECRET_KEY) ?: 'mock-secret')
+    ));
+}
+
+// The card rail is ALWAYS registered and never configured — see
+// CardPaymentProviderAdapter. Registering it keeps the extension point visible
+// (and its refusal testable) without ever offering it to a customer, because
+// `available()` filters on isConfigured().
+$paymentProviders->register(new \Whity\Core\Payment\CardPaymentProviderAdapter());
+
+$invoiceRepository = new \Whity\Core\Billing\InvoiceRepository($db->getPdo());
+$paymentLedger = new \Whity\Core\Payment\PaymentLedger($db->getPdo());
+$paymentReconciler = new \Whity\Core\Billing\PaymentReconciler(
+    $invoiceRepository,
+    $paymentLedger,
+    $db->getPdo()
+);
+$dunningService = new \Whity\Core\Billing\DunningService(
+    $invoiceRepository,
+    $paymentLedger,
+    new \Whity\Core\Subscription\SubscriptionService(
+        new \Whity\Core\Subscription\SubscriptionRepository($db->getPdo()),
+        $settingsService
+    )
+);
+
+// The tenant's own billing. Not the operator's: these are ordinary
+// tenant-scoped permissions, and a tenant sees only its own invoices.
+$billingHandler = new \Whity\Api\BillingApiHandler(
+    $invoiceRepository,
+    $paymentLedger,
+    $paymentReconciler,
+    $paymentProviders,
+    $roleChecker
+);
+$router->register('GET',  '/api/billing/invoices',              [$billingHandler, 'invoices'], null, null, CorePermissions::BILLING_VIEW);
+$router->register('GET',  '/api/billing/invoices/{id:\d+}',     [$billingHandler, 'invoice'],  null, null, CorePermissions::BILLING_VIEW);
+$router->register('GET',  '/api/billing/methods',               [$billingHandler, 'methods'],  null, null, CorePermissions::BILLING_VIEW);
+$router->register('POST', '/api/billing/invoices/{id:\d+}/pay', [$billingHandler, 'pay'],      null, null, CorePermissions::BILLING_PAY);
+
+// UNAUTHENTICATED, NECESSARILY: a bank cannot hold a session. What makes it
+// safe is that verification happens inside translateWebhook() before anything
+// is parsed, and there is no way to obtain events from a payload without it.
+$paymentWebhookHandler = new \Whity\Api\PaymentWebhookApiHandler(
+    $paymentProviders,
+    $paymentReconciler,
+    $dunningService,
+    $logger
+);
+$router->register('POST', '/api/payments/webhook/{provider}', [$paymentWebhookHandler, 'receive'], null);
+
+// Early birds, offers and promo codes — one object, three ways of being found.
+// A promotion carrying a `code` is typed by the customer; one without applies
+// automatically to whoever qualifies, which is the only structural difference
+// between them. Same gate as the catalogue: a tenant admin holding
+// `plans:manage` through the global admin role could otherwise mint themselves
+// a hundred-per-cent discount.
+$promotionsHandler = new \Whity\Api\PromotionsApiHandler(
+    new \Whity\Core\Promotion\PromotionRepository($db->getPdo()),
+    $roleChecker
+);
+$router->register('GET',    '/api/promotions',            [$promotionsHandler, 'list'],   null, null, CorePermissions::PLANS_MANAGE);
+$router->register('POST',   '/api/promotions',            [$promotionsHandler, 'create'], null, null, CorePermissions::PLANS_MANAGE);
+$router->register('DELETE', '/api/promotions/{id:\d+}',   [$promotionsHandler, 'retire'], null, null, CorePermissions::PLANS_MANAGE);
 $router->register('POST',   '/api/tenants/{id:\d+}/plan',       [$plansHandler, 'applyToTenant'],   null, null, CorePermissions::PLANS_MANAGE);
 $router->register('GET',    '/api/tenants/{id:\d+}/plan',       [$plansHandler, 'getTenantPlan'],   null, null, CorePermissions::PLANS_MANAGE);
 
@@ -2011,6 +2581,9 @@ $documentBlocksHandler = new \Whity\Api\DocumentBlocksApiHandler(
 $router->register('GET',    '/api/document-blocks',          [$documentBlocksHandler, 'list'],   null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('POST',   '/api/document-blocks',          [$documentBlocksHandler, 'create'], null, null, CorePermissions::DOCUMENTS_WRITE);
 $router->register('GET',    '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'show'],   null, null, CorePermissions::DOCUMENTS_READ);
+// "What would break if this block changed" — gated documents:read, not :write,
+// because the whole point is to be asked BEFORE deciding to write.
+$router->register('GET',    '/api/document-blocks/{id:\d+}/usage', [$documentBlocksHandler, 'usage'], null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('PATCH',  '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'update'], null, null, CorePermissions::DOCUMENTS_WRITE);
 $router->register('DELETE', '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'delete'], null, null, CorePermissions::DOCUMENTS_WRITE);
 
@@ -2025,6 +2598,39 @@ $router->register('DELETE', '/api/document-blocks/{id:\d+}', [$documentBlocksHan
 // makes the client report itself unusable and every render 503s cleanly rather
 // than calling out with no auth.
 //
+// The FLOWING render mode (#1072) and the SDK seam in front of it.
+//
+// The fixed-canvas renderer above prints one PDF page per designed template
+// page. This one takes a content TREE with no positions and lets the renderer
+// decide how many pages it becomes — which is the only way to produce the
+// document class #1072 is about: a submission of well over a hundred pages
+// carrying a contents list, a list of tables and a list of figures, each entry
+// page-numbered. Those page numbers are a property of the laid-out result, so
+// nothing that assembles a tree can know them.
+//
+// EXPOSED TO PLUGINS, for the reason recorded above the artifact store: the SDK
+// had no rendering surface of any kind, so a plugin holding structured content
+// either shipped JSON and asked someone to print a web page or built its own
+// renderer. Registered under the SDK INTERFACE, so a plugin type-hints the
+// contract and never a core class — which is also what lets the host swap what
+// is behind it.
+//
+// The seam takes no tenant argument by design: SdkDocumentRenderer reads the
+// tenant and actor from the host's own request-scoped context, so a plugin
+// cannot render for a tenant other than the one whose request it is inside.
+// The renderer is built HERE, beside the other document services it belongs
+// with; the SEAM that exposes it to plugins is registered further down, after
+// $documentQrService exists — a plugin-issued document carries the same
+// verification code a person-issued one does, and PHP does not hoist.
+$flowDocumentRenderer = new \Whity\Core\Document\Render\FlowDocumentRenderer(
+    $settingsService,
+    new \Whity\Core\Document\Render\RenderServiceClient(
+        (string) ($_ENV['RENDER_SERVICE_URL'] ?? 'http://render:8130'),
+        (string) ($_ENV['RENDER_SHARED_SECRET'] ?? ''),
+        (int) ($_ENV['RENDER_TIMEOUT_SECONDS'] ?? 30)
+    )
+);
+
 // #947 item 1 split the render MECHANICS out into DocumentRenderer (ceilings,
 // dataRows normalisation, blockInstance resolution, the internal call) so the
 // re-render route below runs the same code rather than a second copy of it, and
@@ -2036,7 +2642,11 @@ $documentRenderer = new \Whity\Core\Document\Render\DocumentRenderer(
         (string) ($_ENV['RENDER_SERVICE_URL'] ?? 'http://render:8130'),
         (string) ($_ENV['RENDER_SHARED_SECRET'] ?? ''),
         (int) ($_ENV['RENDER_TIMEOUT_SECONDS'] ?? 30)
-    )
+    ),
+    // #1186: a template in DOCUMENT MODE goes to the flowing renderer instead.
+    // Built above rather than below for this line — PHP does not hoist, and
+    // without it a flow document silently printed its unused canvas pages.
+    $flowDocumentRenderer
 );
 $documentRepository = new \Whity\Core\Document\DocumentRepository($db->getPdo());
 $documentArtifactRepository = new \Whity\Core\Document\DocumentArtifactRepository($db->getPdo());
@@ -2044,6 +2654,19 @@ $documentArtifactRepository = new \Whity\Core\Document\DocumentArtifactRepositor
 // an entitled tenant's documents land in its own bucket, everyone else's on the
 // platform default, and there is exactly one storage story to keep correct.
 $documentArtifactStore = new \Whity\Core\Document\DocumentArtifactStore($storageDriver);
+// EXPOSED TO PLUGINS, and the reason is a defect visible in this repository
+// own consumers. Storing a file is a platform concern: it has to honour the
+// per-tenant routing above, the immutability rule the store enforces, and the
+// content-type-at-write-time constraint that no read-time lookup can repair.
+// None of that was reachable from a plugin, so a plugin needing to keep an
+// uploaded file did the only thing left to it and shipped its OWN storage
+// client, reading its own environment variables and bypassing per-tenant
+// storage configuration entirely. That is not a plugin author mistake; it is
+// what a missing seam produces. Registering these under their class names
+// makes the platform's storage the path of least resistance again.
+\Whity\register_service(\Whity\Core\Document\DocumentArtifactStore::class, $documentArtifactStore); // @phpstan-ignore-line
+\Whity\register_service(\Whity\Core\Document\DocumentArtifactRepository::class, $documentArtifactRepository); // @phpstan-ignore-line
+\Whity\register_service(\Whity\Storage\StorageDriverInterface::class, $storageDriver); // @phpstan-ignore-line
 $documentIssuer = new \Whity\Core\Document\DocumentIssuer(
     $db->getPdo(),
     $documentRepository,
@@ -2083,6 +2706,10 @@ $routeRepository = new \Whity\Core\Document\Routing\RouteRepository($db->getPdo(
 $routeStepRepository = new \Whity\Core\Document\Routing\RouteStepRepository($db->getPdo());
 $routeEventRepository = new \Whity\Core\Document\Routing\RouteEventRepository($db->getPdo());
 $routeRecipientRepository = new \Whity\Core\Document\Routing\RouteRecipientRepository($db->getPdo());
+// #1014 — the verdict edges. Shared by the engine (which reads one edge per
+// decided act) and the handler (which lists a route's whole graph back to an
+// editor), for the same reason the recipient repository is shared above.
+$routeEdgeRepository = new \Whity\Core\Document\Routing\RouteEdgeRepository($db->getPdo());
 
 // Resource-scoped role grants. Built HERE rather than inline at the grants
 // handler further down (and now above the DESIGNER handlers too, because the
@@ -2151,6 +2778,102 @@ $documentViews = new \Whity\Core\Document\Organizer\DocumentViewRegistry($docume
 
 $documentCollectionRepository = new \Whity\Core\Document\DocumentCollectionRepository($db->getPdo());
 
+// 13a-nonies-quinquies. QR VERIFICATION ON DOCUMENTS (#1036). A code printed on
+// a document that anybody can scan to confirm it is genuine, and that a
+// signed-in reader with reach can follow through to the record.
+//
+// THE CONSTRAINT THIS WIRING EXISTS UNDER: the token IDENTIFIES a document and
+// must never AUTHORISE access to one. Note what is NOT passed to
+// DocumentQrService — no RoleChecker, no DocumentVisibilityPolicy, no permission
+// resolver of any kind. It has no collaborator that could answer an
+// authorization question, which is the structural half of the guarantee; the
+// other half is that the one route which turns a token into a record id
+// (`/api/documents/by-verification/{token}`) runs the UNCHANGED visibility
+// policy and answers 404 exactly as the id route does.
+//
+// The public base URL is the instance's own address (APP_URL, already trimmed
+// into $appUrl further up). An instance that has never been told its address
+// cannot mint at all — DocumentQrService::isConfigured() is false, minting
+// returns null, and the record panel reports `configured: false` — rather than
+// encoding a relative path into a QR that nothing can follow.
+$documentQrTokenRepository = new \Whity\Core\Document\Qr\DocumentQrTokenRepository($db->getPdo());
+$documentQrScanRepository = new \Whity\Core\Document\Qr\DocumentQrScanRepository($db->getPdo());
+$documentQrService = new \Whity\Core\Document\Qr\DocumentQrService(
+    $db->getPdo(),
+    $documentQrTokenRepository,
+    $documentQrScanRepository,
+    $appUrl
+);
+
+// THE SDK RENDERING SEAM (#1072), registered here rather than beside
+// $flowDocumentRenderer above because it needs $documentQrService and PHP does
+// not hoist — a use-before-definition here is a boot-time fatal on every
+// request, not a test failure.
+//
+// Registered under the SDK INTERFACE so a plugin type-hints the contract and
+// never a core class, which is also what the SDK's own contract test requires:
+// SDK sources may not reference a core namespace at all.
+//
+// It takes NO tenant argument by design. SdkDocumentRenderer reads the tenant
+// and the actor from the host's request-scoped context, so a plugin cannot
+// render for a tenant other than the one whose request it is inside — the
+// failure where a document is built from one tenant's content and filed in
+// another's storage has no expression in the API.
+//
+// The QR service is passed for the same reason the artifact store is shared: a
+// document a plugin issues must be verifiable exactly as one a person issues,
+// and the code is minted BY THE PLATFORM against a real document id. The SDK's
+// FlowDocument offers no way to author one, so a plugin cannot print a document
+// that looks verified and resolves to nothing.
+$sdkDocumentRenderer = new \Whity\Core\Document\Render\SdkDocumentRenderer(
+    $flowDocumentRenderer,
+    $documentIssuer,
+    $settingsService,
+    $documentQrService
+);
+\Whity\register_service(
+    \Whity\Sdk\Render\DocumentRenderer::class, // @phpstan-ignore-line
+    $sdkDocumentRenderer
+);
+
+// 13a-nonies-ter. TABULAR REPORTS (#947 item 6) — the last piece of that epic,
+// and the first production caller of the flowing renderer above.
+//
+// A source returns ROWS, never SQL. That is the same refusal DocumentCriteria
+// makes and for the same reason: `ci-tenant-predicate-guard.php` proves tenant
+// isolation by reading LITERAL SQL out of the source, so a statement core
+// assembled from a declaration is exactly the one CI cannot police. Each source
+// therefore runs its own query, in its own file, with its own visible tenant
+// predicate — and core's first source writes no new SQL at all, going through
+// DocumentCriteria and DocumentRepository so a report shows precisely the rows
+// the caller's own document list would.
+//
+// There is no `reports:run` permission. Each source names the EXISTING
+// permission that already governs reading its data, and the route adds
+// documents:render on top — because producing a report spends a
+// headless-browser page and writes to the tenant's storage, which is the same
+// capability the render endpoint requires.
+$reportSourceRegistry = new \Whity\Core\Report\ReportSourceRegistry();
+$reportSourceRegistry->registerCoreSource(
+    \Whity\Core\Report\ReportSourceRegistry::CORE_DOCUMENTS,
+    new \Whity\Core\Report\DocumentsReportSource(
+        $documentRepository,
+        $documentVisibilityPolicy,
+        $serverLabels
+    )
+);
+\Whity\register_service(\Whity\Core\Report\ReportSourceRegistry::class, $reportSourceRegistry); // @phpstan-ignore-line
+$reportsHandler = new \Whity\Api\ReportsApiHandler(
+    $reportSourceRegistry,
+    new \Whity\Core\Report\ReportAssembler($sdkDocumentRenderer, $serverLabels),
+    $roleChecker,
+    $settingsService,
+    $ouReachResolver,
+    $languageRegistry
+);
+$router->register('GET',  '/api/reports',                            [$reportsHandler, 'index'],    null, null, CorePermissions::DOCUMENTS_RENDER);
+$router->register('POST', '/api/reports/{source:[a-z][a-z0-9_]*}/document', [$reportsHandler, 'document'], null, null, CorePermissions::DOCUMENTS_RENDER);
+
 $documentsHandler = new \Whity\Api\DocumentsApiHandler(
     $documentRepository,
     $documentArtifactRepository,
@@ -2189,18 +2912,92 @@ $documentsHandler = new \Whity\Api\DocumentsApiHandler(
     // rule could be spelled, and migration 112's partial unique index is the
     // only definition of open there should ever be.
     $routeEventRepository,
-    $routeRecipientRepository
+    $routeRecipientRepository,
+    // #1036: minting the verification code at CREATE time, before the render, so
+    // the first artifact can carry it — which is only possible because create()
+    // commits the record first. Also the `qr` record-page region's predicate.
+    $documentQrService
 );
+$documentQrHandler = new \Whity\Api\DocumentQrApiHandler(
+    $documentRepository,
+    $documentTemplateRepository,
+    $documentVisibilityPolicy,
+    $documentQrService,
+    $documentQrScanRepository,
+    $roleChecker,
+    $settingsService
+);
+$documentVerificationHandler = new \Whity\Api\DocumentVerificationApiHandler(
+    $documentQrService,
+    $documentRepository,
+    $routeEventRepository,
+    $settingsService,
+    new DatabaseSharedStore($db->getPdo())
+);
+
 // `/api/documents/views` is registered BEFORE the `{id:\d+}` routes and cannot
 // collide with them: the id constraint is digits-only, so `views` was never a
 // candidate match. Spelling that out because the reverse order would look
 // equally fine and would be a bug the day the constraint is loosened.
 $router->register('GET',  '/api/documents/views',                                      [$documentsHandler, 'views'],           null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/documents',                                            [$documentsHandler, 'list'],            null, null, CorePermissions::DOCUMENTS_READ);
+// CREATING a document: gated on DOCUMENTS_RENDER, and deliberately not on a new
+// slug of its own. Migration 113 already settled who may bring a document into
+// existence when it chose the audience for `documents:route` — "`documents:render`
+// is what gates `persist: true` on the render routes, so a role holding it is
+// precisely a role that can bring a document into existence". A `documents:create`
+// minted here would be a second answer to that question and, on every install
+// that already exists, a permission NOBODY HOLDS: the route would 403 for the
+// admin role, the demo dean and the registry officer alike until somebody wrote
+// a grant migration. The slug chosen is one the seeded `admin` role holds
+// (migration 060) and one four of the five demo roles hold, so the gate is a
+// gate rather than a lockout.
+//
+// Note this route does NOT require the render TIER to be running — the
+// permission and the `documents.render_enabled` setting answer different
+// questions, and the handler renders opportunistically. See
+// DocumentsApiHandler::create().
+$router->register('POST', '/api/documents',                                            [$documentsHandler, 'create'],          null, null, CorePermissions::DOCUMENTS_RENDER);
 $router->register('GET',  '/api/documents/{id:\d+}',                                   [$documentsHandler, 'show'],            null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/documents/{id:\d+}/content',                           [$documentsHandler, 'content'],         null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/documents/{id:\d+}/artifacts/{artifactId:\d+}/content', [$documentsHandler, 'artifactContent'], null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('POST', '/api/documents/{id:\d+}/render',                            [$documentsHandler, 'rerender'],        null, null, CorePermissions::DOCUMENTS_RENDER);
+
+// #1036: the document's verification code.
+//
+// `by-verification` cannot collide with the `{id:\d+}` routes above: the id
+// constraint is digits-only, so this literal segment was never a candidate
+// match — the same reasoning `/api/documents/views` carries, spelled out
+// because the order below would look wrong without it. It is the SCAN-THROUGH: a signed-in person scans a printed
+// document and this turns the code into the record id their browser navigates
+// to. Gated on DOCUMENTS_READ like every other document read, and the handler
+// then runs the UNCHANGED DocumentVisibilityPolicy, so a caller without reach
+// gets the same 404 the id route gives them. Holding the paper is not reach.
+$router->register('GET',    '/api/documents/by-verification/{token}',                  [$documentQrHandler, 'resolveToken'], null, null, CorePermissions::DOCUMENTS_READ);
+// The record page's panel: the live code, its URL (so the client draws the
+// symbol with the barcode renderer already in @amroksaleh/ui) and the scan
+// trail. Read gate matches the region's declaration in
+// DocumentsApiHandler::recordSections() — #975's rule that a region's dedicated
+// route carries the same gate as the region.
+$router->register('GET',    '/api/documents/{id:\d+}/qr',                              [$documentQrHandler, 'show'],   null, null, CorePermissions::DOCUMENTS_READ);
+// Rotating and withdrawing are gated on DOCUMENTS_RENDER — the slug that
+// already means "may change what this document's paper says", held by the
+// seeded admin role and four of the five demo roles, so the gate is a gate
+// rather than a lockout (the same argument POST /api/documents makes above).
+$router->register('POST',   '/api/documents/{id:\d+}/qr',                              [$documentQrHandler, 'mint'],   null, null, CorePermissions::DOCUMENTS_RENDER);
+$router->register('DELETE', '/api/documents/{id:\d+}/qr',                              [$documentQrHandler, 'revoke'], null, null, CorePermissions::DOCUMENTS_RENDER);
+
+// THE PUBLIC END. Unauthenticated by construction — a courier holding a printed
+// decision has no session, and the whole point is that they do not need one. It
+// is GET-only (so CsrfGuard, which exempts reads, needs no accommodation and is
+// not weakened), it is throttled per IP inside the handler BEFORE the token is
+// examined, and it sits on EnforceTenantIsolation's public-path list as an
+// ANCHORED PATTERN rather than an open prefix.
+//
+// It cannot return a document id, a title, any content, or any person's or
+// unit's name — see DocumentVerificationApiHandler and VerificationPresenter for
+// what it discloses and why each field earns its place.
+$router->register('GET', '/api/document-verifications/{token}', [$documentVerificationHandler, 'verify'], null);
 
 // 13a-nonies-ter. DOCUMENT ROUTING (#947 item 3) — routes, ordered steps, the
 // append-only trail, and recipients as the inbox.
@@ -2221,26 +3018,63 @@ $documentRouter = new \Whity\Core\Document\Routing\DocumentRouter(
     $routeStepRepository,
     $routeEventRepository,
     $routeRecipientRepository,
+    $routeEdgeRepository,
     $routingRuleRegistry,
     $settingsService,
     $hookManager
 );
+// #1031. The route-TEMPLATE store, constructed here rather than beside the
+// templates handler below because BOTH need it: designing a flow and applying one
+// read the same three tables, and a second instance would be a second connection
+// to the same rows for no benefit. The templates handler further down reuses this
+// object.
+$routeTemplateRepository = new \Whity\Core\Document\RouteTemplate\RouteTemplateRepository($db->getPdo());
 $documentRoutingHandler = new \Whity\Api\DocumentRoutingApiHandler(
     $documentRepository,
     $routeRepository,
     $routeStepRepository,
     $routeEventRepository,
     $routeRecipientRepository,
+    $routeEdgeRepository,
     $documentRouter,
     $routingRuleRegistry,
     $documentVisibilityPolicy,
-    $roleChecker
+    $roleChecker,
+    $routeTemplateRepository,
+    $serverLabels
 );
 $router->register('GET',  '/api/routing-rules',                                        [$documentRoutingHandler, 'rules'],      null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('POST', '/api/documents/{id:\d+}/routes',                            [$documentRoutingHandler, 'create'],     null, null, CorePermissions::DOCUMENTS_ROUTE);
-$router->register('GET',  '/api/documents/{id:\d+}/routes',                            [$documentRoutingHandler, 'list'],       null, null, CorePermissions::DOCUMENTS_READ);
-$router->register('GET',  '/api/documents/{id:\d+}/trail',                             [$documentRoutingHandler, 'trail'],      null, null, CorePermissions::DOCUMENTS_READ);
-$router->register('GET',  '/api/documents/{id:\d+}/recipients',                        [$documentRoutingHandler, 'recipients'], null, null, CorePermissions::DOCUMENTS_READ);
+// #1031. Applying a DESIGN. Registered before the `{routeId:\d+}` action route
+// below purely for readability - `from-template` is not a number and could never
+// match it - and gated on `documents:route` because issuing a circulation is the
+// act. The handler additionally requires `route_templates:read`, since the reply
+// contains every stage of somebody's design and the router carries one permission
+// per route; migration 120 grants that slug to this same audience.
+$router->register('POST', '/api/documents/{id:\d+}/routes/from-template',              [$documentRoutingHandler, 'createFromTemplate'], null, null, CorePermissions::DOCUMENTS_ROUTE);
+// The three READ routes of a circulation, deliberately UNPERMISSIONED for the
+// same reason the action POST below is (#1001).
+//
+// They were gated on `documents:read` while acting was gated on nothing, so the
+// recipient the unpermissioned POST exists to serve could act on a document and
+// could not SEE that anything awaited them — no list of routes, no recipient
+// rows, no trail to confirm their action landed. They could act blindly given an
+// id from somewhere else, which is not a workflow. Reachability and authority
+// had been decided independently: the write path was reasoned about and the
+// read paths inherited a default.
+//
+// This does NOT widen who can read a circulation. Every one of these handlers
+// already resolves the document through
+// `DocumentRoutingApiHandler::resolveVisibleDocument()`, which applies
+// `DocumentVisibilityPolicy::canView()` — you raised it, OR you hold
+// `documents:read:all`, OR a route reached you, OR a role was granted to you on
+// it — and 404s otherwise. That predicate is STRICTLY STRONGER than the gate
+// being removed: `documents:read` alone never satisfied it (see migration 109 —
+// it means "may use the designer" and is held broadly). So a caller who could
+// reach these before still can, and a recipient who could not now can.
+$router->register('GET',  '/api/documents/{id:\d+}/routes',                            [$documentRoutingHandler, 'list'],       null);
+$router->register('GET',  '/api/documents/{id:\d+}/trail',                             [$documentRoutingHandler, 'trail'],      null);
+$router->register('GET',  '/api/documents/{id:\d+}/recipients',                        [$documentRoutingHandler, 'recipients'], null);
 // Deliberately UNPERMISSIONED (null, null): being a recipient IS the
 // authorization — the route named a rule, the rule resolved to you, and the
 // engine wrote the row. Requiring a permission on top would let a route resolve
@@ -2281,6 +3115,7 @@ $userGroupsHandler = new \Whity\Api\UserGroupsApiHandler(
     $routingRuleRegistry,
     $settingsService,
     $roleChecker,
+    $serverLabels,
     // Only the DELETE is audited, and only because its consequence surfaces
     // later and elsewhere — see the handler's `destroy()`.
     $auditLogger
@@ -2293,6 +3128,269 @@ $router->register('GET',    '/api/user-groups/{id:\d+}/preview',   [$userGroupsH
 $router->register('GET',    '/api/user-groups/{id:\d+}',           [$userGroupsHandler, 'show'],          null, null, CorePermissions::GROUPS_READ);
 $router->register('PATCH',  '/api/user-groups/{id:\d+}',           [$userGroupsHandler, 'update'],        null, null, CorePermissions::GROUPS_WRITE);
 $router->register('DELETE', '/api/user-groups/{id:\d+}',           [$userGroupsHandler, 'destroy'],       null, null, CorePermissions::GROUPS_WRITE);
+
+// 13a-nonies-quinquies. DOCUMENT ROUTE TEMPLATES (#1027) — the reusable,
+// BRANCHING flow designs the node-based editor edits. Migration 112 named this
+// seam ("a `document_route_templates` / `document_route_template_steps` pair")
+// and migration 120 takes it.
+//
+// A template is to a route what `document_templates` is to `documents`: the
+// thing DESIGNED, with a different lifetime from the thing that HAPPENED. The
+// append-only trail hangs off the second and cannot be reached from here at all.
+//
+// Three things about this surface are deliberate:
+//
+//  - THE GRAPH HAS ITS OWN VERB. `PATCH /{id}` renames; `PUT /{id}/graph`
+//    replaces the canvas. They are different acts by different people at
+//    different moments, and folding them would make every rename send the whole
+//    graph back — with an omitted `steps` indistinguishable from an author who
+//    meant to clear it.
+//
+//  - THERE IS NO PREVIEW ROUTE. "How many people does this node reach?" is
+//    already answered exactly by `POST /api/user-groups/preview` (#1003), which
+//    the editor calls per node. A second one here would be a second
+//    implementation of the resolver's semantics, free to drift.
+//
+//  - NOTHING INSTANTIATES A TEMPLATE ONTO A DOCUMENT. That needs the engine to
+//    follow verdict edges (#1014), and a route that "applied" a branching design
+//    today would flatten it into a linear one — silently doing less than the
+//    canvas draws, which is the failure this whole subsystem is written against.
+//    Filed, with migration 112's own seam (`template_id` + a `template_name`
+//    snapshot on `document_routes`), rather than half-built.
+//
+// Reading a design and DESIGNING one are separate permissions on purpose: a
+// clerk who may send a form onward should not thereby be able to rewrite where
+// every form goes. `/graph` is registered before `/{id}` for the same reason
+// `/preview` is above — the router matches in registration order.
+// $routeTemplateRepository is constructed above, beside the routing handler that
+// also needs it (#1031).
+$routeTemplateGraph = new \Whity\Core\Document\RouteTemplate\RouteTemplateGraph($routingRuleRegistry);
+$routeTemplatesHandler = new \Whity\Api\DocumentRouteTemplatesApiHandler(
+    $routeTemplateRepository,
+    $routeTemplateGraph,
+    $settingsService
+);
+$router->register('GET',    '/api/document-route-templates',                  [$routeTemplatesHandler, 'index'],         null, null, CorePermissions::ROUTE_TEMPLATES_READ);
+$router->register('POST',   '/api/document-route-templates',                  [$routeTemplatesHandler, 'create'],        null, null, CorePermissions::ROUTE_TEMPLATES_WRITE);
+$router->register('PUT',    '/api/document-route-templates/{id:\d+}/graph',   [$routeTemplatesHandler, 'replaceGraph'],  null, null, CorePermissions::ROUTE_TEMPLATES_WRITE);
+$router->register('GET',    '/api/document-route-templates/{id:\d+}',         [$routeTemplatesHandler, 'show'],          null, null, CorePermissions::ROUTE_TEMPLATES_READ);
+$router->register('PATCH',  '/api/document-route-templates/{id:\d+}',         [$routeTemplatesHandler, 'update'],        null, null, CorePermissions::ROUTE_TEMPLATES_WRITE);
+$router->register('DELETE', '/api/document-route-templates/{id:\d+}',         [$routeTemplatesHandler, 'destroy'],       null, null, CorePermissions::ROUTE_TEMPLATES_WRITE);
+
+// 13a-nonies-sexies. FORMS (migrations 127/128) — tenant-authored forms, the
+// fields that compose them, and the submissions people make against them.
+//
+// WIRED HERE, AFTER ROUTING AND ROUTE TEMPLATES, AND THE PLACEMENT IS LOAD-
+// BEARING: SubmissionIssuer takes $documentIssuer, $routeTemplateRepository and
+// $documentRouter, all of which are constructed above. Registering this block
+// with the other tenant-configuration subsystems higher up would reference three
+// undefined variables — which passes lint, passes PHPStan, and 500s every
+// request at worker boot.
+//
+// THE POINT OF THE SUBSYSTEM IS THE HANDOFF, NOT THE TABLES. On submit, a
+// submission becomes a core DOCUMENT (DocumentIssuer::raise) and, when the form
+// names a route template, that document is circulated through the EXISTING
+// routing engine — so a submission inherits approvals, the inbox, QR
+// verification, artifacts and row-level visibility without one line of new
+// routing logic. SubmissionIssuer is where the two subsystems meet, and it uses
+// the same RouteTemplateInstantiation converter DocumentRoutingApiHandler uses
+// rather than a second one.
+//
+// THREE gates, not the usual read/write pair, because there are three audiences
+// and two of them barely overlap: AUTHORING a form is organisational policy
+// (`forms:manage`), FILLING ONE IN is the everyday act of the largest audience
+// in the tenant (`forms:submit`), and READING what came back is a third job done
+// by approvers (`forms:read`). Migration 128 grants all three by CAPABILITY —
+// to whoever already holds `roles:write` or `documents:read` — rather than to
+// the role literally named `admin`, which is the #834 hazard.
+//
+// RENDER is gated on `forms:submit`, not `forms:read`: its response carries the
+// CALLER'S OWN prefilled details, so the catalogue-reading audience has no
+// business receiving it and the far larger fill-it-in audience must not be
+// denied it.
+//
+// GET /api/form-fields is the one FLAT route, and it is a read. A master-detail
+// `selector` publishes into a data-bound block's `params`, which append QUERY
+// params to a fixed source and cannot fill a PATH segment — so the builder's
+// field table needs `?form_id=`. Every WRITE stays nested under the form, which
+// is what makes `DELETE /api/forms/7/fields/42` refuse when field 42 belongs to
+// form 9. See FormFieldsApiHandler for why the asymmetry is not a hole.
+//
+// There is deliberately no DELETE for a form and none for a submission. A form
+// is what somebody's submission was an answer TO, and a submission is what
+// somebody declared under their own name while other people acted on it.
+// Archiving replaces the first; submitting again replaces the second.
+$formRepository = new \Whity\Core\Form\FormRepository($db->getPdo());
+$formFieldRepository = new \Whity\Core\Form\FormFieldRepository($db->getPdo());
+$formSubmissionRepository = new \Whity\Core\Form\FormSubmissionRepository($db->getPdo());
+$formRenderer = new \Whity\Core\Form\FormRenderer(
+    $formFieldRepository,
+    new \Whity\Core\Form\PrefillResolver($db->getPdo())
+);
+
+// The link service (migration 132). $appUrl is the instance's own public origin,
+// trimmed further up — the same value DocumentQrService is given, so a public
+// form link and a QR verification link cannot disagree about where this
+// deployment lives. An instance that has never been told its address still MINTS
+// (the slug is what makes the endpoint reachable); it simply returns a null
+// `public_url` until somebody sets APP_URL, rather than emitting a relative path
+// nobody can put on a poster.
+$publicFormLink = new \Whity\Core\Form\PublicFormLink($appUrl);
+
+// FILE ATTACHMENTS (migration 134). The staging record for a file uploaded
+// against a `file` field, plus the store that writes the bytes.
+//
+// $storageDriver is the SAME per-tenant routing driver branding and document
+// artifacts use — built once in 13a-storage above and handed here rather than
+// rebuilt, because two drivers built from the same settings is the split-backend
+// hazard StorageDriverFactory's own docblock warns about. There is deliberately
+// no storage client anywhere in the forms subsystem.
+//
+// $formUploadRepository is shared by the STORE (which records an upload) and by
+// SubmissionIssuer (which spends one). It has to be the same table and the same
+// statements: the claim is what makes a storage key not a capability, and a
+// second access path is a second place for that check to be got wrong.
+$formUploadRepository = new \Whity\Core\Form\FormUploadRepository($db->getPdo());
+$formUploadStore = new \Whity\Core\Form\FormUploadStore($storageDriver, $formUploadRepository);
+
+$formsHandler = new \Whity\Api\FormsApiHandler(
+    $formRepository,
+    $formFieldRepository,
+    $formRenderer,
+    $formSubmissionRepository,
+    $publicFormLink
+);
+$router->register('GET', '/api/forms', [$formsHandler, 'list'], null, null, CorePermissions::FORMS_READ);
+$router->register('POST', '/api/forms', [$formsHandler, 'create'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('GET', '/api/forms/{id:\d+}', [$formsHandler, 'show'], null, null, CorePermissions::FORMS_READ);
+$router->register('PATCH', '/api/forms/{id:\d+}', [$formsHandler, 'update'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('POST', '/api/forms/{id:\d+}/publish', [$formsHandler, 'publish'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('POST', '/api/forms/{id:\d+}/archive', [$formsHandler, 'archive'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('GET', '/api/forms/{id:\d+}/render', [$formsHandler, 'render'], null, null, CorePermissions::FORMS_SUBMIT);
+// Opening and closing the PUBLIC LINK (migration 132). Ordinary tenant-scoped
+// routes gated on `forms:manage` — the authoring permission, because opening a
+// form to the entire internet is an act of organisational policy and the single
+// most consequential thing that permission does. They are POST/DELETE on a
+// sub-resource rather than a `public_enabled` key on PATCH, for the same reason
+// publish and archive are endpoints: it must not be one stray key away from a
+// body that meant to fix a typo, and the audit must read it as an act.
+$router->register('POST', '/api/forms/{id:\d+}/public-link', [$formsHandler, 'enablePublicLink'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('DELETE', '/api/forms/{id:\d+}/public-link', [$formsHandler, 'disablePublicLink'], null, null, CorePermissions::FORMS_MANAGE);
+
+$formFieldsHandler = new \Whity\Api\FormFieldsApiHandler($formRepository, $formFieldRepository);
+$router->register('GET', '/api/form-fields', [$formFieldsHandler, 'listByQuery'], null, null, CorePermissions::FORMS_READ);
+$router->register('GET', '/api/forms/{id:\d+}/fields', [$formFieldsHandler, 'list'], null, null, CorePermissions::FORMS_READ);
+$router->register('POST', '/api/forms/{id:\d+}/fields', [$formFieldsHandler, 'create'], null, null, CorePermissions::FORMS_MANAGE);
+// The whole set at once, for an editor that composes a form as one act
+// rather than as a sequence of single-field calls it must sequence itself.
+$router->register('PUT', '/api/forms/{id:\d+}/fields', [$formFieldsHandler, 'replace'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('PATCH', '/api/forms/{id:\d+}/fields/{fieldId:\d+}', [$formFieldsHandler, 'update'], null, null, CorePermissions::FORMS_MANAGE);
+$router->register('DELETE', '/api/forms/{id:\d+}/fields/{fieldId:\d+}', [$formFieldsHandler, 'delete'], null, null, CorePermissions::FORMS_MANAGE);
+
+// ATTACHING A FILE (migration 134). Gated `forms:submit` — the SAME permission
+// as the submit itself, because uploading is half of answering: a grant of one
+// without the other produces a person who can submit a form they cannot
+// complete. MULTIPART rather than base64 JSON; FormUploadsApiHandler's docblock
+// argues the trade (a 9 MB paper is a 12 MB base64 body held as two live strings
+// against a 128 MB memory_limit, times eight workers).
+//
+// Registered ABOVE the submit route it feeds, in the order a client uses them.
+$formUploadsHandler = new \Whity\Api\FormUploadsApiHandler(
+    $formRepository,
+    $formFieldRepository,
+    $formUploadStore,
+    new DatabaseSharedStore($db->getPdo())
+);
+$router->register('POST', '/api/forms/{id:\d+}/uploads', [$formUploadsHandler, 'upload'], null, null, CorePermissions::FORMS_SUBMIT);
+
+$formSubmissionsHandler = new \Whity\Api\FormSubmissionsApiHandler(
+    $formRepository,
+    $formFieldRepository,
+    $formSubmissionRepository,
+    new \Whity\Core\Form\SubmissionIssuer(
+        $db->getPdo(),
+        $formSubmissionRepository,
+        $documentIssuer,
+        $routeTemplateRepository,
+        $documentRouter,
+        // The two collaborators that turn a `file` answer into evidence: the
+        // upload repository CLAIMS the staged upload (the check that stops a key
+        // from another tenant becoming an artifact on this one), and the artifact
+        // repository records the row that makes the bytes reachable through the
+        // ordinary document-artifact download route.
+        $formUploadRepository,
+        $documentArtifactRepository
+    )
+);
+$router->register('POST', '/api/forms/{id:\d+}/submissions', [$formSubmissionsHandler, 'submit'], null, null, CorePermissions::FORMS_SUBMIT);
+$router->register('GET', '/api/form-submissions', [$formSubmissionsHandler, 'list'], null, null, CorePermissions::FORMS_READ);
+$router->register('GET', '/api/form-submissions/{id:\d+}', [$formSubmissionsHandler, 'show'], null, null, CorePermissions::FORMS_READ);
+// Only ever the caller's own rows — the ROUTE decides whose, not a query param,
+// so no client can widen it. `forms:submit` rather than `forms:read`: the rows
+// already name exactly one person, so a tenant-wide permission has nothing left
+// to decide (migration 113's "being a recipient IS the authorization").
+$router->register('GET', '/api/me/form-submissions', [$formSubmissionsHandler, 'listMine'], null, null, CorePermissions::FORMS_SUBMIT);
+
+// THE PUBLIC END (migration 132). Unauthenticated by construction — the person
+// filling in an external application has no account and the whole point is that
+// they do not need one.
+//
+// Registered with NO permission and NO role, which in this router means
+// "unprotected" (RbacMiddleware fails open on a route with neither). That is
+// only half the story and the other half is NOT here: a route the router leaves
+// unprotected is still refused with a 401 by EnforceTenantIsolation unless the
+// path is on its public list, so these two paths are added there as ANCHORED
+// PATTERNS — never an open `/api/v1/public/` prefix, which would make the next
+// route anybody adds beneath it public by default. That is the lesson
+// `/api/v1/translations/` records in that file, and this is the surface where
+// the mistake would be worst.
+//
+// A separate handler from FormsApiHandler on purpose: this one is constructed
+// with no RoleChecker, no visibility policy and no permission resolver of any
+// kind, and it holds NOTHING that can change a form's state. The structural half
+// of "an anonymous caller cannot open, close, edit or publish a form" is that
+// the class reachable without a session has no collaborator that could.
+//
+// The SAME SubmissionIssuer the authenticated path uses, not a reduced copy: a
+// public submission becomes a document and circulates through the existing
+// routing engine exactly as an internal one does. The caller cannot choose the
+// route template — it lives on the FORM, set only by `forms:manage` — so there
+// is no arbitrary flow for an unauthenticated caller to inject work into. See
+// PublicFormsApiHandler's docblock, point 6.
+$publicFormsHandler = new \Whity\Api\PublicFormsApiHandler(
+    $formRepository,
+    $formFieldRepository,
+    new \Whity\Core\Form\SubmissionIssuer(
+        $db->getPdo(),
+        $formSubmissionRepository,
+        $documentIssuer,
+        $routeTemplateRepository,
+        $documentRouter,
+        $formUploadRepository,
+        $documentArtifactRepository
+    ),
+    new DatabaseSharedStore($db->getPdo()),
+    // The SAME store the authenticated path uses. An anonymous upload differs
+    // only in its ceiling, its throttle and its null uploader — none of which is
+    // a reason for a second storage path.
+    $formUploadStore
+);
+$router->register('GET', '/api/public/forms/{slug}', [$publicFormsHandler, 'render'], null);
+// AN ANONYMOUS UPLOAD (migration 134). `file` fields used to be stripped from
+// the public surface on the grounds that every upload route was gated, so a
+// stranger could not produce a reference — true about the platform, not about
+// the field. A file input asks the tenant's data NOTHING, so unlike the person
+// and unit pickers beside it, it is not an oracle. This route is what removed
+// the premise; PublicFormView::isPubliclyAnswerable() carries the argument and
+// PublicFormsApiHandler point 7 carries the bounds (a tighter per-IP ceiling
+// than the submit, a per-form ceiling, HALF the authenticated size limit, a
+// sniffed content-type allow-list, and the retention sweep).
+//
+// Added to EnforceTenantIsolation's public list as its own anchored pattern —
+// never as an open `/api/v1/public/` prefix, which is the lesson recorded beside
+// the other two.
+$router->register('POST', '/api/public/forms/{slug}/uploads', [$publicFormsHandler, 'upload'], null);
+$router->register('POST', '/api/public/forms/{slug}/submissions', [$publicFormsHandler, 'submit'], null);
 
 // 13a-nonies-quater. Routing's recipients registered as an #881 INBOX SOURCE —
 // not a surface of their own. The `document_route_recipients` table IS an inbox,
@@ -2330,25 +3428,20 @@ $router->register('DELETE', '/api/document-collections/{id:\d+}/documents/{docum
 $router->register('PUT',    '/api/documents/{id:\d+}/star',                                    [$documentCollectionsHandler, 'star'],           null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('DELETE', '/api/documents/{id:\d+}/star',                                    [$documentCollectionsHandler, 'unstar'],         null, null, CorePermissions::DOCUMENTS_READ);
 
-// 13a-octies. Per-tenant starter document/label seeding (WC-515 REMAINING #3):
-// a brand-new tenant should never open the designer to an empty library. The
-// SYNC 'tenant.created' hook (not '.async') is used deliberately — seeding
-// must complete before the tenant-creation response returns, same as the
-// AuditLogger audit-log write already subscribed to this same event just
-// above (so a sync DB-writing listener on this hook is an established
-// pattern, not a first use). Wrapped in its own try/catch AND
-// DocumentStarterSeeder::seedForTenant() itself never throws (see its
-// docblock) — a seeding failure must never turn a successful tenant creation
-// into a 500 for the caller.
-$documentStarterSeeder = new \Whity\Core\Document\DocumentStarterSeeder(
-    $documentTemplateRepository,
-    $documentBlockRepository,
-    $logger
-);
-$hookManager->listen('tenant.created', function ($data, $context) use ($documentStarterSeeder) {
-    $documentStarterSeeder->seedForTenant((int) $data['id'], (string) ($data['name'] ?? ''));
-    return $data;
-});
+// 13a-octies. Per-tenant starter document/label seeding (WC-515 REMAINING #3)
+// is NOT registered here any more, and the move is the fix for #1012.
+//
+// It was a `tenant.created` listener registered at this entry point, which meant
+// it fired for tenants created by an HTTP request and for no others. The Default
+// Tenant is created by the CLI seeder, which exits this file at the command
+// dispatch hundreds of lines above and never reaches this line — so the one
+// tenant every fresh install actually opens the designer in was the only one
+// that opened it empty.
+//
+// Starters are now a {@see \Whity\Core\Tenant\TenantProvisioningStep} run by
+// {@see \Whity\Core\Tenant\TenantProvisioner}, which every creation path goes
+// through, seeder included. `tenant.created` keeps announcing the fact to audit
+// and to plugins; it is no longer what core provisioning secretly hangs off.
 
 // 13b-ter. Native taxonomy/tagging API (WC-621): a domain-neutral tagging
 // primitive. Tenant-scoped, RBAC-gated CRUD for tag groups + tags, plus a
@@ -2527,6 +3620,201 @@ $notificationDispatcher = new \Whity\Core\Notification\NotificationDispatcher(
 );
 $notificationDispatcher->subscribe($hookManager);
 
+// 13b-quinquies-bis. ROUTING NOTIFICATIONS (#1054) — the subscriber that turns a
+// routing broadcast into notifications.
+//
+// Registered HERE rather than beside the router at 13a-nonies-ter, because it
+// needs the dispatcher, and the dispatcher is built in this block. The order does
+// not matter to the router: it emits through the hook manager, and a listener
+// bound at any point before the first request is bound in time.
+//
+// WHY THE ENGINE DOES NOT CALL THIS DIRECTLY. A notification is a CONSEQUENCE of
+// a routing act, it may fail without the act being wrong, and the next consumer
+// somebody wants must not mean editing the engine. So routing broadcasts and this
+// subscribes — which is also what lets a plugin add its own consumer beside this
+// one without core knowing about it.
+//
+// The channels are the TENANT's (`documents.routing_notification_channels`,
+// per-tenant then global then the registry default), never the route step's: a
+// step declares that its people are told rather than asked, and how they are
+// reached is operator configuration.
+$routingNotifications = new \Whity\Core\Document\Routing\RoutingNotifications(
+    $notificationDispatcher,
+    $settingsService
+);
+$routingNotifications->subscribe($hookManager);
+
+// THE EFFECT ENGINE (#1032), beside the notifier and for the same reasons.
+//
+// Migration 112 refused to ship an effect DECLARATION without this, because "an
+// effect declaration with no engine to run it is a stored intention that
+// silently does nothing" — so the two land together or not at all.
+//
+// A SUBSCRIBER, not a call from inside DocumentRouter. The router broadcasts
+// after its transaction commits, deliberately: an effect invoked inside that
+// transaction would hold the routing write open for as long as a notification
+// write takes, and a failure to notify would roll back an approval somebody had
+// already been told was recorded.
+//
+// It is fail-soft per effect and every path ends in a recorded attempt —
+// including the paths where nothing happened, which is the whole point. A
+// swallowed exception is silence, and silence is what this feature exists to
+// eliminate.
+//
+// SAME GAP AS THE NOTIFIER ABOVE: neither is wired into BaseCommand, so a
+// routing act driven from a CLI command notifies nobody and fires no effects.
+// That is pre-existing and consistent rather than newly introduced here —
+// wiring only ONE of the two into the CLI kernel would be worse, because a
+// stage would then take its side effects without telling its own recipients.
+$routeEffectRunner = new \Whity\Core\Document\Routing\RouteEffectRunner(
+    $routeEffectRegistry,
+    new \Whity\Core\Document\Routing\RouteStepEffectRepository($db->getPdo()),
+    new \Whity\Core\Document\Routing\RouteEffectAttemptRepository($db->getPdo()),
+    $notificationDispatcher
+);
+$routeEffectRunner->subscribe($hookManager);
+
+// 13b-quinquies-ter. CONVENING (migrations 130/131) — deliberative BODIES that
+// meet, minute numbered decisions, and drive a document's existing approval
+// route with what they decided.
+//
+// Registered HERE, after the notification dispatcher and after the routing
+// engine, because it needs both: invitations go out through the dispatcher (no
+// new mail code — see MeetingNotifications), and a decision reaches a route
+// through DocumentRouter::act() and nothing else.
+//
+// WHAT THIS SUBSYSTEM DOES NOT CONTAIN is the point worth recording at the
+// wiring: there is NO second routing engine. DecisionRouteBridge holds the three
+// routing repositories only to READ — which routes a document has, whether
+// anybody on the body holds an open recipient row, and whether the step they
+// hold is a gate. The single write is the engine's own `act()`, made as a person
+// the route actually reached, so every invariant the engine enforces for a human
+// approval is enforced identically for a body's.
+$conveningBodyRepository = new \Whity\Core\Convening\ConveningBodyRepository($db->getPdo());
+$meetingRepository = new \Whity\Core\Convening\MeetingRepository($db->getPdo(), $sequenceCounters);
+$agendaRepository = new \Whity\Core\Convening\AgendaRepository($db->getPdo());
+$meetingDecisionRepository = new \Whity\Core\Convening\DecisionRepository($db->getPdo());
+$meetingInvitationRepository = new \Whity\Core\Convening\InvitationRepository($db->getPdo());
+// Attendance is its OWN table, not a column on an invitation: somebody attends
+// who was never invited, and an attendance expressed as an invitation's column
+// has nowhere to record them. Migration 134 carries the argument.
+$meetingAttendanceRepository = new \Whity\Core\Convening\AttendanceRepository($db->getPdo());
+
+$meetingService = new \Whity\Core\Convening\MeetingService(
+    $conveningBodyRepository,
+    $meetingRepository,
+    $meetingInvitationRepository,
+    new \Whity\Core\Convening\MeetingNotifications($notificationDispatcher),
+    $meetingAttendanceRepository
+);
+
+$decisionRecorder = new \Whity\Core\Convening\DecisionRecorder(
+    $db->getPdo(),
+    $conveningBodyRepository,
+    $meetingRepository,
+    $agendaRepository,
+    $meetingDecisionRepository,
+    // Decision numbers come from `sequence_counters` — core's one implementation
+    // of "hand out the next number" — never from MAX(seq) + 1, which hands the
+    // same number to two of eight workers on a busy Tuesday.
+    new \Whity\Core\Convening\DecisionNumbers($sequenceCounters),
+    new \Whity\Core\Convening\DecisionRouteBridge(
+        $documentRouter,
+        $routeRepository,
+        $routeStepRepository,
+        $routeRecipientRepository,
+        $conveningBodyRepository
+    )
+);
+
+$conveningBodiesHandler = new \Whity\Api\ConveningBodiesApiHandler($conveningBodyRepository);
+$router->register('GET',    '/api/convening-bodies',                        [$conveningBodiesHandler, 'list'],         null, null, CorePermissions::CONVENING_READ);
+$router->register('POST',   '/api/convening-bodies',                        [$conveningBodiesHandler, 'create'],       null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('GET',    '/api/convening-bodies/{id:\d+}',               [$conveningBodiesHandler, 'show'],         null, null, CorePermissions::CONVENING_READ);
+$router->register('PATCH',  '/api/convening-bodies/{id:\d+}',               [$conveningBodiesHandler, 'update'],       null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('DELETE', '/api/convening-bodies/{id:\d+}',               [$conveningBodiesHandler, 'delete'],       null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('GET',    '/api/convening-bodies/{id:\d+}/members',       [$conveningBodiesHandler, 'listMembers'],  null, null, CorePermissions::CONVENING_READ);
+$router->register('POST',   '/api/convening-bodies/{id:\d+}/members',       [$conveningBodiesHandler, 'addMember'],    null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('DELETE', '/api/convening-bodies/{id:\d+}/members/{profileId:\d+}', [$conveningBodiesHandler, 'removeMember'], null, null, CorePermissions::CONVENING_MANAGE);
+
+$meetingsHandler = new \Whity\Api\MeetingsApiHandler(
+    $conveningBodyRepository,
+    $meetingRepository,
+    $agendaRepository,
+    $meetingDecisionRepository,
+    $meetingInvitationRepository,
+    $meetingAttendanceRepository,
+    $meetingService,
+    $decisionRecorder
+);
+$router->register('GET',    '/api/meetings',                                [$meetingsHandler, 'list'],     null, null, CorePermissions::CONVENING_READ);
+$router->register('POST',   '/api/meetings',                                [$meetingsHandler, 'create'],   null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('GET',    '/api/meetings/{id:\d+}',                       [$meetingsHandler, 'show'],     null, null, CorePermissions::CONVENING_READ);
+$router->register('POST',   '/api/meetings/{id:\d+}/schedule',              [$meetingsHandler, 'schedule'], null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('POST',   '/api/meetings/{id:\d+}/hold',                  [$meetingsHandler, 'hold'],     null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('POST',   '/api/meetings/{id:\d+}/cancel',                [$meetingsHandler, 'cancel'],   null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('POST',   '/api/meetings/{id:\d+}/invitations',           [$meetingsHandler, 'invite'],   null, null, CorePermissions::CONVENING_MANAGE);
+// WHO ACTUALLY TURNED UP. PUT, because the act REPLACES the whole list — a
+// secretary reads a sign-in sheet and asserts the entire set, not a stream of
+// arrivals — and a POST would invite a client to double the list on every retry.
+// Refused before the meeting is held: attendance taken beforehand is a guess,
+// and the platform already holds guesses under a name that says so (an
+// invitation somebody accepted). `convening:manage`, the secretarial gate that
+// already covers agendas, dates and invitations.
+$router->register('PUT',    '/api/meetings/{id:\d+}/attendance',            [$meetingsHandler, 'recordAttendance'], null, null, CorePermissions::CONVENING_MANAGE);
+// Deliberately UNPERMISSIONED (null, null): BEING INVITED IS THE AUTHORIZATION —
+// the same posture migration 113 takes on acting on a route that reached you, and
+// the same one /api/me/notifications and /api/me/sessions take. Gating it would
+// let a body invite somebody who then cannot answer, leaving the chair counting
+// them as silent for ever. The handler resolves the answering profile from the
+// SESSION and never from the request body, which is the check a tenant-wide
+// permission could not have made.
+$router->register('POST',   '/api/meetings/{id:\d+}/invitations/respond',   [$meetingsHandler, 'respond'],  null);
+// Agenda WRITES are nested under the meeting, because every one of them is an act
+// ON a sitting whose state (draft / scheduled / held / cancelled) decides whether
+// it is allowed.
+$router->register('POST',   '/api/meetings/{id:\d+}/agenda',                [$meetingsHandler, 'addAgendaItem'],    null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('PUT',    '/api/meetings/{id:\d+}/agenda/order',          [$meetingsHandler, 'reorderAgenda'],    null, null, CorePermissions::CONVENING_MANAGE);
+$router->register('DELETE', '/api/meetings/{id:\d+}/agenda/{itemId:\d+}',   [$meetingsHandler, 'removeAgendaItem'], null, null, CorePermissions::CONVENING_MANAGE);
+// THE ONE ROUTE THAT CAN MOVE SOMEBODY ELSE'S DOCUMENT, and the only one gated on
+// `convening:decide`. Recording a decision allocates its number, asks
+// DocumentRouter::act() to apply the verdict, and writes the decision row —
+// all three in one transaction, in that order, so a decision can never claim an
+// approval the engine refused.
+$router->register('POST',   '/api/meetings/{id:\d+}/agenda/{itemId:\d+}/decision', [$meetingsHandler, 'recordDecision'], null, null, CorePermissions::CONVENING_DECIDE);
+// FLAT, FILTERED COLLECTION READS. A tabular client — including the server-driven
+// block screens this subsystem ships — addresses a collection with query
+// parameters and cannot build `/meetings/7/agenda` out of a selection. Each
+// REQUIRES `meeting_id`: an unfiltered tenant-wide list is not a question anybody
+// asks, and answering one would make a forgotten filter look like a working call.
+$router->register('GET',    '/api/agenda-items',                            [$meetingsHandler, 'agendaItems'], null, null, CorePermissions::CONVENING_READ);
+$router->register('GET',    '/api/meeting-decisions',                       [$meetingsHandler, 'decisions'],   null, null, CorePermissions::CONVENING_READ);
+$router->register('GET',    '/api/meeting-invitations',                     [$meetingsHandler, 'invitations'], null, null, CorePermissions::CONVENING_READ);
+// `convening:read` and NOT `convening:manage`, deliberately. Migration 131 grants
+// the read gate to `settings:read` AND `documents:route` and the manage gate only
+// to `settings:write`; gating this one on manage would 403 somebody who can
+// already see this meeting's invitations and decisions — strictly more sensitive
+// — and leave the meeting-record screen showing one empty table among five.
+$router->register('GET',    '/api/meeting-attendees',                       [$meetingsHandler, 'attendance'],  null, null, CorePermissions::CONVENING_READ);
+// THE REVERSE READ. Without it this subsystem is invisible from the document
+// side: somebody looking at a document that is sitting still has no way to
+// discover it is waiting for a body that meets on the 14th.
+$router->register('GET',    '/api/documents/{id:\d+}/convening',            [$meetingsHandler, 'forDocument'], null, null, CorePermissions::CONVENING_READ);
+
+// The three convening screens in the sidebar. A SECOND `navigation.register`
+// listener rather than more entries in the core one above, for the reason
+// PluginNavigationBridge is a listener too: the items are DERIVED from the same
+// descriptors the features endpoint serves, so a renamed screen cannot end up
+// with one label in the menu and another on the page.
+$hookManager->listen('navigation.register', function ($data, $context) use ($router) {
+    $items = $data['items'] ?? [];
+    foreach (\Whity\Core\Convening\ConveningFeatures::navigationItems($router) as $item) {
+        $items[] = $item;
+    }
+
+    return ['items' => $items];
+});
+
 // In-app notification INBOX (WC-notifications, 6e10d9ea). Self-scoped to the
 // caller's (tenant, profile) — session-gated, no RBAC permission (like
 // /api/me/sessions). Reads the notifications the dispatcher persisted.
@@ -2634,6 +3922,19 @@ $router->register('POST',   '/api/branding/global/assets/{key}',    [$brandingHa
 $router->register('DELETE', '/api/branding/global/assets/{key}',    [$brandingHandler, 'clearGlobal'],   null, null, CorePermissions::SETTINGS_MANAGE);
 $router->register('PUT',    '/api/tenants/{id}/branding-host',      [$brandingHandler, 'setBrandingHost'], null, null, CorePermissions::SETTINGS_MANAGE);
 
+// 13c-ter. UI display preferences (#1068) — public GET /api/v1/ui/preferences.
+// Registered here rather than beside the settings routes because it resolves
+// its tenant exactly as branding does (JWT context, else request host, else the
+// global layer) and so needs the $hostResolver built just above.
+//
+// UNGATED, and that is the point of it existing separately from
+// /api/v1/settings: `settings:read` is an administrative right, and a
+// preference about how every screen renders has to reach every reader,
+// including the ones who will never open the settings console. The payload is
+// one boolean about presentation and carries no tenant data.
+$uiPreferencesHandler = new \Whity\Api\UiPreferencesApiHandler($settingsService, $hostResolver, $jwtParser);
+$router->register('GET', '/api/ui/preferences', [$uiPreferencesHandler, 'get'], null, null, null);
+
 // 12b. Theme Override API (WC-242) — public GET, unauthenticated by design
 // (like branding, called on every page load before login is even possible).
 // The handler enforces whatever permission the contributing plugin's OWN
@@ -2660,6 +3961,7 @@ $emailDomainHandler = new TenantEmailDomainApiHandler(
 );
 $router->register('GET',    '/api/email-domains',              [$emailDomainHandler, 'list'],   'admin');
 $router->register('POST',   '/api/email-domains',              [$emailDomainHandler, 'create'], 'admin');
+$router->register('PATCH',  '/api/email-domains/{id:\d+}',     [$emailDomainHandler, 'update'], 'admin');
 $router->register('POST',   '/api/email-domains/{id:\d+}/verify', [$emailDomainHandler, 'verify'], 'admin');
 $router->register('DELETE', '/api/email-domains/{id:\d+}',     [$emailDomainHandler, 'delete'], 'admin');
 
@@ -2838,13 +4140,18 @@ $mcpListChangedNotifier = new ListChangedNotifier(
     $mcpCatalogSignature,
     new DatabaseSharedStore($db->getPdo()),
 );
+// SDK 1.43: the tools plugins write themselves, as opposed to the ones the
+// deriver reads off the route table. Built here so the two tool handlers share
+// ONE registry — a second instance would answer tools/list from a different set
+// than tools/call dispatches from.
+$authoredMcpTools = new AuthoredToolRegistry();
 $mcpTransportHandler = new McpTransportHandler(
     new Dispatcher([
         'initialize'              => new InitializeHandler(listChanged: true),
         'ping'                    => new PingHandler(),
         'notifications/cancelled' => new CancelledNotificationHandler(),
-        'tools/list'              => new ToolsListHandler($toolDeriver, $roleChecker, $tokenValidator),
-        'tools/call'              => new ToolsCallHandler($toolDeriver, $router, $roleChecker, $tokenValidator, auditLogger: $auditLogger),
+        'tools/list'              => new ToolsListHandler($toolDeriver, $roleChecker, $tokenValidator, $authoredMcpTools),
+        'tools/call'              => new ToolsCallHandler($toolDeriver, $router, $roleChecker, $tokenValidator, auditLogger: $auditLogger, authoredTools: $authoredMcpTools),
         'resources/list'          => new ResourcesListHandler($resourceDeriver, $roleChecker, $tokenValidator),
         'resources/read'          => new ResourcesReadHandler($router, $roleChecker, $tokenValidator, auditLogger: $auditLogger),
         'prompts/list'            => new PromptsListHandler($promptRegistry, $roleChecker, $tokenValidator),
@@ -2860,6 +4167,11 @@ $router->registerUnversioned('GET',  '/mcp', [$mcpTransportHandler, 'handleGet']
 // shadowed by a plugin claiming the same path.
 $pluginLoader->load();
 $pluginLoader->collectMcpPrompts($promptRegistry);
+// SDK 1.43. Collect FIRST, then hand the deriver the suppressions: a plugin
+// that authors its own tools may ask for its routes not to be derived, and the
+// deriver has to know that before anything asks it for a tool list.
+$pluginLoader->collectMcpTools($authoredMcpTools);
+$toolDeriver->suppressNamespaces($authoredMcpTools->suppressedPlugins());
 
 // #952: everything the MCP layer memoized off the plugin registry is rebuilt
 // whenever the registry changes. Announcing a change while continuing to serve
@@ -2876,12 +4188,22 @@ $pluginLoader->collectMcpPrompts($promptRegistry);
 $refreshMcpCatalog = static function (string $trigger) use (
     $promptRegistry,
     $pluginLoader,
-    $mcpCatalogSignature
+    $mcpCatalogSignature,
+    $authoredMcpTools,
+    $toolDeriver
 ): void {
     ToolDeriver::clearCache();
     $promptRegistry->reset();
     CorePrompts::register($promptRegistry);
     $pluginLoader->collectMcpPrompts($promptRegistry);
+    // #952 applies to TOOLS at least as hard as to prompts: a plugin turned off
+    // whose tools stayed listed would leave them CALLABLE, which is an action
+    // rather than a listing. Rebuilt from the current plugin set, suppressions
+    // included — a suppression from a plugin that is no longer active must stop
+    // hiding derived tools.
+    $authoredMcpTools->reset();
+    $pluginLoader->collectMcpTools($authoredMcpTools);
+    $toolDeriver->suppressNamespaces($authoredMcpTools->suppressedPlugins());
     // Last: the signature must be computed from the refreshed catalogue, not the
     // one being replaced.
     $mcpCatalogSignature->invalidate();

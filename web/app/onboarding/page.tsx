@@ -804,7 +804,7 @@ function StepGuide({ content }: { content: StepGuideContent }) {
                 {t(section.heading.key, section.heading.text)}
               </p>
             )}
-            <ul className="list-disc space-y-1 pl-5">
+            <ul className="list-disc space-y-1 ps-5">
               {section.lines.map((line) => (
                 <li key={line.key}>{t(line.key, line.text)}</li>
               ))}

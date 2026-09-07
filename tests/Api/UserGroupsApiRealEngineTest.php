@@ -23,6 +23,11 @@ use Whity\Core\Settings\GlobalSettingsRepository;
 use Whity\Core\Settings\SettingsRegistry;
 use Whity\Core\Settings\SettingsService;
 use Whity\Core\Settings\TenantSettingsRepository;
+use Whity\Core\i18n\LanguageRegistry;
+use Whity\Core\i18n\LanguageRepository;
+use Whity\Core\i18n\ServerLabels;
+use Whity\Core\i18n\TranslationRepository;
+use Whity\Core\Tenant\StaticTenantContextAdapter;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
 use Whity\Sdk\Http\Response;
@@ -127,10 +132,26 @@ final class UserGroupsApiRealEngineTest extends TestCase
             $this->resolver,
             $this->rules,
             $this->settings,
-            new RoleChecker($db, new PermissionRegistry())
+            new RoleChecker($db, new PermissionRegistry()),
+            $this->serverLabels()
         );
 
         TenantContext::setTenantId(self::TENANT);
+    }
+
+    /**
+     * A REAL label translator over this suite's own schema (#1044).
+     *
+     * The rule catalogue is localised at serving time now. A stub would agree
+     * with whatever this file assumed, which is the one thing worth checking.
+     */
+    private function serverLabels(): ServerLabels
+    {
+        return new ServerLabels(new LanguageRegistry(
+            new LanguageRepository($this->pdo),
+            new TranslationRepository($this->pdo),
+            new StaticTenantContextAdapter(),
+        ));
     }
 
     protected function tearDown(): void
@@ -570,6 +591,7 @@ final class UserGroupsApiRealEngineTest extends TestCase
             $this->rules,
             $this->settings,
             new RoleChecker($this->wrapDb($this->pdo), new PermissionRegistry()),
+            $this->serverLabels(),
             $logger
         );
 

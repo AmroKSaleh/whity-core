@@ -26,13 +26,20 @@ final class TenantEmailDomainPolicyService
 {
     private TenantEmailDomainsRepository $domains;
     private MembershipRepository $memberships;
+    private AssignableRole $assignableRole;
 
     public function __construct(
         TenantEmailDomainsRepository $domains,
         MembershipRepository $memberships,
+        AssignableRole $assignableRole,
     ) {
-        $this->domains     = $domains;
-        $this->memberships = $memberships;
+        $this->domains        = $domains;
+        $this->memberships    = $memberships;
+        // Injected rather than built from a PDO reached through a repository:
+        // this service decides what privilege a stranger arrives with, and the
+        // check that bounds it should be visible in the constructor rather than
+        // conjured inside the method that provisions.
+        $this->assignableRole = $assignableRole;
     }
 
     /**
@@ -90,8 +97,23 @@ final class TenantEmailDomainPolicyService
             // unverified claim silently does nothing here; the tenant must pass the
             // DNS TXT challenge (DomainOwnershipVerifier) first.
             if ($autoProvision && $isVerified) {
+                // The stored role is NOT trusted. `default_role_id` has a foreign
+                // key to `roles(id)` with no tenant constraint, so a row written
+                // before that was validated can name another tenant's role — and
+                // this is the path that would provision somebody into it.
+                //
+                // Falls back to the global `user` role rather than refusing:
+                // there is a verified person waiting on a policy somebody else
+                // configured, so least privilege beats stranding them. The same
+                // resolution FederatedIdentityLinker uses, and now literally the
+                // same code — the two disagreeing was the original defect.
+                $safeRoleId = $this->assignableRole->resolveSafe($defaultRoleId, $tenantId);
+                if ($safeRoleId === null) {
+                    continue;
+                }
+
                 try {
-                    $this->memberships->insert($profileId, $tenantId, $defaultRoleId);
+                    $this->memberships->insert($profileId, $tenantId, $safeRoleId);
                 } catch (\PDOException $e) {
                     // Check-then-insert race: two verifications of the same email
                     // (or a verification concurrent with a JIT/federated provision)

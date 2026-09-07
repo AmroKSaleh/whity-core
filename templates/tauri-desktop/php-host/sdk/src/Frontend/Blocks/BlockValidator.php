@@ -161,6 +161,13 @@ final class BlockValidator
         'checkbox', 'slider', 'dateInput', 'fileInput', 'colorInput',
         'bilingualText', 'referenceSelect', 'richTextInput', 'ouScopePicker',
         'submitButton', 'fieldArray',
+        // WC-532 item 3. `variant` selects on a sibling input's value, so a
+        // form is the only place its discriminator can exist. `variantCase` is
+        // listed too rather than relying on its parent check alone: the two
+        // rules answer different questions ("is there a form?" and "is the
+        // parent a variant?"), and a case that somehow reached the tree without
+        // a form ancestor should say so in its own terms.
+        'variant', 'variantCase',
     ];
 
     /**
@@ -272,6 +279,24 @@ final class BlockValidator
         // own type is wrong).
         if ($parentType === 'tabs' && $type !== 'tab') {
             $errors[] = "{$path}: children of 'tabs' must be 'tab' blocks, got '{$type}'";
+
+            return;
+        }
+
+        // WC-532 item 3: `variant`/`variantCase` pair the same way, and for a
+        // sharper reason than tabs do. A case is the unit the renderer includes
+        // in or excludes from the SUBMIT PAYLOAD; an input sitting directly
+        // under a `variant`, in no case at all, has no answer to "which
+        // discriminator value does this belong to". Rejecting it here is the
+        // difference between a declaration error and a field that silently
+        // never submits.
+        if ($type === 'variantCase' && $parentType !== 'variant') {
+            $errors[] = "{$path}: 'variantCase' is only valid as a direct child of 'variant'";
+
+            return;
+        }
+        if ($parentType === 'variant' && $type !== 'variantCase') {
+            $errors[] = "{$path}: children of 'variant' must be 'variantCase' blocks, got '{$type}'";
 
             return;
         }
@@ -399,6 +424,32 @@ final class BlockValidator
                 continue;
             }
 
+            // WC-532 item 3: a `variantCase` INHERITS the enclosing form's
+            // names but does not export its own.
+            //
+            // Inheriting is what stops a case from redefining a name the form
+            // already uses outside the variant: both would be in the payload
+            // together, and one would win silently.
+            //
+            // Not exporting is what makes the union work. Sibling cases are
+            // mutually exclusive by construction — at most one is ever
+            // submitted — so two cases may both declare `value`, which is
+            // exactly what a discriminated union looks like from the server's
+            // side: {type:'numeric', value: 5} and {type:'text', value: 'x'}.
+            // Merging their names back out would report that as a duplicate and
+            // force every branch to prefix its fields, which would make the
+            // payload shape depend on the declaration style rather than on the
+            // union being modelled.
+            //
+            // A duplicate WITHIN one case is still caught, because the case's
+            // own registry is shared across its subtree.
+            if ($type === 'variantCase') {
+                $caseNames = $outerNames;
+                self::validateList($children, "{$path}.{$slot}", $depth + 1, $count, $errors, $type, $inForm, $caseNames);
+
+                continue;
+            }
+
             $slotNames = $outerNames;
             self::validateList($children, "{$path}.{$slot}", $depth + 1, $count, $errors, $type, $inForm, $slotNames);
             $formNames += $slotNames;
@@ -421,7 +472,7 @@ final class BlockValidator
      * Validate every declared prop of a node against the type's prop rules.
      *
      * @param array<mixed>  $node
-     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck', required: bool, values?: list<string|int>}> $propRules
+     * @param array<string, array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck'|'preloadSpec', required: bool, values?: list<string|int>}> $propRules
      * @param list<string>  $errors by reference
      */
     private static function validateProps(
@@ -450,7 +501,7 @@ final class BlockValidator
      * Validate a single present prop value against its rule.
      *
      * @param mixed $value
-     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck', values?: list<string|int>, required: bool} $rule
+     * @param array{type: 'string'|'int'|'bool'|'enum'|'intEnum'|'kvList'|'stringList'|'columnList'|'dataColumnList'|'rowList'|'chartSeriesList'|'relPath'|'apiPath'|'inputName'|'selectOptions'|'submitSpec'|'visibilityRule'|'rowActionList'|'sourceParamList'|'blockId'|'contextPath'|'itemActionList'|'ouScopeList'|'ouTypeKey'|'recordPath'|'recordFactList'|'accessCheck'|'preloadSpec', values?: list<string|int>, required: bool} $rule
      * @param list<string> $errors by reference
      */
     private static function validatePropValue(
@@ -665,6 +716,13 @@ final class BlockValidator
                 // #883: `dataRecord.source` — an owned apiPath that may carry
                 // `{token}` segments in the master-detail addressing.
                 self::validateRecordPath($value, $type, $prop, $path, $errors);
+
+                break;
+
+            case 'preloadSpec':
+                // `form.dataSource` — the GET a form issues on mount to
+                // pre-populate its fields.
+                self::validatePreloadSpec($value, $type, $prop, $path, $errors);
 
                 break;
 
@@ -1189,6 +1247,61 @@ final class BlockValidator
     }
 
     /**
+     * `form.dataSource`: the GET a form issues on mount to pre-populate itself.
+     *
+     * WHY IT IS DECLARED AT ALL. It was not, and that is the defect this closes.
+     * `web/lib/plugin-features.ts` has carried `dataSource?: { method: 'GET';
+     * path: string }` on `FormBlock` all along, and the renderer fetches it —
+     * but nothing in the contract mentioned it, so nothing validated its shape
+     * and, worse, the host's plugin loader never ownership-checked the path.
+     * (Named in prose rather than with a `@see`: the SDK is standalone and may
+     * not reference core namespaces — `SdkPackageContractTest` enforces it, and
+     * caught this docblock doing exactly that.)
+     *
+     * That gap is a property of how validation works here rather than an
+     * oversight in one rule: {@see validateProps} iterates the DECLARED prop
+     * rules, never the node's own keys, and the loader's walk returns the node
+     * it was handed. So an undeclared prop is neither rejected nor stripped —
+     * it travels to the client untouched. `submit.endpoint`, every `source`,
+     * `inbox.actions` and every `rowActionList` are checked against the routes
+     * the plugin registered; this one was not, and it is the only endpoint a
+     * block can name that was not.
+     *
+     * `method` is GET and only GET. A preload that could POST would be a write
+     * performed by rendering a screen.
+     *
+     * The path is validated as a {@see validateRecordPath} — an `/api/` path
+     * that may carry `{token}` segments — because #949 established that
+     * `dataSource.path` takes the same master-detail tokens a `dataRecord`
+     * source does, and the renderer substitutes them the same way.
+     *
+     * @param mixed        $value
+     * @param list<string> $errors by reference
+     */
+    private static function validatePreloadSpec(
+        mixed $value,
+        string $type,
+        string $prop,
+        string $path,
+        array &$errors,
+    ): void {
+        if (!\is_array($value)) {
+            $errors[] = "{$path}: '{$type}.{$prop}' must be an object with 'method' and 'path', got "
+                . get_debug_type($value);
+
+            return;
+        }
+
+        $method = $value['method'] ?? null;
+        if ($method !== 'GET') {
+            $errors[] = "{$path}.method: '{$type}.{$prop}.method' must be 'GET', got "
+                . self::describeScalar($method);
+        }
+
+        self::validateRecordPath($value['path'] ?? null, $type, "{$prop}.path", "{$path}.path", $errors);
+    }
+
+    /**
      * `<dataBound>.params` (WC-532 A7): master-detail query-param bindings.
      * A list of `{param: non-empty string, from: non-empty string}` where
      * `param` is the query-param name appended to the block's `source` and
@@ -1418,8 +1531,21 @@ final class BlockValidator
      *       endpoint:          an apiPath, `{field}`-templatable from the item,
      *       scopedPermission?: a `resource:action` slug, resolved AT the item,
      *       confirm?:          string,
+     *       prompt?:           {field, label, required?, placeholder?},
      *       variant?:          primary|secondary|outline|ghost|destructive,
      *     }
+     *
+     * `prompt` (WC-532 item 5) COLLECTS A REASON AND SENDS IT. `confirm` asks
+     * a yes/no question and posts an empty body, which covers "approve" and
+     * cannot express "return this, and say why" — the shape a review queue is
+     * mostly made of. Without it a plugin has to leave the inbox and hand-build
+     * the screen, which is what item 5 was raised about.
+     *
+     * The value is sent as `{[field]: text}` in the request body. `required`
+     * means the action cannot be dispatched with it blank — enforced in the
+     * dialog, and by the plugin's own handler, which is the authority. A
+     * required comment that the client alone enforced would be a convention,
+     * not a rule.
      *
      * There is deliberately no `permission` prop for the endpoint's own gate.
      * The host reads that off the route the endpoint dispatches to; a plugin
@@ -1509,6 +1635,35 @@ final class BlockValidator
 
             if (\array_key_exists('confirm', $item) && !\is_string($item['confirm'])) {
                 $errors[] = "{$at}.confirm: '{$type}.{$prop}' confirm must be a string";
+            }
+
+            // WC-532 item 5: the reason-collecting prompt. `field` is the body
+            // key the text is sent under, so it is validated as an input name —
+            // the same rule a form field's `name` follows, for the same reason:
+            // it becomes a key in a JSON payload a handler reads by name.
+            if (\array_key_exists('prompt', $item)) {
+                $prompt = $item['prompt'];
+                if (!\is_array($prompt)) {
+                    $errors[] = "{$at}.prompt: '{$type}.{$prop}' prompt must be an object";
+                } else {
+                    foreach (['field', 'label'] as $req) {
+                        $v = $prompt[$req] ?? null;
+                        if (!\is_string($v) || trim($v) === '') {
+                            $errors[] = "{$at}.prompt.{$req}: '{$type}.{$prop}' prompt {$req} must be a non-empty string";
+                        }
+                    }
+                    if (\is_string($prompt['field'] ?? null)
+                        && preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $prompt['field']) !== 1
+                    ) {
+                        $errors[] = "{$at}.prompt.field: '{$type}.{$prop}' prompt field must be a valid input name";
+                    }
+                    if (\array_key_exists('required', $prompt) && !\is_bool($prompt['required'])) {
+                        $errors[] = "{$at}.prompt.required: '{$type}.{$prop}' prompt required must be a boolean";
+                    }
+                    if (\array_key_exists('placeholder', $prompt) && !\is_string($prompt['placeholder'])) {
+                        $errors[] = "{$at}.prompt.placeholder: '{$type}.{$prop}' prompt placeholder must be a string";
+                    }
+                }
             }
 
             if (

@@ -222,14 +222,62 @@ export interface RoleCreateInput extends RoleInput {
 }
 
 /**
+ * One page of `GET /roles`, as the screen asks for it (#1102).
+ *
+ * Structurally the `DataTableQueryRequest` the roles screen's table produces,
+ * restated here rather than imported so this contract stays about the ENDPOINT
+ * rather than about the component that happens to drive it — a Flutter or CLI
+ * consumer implements the same adapter and has no DataTable at all.
+ *
+ * `sort` is the endpoint's own key (`name`, `description`, `created`) and `dir`
+ * travels with it: both absent means "your default order", which is what the
+ * screen sends when no column is chosen. `q` absent means no search. None of
+ * the three is ever sent empty — an empty `sort` would ask the endpoint to
+ * order by nothing in particular and get a fallback the UI would then present
+ * as the sort it asked for.
+ */
+export interface RoleListQuery {
+  /** 1-based. */
+  page: number;
+  perPage: number;
+  sort?: string;
+  dir?: 'asc' | 'desc';
+  q?: string;
+}
+
+/**
+ * A page of roles and the FULL count, from the one request that produced both.
+ *
+ * Same bargain as {@link RoleAssignmentsPage}: `total` is every role the query
+ * matches, `roles` is only the page. Counting `roles.length` would be counting
+ * the page size, which is how a list ends up drawing one page of controls for a
+ * thousand rows.
+ */
+export interface RoleListPage {
+  roles: Role[];
+  total: number;
+  totalPages: number;
+}
+
+/**
  * The injected data-source adapter the components consume. Both the web and
  * desktop factories are thin wrappers over a {@link Transport}, so the
  * per_page=100 cap, the `{data}` unwrap and the 404→'not-manageable' mapping
  * are written once per client and never leak into the components.
  */
 export interface RolesAdapter {
-  /** GET /roles?per_page=100 (capped — see the truncation note in roles-screen). */
-  listRoles(): Promise<Role[]>;
+  /**
+   * GET /roles — ONE page, ordered and filtered by the server (#1102).
+   *
+   * Took no arguments and answered `Role[]` until then: it fetched
+   * `per_page=100` and the screen sorted, searched and paged that slice in the
+   * browser, so a tenant with more than a hundred roles could not see the rest
+   * and nothing on screen said so. The query is REQUIRED rather than optional
+   * because there is no sensible "whatever you like" page for a list a person
+   * is looking at, and an optional one would let a caller silently reintroduce
+   * the first page as the whole answer.
+   */
+  listRoles(query: RoleListQuery): Promise<RoleListPage>;
   /** GET /roles/{id} — returns the role with its full permission list. */
   getRole(id: number): Promise<RoleWithPermissions>;
   /** GET /roles/{id}/permissions — the read-only grouped view. */

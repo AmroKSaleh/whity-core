@@ -155,6 +155,23 @@ final class CorePermissions
     // settings:read (and is exempt from the payment wall so it stays reachable).
     public const SUBSCRIPTIONS_MANAGE = 'subscriptions:manage';
 
+    // A TENANT'S OWN BILLING (#billing). Distinct from the two operator
+    // capabilities above, and the distinction is the point: those are
+    // PLATFORM powers that additionally require acting in the system tenant,
+    // because they set what somebody ELSE is charged. These are ordinary
+    // tenant-scoped permissions for a customer looking at their own account.
+    //
+    //   billing:view — see this tenant's invoices, what is owed, and the
+    //     payments made against them. Read-only, and separate from
+    //     `billing:pay` because a finance viewer who may read the account is
+    //     not necessarily someone who may spend from it.
+    //   billing:pay  — start a payment for this tenant's invoice. It does not
+    //     settle anything: only a verified provider callback does that, so
+    //     this grants the ability to be ASKED for money, not to declare an
+    //     invoice paid.
+    public const BILLING_VIEW = 'billing:view';
+    public const BILLING_PAY = 'billing:pay';
+
     // Document/label designer (WC-docdesigner). Tenant-scoped. read = view/list
     // templates & blocks (list/get are ADDITIONALLY row-filtered server-side by
     // scope + a row's required_permission, so a technician never receives a gated
@@ -235,6 +252,21 @@ final class CorePermissions
     public const GROUPS_READ = 'groups:read';
     public const GROUPS_WRITE = 'groups:write';
 
+    // Document ROUTE TEMPLATES (#1027, migration 118). A template is a reusable,
+    // branching flow design — the record the node-based editor edits.
+    //
+    // Deliberately NOT folded into `documents:route`. Routing a document is an
+    // everyday act many people perform; DESIGNING the flow that every document
+    // of a kind will follow is an act of organisational policy. A clerk who may
+    // send a form onward should not thereby be able to rewrite where every form
+    // goes, and collapsing the two would make that impossible to express.
+    //
+    // The split mirrors `groups:read` / `groups:write` above and for the same
+    // reason: reading a design is what a router needs to pick one, writing it is
+    // what a designer needs, and the two audiences are not the same people.
+    public const ROUTE_TEMPLATES_READ = 'route_templates:read';
+    public const ROUTE_TEMPLATES_WRITE = 'route_templates:write';
+
     // Generic async-job API (WC-jobs-api). Tenant-scoped submission + status.
     // submit = POST /api/jobs (enqueue an allow-listed job name for this tenant)
     // and read its own jobs; read = GET /api/jobs/{id} status/progress/result.
@@ -288,6 +320,68 @@ final class CorePermissions
     public const LANGUAGES_MANAGE = 'languages:manage';
     public const TRANSLATIONS_MANAGE = 'translations:manage';
 
+    // TIME WINDOWS (#1070, migration 126). A named, non-overlapping period a
+    // tenant's records are scoped to and rolled up by, which can be CLOSED the
+    // way a set of books is closed.
+    //
+    // FOUR slugs rather than the usual read/write pair, because sealing and
+    // unsealing are not writes. Defining the vocabulary and adjusting a
+    // period's dates is configuration; CLOSING is a control an operator
+    // exercises routinely and which other people then rely on; REOPENING undoes
+    // a seal they relied on. An institution will want the last of those held by
+    // fewer people than the others, and folding it into `:close` would make
+    // "may seal the books" and "may unseal them" one grant, which nothing means
+    // to say. Each of the four is a permission somebody would revoke separately
+    // — the #987 test for whether a slug is a real capability or a second name
+    // for an existing one.
+    public const TIME_WINDOWS_READ = 'time_windows:read';
+    public const TIME_WINDOWS_WRITE = 'time_windows:write';
+    public const TIME_WINDOWS_CLOSE = 'time_windows:close';
+    public const TIME_WINDOWS_REOPEN = 'time_windows:reopen';
+
+    // FORMS (migrations 127/128). Tenant-authored forms, their fields, and the
+    // submissions people make against them.
+    //
+    // THREE slugs rather than the usual read/write pair, because there are three
+    // audiences and two of them barely overlap. AUTHORING a form is
+    // organisational policy — deciding what everyone must declare — while
+    // FILLING ONE IN is the everyday act performed by the largest audience in the
+    // tenant, and READING what came back is a third job done by approvers who
+    // will never author anything.
+    //
+    // `forms:submit` is deliberately not folded into `forms:read`, which is the
+    // tempting fold and the wrong one: it would mean that letting somebody file a
+    // request also lets them read every request everybody else filed. Each of the
+    // three is a permission somebody would revoke separately — the #987 test for
+    // whether a slug is a real capability or a second name for an existing one.
+    //
+    // Reading back one's OWN submissions is gated on `forms:submit`, not
+    // `forms:read`: the row already names exactly one person, so a tenant-wide
+    // permission has nothing left to decide. Same argument migration 113 makes
+    // about routing ("being a recipient IS the authorization").
+    public const FORMS_READ = 'forms:read';
+    public const FORMS_MANAGE = 'forms:manage';
+    public const FORMS_SUBMIT = 'forms:submit';
+    // CONVENING (migrations 130/131). Deliberative BODIES that meet, minute a
+    // numbered decision, and — where the agenda item carried a document — drive
+    // that document's existing approval route with the decision.
+    //
+    // THREE slugs rather than a read/write pair, and the third is the reason.
+    // Assembling an agenda, moving a date and sending invitations are
+    // secretarial acts an organisation hands to whoever runs the calendar.
+    // MINUTING WHAT THE BODY CONCLUDED is the act that reaches
+    // {@see \Whity\Core\Document\Routing\DocumentRouter::act()} with a
+    // verdict, so it can approve or reject somebody's document — the same
+    // consequence a recipient's own approval has, from a different chair. An
+    // institution will want that held by fewer people than the calendar, and one
+    // grant covering both would make the separation inexpressible.
+    //
+    // Responding to an INVITATION is under none of them: being invited is the
+    // authorization, exactly as being a recipient is (migration 113).
+    public const CONVENING_READ = 'convening:read';
+    public const CONVENING_MANAGE = 'convening:manage';
+    public const CONVENING_DECIDE = 'convening:decide';
+
     /**
      * Return the full list of core permission strings.
      *
@@ -333,6 +427,8 @@ final class CorePermissions
             self::STORAGE_MANAGE,
             self::PLANS_MANAGE,
             self::SUBSCRIPTIONS_MANAGE,
+            self::BILLING_VIEW,
+            self::BILLING_PAY,
             self::DOCUMENTS_READ,
             self::DOCUMENTS_WRITE,
             self::DOCUMENTS_PUBLISH,
@@ -344,6 +440,8 @@ final class CorePermissions
             self::TAGS_MANAGE,
             self::GROUPS_READ,
             self::GROUPS_WRITE,
+            self::ROUTE_TEMPLATES_READ,
+            self::ROUTE_TEMPLATES_WRITE,
             self::JOBS_SUBMIT,
             self::JOBS_READ,
             self::NOTIFICATIONS_MANAGE,
@@ -352,6 +450,16 @@ final class CorePermissions
             self::TWO_FACTOR_RECOVERY_APPROVE,
             self::LANGUAGES_MANAGE,
             self::TRANSLATIONS_MANAGE,
+            self::TIME_WINDOWS_READ,
+            self::TIME_WINDOWS_WRITE,
+            self::TIME_WINDOWS_CLOSE,
+            self::TIME_WINDOWS_REOPEN,
+            self::FORMS_READ,
+            self::FORMS_MANAGE,
+            self::FORMS_SUBMIT,
+            self::CONVENING_READ,
+            self::CONVENING_MANAGE,
+            self::CONVENING_DECIDE,
         ];
     }
 }

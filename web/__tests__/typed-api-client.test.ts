@@ -11,7 +11,7 @@
  * `Request` objects (jsdom provides none).
  */
 
-import { createApiClient } from '@/lib/api/client';
+import { createApiClient, SESSION_EXPIRED_EVENT } from '@/lib/api/client';
 
 /** Build a JSON Response the way the backend shapes it. */
 function jsonResponse(status: number, body: unknown): Response {
@@ -184,5 +184,106 @@ describe('typed api client — module surface', () => {
     expect(typeof mod.api.POST).toBe('function');
     expect(typeof mod.api.PATCH).toBe('function');
     expect(typeof mod.api.DELETE).toBe('function');
+  });
+});
+
+/**
+ * Saying, once, that the session is over.
+ *
+ * `AuthGate` redirects on a null user but evaluates only at MOUNT, so a token
+ * that expired mid-visit left a fully-rendered shell where every request 401'd
+ * — and the sidebar, which turns its own failed fetch into an empty list,
+ * showed no navigation at all. The product looked featureless rather than
+ * signed out, which is exactly how it was reported.
+ *
+ * The second test is the one that matters more. Signing somebody out because
+ * their laptop lost Wi-Fi for a moment would be a worse bug than the one being
+ * fixed, and it is the kind that only shows up on bad networks — so the
+ * distinction between "the server REFUSED the refresh" and "the refresh never
+ * arrived" is pinned rather than trusted.
+ */
+describe('typed api client — a refused refresh ends the session', () => {
+  // This suite runs in the NODE environment (see the file docblock: openapi-fetch
+  // needs real `Request` objects, which jsdom does not provide), so there is no
+  // `window` to dispatch on. An `EventTarget` is exactly the contract
+  // `announceSessionExpired` uses — addEventListener / dispatchEvent — so
+  // standing one up here exercises the real path rather than a stub of it.
+  //
+  // It also means the production guard is under test: without the window this
+  // installs, `typeof window === 'undefined'` must make the announcement a
+  // no-op instead of a crash, which is what keeps this module importable during
+  // SSR.
+  beforeAll(() => {
+    (globalThis as unknown as { window: EventTarget }).window = new EventTarget();
+  });
+
+  afterAll(() => {
+    delete (globalThis as unknown as { window?: EventTarget }).window;
+  });
+
+  const listen = () => {
+    const seen = jest.fn();
+    window.addEventListener(SESSION_EXPIRED_EVENT, seen);
+    return {
+      seen,
+      stop: () => window.removeEventListener(SESSION_EXPIRED_EVENT, seen),
+    };
+  };
+
+  it('announces the expiry when the refresh is refused', async () => {
+    const { seen, stop } = listen();
+    const { fn } = scriptedFetch(
+      jsonResponse(401, { error: 'Authentication required' }),
+      jsonResponse(401, { error: 'refresh denied' })
+    );
+
+    await client(fn).GET('/api/v1/users');
+
+    expect(seen).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it('stays silent when the refresh never reaches the server', async () => {
+    // A dropped connection says nothing about whether the session is valid.
+    const { seen, stop } = listen();
+    let call = 0;
+    const fn = jest.fn(async (): Promise<Response> => {
+      call += 1;
+      if (call === 1) {
+        return jsonResponse(401, { error: 'Authentication required' });
+      }
+      throw new Error('network down');
+    });
+
+    await client(fn).GET('/api/v1/users');
+
+    expect(seen).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it('stays silent when the refresh succeeds', async () => {
+    // The ordinary path: a 15-minute token lapses, the refresh renews it, the
+    // original request replays. Nobody should be signed out for that.
+    const { seen, stop } = listen();
+    const { fn } = scriptedFetch(
+      jsonResponse(401, { error: 'Authentication required' }),
+      jsonResponse(200, { ok: true }),
+      jsonResponse(200, { data: [] })
+    );
+
+    await client(fn).GET('/api/v1/users');
+
+    expect(seen).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it('says nothing on a non-401, where no refresh is attempted at all', async () => {
+    const { seen, stop } = listen();
+    const { fn } = scriptedFetch(jsonResponse(500, { error: 'boom' }));
+
+    await client(fn).GET('/api/v1/users');
+
+    expect(seen).not.toHaveBeenCalled();
+    stop();
   });
 });

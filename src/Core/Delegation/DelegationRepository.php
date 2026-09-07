@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Whity\Core\Delegation;
 
 use PDO;
+use Whity\Http\ListQuery;
+use Whity\Http\ListSpec;
 
 /**
  * Data-access layer for `permission_delegations` (WC-34 / WC-bc07b6de).
@@ -133,13 +135,72 @@ class DelegationRepository
     }
 
     /**
+     * The sort keys and search columns a delegations LIST endpoint may offer.
+     *
+     * The column expressions live HERE, next to the only SQL that reads this
+     * table, because {@see \Whity\Http\ListSpec} interpolates them verbatim —
+     * they are code, not input, and code belongs with the query it lands in.
+     * Only the caller-facing KEYS travel over the wire, and an unrecognised one
+     * is simply not a sort.
+     *
+     * The keys mirror the delegations admin table. Its "Grantee", "Scope" and
+     * "Status" columns are composed in the browser out of three stored columns,
+     * so server-side they decompose: `granteeType`/`granteeId` for the grantee,
+     * `scope` for `ou_id`, and `status` for `revoked_at`.
+     *
+     * NEITHER of those last two sorts on the raw nullable column, and the reason
+     * is a dialect difference rather than taste: PostgreSQL orders NULLs LAST
+     * ascending, SQLite orders them FIRST, and this repository is exercised
+     * against both. Sorting `status` by `revoked_at` would therefore put the
+     * live delegations at the top of the table on one engine and the bottom on
+     * the other — the same request answered two ways depending on the
+     * deployment. The `CASE`/`COALESCE` forms below are NULL-free, so both
+     * engines agree, and they sort by what the column actually SHOWS: active
+     * before revoked, tenant-wide before OU-scoped. `ou_id` is a positive
+     * SERIAL, so 0 can never collide with a real unit.
+     *
+     * Only `permission` is searchable. It is the sole free-text column and the
+     * one an administrator actually hunts by ("who did I give documents:write
+     * to?"); `grantee_type` holds `role`/`profile` discriminators that would
+     * match half the table on a three-letter term, and the grantee, scope and
+     * status a reader SEES are rendered client-side from integers and NULLs
+     * that no typed term corresponds to.
+     *
+     * Default: `grantedAt` descending, matching the `ORDER BY granted_at DESC`
+     * this table has always been read with. The tiebreaker is `id` (ascending,
+     * as the contract appends it) rather than the old `id DESC`, so rows
+     * written by a single delegate() call — all sharing one `granted_at` — now
+     * page in a stable, total order.
+     */
+    public static function listSpec(): ListSpec
+    {
+        return new ListSpec(
+            sortable: [
+                'permission'  => 'permission',
+                'granteeType' => 'grantee_type',
+                'granteeId'   => 'grantee_id',
+                'scope'       => 'COALESCE(ou_id, 0)',
+                'status'      => 'CASE WHEN revoked_at IS NULL THEN 0 ELSE 1 END',
+                'grantedAt'   => 'granted_at',
+            ],
+            tiebreaker: 'id',
+            searchable: ['permission'],
+            defaultSort: 'grantedAt',
+            defaultDirection: 'desc',
+        );
+    }
+
+    /**
      * Count delegation rows matching the given filters.
      *
-     * @param int         $tenantId         The acting tenant (0 = system).
-     * @param string|null $granteeType      Filter by grantee type, or null.
-     * @param int|null    $granteeId        Filter by grantee id, or null.
-     * @param int|null    $grantorProfileId Filter by grantor profile id, or null.
-     * @param bool        $includeRevoked   Whether to include revoked delegations.
+     * @param int            $tenantId         The acting tenant (0 = system).
+     * @param string|null    $granteeType      Filter by grantee type, or null.
+     * @param int|null       $granteeId        Filter by grantee id, or null.
+     * @param int|null       $grantorProfileId Filter by grantor profile id, or null.
+     * @param bool           $includeRevoked   Whether to include revoked delegations.
+     * @param ListQuery|null $listQuery        Carries the caller's search term, which must
+     *        narrow this count exactly as it narrows {@see self::list()} — a total taken
+     *        without it describes a different set of rows than the page beside it.
      * @return int Total matching rows.
      */
     public function count(
@@ -147,10 +208,11 @@ class DelegationRepository
         ?string $granteeType = null,
         ?int $granteeId = null,
         ?int $grantorProfileId = null,
-        bool $includeRevoked = false
+        bool $includeRevoked = false,
+        ?ListQuery $listQuery = null
     ): int {
         [$where, $params] = $this->buildListWhere(
-            $tenantId, $granteeType, $granteeId, $grantorProfileId, $includeRevoked
+            $tenantId, $granteeType, $granteeId, $grantorProfileId, $includeRevoked, $listQuery
         );
 
         // @tenant-guard-ignore: tenant_id predicate added to $where only for non-system tenants
@@ -160,19 +222,26 @@ class DelegationRepository
         }
 
         $stmt = $this->db->prepare($sql);
-        $stmt->execute($params);
+        foreach ($params as $key => $value) {
+            $stmt->bindValue($key, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
+        $listQuery?->bindSearch($stmt);
+        $stmt->execute();
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row !== false ? (int)($row['cnt'] ?? 0) : 0;
     }
 
     /**
-     * @param int         $tenantId
-     * @param string|null $granteeType
-     * @param int|null    $granteeId
-     * @param int|null    $grantorProfileId
-     * @param bool        $includeRevoked
-     * @param int|null    $limit
-     * @param int         $offset
+     * @param int            $tenantId
+     * @param string|null    $granteeType
+     * @param int|null       $granteeId
+     * @param int|null       $grantorProfileId
+     * @param bool           $includeRevoked
+     * @param int|null       $limit
+     * @param int            $offset
+     * @param ListQuery|null $listQuery Sort and search from the request. Its ORDER BY
+     *        replaces the default one; its search is ANDed onto the same WHERE the
+     *        filters build, so it can only ever narrow a tenant's own rows.
      * @return array<int, array<string, mixed>> Normalised rows.
      */
     public function list(
@@ -182,10 +251,11 @@ class DelegationRepository
         ?int $grantorProfileId = null,
         bool $includeRevoked = false,
         ?int $limit = null,
-        int $offset = 0
+        int $offset = 0,
+        ?ListQuery $listQuery = null
     ): array {
         [$where, $params] = $this->buildListWhere(
-            $tenantId, $granteeType, $granteeId, $grantorProfileId, $includeRevoked
+            $tenantId, $granteeType, $granteeId, $grantorProfileId, $includeRevoked, $listQuery
         );
 
         // @tenant-guard-ignore: tenant_id predicate added to $where only for non-system tenants; system tenant (id 0) lists all delegations by design
@@ -193,16 +263,24 @@ class DelegationRepository
         if ($where !== []) {
             $sql .= ' WHERE ' . implode(' AND ', $where);
         }
-        $sql .= ' ORDER BY granted_at DESC, id DESC';
+        $sql .= ' ' . ($listQuery !== null ? $listQuery->orderBy() : 'ORDER BY granted_at DESC, id DESC');
 
         if ($limit !== null) {
             $sql .= ' LIMIT :limit OFFSET :offset';
-            $params[':limit']  = $limit;
-            $params[':offset'] = $offset;
         }
 
         $stmt = $this->db->prepare($sql);
-        $stmt->execute($params);
+        foreach ($params as $key => $value) {
+            $stmt->bindValue($key, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
+        $listQuery?->bindSearch($stmt);
+        if ($limit !== null) {
+            // Bound as integers, not through execute()'s all-strings path:
+            // PostgreSQL refuses a text argument to LIMIT.
+            $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+            $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        }
+        $stmt->execute();
 
         /** @var array<int, array<string, mixed>> $rows */
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -220,7 +298,8 @@ class DelegationRepository
         ?string $granteeType,
         ?int $granteeId,
         ?int $grantorProfileId,
-        bool $includeRevoked
+        bool $includeRevoked,
+        ?ListQuery $listQuery = null
     ): array {
         $where  = [];
         $params = [];
@@ -247,6 +326,16 @@ class DelegationRepository
 
         if (!$includeRevoked) {
             $where[] = 'revoked_at IS NULL';
+        }
+
+        // The search is the LAST condition, never the only one: it is ANDed onto
+        // the tenant scope and the filters above, so no term can widen the set a
+        // caller already reads. Both count() and list() build their WHERE here,
+        // which is what keeps the reported total and the returned page describing
+        // the same rows.
+        $searchPredicate = $listQuery?->searchPredicate($this->db) ?? '';
+        if ($searchPredicate !== '') {
+            $where[] = $searchPredicate;
         }
 
         return [$where, $params];

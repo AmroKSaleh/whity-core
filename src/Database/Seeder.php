@@ -6,6 +6,7 @@ namespace Whity\Database;
 
 use PDO;
 use Whity\Core\Identity\AuthMethod;
+use Whity\Core\Tenant\TenantProvisioner;
 
 /**
  * Seeder class for database initialization
@@ -88,18 +89,25 @@ class Seeder
         $driver = (string) $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
 
         // ── Create default tenant ─────────────────────────────────────────────
-        $db->query(
-            'INSERT INTO tenants (name, created_at) VALUES (:name, NOW()) ON CONFLICT (name) DO NOTHING',
-            [':name' => self::DEFAULT_TENANT_NAME]
-        );
-
-        // Fetch the tenant ID
-        $tenantResult = $db->query(
-            'SELECT id FROM tenants WHERE name = :name',
-            [':name' => self::DEFAULT_TENANT_NAME]
-        );
-        $tenant   = $tenantResult->fetch();
-        $tenantId = (int) ($tenant['id'] ?? 1);
+        // Through {@see TenantProvisioner} — the way a tenant is created AND
+        // given what a tenant must have — rather than through an INSERT of its
+        // own (#1012).
+        //
+        // The INSERT that used to be here is the whole of that bug: starter
+        // templates and header/footer blocks are core provisioning, this tenant
+        // never went past the code that applies it, and so the one tenant every
+        // fresh install opens the designer in was the only one that opened it
+        // empty — defeating the explicit requirement that the designer never
+        // present an empty document. Nothing about the tenant row differed; the
+        // spelling of its creation did.
+        //
+        // No HookManager: this runs from the CLI, which exits `public/index.php`
+        // before the bootstrap that registers any listener, so there is nobody to
+        // announce to. That is exactly why core provisioning is a STEP on the
+        // provisioner and not a `tenant.created` listener — see
+        // Whity\Core\Tenant\TenantProvisioningStep.
+        $tenantId = TenantProvisioner::withCoreSteps($pdo)
+            ->findOrCreate(self::DEFAULT_TENANT_NAME);
 
         // ── Resolve role IDs ──────────────────────────────────────────────────
         // @tenant-guard-ignore: seed-time bootstrap resolves global default role ids by name; no tenant context exists during seeding

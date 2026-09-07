@@ -260,10 +260,6 @@ parameters:
 			count: 1
 			path: src/Cli/Commands/MigrationsCommand.php
 
-		-
-			message: "#^Method Whity\\\\Cli\\\\Commands\\\\MigrationsCommand\\:\\:execute\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
-			count: 1
-			path: src/Cli/Commands/MigrationsCommand.php
 
 		-
 			message: "#^Method Whity\\\\Cli\\\\Commands\\\\MigrationsCommand\\:\\:getExecutedMigrations\\(\\) return type has no value type specified in iterable type array\\.$#"
@@ -310,10 +306,6 @@ parameters:
 			count: 1
 			path: src/Cli/Commands/PluginsCommand.php
 
-		-
-			message: "#^Method Whity\\\\Cli\\\\Commands\\\\SeedCommand\\:\\:execute\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
-			count: 1
-			path: src/Cli/Commands/SeedCommand.php
 
 		-
 			message: "#^Method Whity\\\\Cli\\\\Commands\\\\TenantsCommand\\:\\:create\\(\\) has parameter \\$argv with no value type specified in iterable type array\\.$#"
@@ -621,11 +613,6 @@ parameters:
 			path: tests/Cli/BaseCommandCallApiTest.php
 
 		-
-			message: "#^Expression on left side of \\?\\? is not nullable\\.$#"
-			count: 1
-			path: tests/Cli/MigrationsCommandTest.php
-
-		-
 			message: "#^Parameter \\#1 \\$string of function strtolower expects string, string\\|false given\\.$#"
 			count: 1
 			path: tests/Cli/MigrationsCommandTest.php
@@ -659,11 +646,6 @@ parameters:
 			message: "#^Parameter \\#2 \\$haystack of method PHPUnit\\\\Framework\\\\Assert\\:\\:assertStringContainsString\\(\\) expects string, string\\|false given\\.$#"
 			count: 4
 			path: tests/Cli/PluginsCommandTest.php
-
-		-
-			message: "#^Expression on left side of \\?\\? is not nullable\\.$#"
-			count: 1
-			path: tests/Cli/SeedCommandTest.php
 
 		-
 			message: "#^Parameter \\#1 \\$string of function strtolower expects string, string\\|false given\\.$#"

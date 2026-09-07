@@ -48,12 +48,15 @@ import { EmptyState, ErrorState } from '@amroksaleh/ui/empty-state';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { IconRoute } from '@tabler/icons-react';
 import { useTranslation } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { useAuth } from '@/lib/auth-context';
 import { useFetch } from '@/hooks/useFetch';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { fetchAllPages } from '@/lib/api/fetch-all-pages';
 import { DOCUMENTS_ROUTE } from '@/lib/capabilities';
+import type { AudienceGroupOption } from '@amroksaleh/ui/audience-group-picker';
+import type { AudiencePersonOption } from '@amroksaleh/ui/audience-people-picker';
 import { RouteComposer, type RoleOption } from '@/components/documents/route-composer';
 import { RouteFanout } from '@/components/documents/route-fanout';
 import { RouteActPanel } from '@/components/documents/route-act-panel';
@@ -63,14 +66,38 @@ import type {
   RoutesResponse,
   RoutingRulesResponse,
 } from '@/components/documents/routing-wire';
+import type {
+  RouteTemplateSummary,
+} from '@/components/documents/route-template-wire';
 
 interface DocumentSummary {
   id: number;
   title: string;
 }
 
+/**
+ * A picker's catalogue, plus the two DIFFERENT things that can be wrong with it.
+ *
+ * They were one field until #1015 and the conflation was a real defect: a
+ * truncated pagination walk set the same `reason` a 403 set, the composer only
+ * rendered that field when the list was EMPTY, and so a short list rendered as
+ * though it were whole — an author could conclude a role did not exist and pick
+ * the wrong one, which is precisely what `fetchAllPages`' `complete` flag exists
+ * to prevent.
+ *
+ * `unavailable` means there is NO list and says why. `incomplete` means the list
+ * is there but may be short. One is rendered instead of the control, the other
+ * beside it.
+ */
+interface PickerCatalogue<T> {
+  items: T[];
+  unavailable: string | null;
+  incomplete: string | null;
+}
+
 export default function DocumentRoutingPage() {
   const t = useTranslation('documents');
+  const dates = useDateDisplay();
   const { apiClient, user } = useAuth();
   const { has, loading: capsLoading } = useCapabilities();
   const router = useRouter();
@@ -131,7 +158,7 @@ export default function DocumentRoutingPage() {
    * render rather than thrown — throwing would take down the whole page over a
    * picker.
    */
-  const rolesResult = useFetch<{ roles: RoleOption[]; reason: string | null }>(async () => {
+  const rolesResult = useFetch<PickerCatalogue<RoleOption>>(async () => {
     const probe = await apiClient('/api/v1/roles?page=1');
     if (!probe.ok) {
       const body = (await probe.json().catch(() => null)) as
@@ -139,8 +166,9 @@ export default function DocumentRoutingPage() {
         | null;
       const required = body?.required;
       return {
-        roles: [],
-        reason:
+        items: [],
+        incomplete: null,
+        unavailable:
           probe.status === 403
             ? // The server's own `required` slug when it sent one, resolved by
               // NAME. Never a hardcoded permission id: #992 removed eight slugs
@@ -162,10 +190,11 @@ export default function DocumentRoutingPage() {
 
     const all = await fetchAllPages<RoleOption>(apiClient, '/api/v1/roles');
     return {
-      roles: all.items.map((role) => ({ id: role.id, name: role.name })),
+      items: all.items.map((role) => ({ id: role.id, name: role.name })),
+      unavailable: null,
       // MUST branch on `complete`: a truncated picker that looks whole would let
       // an author conclude a role does not exist and choose the wrong one.
-      reason: all.complete
+      incomplete: all.complete
         ? null
         : t(
             'routing.compose.roles.partial',
@@ -174,22 +203,188 @@ export default function DocumentRoutingPage() {
     };
   }, [apiClient]);
 
-  /** Display names, best-effort. See the file docblock. */
-  const profileNames = useFetch<{ names: Map<number, string>; complete: boolean }>(async () => {
-    const probe = await apiClient('/api/v1/users?page=1');
-    if (!probe.ok) return { names: new Map<number, string>(), complete: false };
+  /**
+   * User groups, for the `group` kind's `group_id` (#1015).
+   *
+   * A 403 here is as EXPECTED as the one on roles, and for a related reason.
+   * Migration 116 grants `groups:read` to whoever held `documents:route` AT THE
+   * MOMENT IT RAN — which is a snapshot, not a standing implication: a role that
+   * acquired `documents:route` afterwards, or holds it through inheritance, an OU
+   * assignment or a delegation, was never seen by that grant. So somebody who may
+   * route a document may perfectly well be unable to list groups, and that is a
+   * reason to render, not an exception to throw.
+   */
+  const groupsResult = useFetch<PickerCatalogue<AudienceGroupOption>>(async () => {
+    const probe = await apiClient('/api/v1/user-groups?page=1');
+    if (!probe.ok) {
+      const body = (await probe.json().catch(() => null)) as
+        | { error?: string; required?: string }
+        | null;
+      const required = body?.required;
+      return {
+        items: [],
+        incomplete: null,
+        unavailable:
+          probe.status === 403
+            ? required !== undefined && required !== ''
+              ? t(
+                  'routing.compose.groups.forbiddenNamed',
+                  'You cannot list user groups here, so a step cannot name one. An administrator would need to grant you {slug}.',
+                  { slug: required }
+                )
+              : t(
+                  'routing.compose.groups.forbidden',
+                  'You cannot list user groups here, so a step cannot name one. An administrator would need to grant you permission to read user groups.'
+                )
+            : (body?.error ??
+              t('routing.compose.groups.error', 'User groups could not be loaded.')),
+      };
+    }
 
-    const all = await fetchAllPages<{ id: number; name: string }>(apiClient, '/api/v1/users');
+    const all = await fetchAllPages<{ id: number; name: string; description: string | null }>(
+      apiClient,
+      '/api/v1/user-groups'
+    );
+    return {
+      items: all.items.map((group) => ({
+        id: group.id,
+        name: group.name,
+        description: group.description,
+      })),
+      unavailable: null,
+      incomplete: all.complete
+        ? null
+        : t(
+            'routing.compose.groups.partial',
+            'Only some user groups could be loaded, so this list may be incomplete.'
+          ),
+    };
+  }, [apiClient]);
+
+  /**
+   * Route templates, for #1031's "start from a template".
+   *
+   * A 403 here is EXPECTED for the same reason it is on roles and groups:
+   * migration 120 grants `route_templates:read` to `documents:route` holders
+   * because they are one of its two audiences, but a deployment can revoke it —
+   * and the endpoint that APPLIES a design requires it, so a caller without it
+   * would be refused after choosing rather than before. Captured as a reason the
+   * composer renders instead of the picker, never thrown: a page must not fall
+   * over because one of three ways to name recipients is closed.
+   */
+  const templatesResult = useFetch<PickerCatalogue<RouteTemplateSummary>>(async () => {
+    const probe = await apiClient('/api/v1/document-route-templates?page=1');
+    if (!probe.ok) {
+      const body = (await probe.json().catch(() => null)) as
+        | { error?: string; required?: string }
+        | null;
+      const required = body?.required;
+      return {
+        items: [],
+        incomplete: null,
+        unavailable:
+          probe.status === 403
+            ? required !== undefined && required !== ''
+              ? t(
+                  'routing.compose.templates.forbiddenNamed',
+                  'You cannot read this tenant’s route templates, so a design cannot be applied here. An administrator would need to grant you {slug}.',
+                  { slug: required }
+                )
+              : t(
+                  'routing.compose.templates.forbidden',
+                  'You cannot read this tenant’s route templates, so a design cannot be applied here. An administrator would need to grant you permission to read route templates.'
+                )
+            : (body?.error ??
+              t('routing.compose.templates.error', 'Route templates could not be loaded.')),
+      };
+    }
+
+    const all = await fetchAllPages<RouteTemplateSummary>(
+      apiClient,
+      '/api/v1/document-route-templates'
+    );
+    return {
+      items: all.items.map((template) => ({
+        id: template.id,
+        name: template.name,
+        description: template.description,
+        step_count: template.step_count,
+      })),
+      unavailable: null,
+      incomplete: all.complete
+        ? null
+        : t(
+            'routing.compose.templates.partial',
+            'Only some route templates could be loaded, so this list may be incomplete.'
+          ),
+    };
+  }, [apiClient]);
+
+  /**
+   * People — two jobs, ONE request.
+   *
+   * The display names this page has always needed (see the file docblock), and
+   * since #1015 the catalogue the `explicit` kind's picker searches. They are the
+   * same rows behind the same `users:read` gate, and asking twice would mean two
+   * walks of the same list that could disagree about how much of it arrived.
+   */
+  const peopleResult = useFetch<
+    PickerCatalogue<AudiencePersonOption> & { names: Map<number, string> }
+  >(async () => {
+    const probe = await apiClient('/api/v1/users?page=1');
+    if (!probe.ok) {
+      const body = (await probe.json().catch(() => null)) as
+        | { error?: string; required?: string }
+        | null;
+      const required = body?.required;
+      return {
+        items: [],
+        names: new Map<number, string>(),
+        incomplete: null,
+        unavailable:
+          probe.status === 403
+            ? required !== undefined && required !== ''
+              ? t(
+                  'routing.compose.people.forbiddenNamed',
+                  'You cannot list people here, so a step cannot name one by name. An administrator would need to grant you {slug}.',
+                  { slug: required }
+                )
+              : t(
+                  'routing.compose.people.forbidden',
+                  'You cannot list people here, so a step cannot name one by name. An administrator would need to grant you permission to read people.'
+                )
+            : (body?.error ?? t('routing.compose.people.error', 'People could not be loaded.')),
+      };
+    }
+
+    const all = await fetchAllPages<{ id: number; name: string; email?: string | null }>(
+      apiClient,
+      '/api/v1/users'
+    );
     const names = new Map<number, string>();
     for (const person of all.items) {
       if (typeof person.name === 'string' && person.name !== '') names.set(person.id, person.name);
     }
-    return { names, complete: all.complete };
+    return {
+      names,
+      items: all.items.map((person) => ({
+        id: person.id,
+        name: typeof person.name === 'string' && person.name !== '' ? person.name : String(person.id),
+        secondary: person.email ?? null,
+      })),
+      unavailable: null,
+      incomplete: all.complete
+        ? null
+        : t(
+            'routing.compose.people.partial',
+            'Only some people could be loaded, so this list may be incomplete.'
+          ),
+    };
   }, [apiClient]);
 
   const roleNames = useMemo(() => {
     const map = new Map<number, string>();
-    for (const role of rolesResult.data?.roles ?? []) map.set(role.id, role.name);
+    for (const role of rolesResult.data?.items ?? []) map.set(role.id, role.name);
     return map;
   }, [rolesResult.data]);
 
@@ -261,7 +456,8 @@ export default function DocumentRoutingPage() {
         }
       />
 
-      {profileNames.data !== null && !profileNames.data.complete && (
+      {peopleResult.data !== null &&
+        (peopleResult.data.unavailable !== null || peopleResult.data.incomplete !== null) && (
         <Alert className="mb-4">
           <AlertDescription>
             {t(
@@ -282,8 +478,18 @@ export default function DocumentRoutingPage() {
               documentId={documentId}
               documentTitle={document.data?.title ?? ''}
               rules={rules.data?.data ?? []}
-              roles={rolesResult.data?.roles ?? []}
-              rolesUnavailableReason={rolesResult.data?.reason ?? null}
+              roles={rolesResult.data?.items ?? []}
+              rolesUnavailableReason={rolesResult.data?.unavailable ?? null}
+              rolesIncompleteReason={rolesResult.data?.incomplete ?? null}
+              groups={groupsResult.data?.items ?? []}
+              groupsUnavailableReason={groupsResult.data?.unavailable ?? null}
+              groupsIncompleteReason={groupsResult.data?.incomplete ?? null}
+              people={peopleResult.data?.items ?? []}
+              peopleUnavailableReason={peopleResult.data?.unavailable ?? null}
+              peopleIncompleteReason={peopleResult.data?.incomplete ?? null}
+              templates={templatesResult.data?.items ?? []}
+              templatesUnavailableReason={templatesResult.data?.unavailable ?? null}
+              templatesIncompleteReason={templatesResult.data?.incomplete ?? null}
               onIssued={onIssued}
               onCancel={() => setComposing(false)}
             />
@@ -295,7 +501,23 @@ export default function DocumentRoutingPage() {
         <p className="rounded-md border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
           {routes.error}
         </p>
-      ) : routes.loading ? (
+      ) : routes.loading && routes.data === null ? (
+        /*
+          FIRST LOAD ONLY, and this gate is the reason to say so twice.
+
+          `useFetch` raises `loading` on every refetch, and an act triggers one
+          for BOTH requests. Gating on `loading` alone replaced the entire route
+          list — every card, every act panel — with the word "Loading…" the
+          instant somebody approved, which threw away the sentence the panel
+          exists to show them ("your approval is recorded; this step is not
+          approved yet") before anybody could read it.
+
+          The recipients gate below had the identical defect and was fixed first;
+          this one sat two lines away and stayed green through 1,794 unit tests,
+          because the panel's own tests mount the panel and never the host. It
+          was found by opening the page (#1041). `document-routing-refresh.test.tsx`
+          now holds both.
+        */
         <p className="text-sm text-muted-foreground">{t('routing.loading', 'Loading…')}</p>
       ) : routeList.length === 0 ? (
         /*
@@ -316,34 +538,80 @@ export default function DocumentRoutingPage() {
             <Card key={route.id} data-slot="routing-route">
               <CardHeader>
                 <CardTitle className="text-base">{route.title}</CardTitle>
-                <p className="text-xs text-muted-foreground">
-                  {t('routing.route.raised', 'Raised {when}', {
-                    when: new Date(route.created_at).toLocaleString(),
-                  })}
-                </p>
+                {/*
+                  #1068: the subtitle GOES when dates are hidden — it says
+                  nothing else. The route's TITLE is directly above it and the
+                  steps are below, so a card with no subtitle loses no meaning;
+                  "Raised —" would lose the sentence and keep the gap.
+                */}
+                {(() => {
+                  const raised = dates.dateTime(route.created_at);
+                  if (raised === null) return null;
+
+                  return (
+                    <p className="text-xs text-muted-foreground">
+                      {t('routing.route.raised', 'Raised {when}', { when: raised })}
+                    </p>
+                  );
+                })()}
               </CardHeader>
               <CardContent className="space-y-6">
+                {/*
+                  BOTH panels below read the recipient rows, and BOTH turn an
+                  empty list into a definite statement: "this route reached
+                  nobody", "nothing on this route is awaiting you". So neither
+                  may be rendered until the rows have actually arrived.
+
+                  Until this branch existed they were, and the result was a
+                  route that had just reached two people announcing that it had
+                  reached nobody — for as long as the second request took. The
+                  claim was not merely premature, it was the OPPOSITE of the
+                  truth, and it is the reading `RouteFanout`'s own comment says
+                  the sentence exists to prevent: an empty list must never be
+                  shown where "still loading" is what is true.
+
+                  `routes` and `recipients` are two requests and the routes
+                  resolve first, which is exactly why the gap is visible rather
+                  than theoretical.
+
+                  The gate is the FIRST load only — `loading` with nothing held
+                  yet. `useFetch` raises `loading` again on every refetch, and an
+                  act triggers one, so gating on `loading` alone UNMOUNTED the
+                  act panel the instant somebody acted. That threw away the one
+                  sentence the panel exists to show them ("your approval is
+                  recorded; this step is still waiting on the others") before it
+                  could be read (#1041). Holding the previous rows for the length
+                  of a refetch does not reintroduce the #1039 defect: the claim
+                  that was false was "this route reached nobody", and rows we
+                  already have are not nobody.
+                */}
                 {recipients.error !== null ? (
                   <p className="text-sm text-muted-foreground">{recipients.error}</p>
+                ) : recipients.loading && recipients.data === null ? (
+                  <p className="text-sm text-muted-foreground" data-slot="routing-recipients-loading">
+                    {t('routing.recipients.loading', 'Working out who this reached…')}
+                  </p>
                 ) : (
-                  <RouteFanout
-                    route={route}
-                    recipients={recipientRows}
-                    profileNames={profileNames.data?.names ?? new Map()}
-                    roleNames={roleNames}
-                    viewerProfileId={viewerProfileId}
-                  />
-                )}
+                  <>
+                    <RouteFanout
+                      route={route}
+                      recipients={recipientRows}
+                      profileNames={peopleResult.data?.names ?? new Map()}
+                      roleNames={roleNames}
+                      viewerProfileId={viewerProfileId}
+                    />
 
-                <div className="border-t border-border pt-4">
-                  <RouteActPanel
-                    documentId={documentId}
-                    route={route}
-                    recipients={recipientRows}
-                    viewerProfileId={viewerProfileId}
-                    onActed={() => setVersion((v) => v + 1)}
-                  />
-                </div>
+                    <div className="border-t border-border pt-4">
+                      <RouteActPanel
+                        documentId={documentId}
+                        route={route}
+                        recipients={recipientRows}
+                        viewerProfileId={viewerProfileId}
+                        onActed={() => setVersion((v) => v + 1)}
+                      />
+                    </div>
+                  </>
+                )}
               </CardContent>
             </Card>
           ))}

@@ -40,7 +40,7 @@ namespace Whity\Sdk\Tenant;
  * flagging (a developer can annotate a genuine exception with a reason) rather
  * than toward silently passing an unscoped tenant query.
  *
- * @phpstan-type Violation array{file: string, line: int, tables: list<string>, sql: string}
+ * @phpstan-type Violation array{file: string, line: int, tables: list<string>, sql: string, strandedAnnotation?: int}
  */
 final class TenantPredicateScanner
 {
@@ -55,6 +55,27 @@ final class TenantPredicateScanner
      * text after the colon and must be non-empty.
      */
     public const IGNORE_TAG = '@tenant-guard-ignore:';
+
+    /**
+     * How far above a statement an ignore annotation may sit and still apply.
+     *
+     * Only the line bearing the tag counts as annotated — a `//` comment block is
+     * one token per line, and the lines after the tag carry no tag of their own.
+     * So a reason written tag-first and continued over several lines pushes the
+     * tag out of this window, and the annotation stops applying while still
+     * reading, to a person, as though it does.
+     */
+    public const ANNOTATION_LOOKBACK = 3;
+
+    /**
+     * How far above to keep looking when reporting WHY a statement is unannotated.
+     *
+     * Purely diagnostic — it never suppresses. An annotation found in here but
+     * outside {@see ANNOTATION_LOOKBACK} is the difference between "you forgot to
+     * annotate this" and "you annotated it and it did not take", and those need
+     * different fixes.
+     */
+    private const STRANDED_ANNOTATION_WINDOW = 40;
 
     /** SQL DML verbs the scanner polices. INSERT is out of scope (it sets, not selects, a row). */
     private const DML_VERBS = ['SELECT', 'UPDATE', 'DELETE'];
@@ -139,12 +160,20 @@ final class TenantPredicateScanner
                 continue;
             }
 
-            $violations[] = [
+            $violation = [
                 'file' => $file,
                 'line' => $statement['line'],
                 'tables' => $tables,
                 'sql' => $this->normalizeWhitespace($sql),
             ];
+
+            // Decided already; this only explains the decision.
+            $stranded = $this->strandedAnnotationAbove($statement['lines'], $annotatedLines);
+            if ($stranded !== null) {
+                $violation['strandedAnnotation'] = $stranded;
+            }
+
+            $violations[] = $violation;
         }
 
         return $violations;
@@ -444,13 +473,50 @@ final class TenantPredicateScanner
         }
         // Allow the annotation to sit on the line(s) directly above the statement.
         $first = min($statementLines);
-        for ($above = $first - 1; $above >= $first - 3; $above--) {
+        for ($above = $first - 1; $above >= $first - self::ANNOTATION_LOOKBACK; $above--) {
             if (isset($annotatedLines[$above])) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /**
+     * The line of an ignore annotation that sits above this statement but too far
+     * above to apply, or null when there is none.
+     *
+     * Diagnostic only: this never suppresses anything, and is read exclusively to
+     * explain a violation that has already been decided.
+     *
+     * It exists because the two failures are indistinguishable in the output and
+     * need opposite fixes. "No annotation" means decide whether the access is
+     * legitimate and say why. "An annotation that did not take" means the author
+     * ALREADY decided and wrote the reason down — the access is probably fine and
+     * the tag is simply in the wrong place. Reporting the second as the first
+     * sends a reviewer to re-litigate a question that was already answered, and
+     * invites them to conclude the guard is noisy.
+     *
+     * @param list<int>        $statementLines
+     * @param array<int, true> $annotatedLines
+     */
+    private function strandedAnnotationAbove(array $statementLines, array $annotatedLines): ?int
+    {
+        if ($statementLines === []) {
+            return null;
+        }
+
+        $first = min($statementLines);
+        $from = $first - self::ANNOTATION_LOOKBACK - 1;
+        $to = $first - self::STRANDED_ANNOTATION_WINDOW;
+
+        for ($above = $from; $above >= $to && $above > 0; $above--) {
+            if (isset($annotatedLines[$above])) {
+                return $above;
+            }
+        }
+
+        return null;
     }
 
     /**

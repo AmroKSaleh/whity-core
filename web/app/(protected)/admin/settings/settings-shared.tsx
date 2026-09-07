@@ -95,6 +95,17 @@ export type GeneralSettingKey = 'site_name' | 'timezone' | 'support_email';
 export const GENERAL_SETTING_KEYS: readonly GeneralSettingKey[] = ['site_name', 'timezone', 'support_email'];
 
 /**
+ * Per-tenant DISPLAY preferences, rendered on the General tab beneath the four
+ * fields above (#1068).
+ *
+ * A separate list because these are rendered from the SERVER's registry
+ * descriptor — which supplies the control type and the default — rather than
+ * from a bespoke control per key. A second display preference is a string here
+ * and nothing else.
+ */
+export const DISPLAY_SETTING_KEYS: readonly string[] = ['ui.hide_dates'];
+
+/**
  * Short labels for the fixed per-tenant key set, as rendered on the General and
  * Branding tabs.
  *
@@ -127,6 +138,13 @@ export interface FieldMeta {
  */
 export function fieldMeta(t: TranslateFn): Record<string, FieldMeta> {
   return {
+    'ui.hide_dates': {
+      label: t('settings.meta.ui.hide_dates.label', 'Hide dates and times'),
+      help: t(
+        'settings.meta.ui.hide_dates.help',
+        'Stop showing dates and times anywhere in the interface. Everything is still recorded — timestamps stay in the database, in the audit trail and in the API, and turning this off brings them all back. The public document-verification page is not affected; it has its own setting.'
+      ),
+    },
     'error_tracking.enabled': {
       label: t('settings.meta.error_tracking.enabled.label', 'Record errors'),
       help: t(
@@ -860,6 +878,21 @@ export function RegistrySettingControl({
               {meta.label}
             </label>
             {sourceNode}
+            {/* #1068: a bool control could not report inherited/overridden, and
+                every other control on the tenant card can. On a card whose whole
+                subject is per-tenant OVERRIDES, a row that cannot say whether it
+                is one is the row an operator misreads. Only rendered when a
+                caller passes `status`, so the global-only surfaces that have no
+                such distinction are unchanged. */}
+            {status && (
+              <Badge
+                data-testid={`status-${key}`}
+                variant={status === 'overridden' ? 'default' : 'secondary'}
+                className="text-[10px] font-medium capitalize"
+              >
+                {statusLabel(status, t)}
+              </Badge>
+            )}
           </div>
           {helpNode}
           {errorNode}

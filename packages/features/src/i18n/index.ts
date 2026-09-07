@@ -10,6 +10,7 @@
  *   separately and cannot reorder — see useRichTranslation.tsx.
  * - useCurrentLanguage: Hook to get/set the current language
  * - useLanguageDirection: Hook for the resolved language's writing direction
+ * - useFormattingLocale: Hook for the locale to hand Intl / toLocale*String
  * - useI18nEnabled: Hook for whether this instance offers a language CHOICE
  *
  * Architecture:
@@ -54,6 +55,7 @@ export {
 } from './useRichTranslation'
 export { useCurrentLanguage, type UseCurrentLanguageReturn } from './useCurrentLanguage'
 export { useLanguageDirection } from './useLanguageDirection'
+export { useFormattingLocale } from './useFormattingLocale'
 export { useI18nEnabled, useI18nAvailability, type I18nAvailability } from './useI18nEnabled'
 export { LanguageSwitcher, type LanguageSwitcherProps } from './LanguageSwitcher'
 export type {

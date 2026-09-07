@@ -18,13 +18,16 @@ declare(strict_types=1);
  * WHY THIS IS NOT "NO ORPHAN SLUGS"
  * ---------------------------------
  * The narrowing is the whole design. A catalogue entry that nothing consults
- * yet is FINE, and there is one in the tree right now on purpose: `tenants:read`
- * exists, is held by nobody, and is the slug `GET /api/tenants` is to be
- * re-gated onto — migration 114's docblock says so in as many words, and
+ * yet is FINE. There was one in the tree on purpose while this guard was
+ * written: `tenants:read` existed, was held by nobody, and was the slug
+ * `GET /api/tenants` was to be re-gated onto — the docblock of
+ * `115_remove_legacy_crud_permission_slugs.php` says so in as many words, and
  * explains why it was deliberately left in place while its eight neighbours were
- * deleted. A guard that fired on it would be wrong, and the only available fix
- * would be an allowlist entry that says "wrong on purpose", which is how a
- * guard stops being read.
+ * deleted. #990 made that re-gate and shipped migration
+ * 138 with it, so the slug is now gated AND held and this guard's proper
+ * business. A guard that had fired on it beforehand would have been wrong, and
+ * the only available fix would have been an allowlist entry saying "wrong on
+ * purpose", which is how a guard stops being read.
  *
  * So the subject is CONSULTED, not EXISTING. A slug becomes this guard's
  * business the moment a route gates on it, and not before.
@@ -42,12 +45,20 @@ declare(strict_types=1);
  *
  * AND WHAT IT IS QUEUED TO COST
  * -----------------------------
- * #990 is open, and it is the same shape, fourteen times over: fourteen routes
- * still gate on the `admin` ROLE NAME and are to be re-gated onto slugs. This
- * guard measured them while it was being written, and `tenants:read` — the slug
- * `GET /api/tenants` is headed for — has ZERO holders today. Landing that
- * re-gate without a grant migration beside it is a lockout, and it is a lockout
- * that CI would otherwise call green: no test asks who holds a permission.
+ * #990 is the same shape, fourteen times over: fourteen routes gated on the
+ * `admin` ROLE NAME and to be re-gated onto slugs. This guard measured them
+ * while it was being written, and `tenants:read` — the slug `GET /api/tenants`
+ * was headed for — had ZERO holders. Landing that re-gate without a grant
+ * migration beside it would have been a lockout, and one CI would otherwise have
+ * called green: no test asks who holds a permission.
+ *
+ * Five of the fourteen have since landed (the four tenants routes and
+ * `GET /api/permissions`), with migration 138 granting `tenants:read` to every
+ * role that may already write or delete a tenant. NINE REMAIN — email-domains,
+ * deployments, migrations and admin/stats — and those are the harder half: no
+ * slug exists for any of them, so re-gating means inventing the vocabulary and
+ * deciding its audience, one group at a time. Each such slug arrives held by
+ * nobody by construction, which is exactly the case this guard is for.
  *
  * HOW IT LEARNS WHICH SLUGS ARE GATED
  * -----------------------------------
@@ -607,8 +618,8 @@ if ($lockouts !== [] || $staleEntries !== []) {
             . "     migration that has not been applied to the database being measured looks exactly\n"
             . "     like a missing grant from here.\n\n"
             . "  2. DO NOT GATE ON IT YET. A slug can sit in the catalogue unheld indefinitely and\n"
-            . "     harm nothing — `tenants:read` does, on purpose, waiting for #990. The harm starts\n"
-            . "     when a route consults it.\n\n"
+            . "     harm nothing — `tenants:read` did exactly that until #990 gated it and shipped\n"
+            . "     the grant in the same change. The harm starts when a route consults it.\n\n"
             . "Adding it to UNHELD_BY_DESIGN is a third way and almost never the answer: it says the\n"
             . 'gate refusing everybody is the intended product behaviour.'
         : "UNHELD_BY_DESIGN is a list of reviewed decisions, not a mute button, so it is checked in\n"

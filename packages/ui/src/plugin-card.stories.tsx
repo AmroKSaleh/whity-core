@@ -28,9 +28,9 @@ const SAMPLE_PLUGINS: PluginItem[] = [
     state: "update-available",
     permissions: ["storage:read-write", "ai-engine:invoke", "documents:parse"],
     versions: [
-      { version: "2.4.0", releasedAt: "Current (Installed)", isCurrent: true },
-      { version: "2.3.1", releasedAt: "2 weeks ago", changelog: "Added batch PDF processing worker support." },
-      { version: "2.2.0", releasedAt: "1 month ago", changelog: "Initial multi-lingual summary support." },
+      { version: "2.4.0", releasedLabel: "Current (Installed)", isCurrent: true },
+      { version: "2.3.1", releasedLabel: "2 weeks ago", changelog: "Added batch PDF processing worker support." },
+      { version: "2.2.0", releasedLabel: "1 month ago", changelog: "Initial multi-lingual summary support." },
     ],
   },
   {
@@ -48,9 +48,9 @@ const SAMPLE_PLUGINS: PluginItem[] = [
     state: "active",
     permissions: ["storage:read-write", "network:outbound-https"],
     versions: [
-      { version: "1.8.2", releasedAt: "Current", isCurrent: true },
-      { version: "1.7.5", releasedAt: "3 weeks ago", changelog: "Added MinIO multipart upload chunking." },
-      { version: "1.6.0", releasedAt: "2 months ago", changelog: "S3 server-side encryption support." },
+      { version: "1.8.2", releasedLabel: "Current", isCurrent: true },
+      { version: "1.7.5", releasedLabel: "3 weeks ago", changelog: "Added MinIO multipart upload chunking." },
+      { version: "1.6.0", releasedLabel: "2 months ago", changelog: "S3 server-side encryption support." },
     ],
   },
   {
@@ -68,9 +68,9 @@ const SAMPLE_PLUGINS: PluginItem[] = [
     state: "inactive",
     permissions: ["audit-log:read-write", "webhooks:dispatch"],
     versions: [
-      { version: "3.1.0", releasedAt: "Current", isCurrent: true },
-      { version: "3.0.2", releasedAt: "1 month ago" },
-      { version: "2.9.0", releasedAt: "3 months ago" },
+      { version: "3.1.0", releasedLabel: "Current", isCurrent: true },
+      { version: "3.0.2", releasedLabel: "1 month ago" },
+      { version: "2.9.0", releasedLabel: "3 months ago" },
     ],
   },
   {

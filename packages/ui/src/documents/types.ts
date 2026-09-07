@@ -1,9 +1,21 @@
 /**
  * Document/label designer model (WC-doceditor).
  *
- * A template is an ABSOLUTE-POSITIONED canvas: a fixed-size page (millimetres,
- * print-accurate) holding elements placed at (x, y) with (w, h). This suits
- * labels, sheets and docs alike — unlike word-processor flow layout.
+ * A template has TWO possible bodies, and `mode` says which one it is being
+ * edited as (#1186):
+ *
+ *   - CANVAS (`pages`, the original and the default): an absolute-positioned
+ *     page in millimetres, elements placed at (x, y) with (w, h). Exactly what
+ *     a label, a certificate or a form needs, and what word-processor flow
+ *     layout cannot give.
+ *   - FLOW (`flow`): blocks one below another, paginated by the render service.
+ *     What a report or a letter needs, and what placing every paragraph by hand
+ *     makes miserable.
+ *
+ * Both are held at once so a document can be switched between them. Neither is
+ * a conversion of the other at rest; conversion happens on the switch, and the
+ * canvas -> flow direction loses positions, which the switch has to say before
+ * it happens rather than after.
  *
  * NOTE on colours: element `fill`/`stroke`/`color` are USER CONTENT (the design
  * the operator draws), stored as data and applied via inline style. That is
@@ -17,6 +29,7 @@
  */
 
 import type { SheetSpec } from './sheet';
+import type { FlowContent } from './flow';
 
 export type ElementType = 'text' | 'dynamicText' | 'image' | 'barcode' | 'qr' | 'rect' | 'line' | 'math';
 
@@ -223,6 +236,23 @@ export interface DocTemplate {
   sheet?: SheetSpec;
   /** Saved serial/sequence generator settings, for repeatable batch runs. */
   sequence?: SequenceConfig;
+  /**
+   * Which editor owns this document (#1186).
+   *
+   * Absent means `canvas`, so every template written before document mode
+   * existed reads correctly without a migration — and an older client that
+   * does not know the field keeps opening its own documents unchanged.
+   */
+  mode?: 'canvas' | 'flow';
+  /**
+   * The flowing content, when `mode` is `flow`.
+   *
+   * Kept BESIDE `pages` rather than replacing it, because a template can be
+   * switched between modes and the other half must survive the trip. Canvas ->
+   * flow drops absolute positions and cannot get them back; holding both is
+   * what makes that a stated cost rather than a silent one.
+   */
+  flow?: FlowContent;
 }
 
 /** The barcode symbologies offered in the properties panel (bwip-js ids). */

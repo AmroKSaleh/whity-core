@@ -46,6 +46,7 @@ import { PageHeader } from '@amroksaleh/ui/page-header';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
 import { IconArrowLeft } from '@tabler/icons-react';
 
+import { useDateDisplay } from '../datetime';
 import { RecordSection } from './record-section';
 import type {
   RecordAccess,
@@ -250,7 +251,13 @@ export function RecordPageShell<TFields extends object>({
   side,
   className,
 }: RecordPageShellProps<TFields>) {
-  // Called with the record and the dictionary, and NOTHING ELSE — `access` is
+  // #1068: resolved HERE, once, and handed to the projection below. A facts
+  // function is module-scope and pure, so it cannot call a hook — and a date it
+  // formatted for itself would be a date outside the one sanctioned path.
+  const dates = useDateDisplay();
+
+  // Called with the record, the dictionary and the date formatter, and NOTHING
+  // ELSE — `access` is
   // not in scope for it, and `fields` cannot carry a permission flag. These two
   // lines are the #895 fix expressed as a call signature.
   //
@@ -260,7 +267,7 @@ export function RecordPageShell<TFields extends object>({
   // type carrying `manageable` resolves the prop to `CallerFlagInRecordFields`
   // and the screen does not compile.
   const project = facts as RecordProjection<TFields>;
-  const statement = project(fields, t ?? identityRecordTranslate);
+  const statement = project(fields, t ?? identityRecordTranslate, dates);
   const badges = statement.badges ?? [];
   const stats = statement.stats ?? [];
 

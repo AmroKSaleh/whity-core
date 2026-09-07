@@ -303,6 +303,89 @@ final class BlockValidatorTest extends TestCase
         ];
     }
 
+    // ---- WC-532 item 5: the reason-collecting action prompt ----
+
+    /**
+     * `mixed`, not an array shape: one case deliberately passes a string, to
+     * prove the validator refuses a prompt that is not an object. A narrower
+     * type here would make that case unwritable rather than unnecessary.
+     *
+     * @return array{ok: bool, errors: list<string>}
+     */
+    private function validateInboxPrompt(mixed $prompt): array
+    {
+        $inbox = self::validInbox();
+        $inbox['actions'][] = [
+            'key' => 'reject',
+            'label' => 'Reject',
+            'method' => 'POST',
+            'endpoint' => '/api/tasks/{id}/reject',
+            'prompt' => $prompt,
+        ];
+
+        return BlockValidator::validate([$inbox]);
+    }
+
+    /**
+     * The review-queue shape: approve needs no reason, returning something does.
+     * `confirm` can only ask yes/no, which is why this exists at all.
+     */
+    public function testAnItemActionMayCollectAReason(): void
+    {
+        $result = $this->validateInboxPrompt([
+            'field' => 'comment',
+            'label' => 'Reason for rejection',
+            'required' => true,
+            'placeholder' => 'What should change?',
+        ]);
+
+        $this->assertTrue($result['ok'], implode('; ', $result['errors']));
+    }
+
+    /** `field` and `label` are what make the prompt dispatchable and readable. */
+    public function testAPromptWithoutAFieldOrLabelIsRefused(): void
+    {
+        $missingField = $this->validateInboxPrompt(['label' => 'Why?']);
+        $this->assertFalse($missingField['ok']);
+        $this->assertStringContainsString('prompt field must be a non-empty string', implode('; ', $missingField['errors']));
+
+        $missingLabel = $this->validateInboxPrompt(['field' => 'comment']);
+        $this->assertFalse($missingLabel['ok']);
+        $this->assertStringContainsString('prompt label must be a non-empty string', implode('; ', $missingLabel['errors']));
+    }
+
+    /**
+     * `field` becomes a key in the JSON body a handler reads by name, so it is
+     * held to the same shape a form input's `name` is. A dotted or spaced key
+     * would be accepted here and then be unreadable at the other end.
+     */
+    public function testAPromptFieldMustLookLikeAnInputName(): void
+    {
+        $result = $this->validateInboxPrompt(['field' => 'the comment', 'label' => 'Why?']);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString('prompt field must be a valid input name', implode('; ', $result['errors']));
+    }
+
+    public function testAPromptWithMistypedOptionalsIsRefused(): void
+    {
+        $required = $this->validateInboxPrompt(['field' => 'comment', 'label' => 'Why?', 'required' => 'yes']);
+        $this->assertFalse($required['ok']);
+        $this->assertStringContainsString('prompt required must be a boolean', implode('; ', $required['errors']));
+
+        $notAnObject = $this->validateInboxPrompt('just a string');
+        $this->assertFalse($notAnObject['ok']);
+        $this->assertStringContainsString('prompt must be an object', implode('; ', $notAnObject['errors']));
+    }
+
+    /** The control: prompt is optional, and an action without one still validates. */
+    public function testAnItemActionWithoutAPromptIsUnchanged(): void
+    {
+        $result = BlockValidator::validate([self::validInbox()]);
+
+        $this->assertTrue($result['ok'], implode('; ', $result['errors']));
+    }
+
     public function testTimelineAcceptsItsFullPropSet(): void
     {
         $result = BlockValidator::validate([[
@@ -538,6 +621,7 @@ final class BlockValidatorTest extends TestCase
             'fieldArray', 'fileInput', 'flow', 'form', 'grid', 'heading', 'icon', 'inbox', 'keyValue', 'list', 'markdown', 'math',
             'documentViewer', 'modal', 'numberInput', 'ouScopePicker', 'recordFields', 'referenceSelect', 'richTextInput', 'row', 'section', 'select', 'selector', 'slider', 'stat', 'submitButton',
             'tab', 'table', 'tabs', 'text', 'textArea', 'textInput', 'timeline',
+            'variant', 'variantCase',
         ];
         sort($expected);
 
@@ -768,6 +852,130 @@ final class BlockValidatorTest extends TestCase
         ]]);
 
         $this->assertTrue($result['ok'], implode('; ', $result['errors']));
+    }
+
+    // ---- WC-532 item 3: variant / variantCase ----
+
+    /**
+     * @param list<array<string, mixed>> $cases
+     * @param list<array<string, mixed>> $extra
+     * @return array{ok: bool, errors: list<string>}
+     */
+    private function validateVariantForm(array $cases, array $extra = []): array
+    {
+        return BlockValidator::validate([[
+            'type' => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/save'],
+            'children' => array_merge(
+                [['type' => 'textInput', 'name' => 'kind', 'label' => 'Kind']],
+                [['type' => 'variant', 'discriminator' => 'kind', 'children' => $cases]],
+                $extra,
+            ),
+        ]]);
+    }
+
+    /**
+     * THE RULE THE WHOLE FEATURE RESTS ON.
+     *
+     * Sibling cases are mutually exclusive — at most one is ever submitted — so
+     * two of them may declare the same field name. That is not a leniency, it
+     * is what a discriminated union looks like from the server's side:
+     * `{kind:'num', value: 5}` and `{kind:'txt', value: 'x'}` are one field in
+     * two shapes.
+     *
+     * Refusing it would force every branch to prefix its fields and make the
+     * payload shape depend on the declaration style rather than on the union
+     * being modelled.
+     */
+    public function testSiblingVariantCasesMayDeclareTheSameInputName(): void
+    {
+        $result = $this->validateVariantForm([
+            ['type' => 'variantCase', 'when' => 'num', 'children' => [
+                ['type' => 'numberInput', 'name' => 'value', 'label' => 'Value'],
+            ]],
+            ['type' => 'variantCase', 'when' => 'txt', 'children' => [
+                ['type' => 'textInput', 'name' => 'value', 'label' => 'Value'],
+            ]],
+        ]);
+
+        $this->assertTrue($result['ok'], implode('; ', $result['errors']));
+    }
+
+    /**
+     * The counterweight. Cases share a scope with the ENCLOSING form even
+     * though they do not share one with each other, because a case field and a
+     * form field of the same name would both be in one payload and one would
+     * win silently.
+     */
+    public function testAVariantCaseMayNotShadowAnInputInTheEnclosingForm(): void
+    {
+        $result = $this->validateVariantForm([
+            ['type' => 'variantCase', 'when' => 'num', 'children' => [
+                ['type' => 'textInput', 'name' => 'kind', 'label' => 'Clash'],
+            ]],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("duplicate input name 'kind'", implode('; ', $result['errors']));
+    }
+
+    /** A duplicate WITHIN one case is still a duplicate. */
+    public function testDuplicateNamesInsideOneVariantCaseAreRefused(): void
+    {
+        $result = $this->validateVariantForm([
+            ['type' => 'variantCase', 'when' => 'num', 'children' => [
+                ['type' => 'numberInput', 'name' => 'v', 'label' => 'A'],
+                ['type' => 'textInput', 'name' => 'v', 'label' => 'B'],
+            ]],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("duplicate input name 'v'", implode('; ', $result['errors']));
+    }
+
+    /**
+     * An input directly under a `variant`, in no case at all, has no answer to
+     * "which discriminator value does this belong to" — so it could never be
+     * included in or excluded from a payload on any principle. Refusing the
+     * declaration is the difference between an error and a field that silently
+     * never submits.
+     */
+    public function testVariantChildrenMustAllBeCases(): void
+    {
+        $result = $this->validateVariantForm([
+            ['type' => 'textInput', 'name' => 'loose', 'label' => 'Loose'],
+        ]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("children of 'variant' must be 'variantCase'", implode('; ', $result['errors']));
+    }
+
+    public function testAVariantCaseIsOnlyValidInsideAVariant(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'form',
+            'submit' => ['method' => 'POST', 'endpoint' => '/api/x/save'],
+            'children' => [
+                ['type' => 'variantCase', 'when' => 'num', 'children' => []],
+            ],
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("'variantCase' is only valid as a direct child of 'variant'", implode('; ', $result['errors']));
+    }
+
+    /** `variant` selects on a sibling input, so a form is the only place it means anything. */
+    public function testAVariantOutsideAFormIsRefused(): void
+    {
+        $result = BlockValidator::validate([[
+            'type' => 'section',
+            'children' => [
+                ['type' => 'variant', 'discriminator' => 'kind', 'children' => []],
+            ],
+        ]]);
+
+        $this->assertFalse($result['ok']);
+        $this->assertStringContainsString("'variant' is only valid inside a 'form'", implode('; ', $result['errors']));
     }
 
     /**

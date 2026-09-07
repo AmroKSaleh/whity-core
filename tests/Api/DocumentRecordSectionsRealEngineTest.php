@@ -193,22 +193,52 @@ final class DocumentRecordSectionsRealEngineTest extends TestCase
     // ── the shape of the map ─────────────────────────────────────────────────
 
     /**
-     * All three regions are reported, and `document` is the only one a
+     * Every region is reported, and `document` and `qr` are the only two a
      * permission can refuse.
      *
      * The read gates are all null on purpose (see
      * {@see DocumentsApiHandler::recordSections()}), so a caller who received a
      * payload at all is entitled to every region. Asserting the exact key SET
-     * rather than three separate `assertArrayHasKey`s is deliberate: a fourth
-     * region added without a test is the thing that would slip through.
+     * rather than one `assertArrayHasKey` per region is deliberate: a region
+     * added without a test is the thing that would slip through — and it caught
+     * exactly that when #1036 added `qr`, which is this assertion working rather
+     * than failing.
      */
-    public function testAllThreeRegionsAreReportedToACallerWhoCanSeeTheDocument(): void
+    public function testEveryRegionIsReportedToACallerWhoCanSeeTheDocument(): void
     {
         $documentId = $this->issue(self::OWNER, 'Minutes');
 
         $sections = $this->sections(self::OWNER, $documentId);
 
-        self::assertSame(['document', 'trail', 'recipients'], array_keys($sections));
+        self::assertSame(['document', 'trail', 'recipients', 'qr'], array_keys($sections));
+    }
+
+    /**
+     * A host wired without the QR service reports the `qr` region as refused BY
+     * THE RECORD (#1036).
+     *
+     * The handler under test here has no {@see \Whity\Core\Document\Qr\DocumentQrService},
+     * which is a real deployment shape — an embedder that wires documents
+     * without verification — and the honest verdict for it is "you may look,
+     * and there is nothing here to change", not a permission refusal and not
+     * silence.
+     *
+     * READ-ONLY rather than DENIED, because the read gate is null like every
+     * other region's: the caller is entitled to see the panel and be told the
+     * document carries no code. It is the WRITE that the record refuses, with
+     * code `record` — the one code a grant cannot fix, which is exactly true
+     * here: no role anywhere would make a code appear on a host that cannot
+     * mint one.
+     */
+    public function testTheQrRegionIsReadOnlyByTheRECORDOnAHostWithNoQrService(): void
+    {
+        $documentId = $this->issue(self::OWNER, 'Minutes');
+
+        $qr = $this->sections(self::OWNER, $documentId)['qr'];
+
+        self::assertSame('read-only', $qr['state']);
+        self::assertIsArray($qr['denial']);
+        self::assertSame('record', $qr['denial']['code']);
     }
 
     /** The list route carries no verdicts — a verdict is about ONE record. */

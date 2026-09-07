@@ -7,8 +7,33 @@ namespace Whity\Cli\Commands;
 /**
  * Plugins management command
  */
-class PluginsCommand extends BaseCommand
+class PluginsCommand extends BaseCommand implements CliCommand
 {
+    /**
+     * The help this command already wrote, routed through the interface.
+     *
+     * `showHelp()` used to be reached as an ACTION — `PluginsCommand --help` matched it
+     * in the first position. That is why `PluginsCommand <action> --help` ran the
+     * action instead: the flag was never in the position that matched. The runner
+     * now intercepts it anywhere, so this is how the text still gets printed.
+     */
+    public function printHelp(string $commandName): bool
+    {
+        $this->showHelp();
+
+        return true;
+    }
+
+    /** @return list<string>|null */
+    public function knownFlags(): ?array
+    {
+        // Not declared yet: this command has not been audited for the full set
+        // of options it accepts, and null means "do not validate" rather than
+        // "accepts nothing". Declaring an incomplete list here would reject
+        // flags that currently work.
+        return null;
+    }
+
     /**
      * Execute the command
      *

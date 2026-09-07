@@ -33,6 +33,12 @@ use RuntimeException;
  * database is the opposite: {@see TranslationSync} only ever inserts, because
  * rows there carry human work (an edited English string, a finished Arabic
  * translation) that no scanner may destroy.
+ *
+ * AND THE OTHER LANGUAGES: `database/i18n/<code>/<domain>.json`. Those are the
+ * exact opposite kind of file — hand-written, partial, never regenerated — and
+ * they live one directory DOWN rather than beside the English, so that every
+ * read and every prune on the generated half walks past them untouched. See
+ * {@see self::localeDirectory()} for why they had to exist.
  */
 final class TranslationCatalog
 {
@@ -63,6 +69,27 @@ final class TranslationCatalog
         . 'Do not edit by hand: edit the English text at the call site and regenerate. '
         . 'Seed it into the database with `whity-cli i18n:sync`.';
 
+    /**
+     * The opposite instruction, for the opposite kind of file.
+     *
+     * A locale catalogue is not derived from anything, so "do not edit by hand"
+     * would be exactly wrong advice — hand-editing is the ONLY way a string gets
+     * into it.
+     */
+    private const LOCALE_HEADER_NOTICE = 'Hand-written translations. Unlike the English catalogue one directory up, '
+        . 'this file is NOT generated — it is the source of truth for this language and is edited by hand. '
+        . 'Every key must also exist in the English catalogue (CI fails on one that does not); a key absent '
+        . 'from here falls back to English at runtime. Seed it with `whity-cli i18n:sync --language=<code>`.';
+
+    /**
+     * A locale directory name, which is also a `languages.code`.
+     *
+     * Anchored and deliberately narrow because this value becomes a PATH
+     * segment: `..` , an absolute path, or a separator would let a catalogue
+     * file be read from or written to anywhere on the filesystem.
+     */
+    private const LANGUAGE_CODE_PATTERN = '/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/';
+
     public function __construct(
         private readonly string $baseDir,
     ) {
@@ -80,7 +107,23 @@ final class TranslationCatalog
      */
     public function read(): array
     {
-        $directory = $this->directory();
+        return self::readDirectory($this->directory());
+    }
+
+    /**
+     * Every `.json` file directly inside a directory, as domain => key => text.
+     *
+     * SUBDIRECTORIES ARE SKIPPED, and that is load-bearing rather than
+     * incidental: `database/i18n/ar/` sits inside `database/i18n/`, so the
+     * English read (and, more dangerously, the English WRITE, which deletes
+     * files it did not expect) must walk past it without seeing it. `is_file()`
+     * is what makes a locale directory invisible to the generated half of the
+     * pipeline.
+     *
+     * @return array<string, array<string, string>>
+     */
+    private static function readDirectory(string $directory): array
+    {
         if (!is_dir($directory)) {
             return [];
         }
@@ -122,6 +165,246 @@ final class TranslationCatalog
         ksort($catalog);
 
         return $catalog;
+    }
+
+    // ─── Locale catalogues: the half a human writes ──────────────────────────
+
+    /**
+     * Where a language's hand-written catalogue lives: `database/i18n/<code>/`.
+     *
+     * WHY THIS EXISTS AT ALL. Until it did, English was the only language that
+     * SHIPPED. The catalogue carried English into the release image and
+     * `i18n:sync` seeded it; Arabic was expected to be typed into
+     * `/admin/translations` by a human, per deployment, after install. The
+     * predictable result was that every deployment started English-only and
+     * stayed that way, and six of the seven domains had no Arabic in them at all
+     * — not because nobody would write it, but because there was nowhere to
+     * COMMIT it. A translation that cannot be committed cannot be reviewed,
+     * cannot be shipped, and cannot survive a database being rebuilt.
+     *
+     * So this is the English catalogue's mirror image, and the differences are
+     * all consequences of one fact — it is written by a person, not a scanner:
+     *
+     *   - it is EDITED BY HAND, and the header says so;
+     *   - it is PARTIAL BY DESIGN. English gains a key the moment a developer
+     *     writes one; the translation follows later. A gate that demanded every
+     *     language be complete would simply stop anyone adding an English
+     *     string, so the CI guard checks the other direction (no key here that
+     *     English does not have) and counts the gap instead of failing on it;
+     *   - it is NEVER deleted wholesale. {@see self::write()} mirrors and
+     *     therefore prunes, because it is regenerating derived data.
+     *     {@see self::writeLocale()} does not, because there is nothing to
+     *     regenerate it from.
+     */
+    public function localeDirectory(string $languageCode): string
+    {
+        return $this->directory() . '/' . self::assertLanguageCode($languageCode);
+    }
+
+    /**
+     * A language's committed translations, grouped by domain and sorted.
+     *
+     * @return array<string, array<string, string>>
+     */
+    public function readLocale(string $languageCode): array
+    {
+        return self::readDirectory($this->localeDirectory($languageCode));
+    }
+
+    /**
+     * The language codes that have a committed catalogue directory.
+     *
+     * @return list<string>
+     */
+    public function localeCodes(): array
+    {
+        $directory = $this->directory();
+        if (!is_dir($directory)) {
+            return [];
+        }
+
+        $codes = [];
+        foreach (new FilesystemIterator($directory, FilesystemIterator::SKIP_DOTS) as $file) {
+            $path = (string) $file;
+            $name = basename($path);
+            if (is_dir($path) && preg_match(self::LANGUAGE_CODE_PATTERN, $name) === 1) {
+                $codes[] = $name;
+            }
+        }
+
+        sort($codes);
+
+        return $codes;
+    }
+
+    /**
+     * Write a language's catalogue, one file per domain.
+     *
+     * ADDITIVE, unlike {@see self::write()}. A domain absent from `$catalog`
+     * keeps its file: this is human work, and there is no generator that could
+     * put it back.
+     *
+     * @param array<string, array<string, string>> $catalog
+     * @return array{written: list<string>, unchanged: list<string>}
+     */
+    public function writeLocale(string $languageCode, array $catalog): array
+    {
+        $code = self::assertLanguageCode($languageCode);
+        $directory = $this->localeDirectory($code);
+        if (!is_dir($directory) && !mkdir($directory, 0o775, true) && !is_dir($directory)) {
+            throw new RuntimeException("Could not create locale catalogue directory: {$directory}");
+        }
+
+        $written = [];
+        $unchanged = [];
+
+        ksort($catalog);
+        foreach ($catalog as $domain => $keys) {
+            $fileName = self::fileNameFor($domain);
+            $path = $directory . '/' . $fileName;
+            $rendered = self::renderLocale($domain, $code, $keys);
+
+            $current = is_file($path) ? file_get_contents($path) : false;
+            if ($current !== false && self::normalise($current) === $rendered) {
+                $unchanged[] = $fileName;
+                continue;
+            }
+
+            if (file_put_contents($path, $rendered) === false) {
+                throw new RuntimeException("Could not write locale catalogue file: {$path}");
+            }
+            $written[] = $fileName;
+        }
+
+        return ['written' => $written, 'unchanged' => $unchanged];
+    }
+
+    /**
+     * The exact bytes a locale catalogue file must contain.
+     *
+     * Byte-stable for the same reason the English one is: the guard compares a
+     * re-render against the checkout, so a translator's editor reformatting the
+     * file must show up as a fixable difference and not as noise.
+     *
+     * @param array<string, string> $keys
+     */
+    public static function renderLocale(string $domain, string $languageCode, array $keys): string
+    {
+        ksort($keys);
+
+        $payload = [
+            'domain' => $domain,
+            'language' => self::assertLanguageCode($languageCode),
+            'notice' => self::LOCALE_HEADER_NOTICE,
+            'keys' => $keys === [] ? new \stdClass() : $keys,
+        ];
+
+        $json = json_encode(
+            $payload,
+            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR
+        );
+
+        return $json . "\n";
+    }
+
+    /**
+     * Coverage of one language against the English catalogue.
+     *
+     * The number the issue that prompted this asked for first, and asked for
+     * before any translation: "translate everything" is unbounded and nobody can
+     * tell whether it is going well, whereas `documents 0/508` is a fact with a
+     * finish line. Computed from files alone — no database, so CI can print it.
+     *
+     * ORPHANS are the failure this makes visible. A key here that English does
+     * not have is not extra credit; it is a translation pointing at a call site
+     * that has been renamed or deleted, so it will never render, and it will sit
+     * in the file looking like completed work for ever.
+     *
+     * @param array<string, array<string, string>> $source english catalogue
+     * @param array<string, array<string, string>> $locale one language's catalogue
+     * @return array{
+     *     domains: array<string, array{total: int, translated: int, missing: int, orphans: list<string>}>,
+     *     total: int,
+     *     translated: int,
+     *     missing: int,
+     *     orphans: int
+     * }
+     */
+    public static function coverage(array $source, array $locale): array
+    {
+        $domains = [];
+        $total = 0;
+        $translated = 0;
+        $orphans = 0;
+
+        foreach ($source as $domain => $keys) {
+            $have = $locale[$domain] ?? [];
+            $done = 0;
+            foreach ($keys as $key => $_) {
+                if (($have[$key] ?? '') !== '') {
+                    $done++;
+                }
+            }
+
+            $stray = [];
+            foreach ($have as $key => $_) {
+                if (!array_key_exists($key, $keys)) {
+                    $stray[] = $key;
+                }
+            }
+            sort($stray);
+
+            $domains[$domain] = [
+                'total' => count($keys),
+                'translated' => $done,
+                'missing' => count($keys) - $done,
+                'orphans' => $stray,
+            ];
+            $total += count($keys);
+            $translated += $done;
+            $orphans += count($stray);
+        }
+
+        // A locale file for a domain English has retired entirely: every key in
+        // it is an orphan, and none of them are counted above because the outer
+        // loop never visits the domain.
+        foreach ($locale as $domain => $keys) {
+            if (array_key_exists($domain, $source)) {
+                continue;
+            }
+            $stray = array_keys($keys);
+            sort($stray);
+            $domains[$domain] = [
+                'total' => 0,
+                'translated' => 0,
+                'missing' => 0,
+                'orphans' => $stray,
+            ];
+            $orphans += count($stray);
+        }
+
+        ksort($domains);
+
+        return [
+            'domains' => $domains,
+            'total' => $total,
+            'translated' => $translated,
+            'missing' => $total - $translated,
+            'orphans' => $orphans,
+        ];
+    }
+
+    /** @throws RuntimeException on anything that must not become a path segment. */
+    private static function assertLanguageCode(string $languageCode): string
+    {
+        if (preg_match(self::LANGUAGE_CODE_PATTERN, $languageCode) !== 1) {
+            throw new RuntimeException(
+                "Not a usable language code: '{$languageCode}'. A locale catalogue directory is named for "
+                . 'the languages.code it holds, and that name becomes a path segment.'
+            );
+        }
+
+        return $languageCode;
     }
 
     /**

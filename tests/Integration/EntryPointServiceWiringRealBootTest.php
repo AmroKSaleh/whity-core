@@ -102,6 +102,143 @@ final class EntryPointServiceWiringRealBootTest extends TestCase
     }
 
     /**
+     * The SDK rendering seam resolves after a real boot, fully assembled
+     * (#1072).
+     *
+     * A source-scanning test already pins that index.php contains the
+     * registration ({@see \Tests\Core\DocumentRenderSeamEntryPointWiringTest}),
+     * and it cannot catch the failure this one is for. The seam is registered
+     * roughly 160 lines below the renderer it wraps, because it also needs
+     * `$documentQrService`, which is built later still — and PHP does not
+     * hoist. Get that order wrong and every request 500s at boot on an
+     * undefined variable, while the source scan, PHPStan and the whole unit
+     * suite stay green because none of them ever runs the file.
+     *
+     * So this boots it, and then asks the container for the CONTRACT a plugin
+     * would ask for.
+     */
+    public function testHttpEntryPointResolvesTheSdkRenderingSeamFullyAssembled(): void
+    {
+        $result = $this->runProbe(<<<'PHP'
+            $_SERVER['REQUEST_METHOD'] = 'GET';
+            $_SERVER['REQUEST_URI']    = '/api/health';
+            $_SERVER['HTTP_HOST']      = 'localhost';
+            $_GET = [];
+
+            ob_start();
+            require __DIR__ . '/public/index.php';
+            ob_end_clean();
+
+            // Exactly the line a plugin author writes (Plugin-Development.md
+            // Step 12). Resolving by the SDK INTERFACE is the point: a plugin
+            // may not reference a core namespace at all.
+            $renderer = \Whity\app(\Whity\Sdk\Render\DocumentRenderer::class);
+
+            $reflection = new \ReflectionClass($renderer);
+            $qr = $reflection->getProperty('qr');
+            $qr->setAccessible(true);
+
+            whity_probe_emit([
+                'implements_contract' => $renderer instanceof \Whity\Sdk\Render\DocumentRenderer,
+                'is_the_host_adapter' => $renderer instanceof \Whity\Core\Document\Render\SdkDocumentRenderer,
+                'stable_identity'     => $renderer === \Whity\app(\Whity\Sdk\Render\DocumentRenderer::class),
+                // The collaborator that arrives last and is therefore the one a
+                // wrong ordering would leave null.
+                'qr_service_wired'    => $qr->getValue($renderer) !== null,
+                // Answers rather than throws with no tenant context, which is
+                // what makes it safe for a plugin to call speculatively.
+                'availability_answers' => $renderer->isAvailable() === false,
+            ]);
+            PHP);
+
+        self::assertTrue(
+            $result['implements_contract'],
+            'The container must hand back something implementing the SDK contract; a plugin '
+            . 'type-hints that interface and can reference nothing else.'
+        );
+        self::assertTrue($result['is_the_host_adapter'], 'and it must be the host adapter.');
+        self::assertTrue($result['stable_identity'], 'Resolving twice must return one instance.');
+        self::assertTrue(
+            $result['qr_service_wired'],
+            'The verification-code service must be wired in. It is constructed AFTER the renderer '
+            . 'the seam wraps, so this is the collaborator a wrong registration order silently '
+            . 'leaves null — and the symptom would be documents that issue perfectly well and '
+            . 'quietly carry no verification code at all.'
+        );
+        self::assertTrue(
+            $result['availability_answers'],
+            'isAvailable() must ANSWER outside a tenant context rather than throw: it exists to '
+            . 'be called speculatively, before a plugin spends its queries assembling a document.'
+        );
+    }
+
+    /**
+     * The report registry boots POPULATED, and its routes are registered
+     * (#947 item 6).
+     *
+     * Two failures this catches that nothing else can. The registry is built
+     * from `$documentRepository`, `$documentVisibilityPolicy` and
+     * `$serverLabels`, all defined further UP the file, and PHP does not hoist
+     * — so a registration that drifted above one of them is a boot-time fatal
+     * on every request while every unit test stays green.
+     *
+     * And the registry is a {@see \Whity\Core\Container\HostWiredService} for a
+     * specific reason worth proving rather than asserting: an empty one answers
+     * "no such report" for every key, which is exactly what an installation
+     * with no reports configured looks like. So this checks the source is
+     * actually THERE, not merely that something resolved.
+     */
+    public function testHttpEntryPointResolvesAPopulatedReportRegistryAndRegistersItsRoutes(): void
+    {
+        $result = $this->runProbe(<<<'PHP'
+            $_SERVER['REQUEST_METHOD'] = 'GET';
+            $_SERVER['REQUEST_URI']    = '/api/health';
+            $_SERVER['HTTP_HOST']      = 'localhost';
+            $_GET = [];
+
+            ob_start();
+            require __DIR__ . '/public/index.php';
+            ob_end_clean();
+
+            $registry = \Whity\app(\Whity\Core\Report\ReportSourceRegistry::class);
+            $documents = $registry->get(\Whity\Core\Report\ReportSourceRegistry::CORE_DOCUMENTS);
+
+            $routes = array_map(
+                static fn (array $r): string => strtoupper((string) $r['method']) . ' ' . (string) $r['path'],
+                $router->getRoutes()
+            );
+
+            whity_probe_emit([
+                'keys'                => $registry->keys(),
+                'documents_source'    => $documents !== null,
+                // The gate that decides who may see these rows. An empty string
+                // here would mean every caller the ROUTE admits can read them.
+                'required_permission' => $documents?->requiredPermission(),
+                'has_index_route'     => in_array('GET /api/v1/reports', $routes, true),
+                'has_document_route'  => (bool) preg_grep('#^POST /api/v1/reports/#', $routes),
+            ]);
+            PHP);
+
+        self::assertSame(
+            [\Whity\Core\Report\ReportSourceRegistry::CORE_DOCUMENTS],
+            $result['keys'],
+            'The registry must boot POPULATED. An empty one is indistinguishable from an '
+            . 'installation with no reports, so the caller is told their report does not exist '
+            . 'and goes looking at their own permissions.'
+        );
+        self::assertTrue($result['documents_source']);
+        self::assertSame(
+            'documents:read',
+            $result['required_permission'],
+            'The documents report must be gated on the permission that already governs reading '
+            . 'documents. A report is a READ; a second vocabulary for it would be a second answer '
+            . 'to one question.'
+        );
+        self::assertTrue($result['has_index_route'], 'GET /api/v1/reports must be registered.');
+        self::assertTrue($result['has_document_route'], 'POST /api/v1/reports/{source}/document must be registered.');
+    }
+
+    /**
      * The same property through the CLI kernel. A registry wired in only one
      * entry point is the divergence bug class this repo has already paid for in
      * #717 and #724: the same plugin, reached two ways, would disagree about
@@ -452,6 +589,78 @@ final class EntryPointServiceWiringRealBootTest extends TestCase
         self::assertTrue($result['stable_identity'], 'The container must not mint a new gate per lookup.');
         self::assertSame(404, $result['status']);
         self::assertSame('unknown_data_type', $result['reason']);
+    }
+
+    /**
+     * The routing-effect catalogue boots populated in BOTH entry points
+     * (#1032).
+     *
+     * Both, because this one is a catalogue rather than a subscriber: a CLI
+     * command validating or describing a route asks it "what kinds exist", and
+     * an empty registry there would report every authored effect as an unknown
+     * kind — which {@see \Whity\Core\Document\Routing\RouteEffectRunner} records
+     * as `skipped`, so the route would look configured, run clean, and do
+     * nothing. That is precisely the silent no-op migration 112 refused to ship
+     * the declaration without an answer to, and the divergence BaseCommand's own
+     * comment names as the bug class this repository has already paid for twice.
+     */
+    public function testBothEntryPointsResolveAPopulatedRouteEffectCatalogue(): void
+    {
+        $probe = <<<'PHP'
+            $registry = \Whity\app(\Whity\Core\Document\Routing\RouteEffectRegistry::class);
+
+            whity_probe_emit([
+                'kinds'   => array_column($registry->catalogue(), 'kind'),
+                'sources' => array_column($registry->catalogue(), 'source'),
+                'notify'  => $registry->get(\Whity\Core\Document\Routing\RouteEffectRegistry::KIND_NOTIFY) !== null,
+            ]);
+            PHP;
+
+        $http = $this->runProbe(<<<PHP
+            \$_SERVER['REQUEST_METHOD'] = 'GET';
+            \$_SERVER['REQUEST_URI']    = '/api/health';
+            \$_SERVER['HTTP_HOST']      = 'localhost';
+            \$_GET = [];
+
+            ob_start();
+            require __DIR__ . '/public/index.php';
+            ob_end_clean();
+
+            {$probe}
+            PHP);
+
+        $cli = $this->runProbe(<<<PHP
+            require __DIR__ . '/vendor/autoload.php';
+            require __DIR__ . '/src/helpers.php';
+
+            \$command = new class extends \Whity\Cli\Commands\BaseCommand {
+                public function execute(array \$argv): int
+                {
+                    return 0;
+                }
+
+                /** Exposes the protected bootstrap every whity-cli API command runs. */
+                public function boot(): void
+                {
+                    \$this->setupKernel();
+                }
+            };
+            \$command->boot();
+
+            {$probe}
+            PHP);
+
+        foreach (['http' => $http, 'cli' => $cli] as $where => $result) {
+            self::assertSame(
+                ['notify'],
+                $result['kinds'],
+                "The {$where} entry point must register core's effect kinds. An empty catalogue "
+                . 'makes every authored effect an unknown kind, which records as skipped — so the '
+                . 'route looks configured and does nothing.'
+            );
+            self::assertSame(['core'], $result['sources'], "and {$where} must record them as core's.");
+            self::assertTrue($result['notify'], "and {$where} must resolve the notify effect.");
+        }
     }
 
     // ─── probe plumbing ──────────────────────────────────────────────────────
