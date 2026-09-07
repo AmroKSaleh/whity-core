@@ -86,53 +86,74 @@ describe('the two exponent tables', () => {
 });
 
 describe('where ICU disagrees with ISO 4217', () => {
-  /**
-   * Every code on which CLDR's display convention differs from the ISO
-   * exponent we bill in. Pinned rather than tolerated: if this set changes —
-   * because ICU updated, or because someone edited our table — the test says
-   * so, and somebody decides deliberately.
-   */
-  const EXPECTED_DIVERGENCES: Record<string, number> = {
-    // ISO 3, ICU 0 — the sharpest case, and the one that would have made the
-    // client and server disagree by a factor of a thousand.
-    IQD: 0,
-    // ISO 2, ICU 0 — minor units inflated into irrelevance.
-    AFN: 0, ALL: 0, IRR: 0, KPW: 0, LAK: 0, LBP: 0,
-    MGA: 0, MMK: 0, RSD: 0, SOS: 0, SYP: 0, YER: 0,
-  };
+  function icuExponent(code: string): number {
+    return new Intl.NumberFormat('en', { style: 'currency', currency: code })
+      .resolvedOptions().maximumFractionDigits;
+  }
 
-  it('is exactly the set we know about', () => {
+  const divergences = (): Record<string, number> => {
     const found: Record<string, number> = {};
     for (const code of ALL_ACTIVE_CODES) {
-      const icu = new Intl.NumberFormat('en', {
-        style: 'currency',
-        currency: code,
-      }).resolvedOptions().maximumFractionDigits;
-
-      if (icu !== currencyExponent(code)) {
-        found[code] = icu;
-      }
+      const icu = icuExponent(code);
+      if (icu !== currencyExponent(code)) found[code] = icu;
     }
-    expect(found).toEqual(EXPECTED_DIVERGENCES);
+    return found;
+  };
+
+  /**
+   * The phenomenon itself, which is the reason this module transcribes a table
+   * instead of asking the engine.
+   *
+   * The EXACT set is deliberately not pinned. An earlier draft of this test did
+   * pin it and failed in CI for a reason worth keeping: the divergence list is
+   * ICU-VERSION-DEPENDENT. The Node this was written on reports the Serbian
+   * dinar as 0-decimal and the Pakistani rupee as 2; CI's Node reports the
+   * opposite. Neither currency's ISO exponent changed — CLDR's opinion about
+   * how many decimals people write did.
+   *
+   * That makes ICU an even worse authority than the first finding suggested:
+   * not merely different from ISO, but different in ways that shift underneath
+   * a deployment when the runtime is upgraded. Pinning the set would only have
+   * bought a test that fails on Node upgrades and teaches nobody anything.
+   */
+  it('exists at all, which is why we do not ask the engine', () => {
+    const found = divergences();
+
+    expect(Object.keys(found).length).toBeGreaterThan(0);
+    // Every known divergence is a currency whose minor unit has been inflated
+    // into irrelevance, so CLDR stopped printing it.
+    for (const icu of Object.values(found)) {
+      expect(icu).toBe(0);
+    }
   });
 
   /**
-   * The safety net that survives the loss of Intl as an oracle: a currency ICU
-   * thinks has THREE decimals had better be in our table, because a missing
-   * three-decimal currency is the failure that bills someone ten times wrong.
+   * THE INVARIANT THAT ACTUALLY MATTERS, and it holds on every ICU version: ICU
+   * may claim LESS precision than our table (a display choice, harmless because
+   * we force the digits when formatting), but never MORE.
+   *
+   * More would mean a currency with real sub-units we are treating as having
+   * fewer — the failure that bills someone ten or a thousand times wrong — and
+   * it is the one thing a missing table entry would look like.
    */
   it('never has ICU claiming more precision than our table does', () => {
     const underCounted: string[] = [];
     for (const code of ALL_ACTIVE_CODES) {
-      const icu = new Intl.NumberFormat('en', {
-        style: 'currency',
-        currency: code,
-      }).resolvedOptions().maximumFractionDigits;
-      if (icu > currencyExponent(code)) {
-        underCounted.push(`${code}: ICU ${icu}, ours ${currencyExponent(code)}`);
+      if (icuExponent(code) > currencyExponent(code)) {
+        underCounted.push(`${code}: ICU ${icuExponent(code)}, ours ${currencyExponent(code)}`);
       }
     }
     expect(underCounted).toEqual([]);
+  });
+
+  /**
+   * The headline case, asserted against OUR table rather than against ICU —
+   * ISO says the Iraqi dinar has three decimal places, and that is what we
+   * bill in regardless of what any ICU build prints.
+   */
+  it('still bills IQD at its ISO precision', () => {
+    expect(currencyExponent('IQD')).toBe(3);
+    expect(formatMoney(5000, 'IQD', 'en')).toContain('5.000');
   });
 });
 
