@@ -58,6 +58,13 @@ export const TAGS_MANAGE = 'tags:manage';
  */
 export const PLANS_MANAGE = 'plans:manage';
 
+// #billing — a tenant's OWN billing, distinct from the operator capabilities
+// above. Reading the account and spending from it are separate jobs: an
+// accountant who needs the invoice list is not necessarily somebody who may
+// start a payment from it.
+export const BILLING_VIEW = 'billing:view';
+export const BILLING_PAY = 'billing:pay';
+
 /**
  * i18n admin management (WC-583). LANGUAGES_MANAGE is a PLATFORM capability —
  * the backend additionally requires the caller to be acting in the SYSTEM

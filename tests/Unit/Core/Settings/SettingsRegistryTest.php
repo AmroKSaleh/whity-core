@@ -52,6 +52,16 @@ final class SettingsRegistryTest extends TestCase
              // can change, which is how a sequence starts issuing duplicates.
              'billing.invoice_number_format', 'billing.invoice_number_scope',
              'billing.invoice_number_reset',
+             // #billing — the payment rails and the dunning policy. The rails are
+             // GLOBAL-ONLY: a tenant able to switch on a rail that settles its
+             // own invoices would be the sharpest possible privilege
+             // escalation. The dunning policy is per-tenant, because a
+             // deployment chases its enterprise customers differently from its
+             // self-service ones.
+             'payments.cliq_enabled', 'payments.cliq_alias',
+             'payments.cliq_bank_name', 'payments.cliq_reference_prefix',
+             'payments.mock_enabled',
+             'dunning.retry_schedule_days', 'dunning.lock_after_days',
              'plugins.store_allowed_hosts', 'plugins.store_enabled',
              'documents.render_enabled', 'documents.render_max_rows',
              'documents.render_max_pages', 'documents.render_max_template_bytes',
@@ -248,7 +258,8 @@ final class SettingsRegistryTest extends TestCase
         // tenant-overridable — tax treatment and seller identity both differ
         // per tenant in a white-label deployment. The three numbering keys are
         // not, for the reason given beside their constants.
-        self::assertCount(31, SettingsRegistry::tenantTextKeys());
+        // 33 since #billing: the two dunning keys are tenant-overridable.
+        self::assertCount(33, SettingsRegistry::tenantTextKeys());
 
         // The desktop-login TTL is per-tenant overridable (NOT global-only) and a
         // plain numeric string key.
@@ -377,7 +388,7 @@ final class SettingsRegistryTest extends TestCase
         // 62 since #1068 added ui.hide_dates.
         // 65 since #1072 added the three documents.flow_max_* ceilings.
         // 67 since seats added seats.enforcement + seats.count_invited.
-        self::assertCount(78, $describe);
+        self::assertCount(85, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

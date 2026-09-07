@@ -155,6 +155,23 @@ final class CorePermissions
     // settings:read (and is exempt from the payment wall so it stays reachable).
     public const SUBSCRIPTIONS_MANAGE = 'subscriptions:manage';
 
+    // A TENANT'S OWN BILLING (#billing). Distinct from the two operator
+    // capabilities above, and the distinction is the point: those are
+    // PLATFORM powers that additionally require acting in the system tenant,
+    // because they set what somebody ELSE is charged. These are ordinary
+    // tenant-scoped permissions for a customer looking at their own account.
+    //
+    //   billing:view — see this tenant's invoices, what is owed, and the
+    //     payments made against them. Read-only, and separate from
+    //     `billing:pay` because a finance viewer who may read the account is
+    //     not necessarily someone who may spend from it.
+    //   billing:pay  — start a payment for this tenant's invoice. It does not
+    //     settle anything: only a verified provider callback does that, so
+    //     this grants the ability to be ASKED for money, not to declare an
+    //     invoice paid.
+    public const BILLING_VIEW = 'billing:view';
+    public const BILLING_PAY = 'billing:pay';
+
     // Document/label designer (WC-docdesigner). Tenant-scoped. read = view/list
     // templates & blocks (list/get are ADDITIONALLY row-filtered server-side by
     // scope + a row's required_permission, so a technician never receives a gated
@@ -410,6 +427,8 @@ final class CorePermissions
             self::STORAGE_MANAGE,
             self::PLANS_MANAGE,
             self::SUBSCRIPTIONS_MANAGE,
+            self::BILLING_VIEW,
+            self::BILLING_PAY,
             self::DOCUMENTS_READ,
             self::DOCUMENTS_WRITE,
             self::DOCUMENTS_PUBLISH,
