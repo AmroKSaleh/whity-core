@@ -48,6 +48,7 @@
     "./locked-screen": "./src/locked-screen.tsx",
     "./math-text": "./src/math-text.tsx",
     "./menu-bar": "./src/menu-bar.tsx",
+    "./money/currency": "./src/money/currency.ts",
     "./page-header": "./src/page-header.tsx",
     "./page-shell": "./src/page-shell.tsx",
     "./pagination": "./src/pagination.tsx",
