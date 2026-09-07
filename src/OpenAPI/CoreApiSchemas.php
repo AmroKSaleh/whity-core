@@ -4189,6 +4189,41 @@ final class CoreApiSchemas
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
             ], ['id', 'plan_id', 'currency', 'unit_amount', 'billing_period', 'is_per_seat', 'is_active']),
+            // Early birds, offers and promo codes are ONE object (#billing). A
+            // promotion carrying a `code` is typed by the customer; one without
+            // applies automatically to whoever qualifies. Exactly one of
+            // `percent_off` and `amount_off` is set — a database CHECK enforces
+            // it, because a row carrying both would make every caller invent a
+            // precedence rule of its own.
+            'Promotion' => self::object([
+                'id' => self::int(),
+                'name' => self::str(),
+                'code' => self::str(true),
+                'percent_off' => self::int(true),
+                'amount_off' => self::int(true),
+                'currency' => self::str(true),
+                'starts_at' => self::str(true),
+                'ends_at' => self::str(true),
+                'max_redemptions' => self::int(true),
+                'max_redemptions_per_tenant' => self::int(),
+                'is_active' => self::bool(),
+                'redemption_count' => self::int(),
+            ], ['id', 'name', 'code', 'percent_off', 'amount_off', 'currency', 'is_active']),
+            'PromotionListResponse' => self::listEnvelope('Promotion'),
+            'PromotionResponse' => self::dataEnvelope(SchemaBuilder::ref('Promotion')),
+            'PromotionCreateRequest' => self::object([
+                'name' => self::str(),
+                'code' => self::str(true),
+                'percent_off' => self::int(true),
+                'amount_off' => self::int(true),
+                'currency' => self::str(true),
+                'starts_at' => self::str(true),
+                'ends_at' => self::str(true),
+                'max_redemptions' => self::int(true),
+                'max_redemptions_per_tenant' => self::int(true),
+                'plan_ids' => ['type' => 'array', 'items' => self::int()],
+            ], ['name']),
+
             'PlanPriceListResponse' => self::listEnvelope('PlanPrice'),
             'PlanPriceResponse' => self::dataEnvelope(SchemaBuilder::ref('PlanPrice')),
             'PlanPriceCreateRequest' => self::object([
@@ -8691,6 +8726,51 @@ final class CoreApiSchemas
     private static function planRoutes(): array
     {
         return [
+            self::permissionRoute('GET', '/api/promotions', 'plans:manage', [
+                'summary' => 'Early birds, offers and promo codes (operator)',
+                'description' =>
+                    'One object, three ways of being found: a promotion carrying a `code` must be typed '
+                    . 'by the customer, one without applies automatically to whoever qualifies. Each row '
+                    . 'carries `redemption_count` because "how much of this early bird is left" is the '
+                    . 'question this list is opened to answer, and asking per row would be one request '
+                    . 'each. Retired promotions are included — a campaign that ended is the explanation '
+                    . 'for a discount somebody is querying.',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('Every promotion, live and retired', 'PromotionListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/promotions', 'plans:manage', [
+                'summary' => 'Create a promotion (operator)',
+                'description' =>
+                    'Send `percent_off` OR `amount_off` with a `currency`, never both. A percentage has '
+                    . 'no currency and applies to any price; a fixed amount is an amount of one currency '
+                    . 'and is refused against a price in another, because converting needs a rate nobody '
+                    . 'stored. Amounts are minor units — a decimal is refused rather than rounded to a '
+                    . 'hundredth of the intended discount. Omit `code` for an early bird or offer. '
+                    . 'Omit `plan_ids` to cover every plan, including ones added later. '
+                    . '`max_redemptions_per_tenant` defaults to 1, or one tenant consumes a whole '
+                    . 'early-bird allocation.',
+                'tags' => ['plans'],
+                'request' => 'PromotionCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The new promotion', 'PromotionResponse'),
+                    409 => self::errorResponse('Another live promotion already uses that code'),
+                    422 => self::errorResponse('The promotion cannot be created as described'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/promotions/{id:\d+}', 'plans:manage', [
+                'summary' => 'Retire a promotion (operator)',
+                'description' =>
+                    'RETIRES rather than destroys, and returns the retired row. A redeemed promotion is '
+                    . 'the evidence of why a tenant is paying what they are paying. Retiring also frees '
+                    . 'its code, which operators reuse — the same seasonal name, every year.',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('The retired promotion', 'PromotionResponse'),
+                    404 => self::errorResponse('No such promotion'),
+                ] + self::authErrors(),
+            ]),
             self::permissionRoute('GET', '/api/plans/{id:\d+}/prices', 'plans:manage', [
                 'summary' => 'What this plan costs, on every set of terms (operator)',
                 'description' =>

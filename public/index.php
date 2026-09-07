@@ -799,6 +799,16 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::TENANTS_READ,
     ];
     $items[] = [
+        'id' => 'promotions',
+        'label' => 'Promotions',
+        'href' => '/admin/promotions',
+        'icon' => 'discount',
+        'group' => 'access',
+        // 8 — orders are unique within a group, and 7 is billing.
+        'order' => 8,
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::PLANS_MANAGE,
+    ];
+    $items[] = [
         'id' => 'billing',
         'label' => 'Plans & pricing',
         'href' => '/admin/billing',
@@ -2348,6 +2358,20 @@ $planPricesHandler = new \Whity\Api\PlanPricesApiHandler(
 $router->register('GET',    '/api/plans/{id:\d+}/prices',                  [$planPricesHandler, 'list'],   null, null, CorePermissions::PLANS_MANAGE);
 $router->register('POST',   '/api/plans/{id:\d+}/prices',                  [$planPricesHandler, 'create'], null, null, CorePermissions::PLANS_MANAGE);
 $router->register('DELETE', '/api/plans/{id:\d+}/prices/{priceId:\d+}',    [$planPricesHandler, 'retire'], null, null, CorePermissions::PLANS_MANAGE);
+
+// Early birds, offers and promo codes — one object, three ways of being found.
+// A promotion carrying a `code` is typed by the customer; one without applies
+// automatically to whoever qualifies, which is the only structural difference
+// between them. Same gate as the catalogue: a tenant admin holding
+// `plans:manage` through the global admin role could otherwise mint themselves
+// a hundred-per-cent discount.
+$promotionsHandler = new \Whity\Api\PromotionsApiHandler(
+    new \Whity\Core\Promotion\PromotionRepository($db->getPdo()),
+    $roleChecker
+);
+$router->register('GET',    '/api/promotions',            [$promotionsHandler, 'list'],   null, null, CorePermissions::PLANS_MANAGE);
+$router->register('POST',   '/api/promotions',            [$promotionsHandler, 'create'], null, null, CorePermissions::PLANS_MANAGE);
+$router->register('DELETE', '/api/promotions/{id:\d+}',   [$promotionsHandler, 'retire'], null, null, CorePermissions::PLANS_MANAGE);
 $router->register('POST',   '/api/tenants/{id:\d+}/plan',       [$plansHandler, 'applyToTenant'],   null, null, CorePermissions::PLANS_MANAGE);
 $router->register('GET',    '/api/tenants/{id:\d+}/plan',       [$plansHandler, 'getTenantPlan'],   null, null, CorePermissions::PLANS_MANAGE);
 

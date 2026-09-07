@@ -3496,6 +3496,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/promotions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Early birds, offers and promo codes (operator)
+         * @description One object, three ways of being found: a promotion carrying a `code` must be typed by the customer, one without applies automatically to whoever qualifies. Each row carries `redemption_count` because "how much of this early bird is left" is the question this list is opened to answer, and asking per row would be one request each. Retired promotions are included — a campaign that ended is the explanation for a discount somebody is querying.
+         */
+        get: operations["get_api_v1_promotions"];
+        put?: never;
+        /**
+         * Create a promotion (operator)
+         * @description Send `percent_off` OR `amount_off` with a `currency`, never both. A percentage has no currency and applies to any price; a fixed amount is an amount of one currency and is refused against a price in another, because converting needs a rate nobody stored. Amounts are minor units — a decimal is refused rather than rounded to a hundredth of the intended discount. Omit `code` for an early bird or offer. Omit `plan_ids` to cover every plan, including ones added later. `max_redemptions_per_tenant` defaults to 1, or one tenant consumes a whole early-bird allocation.
+         */
+        post: operations["post_api_v1_promotions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/promotions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Retire a promotion (operator)
+         * @description RETIRES rather than destroys, and returns the retired row. A redeemed promotion is the evidence of why a tenant is paying what they are paying. Retiring also frees its code, which operators reuse — the same seasonal name, every year.
+         */
+        delete: operations["delete_api_v1_promotions_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/public/forms/{slug}": {
         parameters: {
             query?: never;
@@ -6710,6 +6754,38 @@ export interface components {
                 personId: number | null;
                 relations: components["schemas"]["RelationSummary"][];
             };
+        };
+        Promotion: {
+            id: number;
+            name: string;
+            code: string | null;
+            percent_off: number | null;
+            amount_off: number | null;
+            currency: string | null;
+            starts_at?: string | null;
+            ends_at?: string | null;
+            max_redemptions?: number | null;
+            max_redemptions_per_tenant?: number;
+            is_active: boolean;
+            redemption_count?: number;
+        };
+        PromotionCreateRequest: {
+            name: string;
+            code?: string | null;
+            percent_off?: number | null;
+            amount_off?: number | null;
+            currency?: string | null;
+            starts_at?: string | null;
+            ends_at?: string | null;
+            max_redemptions?: number | null;
+            max_redemptions_per_tenant?: number | null;
+            plan_ids?: number[];
+        };
+        PromotionListResponse: {
+            data: components["schemas"]["Promotion"][];
+        };
+        PromotionResponse: {
+            data: components["schemas"]["Promotion"];
         };
         PublicFormField: {
             field_key: string;
@@ -27172,6 +27248,234 @@ export interface operations {
                 };
             };
             /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_promotions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every promotion, live and retired */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromotionListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_promotions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromotionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The new promotion */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromotionResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Another live promotion already uses that code */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The promotion cannot be created as described */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_promotions_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The retired promotion */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromotionResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such promotion */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
             500: {
                 headers: {
                     [name: string]: unknown;
