@@ -84,6 +84,22 @@ final class SettingsRegistryCorePinTest extends TestCase
             'billing.grace_days',
             'seats.enforcement',
             'seats.count_invited',
+            // #billing — invoicing. Eight tenant-overridable (tax treatment
+            // and seller identity both differ per tenant in a white-label
+            // deployment) and three global-only (numbering, whose per-tenant
+            // override would make the uniqueness index mean something a tenant
+            // admin can change).
+            'billing.default_currency',
+            'billing.tax_rate_bp',
+            'billing.tax_label',
+            'billing.tax_inclusive',
+            'billing.payment_terms_days',
+            'billing.seller_name',
+            'billing.seller_address',
+            'billing.seller_tax_id',
+            'billing.invoice_number_format',
+            'billing.invoice_number_scope',
+            'billing.invoice_number_reset',
             'plugins.store_allowed_hosts',
             'plugins.store_enabled',
             'documents.render_enabled',
@@ -213,6 +229,21 @@ final class SettingsRegistryCorePinTest extends TestCase
             'billing.grace_days' => '7',
             'seats.enforcement' => 'warn',
             'seats.count_invited' => 'true',
+            // Tax defaults to ZERO, not to any country's rate: charging tax
+            // an operator is not registered to collect is a worse failure than
+            // not charging it, and a default correct for one jurisdiction and
+            // wrong for every other gets shipped unnoticed.
+            'billing.default_currency' => 'JOD',
+            'billing.tax_rate_bp' => '0',
+            'billing.tax_label' => '',
+            'billing.tax_inclusive' => 'false',
+            'billing.payment_terms_days' => '14',
+            'billing.seller_name' => '',
+            'billing.seller_address' => '',
+            'billing.seller_tax_id' => '',
+            'billing.invoice_number_format' => 'INV-{YYYY}-{SEQ:5}',
+            'billing.invoice_number_scope' => 'shared',
+            'billing.invoice_number_reset' => 'yearly',
             'plugins.store_allowed_hosts' => '',
             'plugins.store_enabled' => 'true',
             'documents.render_enabled' => 'false',

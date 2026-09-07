@@ -36,6 +36,22 @@ final class SettingsRegistryTest extends TestCase
              'mail.brand_color', 'mail.footer_text',
              'billing.enforcement_default', 'billing.grace_days',
              'seats.enforcement', 'seats.count_invited',
+             // #billing: invoicing. Every one differs per deployment, which is
+             // why none is a constant in the invoicing code. Tax defaults to
+             // ZERO rather than to any country's rate — charging tax an
+             // operator is not registered to collect is worse than not
+             // charging it, and a default wrong for everyone outside one
+             // jurisdiction ships unnoticed.
+             'billing.default_currency', 'billing.tax_rate_bp',
+             'billing.tax_label', 'billing.tax_inclusive',
+             'billing.payment_terms_days',
+             'billing.seller_name', 'billing.seller_address',
+             'billing.seller_tax_id',
+             // Numbering is GLOBAL-ONLY: a per-tenant override would make the
+             // (series, number) uniqueness index mean something a tenant admin
+             // can change, which is how a sequence starts issuing duplicates.
+             'billing.invoice_number_format', 'billing.invoice_number_scope',
+             'billing.invoice_number_reset',
              'plugins.store_allowed_hosts', 'plugins.store_enabled',
              'documents.render_enabled', 'documents.render_max_rows',
              'documents.render_max_pages', 'documents.render_max_template_bytes',
@@ -228,7 +244,11 @@ final class SettingsRegistryTest extends TestCase
         // submissions and one printing two-page receipts should not be held to
         // one number. The instance-wide documents.render_enabled switch above
         // them stays global-only.
-        self::assertCount(23, SettingsRegistry::tenantTextKeys());
+        // 31 since #billing: eight of the eleven invoicing keys are
+        // tenant-overridable — tax treatment and seller identity both differ
+        // per tenant in a white-label deployment. The three numbering keys are
+        // not, for the reason given beside their constants.
+        self::assertCount(31, SettingsRegistry::tenantTextKeys());
 
         // The desktop-login TTL is per-tenant overridable (NOT global-only) and a
         // plain numeric string key.
@@ -357,7 +377,7 @@ final class SettingsRegistryTest extends TestCase
         // 62 since #1068 added ui.hide_dates.
         // 65 since #1072 added the three documents.flow_max_* ceilings.
         // 67 since seats added seats.enforcement + seats.count_invited.
-        self::assertCount(67, $describe);
+        self::assertCount(78, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

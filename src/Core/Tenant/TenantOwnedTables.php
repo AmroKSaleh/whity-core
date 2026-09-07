@@ -124,6 +124,22 @@ final class TenantOwnedTables
         // terms.
         'promotion_redemptions' => '141_create_promotions.php',
 
+        // Billing records (migrations 142 and 143). Registering these is not
+        // bookkeeping — it is the point. `invoices` answers "what does this
+        // tenant owe", `payment_transactions` answers "what have they paid",
+        // and a query that forgot its tenant predicate would answer either
+        // with somebody else's money. The predicate guard is what stops that
+        // from being a code-review responsibility.
+        //
+        // `invoice_lines` and `payment_methods` carry tenant_id DENORMALISED
+        // from their parent, so a read of either is policed directly instead
+        // of trusting a join — the same trade `document_artifacts`,
+        // `notification_deliveries` and `entity_tags` above already make.
+        'invoices' => '142_create_invoices.php',
+        'invoice_lines' => '142_create_invoices.php',
+        'payment_transactions' => '143_create_payment_transactions.php',
+        'payment_methods' => '143_create_payment_transactions.php',
+
         // WC-docdesigner — document/label designer persistence (migration 059).
         // Saved templates and reusable blocks; the client object is stored as JSON
         // in `data`. Tenant-scoped + RBAC-gated visibility; every query binds
