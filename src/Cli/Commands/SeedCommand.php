@@ -123,6 +123,16 @@ class SeedCommand implements CommandHelp, CliCommand
      */
     public const DOCUMENT_DEMO_FLAG = '--with-document-demo';
 
+    /**
+     * The flag that seeds a billing dataset.
+     *
+     * Its own gate, for the same reason the document demo has one: this is
+     * demo CONTENT, not infrastructure. Nothing depends on it, and it writes
+     * INVOICES — financial records, which is the last thing that should ride
+     * a flag meaning something else.
+     */
+    public const BILLING_DEMO_FLAG = '--with-billing-demo';
+
     /** The flag that forces the demo accounts on outside development. */
     public const FIXTURES_FLAG = '--with-fixtures';
 
@@ -145,6 +155,12 @@ class SeedCommand implements CommandHelp, CliCommand
         echo "  " . self::DOCUMENT_DEMO_FLAG . "  Also seed the document demo dataset (templates, blocks and\n";
         echo "                          rendered documents). Off by default everywhere, including\n";
         echo "                          development: it writes real bytes through a storage driver.\n";
+        echo "  " . self::BILLING_DEMO_FLAG . "   Also seed a billing dataset: three plan tiers, four\n";
+        echo "                          promotions, and one invoice of every shape the screens\n";
+        echo "                          distinguish — paid, part-paid, overdue, open and draft.\n";
+        echo "                          Invoices go to a tenant this seeder CREATES, never to a\n";
+        echo "                          real one: an invoice against a customer is a debt they do\n";
+        echo "                          not owe on a screen they can open.\n";
         echo "  --help, -h              Show this help and do nothing else.\n\n";
         echo "The base seed is idempotent: running it twice does not duplicate anything.\n";
 
@@ -154,7 +170,7 @@ class SeedCommand implements CommandHelp, CliCommand
     /** @return list<string> */
     public function knownFlags(): ?array
     {
-        return [self::FIXTURES_FLAG, self::DOCUMENT_DEMO_FLAG, '--help', '-h'];
+        return [self::FIXTURES_FLAG, self::DOCUMENT_DEMO_FLAG, self::BILLING_DEMO_FLAG, '--help', '-h'];
     }
 
     public function execute(array $argv): int
@@ -198,6 +214,10 @@ class SeedCommand implements CommandHelp, CliCommand
                 foreach ($this->seedDocumentDemo($db) as $line) {
                     echo "  - " . $line . "\n";
                 }
+            } elseif (self::wantsBillingDemo($argv)) {
+                foreach ((new \Whity\Database\Seeders\BillingDemoSeeder($db->getPdo()))->seed() as $line) {
+                    echo "  - {$line}\n";
+                }
             } else {
                 echo "  - Document demo data SKIPPED: pass " . self::DOCUMENT_DEMO_FLAG . " for an\n";
                 echo "    invented faculty, its people, three route designs and a routed document\n";
@@ -232,6 +252,25 @@ class SeedCommand implements CommandHelp, CliCommand
     public static function wantsDocumentDemo(array $argv): bool
     {
         return in_array(self::DOCUMENT_DEMO_FLAG, $argv, true);
+    }
+
+    /**
+     * Whether this invocation asked for the billing demo dataset.
+     *
+     * Named and public for the same reason as its sibling above: the GATE is
+     * testable without a database. It matters more here — the dataset this
+     * gates writes invoices and payments, so a flag that leaked into another
+     * one would put invented money in a real ledger.
+     *
+     * No environment fallback. `APP_ENV=development` does not imply it, because
+     * a developer running the base seed to get a login has not asked for a
+     * demo company with five invoices.
+     *
+     * @param list<string> $argv
+     */
+    public static function wantsBillingDemo(array $argv): bool
+    {
+        return in_array(self::BILLING_DEMO_FLAG, $argv, true);
     }
 
     /**
