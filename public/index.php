@@ -2402,7 +2402,12 @@ if (($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ
     $paymentProviders->register(new \Whity\Core\Payment\Cliq\CliqPaymentProvider(
         (string) ($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ_ALIAS] ?? ''),
         (string) ($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ_BANK_NAME] ?? ''),
-        (string) ($globalSettingsRepository->get(\Whity\Core\Payment\Cliq\CliqSecrets::WEBHOOK_SECRET_KEY) ?? ''),
+        \Whity\Core\Payment\Cliq\CliqSecrets::read(
+            $globalSettingsRepository,
+            $secretStore,
+            \Whity\Core\Payment\Cliq\CliqSecrets::WEBHOOK_SECRET_KEY,
+            $logger
+        ),
         (string) ($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ_REFERENCE_PREFIX] ?? 'WHT-'),
     ));
 }
@@ -2412,7 +2417,12 @@ if (($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ
 // its own invoices for free is the sharpest possible privilege escalation.
 if (($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_MOCK_ENABLED] ?? 'false') === 'true') {
     $paymentProviders->register(new \Whity\Core\Payment\MockPaymentProvider(
-        (string) ($globalSettingsRepository->get(\Whity\Core\Payment\Cliq\CliqSecrets::MOCK_SECRET_KEY) ?: 'mock-secret')
+        \Whity\Core\Payment\Cliq\CliqSecrets::read(
+            $globalSettingsRepository,
+            $secretStore,
+            \Whity\Core\Payment\Cliq\CliqSecrets::MOCK_SECRET_KEY,
+            $logger
+        ) ?: 'mock-secret'
     ));
 }
 
