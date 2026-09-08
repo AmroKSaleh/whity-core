@@ -239,6 +239,33 @@ class EnforceTenantIsolation
         // POST to this path is a 404 from the router rather than an
         // unauthenticated write that got this far.
         '#^/api/v1/document-verifications/[^/]+$#',
+        // #billing: a payment provider's settlement callback. A BANK CANNOT HOLD
+        // A SESSION — there is nothing here for this middleware to resolve, and
+        // no amount of configuration would give a provider one. Without this
+        // entry the route 401s before it is ever routed, so no callback can be
+        // delivered, no invoice can ever settle, and a tenant who paid stays
+        // locked out. That is exactly the state this shipped in: the handler was
+        // correct, the route was registered unauthenticated, and every request
+        // died a layer above it — which the handler's own tests could not see,
+        // because they called it directly.
+        //
+        // WHAT MAKES IT SAFE IS NOT AUTHENTICATION. The payload is verified
+        // inside the adapter, before it is parsed, with no way to obtain events
+        // from an unverified body; the tenant comes from the invoice the typed
+        // reference resolves to, never from anything the caller says; and a rail
+        // with no configured secret refuses every callback outright. An
+        // unregistered provider is a 404 from the handler, so this opens no
+        // surface for a rail the operator has not switched on.
+        //
+        // ANCHORED to exactly one segment, following the lesson
+        // `/api/v1/translations/` records above. An open `/api/v1/payments/`
+        // prefix would make the next route added under it public by default,
+        // and this is a surface where that mistake would be expensive.
+        //
+        // POST-only in practice: the route is registered for POST alone, so a
+        // GET to this path is a 404 from the router rather than an
+        // unauthenticated read that got this far.
+        '#^/api/v1/payments/webhook/[^/]+$#',
         // Migration 132: an OPT-IN public form. The person filling in an
         // external application has no account and, in the case this exists for,
         // never will — so there is nothing here for this middleware to resolve.
