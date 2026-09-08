@@ -37,6 +37,13 @@ final class BillingDemoSeederRealEngineTest extends TestCase
         // A stand-in for a REAL customer, so the isolation claim is testable.
         $this->pdo->exec("INSERT INTO tenants (id, name, slug) VALUES (1, 'A Real Customer', 'real-customer')");
 
+        // EXPLICIT IDS DO NOT ADVANCE A POSTGRES SEQUENCE. The fixtures above
+        // name their ids; the seeder under test inserts a tenant WITHOUT one and
+        // takes the next sequence value — which is still 1, so it collides with
+        // the row two lines up. SQLite has no such notion and passes either way,
+        // which is precisely why this only ever fails on the dialect shard.
+        SchemaFromMigrations::syncSequences($this->pdo);
+
         $this->seeder = new BillingDemoSeeder(
             $this->pdo,
             static fn (): DateTimeImmutable => new DateTimeImmutable('2026-09-08 12:00:00'),
