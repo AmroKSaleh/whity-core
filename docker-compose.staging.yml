@@ -56,6 +56,22 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    # THE DATABASE IS THE ONE THAT MUST COME BACK. Without this line it was the
+    # ONLY container in the stack with no restart policy — render and
+    # health-watch declared one here, and frankenphp was surviving on a
+    # hand-applied `docker update`. A host restart on 2026-09-09 therefore
+    # brought every dependent service back up around a database that stayed
+    # down: FrankenPHP crash-looped for three hours on `could not translate
+    # host name "postgres"`, while the Next.js tier kept answering 200 and the
+    # health collector could not report any of it, because the only place it
+    # can write is the database that was missing.
+    #
+    # A stack where everything restarts EXCEPT its datastore is worse than one
+    # where nothing does: nothing-restarts fails visibly and completely, while
+    # this failed as a site that looked up and returned an error to every API
+    # call. `unless-stopped` rather than `always`, so a deliberate `docker stop`
+    # for maintenance still means stopped.
+    restart: unless-stopped
 
   frankenphp:
     build:
@@ -128,6 +144,17 @@ services:
       postgres:
         condition: service_healthy
     working_dir: /app
+    # Declared here rather than left to a hand-applied `docker update --restart`,
+    # which is what was actually holding this container up. A policy set on a
+    # live container survives a reboot but NOT a `docker compose up -d`, which
+    # recreates from this file and would have silently dropped it back to `no` —
+    # so the deployment was one routine command away from losing it.
+    #
+    # `depends_on` does not cover this: it orders the FIRST start and nothing
+    # more. It will not restart this container when Postgres comes back, so the
+    # restart policy is what turns a database outage into something that
+    # recovers by itself instead of a crash loop somebody has to notice.
+    restart: unless-stopped
 
   # Document/label designer server-side render tier (ADR 0012 / WC-docdesigner
   # Track 2) — mirrors the dev compose `render` service (see docker-compose.yml
