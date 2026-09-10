@@ -4,7 +4,7 @@
 
 Whity Core is a foundation for building data-driven, multi-tenant applications. It pairs a [FrankenPHP](https://frankenphp.dev/) worker runtime with a logical multi-tenant data model, a hot-loadable plugin system, and a permission-mesh RBAC layer — plus a token-driven design system and a Next.js admin UI.
 
-> **License:** AGPL-3.0 + Commons Clause — free for non-commercial use. See [License](#license).
+> **License:** AGPL-3.0-only with the [Whity Plugin Exception](LICENSE) — free software, commercial use permitted. Plugins are yours to license as you wish. See [License](#license).
 
 ---
 
@@ -194,9 +194,17 @@ Embedding an n8n workflow engine was **deferred, not adopted** — [ADR 0008](do
 
 ## License
 
-**AGPL-3.0 + [Commons Clause](LICENSE)** — free for non-profit, internal, educational, research, and open-source use. Commercial use (SaaS, paid hosting, reselling, white-labeling for profit) is restricted.
+**[AGPL-3.0-only with the Whity Plugin Exception](LICENSE)** — genuine free software. Run it, modify it, deploy it, sell services around it. If you modify Whity Core and offer it to users over a network, you owe those users your source; that is the whole of the bargain.
 
-For commercial licensing: **amroksaleh@gmail.com**
+**Plugins are exempt.** The plugin boundary — `whity/plugin-sdk` on the PHP side, `@amroksaleh/ui` and friends on the client side — is MIT. A plugin that depends only on those is not a derivative work of the core, and you may license and sell it on any terms you choose. See the [Whity Plugin Exception](LICENSE) and [NOTICE](NOTICE).
+
+The **Whity name** is protected even though the code is free — fork freely, rename when you do. See [TRADEMARK.md](TRADEMARK.md).
+
+Contributing? Sign the [CLA](CLA.md) in your first pull request.
+
+The Commons Clause that previously accompanied this licence has been withdrawn in full. It forbade commercial use, which made Whity neither open source nor safely adoptable, and contradicted the AGPL text it was attached to.
+
+For a licence other than the AGPL: **amroksaleh@gmail.com**
 
 ## Getting help
 

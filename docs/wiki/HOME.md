@@ -57,6 +57,6 @@ See [Installation](Installation.md) for details.
 
 ## License
 
-AGPL v3.0 with Commons Clause (free for non-commercial)
+AGPL-3.0-only with the Whity Plugin Exception (free software; plugins MIT)
 
 Commercial licensing: amroksaleh@gmail.com
