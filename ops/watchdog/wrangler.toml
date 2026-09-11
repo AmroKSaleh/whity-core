@@ -18,6 +18,21 @@ crons = ["*/2 * * * *"]
 binding = "WATCHDOG_STATE"
 id = "3c6d9867a58b4085a9d5b19f2d8d8f18"
 
+# THE PUBLIC STATUS PAGE, on a hostname that is deliberately NOT the
+# application's. whity-core already serves a /status page from inside the
+# deployment, and it reads the same database that goes down — which is why it
+# showed nothing at all through the three-hour outage on 2026-09-09.
+#
+# This one is answered by the Worker from KV, at Cloudflare's edge. It shares
+# no database, no container, no tunnel and no machine with the systems it
+# reports on, which is the only arrangement under which a status page can still
+# be read at the moment anyone needs it.
+#
+# `custom_domain = true` makes Cloudflare create and manage the DNS record.
+[[routes]]
+pattern = "health.whity.dev"
+custom_domain = true
+
 [vars]
 # BOTH TIERS, deliberately. On 2026-09-09 the Next.js tier answered 200 for
 # three hours while every API call behind it failed, so a watchdog pointed only

@@ -131,6 +131,12 @@ async function runChecks(env) {
 
   await checkHeartbeats(env, cfg);
   await maybeSendSummary(env, cfg, results);
+
+  // WHEN this ran, recorded last so it only advances on a run that completed.
+  // The public status page leads with the age of this timestamp: a page that
+  // says "all systems operational" from data three hours old is the same lie
+  // as a monitor that cannot report, just better presented.
+  await writeJson(env, 'meta:last-run', { at: Date.now() });
 }
 
 /**
@@ -427,7 +433,177 @@ async function handleRequest(request, env) {
     return Response.json(out);
   }
 
+  // GET / — the public status page.
+  //
+  // Served from the Worker, from KV, on a hostname that resolves through
+  // Cloudflare's edge. It shares nothing with the systems it reports on: not
+  // the database, not Docker, not the tunnel, not the machine. The status page
+  // that already ships inside whity-core reads the same database that goes
+  // down, which is why it showed nothing at all through a three-hour outage.
+  if (request.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
+    return renderStatusPage(env, config(env));
+  }
+
   return new Response('not found\n', { status: 404 });
+}
+
+// ── the public status page ──────────────────────────────────────────────────
+
+const STALE_AFTER_MS = 15 * 60 * 1000;
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+/** Human-facing labels, so the page never shows an internal key name. */
+const LABELS = {
+  api: 'API',
+  web: 'Application',
+  site: 'Website',
+};
+
+async function renderStatusPage(env, cfg) {
+  const lastRun = await readJson(env, 'meta:last-run');
+  const dataAge = lastRun?.at ? Date.now() - lastRun.at : null;
+
+  // THE FIRST THING ESTABLISHED, BEFORE ANY COMPONENT IS REPORTED. If the
+  // checks stopped running, every "operational" below is a claim about the
+  // past dressed up as the present, so the page says so instead of reassuring.
+  const stale = dataAge === null || dataAge > STALE_AFTER_MS;
+
+  const components = [];
+  for (const target of cfg.targets) {
+    const state = await readJson(env, `state:${target.name}`);
+    components.push({
+      name: LABELS[target.name] || target.name,
+      status: state?.alertedStatus ?? 'unknown',
+      downSince: state?.alertedStatus === 'down' ? state?.downSince ?? null : null,
+    });
+  }
+
+  const beat = await readJson(env, 'beat:backup');
+  const backupAge = beat?.at ? Date.now() - beat.at : null;
+  const backupOk = backupAge !== null && backupAge <= cfg.backupMaxAgeHours * 3600 * 1000;
+
+  const anyDown = components.some((c) => c.status === 'down');
+  const anyUnknown = components.some((c) => c.status === 'unknown');
+  const allDown = components.length > 0 && components.every((c) => c.status === 'down');
+
+  let overall;
+  if (stale) overall = { kind: 'stale', text: 'Status unknown' };
+  else if (allDown) overall = { kind: 'down', text: 'Major outage' };
+  else if (anyDown) overall = { kind: 'down', text: 'Partial outage' };
+  else if (anyUnknown) overall = { kind: 'stale', text: 'Status incomplete' };
+  else overall = { kind: 'ok', text: 'All systems operational' };
+
+  const dot = (kind) => `<span class="dot ${kind}" aria-hidden="true"></span>`;
+  const kindOf = (s) => (s === 'up' ? 'ok' : s === 'down' ? 'down' : 'stale');
+  const wordOf = (s) => (s === 'up' ? 'Operational' : s === 'down' ? 'Down' : 'Unknown');
+
+  const rows = components
+    .map(
+      (c) => `
+      <li class="row">
+        <span class="label">${escapeHtml(c.name)}</span>
+        <span class="state ${kindOf(c.status)}">${dot(kindOf(c.status))}${wordOf(c.status)}${
+          c.downSince ? ` <span class="since">for ${escapeHtml(humanDuration(Date.now() - c.downSince))}</span>` : ''
+        }</span>
+      </li>`
+    )
+    .join('');
+
+  const backupRow = `
+      <li class="row">
+        <span class="label">Backups</span>
+        <span class="state ${backupAge === null ? 'stale' : backupOk ? 'ok' : 'down'}">
+          ${dot(backupAge === null ? 'stale' : backupOk ? 'ok' : 'down')}${
+            backupAge === null ? 'Never reported' : backupOk ? 'Healthy' : 'Overdue'
+          }
+        </span>
+      </li>`;
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Whity Status</title>
+<style>
+  :root{
+    --bg:#f4f5f7; --card:#ffffff; --ink:#16202e; --soft:#5a6878; --line:#e2e6eb;
+    --ok:#1c7a4e; --down:#b1402a; --stale:#8a6a15;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0f141b; --card:#161d26; --ink:#e6eaf0; --soft:#9aa6b5; --line:#252e3a;
+           --ok:#5cba85; --down:#e0805f; --stale:#d3a64a; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:16px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+       -webkit-font-smoothing:antialiased}
+  .wrap{max-width:660px;margin-inline:auto;padding:clamp(1.5rem,5vw,3.5rem) 1.25rem 3rem}
+  h1{font-size:1rem;font-weight:600;letter-spacing:.02em;margin:0 0 1.5rem;color:var(--soft)}
+  .banner{background:var(--card);border:1px solid var(--line);border-radius:8px;
+          padding:1.4rem 1.5rem;display:flex;align-items:center;gap:.85rem}
+  .banner strong{font-size:1.3rem;font-weight:600;line-height:1.2}
+  .dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
+  .dot.ok{background:var(--ok)} .dot.down{background:var(--down)} .dot.stale{background:var(--stale)}
+  .banner .dot{width:13px;height:13px}
+  ul{list-style:none;margin:1.25rem 0 0;padding:0;background:var(--card);
+     border:1px solid var(--line);border-radius:8px}
+  .row{display:flex;justify-content:space-between;align-items:center;gap:1rem;
+       padding:.95rem 1.5rem;border-top:1px solid var(--line)}
+  .row:first-child{border-top:0}
+  .label{font-weight:500}
+  .state{display:inline-flex;align-items:center;gap:.5rem;font-size:.92rem;color:var(--soft)}
+  .state.ok{color:var(--ok)} .state.down{color:var(--down)} .state.stale{color:var(--stale)}
+  .since{color:var(--soft)}
+  .note{margin-top:1.25rem;padding:1rem 1.25rem;background:var(--card);
+        border:1px solid var(--line);border-radius:8px;font-size:.86rem;color:var(--soft)}
+  .warn{border-color:var(--stale)}
+  footer{margin-top:1.5rem;font-size:.8rem;color:var(--soft)}
+  a{color:inherit}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>WHITY STATUS</h1>
+
+  <div class="banner">
+    ${dot(overall.kind)}<strong>${escapeHtml(overall.text)}</strong>
+  </div>
+
+  <ul>${rows}${backupRow}</ul>
+
+  ${
+    stale
+      ? `<div class="note warn"><strong>These readings are not current.</strong> The last completed check was
+         ${dataAge === null ? 'never' : escapeHtml(humanDuration(dataAge)) + ' ago'}, so the statuses above
+         describe the past rather than now. Treat them as unknown.</div>`
+      : `<div class="note">Checked ${escapeHtml(humanDuration(dataAge))} ago.</div>`
+  }
+
+  <div class="note">
+    This page is hosted independently of the systems it reports on &mdash; separate
+    infrastructure, separate database, separate network path. It stays up when they do not,
+    which is the only condition under which a status page is worth reading.
+  </div>
+
+  <footer>Whity &middot; <a href="/status">JSON</a></footer>
+</div>
+</body>
+</html>`;
+
+  return new Response(html, {
+    status: 200,
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      // Never cache a status page. A cached "operational" outliving the outage
+      // it was captured before is the failure this exists to prevent.
+      'cache-control': 'no-store, max-age=0',
+    },
+  });
 }
 
 // ── plumbing ────────────────────────────────────────────────────────────────
@@ -513,4 +689,4 @@ async function notify(env, text) {
 
 // Exported for the unit tests, which exercise the state machine directly
 // rather than through a live Worker.
-export const __test__ = { humanDuration, timingSafeEqual, config, probeOnce, checkTarget, checkHeartbeats, handleRequest };
+export const __test__ = { humanDuration, timingSafeEqual, config, probeOnce, checkTarget, checkHeartbeats, handleRequest, renderStatusPage };

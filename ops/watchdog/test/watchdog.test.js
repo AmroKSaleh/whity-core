@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 
 import { __test__ } from '../src/index.js';
 
-const { humanDuration, timingSafeEqual, config, checkTarget, checkHeartbeats, handleRequest } = __test__;
+const { humanDuration, timingSafeEqual, config, checkTarget, checkHeartbeats, handleRequest, renderStatusPage } = __test__;
 
 // ── a KV stand-in ───────────────────────────────────────────────────────────
 
@@ -376,6 +376,98 @@ test('an authenticated heartbeat is recorded; an unauthenticated one is not', as
   );
   assert.equal(ok.status, 200);
   assert.equal(store.has('beat:backup'), true);
+});
+
+// ── the public status page ──────────────────────────────────────────────────
+//
+// Its one job is to be believable. A status page that claims health from data
+// it stopped collecting is the September outage again, better presented — so
+// the staleness tests below matter more than the happy path.
+
+const PAGE_CFG = { ...CFG, targets: [{ name: 'api', url: 'https://x.test/api/health' }] };
+
+async function pageText(env, cfg = PAGE_CFG) {
+  const res = await renderStatusPage(env, cfg);
+  return { res, html: await res.text() };
+}
+
+test('a healthy, freshly-checked deployment reads as operational', async () => {
+  const { env, store } = makeEnv();
+  store.set('meta:last-run', JSON.stringify({ at: Date.now() - 60_000 }));
+  store.set('state:api', JSON.stringify({ alertedStatus: 'up' }));
+  store.set('beat:backup', JSON.stringify({ at: Date.now() - 3600 * 1000 }));
+
+  const { res, html } = await pageText(env);
+  assert.equal(res.status, 200);
+  assert.match(html, /All systems operational/);
+  assert.match(html, /Healthy/);
+});
+
+test('STALE DATA IS NEVER REPORTED AS OPERATIONAL', async () => {
+  const { env, store } = makeEnv();
+  // Everything it last saw was fine — and it stopped looking an hour ago.
+  store.set('meta:last-run', JSON.stringify({ at: Date.now() - 3600 * 1000 }));
+  store.set('state:api', JSON.stringify({ alertedStatus: 'up' }));
+  store.set('beat:backup', JSON.stringify({ at: Date.now() }));
+
+  const { html } = await pageText(env);
+  assert.doesNotMatch(html, /All systems operational/, 'old readings must not be presented as current');
+  assert.match(html, /Status unknown/);
+  assert.match(html, /not current/);
+});
+
+test('a watchdog that has never run says so instead of showing green', async () => {
+  const { env } = makeEnv();
+  const { html } = await pageText(env);
+  assert.doesNotMatch(html, /All systems operational/);
+  assert.match(html, /Status unknown/);
+});
+
+test('one component down is a partial outage; all down is a major one', async () => {
+  const twoTargets = { ...CFG, targets: [{ name: 'api', url: 'https://x.test/a' }, { name: 'web', url: 'https://x.test/b' }] };
+
+  const partial = makeEnv();
+  partial.store.set('meta:last-run', JSON.stringify({ at: Date.now() }));
+  partial.store.set('state:api', JSON.stringify({ alertedStatus: 'down', downSince: Date.now() - 600_000 }));
+  partial.store.set('state:web', JSON.stringify({ alertedStatus: 'up' }));
+  const p = await pageText(partial.env, twoTargets);
+  assert.match(p.html, /Partial outage/);
+  assert.match(p.html, /for 10m/, 'an outage without its duration is half an answer');
+
+  const major = makeEnv();
+  major.store.set('meta:last-run', JSON.stringify({ at: Date.now() }));
+  major.store.set('state:api', JSON.stringify({ alertedStatus: 'down', downSince: Date.now() }));
+  major.store.set('state:web', JSON.stringify({ alertedStatus: 'down', downSince: Date.now() }));
+  const m = await pageText(major.env, twoTargets);
+  assert.match(m.html, /Major outage/);
+});
+
+test('an overdue backup shows as overdue, not merely absent', async () => {
+  const { env, store } = makeEnv();
+  store.set('meta:last-run', JSON.stringify({ at: Date.now() }));
+  store.set('state:api', JSON.stringify({ alertedStatus: 'up' }));
+  store.set('beat:backup', JSON.stringify({ at: Date.now() - 40 * 3600 * 1000 }));
+
+  const { html } = await pageText(env);
+  assert.match(html, /Overdue/);
+});
+
+test('the page is never cached — a stale green outliving its outage is the bug', async () => {
+  const { env, store } = makeEnv();
+  store.set('meta:last-run', JSON.stringify({ at: Date.now() }));
+  const { res } = await pageText(env);
+  assert.match(res.headers.get('cache-control') || '', /no-store/);
+});
+
+test('internal key names never reach the page', async () => {
+  const { env, store } = makeEnv();
+  store.set('meta:last-run', JSON.stringify({ at: Date.now() }));
+  store.set('state:api', JSON.stringify({ alertedStatus: 'up' }));
+
+  const { html } = await pageText(env);
+  assert.doesNotMatch(html, /state:api|beat:backup|meta:last-run/, 'KV keys are not a user-facing vocabulary');
+  assert.doesNotMatch(html, /HEARTBEAT_SECRET|TELEGRAM/i, 'nothing secret may appear on a public page');
+  assert.match(html, /API/, 'components get human labels');
 });
 
 // ── formatting ──────────────────────────────────────────────────────────────
