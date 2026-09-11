@@ -101,10 +101,10 @@ final class SettingsRegistryCorePinTest extends TestCase
             'billing.invoice_number_scope',
             'billing.invoice_number_reset',
             // #billing — payment rails (global-only) and dunning (per-tenant).
-            'payments.cliq_enabled',
-            'payments.cliq_alias',
-            'payments.cliq_bank_name',
-            'payments.cliq_reference_prefix',
+            // The four payments.cliq_* keys were REMOVED, not renamed: Whity no
+            // longer processes payments against a bank, so there is no rail here
+            // for them to configure. A deployment that had set them keeps the
+            // rows in `app_settings`; nothing reads them, and nothing will.
             'payments.mock_enabled',
             'dunning.retry_schedule_days',
             'dunning.lock_after_days',
@@ -255,10 +255,6 @@ final class SettingsRegistryCorePinTest extends TestCase
             // Every rail OFF until an operator configures one: a payment rail
             // that is on by default can take money before anybody decided it
             // should.
-            'payments.cliq_enabled' => 'false',
-            'payments.cliq_alias' => '',
-            'payments.cliq_bank_name' => '',
-            'payments.cliq_reference_prefix' => 'WHT-',
             'payments.mock_enabled' => 'false',
             'dunning.retry_schedule_days' => '1,3,7',
             'dunning.lock_after_days' => '14',
