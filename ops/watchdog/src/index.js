@@ -371,8 +371,14 @@ async function handleRequest(request, env) {
     // Deliberately NOT deduplicated the way probe alerts are. A caller here has
     // already decided this is worth sending; suppressing it on the Worker's own
     // judgement would drop the one message somebody needed.
-    await notify(env, `🚨 *${source}*\n${text}`);
-    return new Response('sent\n', { status: 200 });
+    const result = await notify(env, `🚨 *${source}*\n${text}`);
+
+    // REPORT WHAT ACTUALLY HAPPENED. Answering "sent" whether or not Telegram
+    // accepted it would make this endpoint a thing that claims success without
+    // checking — and a caller that trusted it would believe somebody had been
+    // told when nobody had. The status code carries it too, so a shell script
+    // using `curl --fail` finds out without parsing anything.
+    return Response.json(result, { status: result.delivered ? 200 : 502 });
   }
 
   // POST /run — force a check cycle now, instead of waiting for the cron.
@@ -471,7 +477,7 @@ function humanDuration(ms) {
 async function notify(env, text) {
   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) {
     console.error('watchdog: telegram is not configured; alert dropped:', text);
-    return;
+    return { delivered: false, reason: 'telegram is not configured' };
   }
 
   try {
@@ -486,11 +492,22 @@ async function notify(env, text) {
       }),
     });
 
-    if (!response.ok) {
-      console.error('watchdog: telegram rejected the alert', response.status, await response.text());
+    // TELEGRAM ANSWERS 200 WITH `ok: false`. A transport-level check alone
+    // would call a rejected message delivered — wrong chat id, a revoked
+    // token, a bot blocked by the user — which is the failure this component
+    // exists to end, reproduced inside it.
+    const body = await response.json().catch(() => null);
+    if (!response.ok || !body?.ok) {
+      const reason = body?.description || `HTTP ${response.status}`;
+      console.error('watchdog: telegram rejected the alert:', reason);
+      return { delivered: false, reason };
     }
+
+    return { delivered: true };
   } catch (error) {
-    console.error('watchdog: telegram unreachable', String(error));
+    const reason = String(error?.message || error);
+    console.error('watchdog: telegram unreachable', reason);
+    return { delivered: false, reason };
   }
 }
 

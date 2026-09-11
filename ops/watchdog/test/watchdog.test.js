@@ -256,9 +256,52 @@ test('an authenticated caller can raise an alert', async () => {
   );
 
   assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { delivered: true });
   assert.equal(sent.length, 1);
   assert.match(sent[0], /npm audit/, 'the alert must say who raised it');
   assert.match(sent[0], /2 critical advisories/);
+});
+
+test('a Telegram rejection is reported as a failure, not as "sent"', async () => {
+  const { env, sent } = makeEnv();
+
+  // Telegram answers HTTP 200 with `ok: false` for a bad chat id, a revoked
+  // token, or a bot the user has blocked. Treating that as delivered would
+  // make this endpoint claim success without checking — the exact failure the
+  // watchdog exists to end, reproduced inside it.
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ ok: false, description: 'Bad Request: chat not found' }), { status: 200 });
+
+  const res = await handleRequest(
+    new Request('https://w.test/alert', {
+      method: 'POST',
+      headers: { authorization: 'Bearer shhh', 'content-type': 'application/json' },
+      body: JSON.stringify({ source: 'ci', text: 'something broke' }),
+    }),
+    env
+  );
+
+  assert.equal(res.status, 502, 'a caller using curl --fail must find out');
+  const body = await res.json();
+  assert.equal(body.delivered, false);
+  assert.match(body.reason, /chat not found/, 'the reason must survive to the caller');
+  assert.equal(sent.length, 0);
+});
+
+test('an unconfigured Telegram is reported rather than silently dropped', async () => {
+  const { env } = makeEnv({ TELEGRAM_CHAT_ID: '' });
+
+  const res = await handleRequest(
+    new Request('https://w.test/alert', {
+      method: 'POST',
+      headers: { authorization: 'Bearer shhh', 'content-type': 'application/json' },
+      body: JSON.stringify({ source: 'ci', text: 'something broke' }),
+    }),
+    env
+  );
+
+  assert.equal(res.status, 502);
+  assert.match((await res.json()).reason, /not configured/);
 });
 
 test('an UNAUTHENTICATED caller cannot raise an alert', async () => {
