@@ -2462,6 +2462,34 @@ $router->register('GET',  '/api/billing/invoices/{id:\d+}',     [$billingHandler
 $router->register('GET',  '/api/billing/methods',               [$billingHandler, 'methods'],  null, null, CorePermissions::BILLING_VIEW);
 $router->register('POST', '/api/billing/invoices/{id:\d+}/pay', [$billingHandler, 'pay'],      null, null, CorePermissions::BILLING_PAY);
 
+// ── per-device licensing ────────────────────────────────────────────────────
+//
+// Three capabilities, because they are three jobs: reading what is billable,
+// SELLING (minting a code), and provisioning or destroying stock. See
+// migration 147 for why they anchor on the capabilities they do.
+$licensingHandler = new \Whity\Api\LicensingApiHandler(
+    $db->getPdo(),
+    new \Whity\Core\Licensing\ActivationService($db->getPdo()),
+    $roleChecker
+);
+$router->register('GET',  '/api/licensing/devices',                 [$licensingHandler, 'devices'],    null, null, CorePermissions::LICENSING_VIEW);
+$router->register('POST', '/api/licensing/devices',                 [$licensingHandler, 'provision'],  null, null, CorePermissions::LICENSING_MANAGE);
+$router->register('POST', '/api/licensing/codes',                   [$licensingHandler, 'issueCode'],  null, null, CorePermissions::LICENSING_ISSUE);
+$router->register('POST', '/api/licensing/codes/{id:\d+}/revoke',   [$licensingHandler, 'revokeCode'], null, null, CorePermissions::LICENSING_MANAGE);
+
+// PUBLIC AND UNAUTHENTICATED, necessarily: the person redeeming may be an end
+// user or a student with no account at all. They are authorised by POSSESSION
+// of the code, which carries 50 bits of entropy and check characters, and every
+// fact used to resolve the activation comes from the code rather than from the
+// caller.
+//
+// REGISTERING THIS IS TWO EDITS. The line below is one; the other is the
+// pattern in EnforceTenantIsolation::PUBLIC_ROUTE_PATTERNS. Without the second,
+// the middleware refuses the request before routing happens and the endpoint
+// 401s while looking correctly registered — which this project has shipped once
+// already (#1214).
+$router->register('POST', '/api/public/licensing/redeem', [$licensingHandler, 'redeem'], null);
+
 // UNAUTHENTICATED, NECESSARILY: a bank cannot hold a session. What makes it
 // safe is that verification happens inside translateWebhook() before anything
 // is parsed, and there is no way to obtain events from a payload without it.

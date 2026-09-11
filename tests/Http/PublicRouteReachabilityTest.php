@@ -44,6 +44,7 @@ final class PublicRouteReachabilityTest extends TestCase
         yield 'any payment provider, by name' => ['/api/v1/payments/webhook/anything'];
         yield 'a citizen verifying a printed document' => ['/api/v1/document-verifications/sometoken'];
         yield 'a browser fetching the UI language before login' => ['/api/v1/translations/ar/admin'];
+        yield 'a student redeeming an activation code' => ['/api/v1/public/licensing/redeem'];
     }
 
     /** @dataProvider pathsWithNoPossibleSession */
@@ -83,6 +84,9 @@ final class PublicRouteReachabilityTest extends TestCase
         yield 'anything deeper than the provider name' => ['/api/v1/payments/webhook/cliq/replay'];
         yield 'the payments root' => ['/api/v1/payments'];
         yield 'a sibling under payments' => ['/api/v1/payments/methods'];
+        yield 'anything deeper under public licensing' => ['/api/v1/public/licensing/redeem/replay'];
+        yield 'the licensing admin surface' => ['/api/v1/licensing/devices'];
+        yield 'issuing a code, which is a privileged sale' => ['/api/v1/licensing/codes'];
         yield 'a tenant reading its own invoices' => ['/api/v1/billing/invoices'];
         yield 'a tenant starting a payment' => ['/api/v1/billing/invoices/7/pay'];
         yield 'the operator plan catalogue' => ['/api/v1/plans'];
