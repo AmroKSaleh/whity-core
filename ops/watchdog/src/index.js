@@ -73,6 +73,10 @@ const DEFAULTS = {
   // positive signal, this monitor's own death is silent — the exact failure it
   // was built to end. Weekly is rare enough not to become noise.
   summaryIntervalHours: 168,
+
+  // How many days the status-page history bar covers. 90 is the convention
+  // on public status pages; the bucket document stays tiny at that size.
+  historyDays: 90,
 };
 
 export default {
@@ -110,6 +114,7 @@ function config(env) {
     probeTimeoutMs: num('PROBE_TIMEOUT_MS', DEFAULTS.probeTimeoutMs),
     backupMaxAgeHours: num('BACKUP_MAX_AGE_HOURS', DEFAULTS.backupMaxAgeHours),
     summaryIntervalHours: num('SUMMARY_INTERVAL_HOURS', DEFAULTS.summaryIntervalHours),
+    historyDays: num('HISTORY_DAYS', DEFAULTS.historyDays),
   };
 }
 
@@ -129,6 +134,7 @@ async function runChecks(env) {
     results.push(await checkTarget(env, cfg, target));
   }
 
+  await recordHistory(env, cfg, results);
   await checkHeartbeats(env, cfg);
   await maybeSendSummary(env, cfg, results);
 
@@ -160,12 +166,25 @@ async function checkTarget(env, cfg, target) {
         `✅ *${target.name} recovered*\n${target.url}\nDown for ${outage}.`
       );
     }
-    await writeJson(env, key, {
-      alertedStatus: 'up',
-      consecutiveFailures: 0,
-      downSince: null,
-      lastOkAt: Date.now(),
-    });
+
+    // WRITE ONLY ON CHANGE. Cloudflare KV allows 1,000 writes a day on the free
+    // plan, and this Worker was writing one key per target per run plus
+    // meta:last-run — 2,880 a day at the */2 schedule, which is nearly three
+    // times the allowance. A healthy target whose state is identical to last
+    // time has nothing to record, so the steady state now costs no writes at
+    // all and the budget is spent on changes, which are the only thing anyone
+    // reads this store to learn.
+    const unchanged =
+      state.alertedStatus === 'up' && (state.consecutiveFailures || 0) === 0 && !state.downSince;
+
+    if (!unchanged) {
+      await writeJson(env, key, {
+        alertedStatus: 'up',
+        consecutiveFailures: 0,
+        downSince: null,
+        lastOkAt: Date.now(),
+      });
+    }
     return { name: target.name, ok: true };
   }
 
@@ -234,6 +253,57 @@ async function probeOnce(url, timeoutMs, expectStatus) {
     return { ok: false, detail: `unreachable: ${reason}` };
   } finally {
     clearTimeout(timer);
+  }
+}
+
+// ── history ─────────────────────────────────────────────────────────────────
+
+/** UTC day key. One bucket per calendar day, per target. */
+function dayKey(at = Date.now()) {
+  return new Date(at).toISOString().slice(0, 10);
+}
+
+/**
+ * Record one day per target: was it observed, and did anything fail.
+ *
+ * DELIBERATELY NOT AN UPTIME PERCENTAGE. Computing one honestly needs a write
+ * on every check, which at a two-minute schedule is thousands a day against a
+ * 1,000-a-day allowance — and it would be a percentage of the checks that
+ * happened to run, not of the day, which is a different and more flattering
+ * number than it appears. A day is therefore recorded as one of three things:
+ * observed and clean, observed with a failure, or NOT OBSERVED.
+ *
+ * That third state is the important one. The checks here do not run reliably —
+ * the Cloudflare cron fires erratically — so there will be gaps, and a gap is
+ * the absence of evidence rather than evidence of health. Drawing it green
+ * would be the same lie as a status page reporting "operational" from readings
+ * it stopped collecting.
+ *
+ * COSTS ONE WRITE PER TARGET PER DAY in the healthy case: the bucket is only
+ * written when the day is new, or when the first failure of that day flips it.
+ */
+async function recordHistory(env, cfg, results) {
+  const today = dayKey();
+  const keepDays = cfg.historyDays;
+
+  for (const r of results) {
+    const key = `history:${r.name}`;
+    const doc = (await readJson(env, key)) || { days: {} };
+    const existing = doc.days[today];
+
+    // Nothing new: the day is already recorded, and already at least as bad as
+    // this check. Skipping the write is the whole point of the shape.
+    if (existing !== undefined && (existing === 'down' || r.ok)) continue;
+
+    doc.days[today] = r.ok ? 'up' : 'down';
+
+    // Prune outside the window so the document cannot grow without bound.
+    const cutoff = dayKey(Date.now() - keepDays * 86400 * 1000);
+    for (const d of Object.keys(doc.days)) {
+      if (d < cutoff) delete doc.days[d];
+    }
+
+    await writeJson(env, key, doc);
   }
 }
 
@@ -486,10 +556,12 @@ async function renderStatusPage(env, cfg) {
   const components = [];
   for (const target of cfg.targets) {
     const state = await readJson(env, `state:${target.name}`);
+    const history = await readJson(env, `history:${target.name}`);
     components.push({
       name: LABELS[target.name] || target.name,
       status: state?.alertedStatus ?? 'unknown',
       downSince: state?.alertedStatus === 'down' ? state?.downSince ?? null : null,
+      days: history?.days ?? {},
     });
   }
 
@@ -512,14 +584,51 @@ async function renderStatusPage(env, cfg) {
   const kindOf = (s) => (s === 'up' ? 'ok' : s === 'down' ? 'down' : 'stale');
   const wordOf = (s) => (s === 'up' ? 'Operational' : s === 'down' ? 'Down' : 'Unknown');
 
+  /**
+   * The history bar: one segment per day, oldest on the left.
+   *
+   * THREE STATES, NOT TWO. A day with no recorded check is drawn as a GAP, not
+   * as green. The checks here do not run reliably, so an unobserved day is the
+   * absence of evidence rather than evidence of health — and colouring it green
+   * would be the same untruth as a status page reporting "operational" from
+   * readings it stopped collecting. Every other honest decision on this page
+   * falls apart if the bar quietly invents uptime.
+   */
+  const historyBar = (days) => {
+    const segs = [];
+    let observed = 0;
+    let bad = 0;
+
+    for (let i = cfg.historyDays - 1; i >= 0; i--) {
+      const d = dayKey(Date.now() - i * 86400 * 1000);
+      const v = days[d];
+      const cls = v === 'up' ? 'ok' : v === 'down' ? 'down' : 'gap';
+      if (v) observed++;
+      if (v === 'down') bad++;
+      const label = v === 'up' ? 'no failures' : v === 'down' ? 'failure recorded' : 'not observed';
+      segs.push(`<i class="seg ${cls}" title="${d} — ${label}"></i>`);
+    }
+
+    const summary =
+      observed === 0
+        ? 'No history yet'
+        : `${observed} day${observed === 1 ? '' : 's'} observed · ${bad === 0 ? 'no failures' : `${bad} with failures`}`;
+
+    return `<div class="bar" role="img" aria-label="${escapeHtml(summary)} over the last ${cfg.historyDays} days">${segs.join('')}</div>
+            <div class="barfoot"><span>${cfg.historyDays} days ago</span><span>${escapeHtml(summary)}</span><span>today</span></div>`;
+  };
+
   const rows = components
     .map(
       (c) => `
       <li class="row">
-        <span class="label">${escapeHtml(c.name)}</span>
-        <span class="state ${kindOf(c.status)}">${dot(kindOf(c.status))}${wordOf(c.status)}${
-          c.downSince ? ` <span class="since">for ${escapeHtml(humanDuration(Date.now() - c.downSince))}</span>` : ''
-        }</span>
+        <div class="rowtop">
+          <span class="label">${escapeHtml(c.name)}</span>
+          <span class="state ${kindOf(c.status)}">${dot(kindOf(c.status))}${wordOf(c.status)}${
+            c.downSince ? ` <span class="since">for ${escapeHtml(humanDuration(Date.now() - c.downSince))}</span>` : ''
+          }</span>
+        </div>
+        ${historyBar(c.days)}
       </li>`
     )
     .join('');
@@ -564,9 +673,21 @@ async function renderStatusPage(env, cfg) {
   .banner .dot{width:13px;height:13px}
   ul{list-style:none;margin:1.25rem 0 0;padding:0;background:var(--card);
      border:1px solid var(--line);border-radius:8px}
-  .row{display:flex;justify-content:space-between;align-items:center;gap:1rem;
-       padding:.95rem 1.5rem;border-top:1px solid var(--line)}
+  .row{padding:1rem 1.5rem 1.05rem;border-top:1px solid var(--line)}
   .row:first-child{border-top:0}
+  .rowtop{display:flex;justify-content:space-between;align-items:center;gap:1rem}
+  /* One segment per day. flex lets 90 of them share the width at any size,
+     and min-width keeps them touchable rather than hairlines on a phone. */
+  .bar{display:flex;gap:2px;margin-top:.7rem;height:26px}
+  .seg{flex:1 1 0;min-width:2px;border-radius:2px;display:block}
+  .seg.ok{background:var(--ok)}
+  .seg.down{background:var(--down)}
+  /* A day nobody looked at is NOT green. Deliberately inert and low-contrast,
+     so a gap reads as "no data" rather than as a result. */
+  .seg.gap{background:var(--line)}
+  .barfoot{display:flex;justify-content:space-between;gap:1rem;margin-top:.45rem;
+           font-size:.74rem;color:var(--soft)}
+  .barfoot span:nth-child(2){text-align:center}
   .label{font-weight:500}
   .state{display:inline-flex;align-items:center;gap:.5rem;font-size:.92rem;color:var(--soft)}
   .state.ok{color:var(--ok)} .state.down{color:var(--down)} .state.stale{color:var(--stale)}
@@ -701,4 +822,4 @@ async function notify(env, text) {
 
 // Exported for the unit tests, which exercise the state machine directly
 // rather than through a live Worker.
-export const __test__ = { humanDuration, timingSafeEqual, config, probeOnce, checkTarget, checkHeartbeats, handleRequest, renderStatusPage };
+export const __test__ = { humanDuration, timingSafeEqual, config, probeOnce, checkTarget, checkHeartbeats, handleRequest, renderStatusPage, recordHistory, dayKey };

@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 
 import { __test__ } from '../src/index.js';
 
-const { humanDuration, timingSafeEqual, config, checkTarget, checkHeartbeats, handleRequest, renderStatusPage } = __test__;
+const { humanDuration, timingSafeEqual, config, checkTarget, checkHeartbeats, handleRequest, renderStatusPage, recordHistory, dayKey } = __test__;
 
 // ── a KV stand-in ───────────────────────────────────────────────────────────
 
@@ -488,6 +488,89 @@ test('internal key names never reach the page', async () => {
   assert.doesNotMatch(html, /state:api|beat:backup|meta:last-run/, 'KV keys are not a user-facing vocabulary');
   assert.doesNotMatch(html, /HEARTBEAT_SECRET|TELEGRAM/i, 'nothing secret may appear on a public page');
   assert.match(html, /API/, 'components get human labels');
+});
+
+// ── the history bar ─────────────────────────────────────────────────────────
+
+const HIST_CFG = { ...CFG, historyDays: 5, targets: [{ name: 'api', url: 'https://x.test/a' }] };
+
+test('a healthy day costs ONE write, not one per check', async () => {
+  const { env, store } = makeEnv();
+  let writes = 0;
+  const put = env.WATCHDOG_STATE.put;
+  env.WATCHDOG_STATE.put = async (k, v) => { writes++; return put(k, v); };
+
+  // Ten checks in the same day, all fine.
+  for (let i = 0; i < 10; i++) await recordHistory(env, HIST_CFG, [{ name: 'api', ok: true }]);
+
+  assert.equal(writes, 1, 'KV allows 1,000 writes a day; per-check writing blows that');
+  assert.equal(JSON.parse(store.get('history:api')).days[dayKey()], 'up');
+});
+
+test('the first failure of a day flips the bucket, and later successes do not unflip it', async () => {
+  const { env, store } = makeEnv();
+
+  await recordHistory(env, HIST_CFG, [{ name: 'api', ok: true }]);
+  await recordHistory(env, HIST_CFG, [{ name: 'api', ok: false }]);
+  await recordHistory(env, HIST_CFG, [{ name: 'api', ok: true }]);
+
+  assert.equal(
+    JSON.parse(store.get('history:api')).days[dayKey()],
+    'down',
+    'a day that had an outage is not clean just because it ended well'
+  );
+});
+
+test('buckets older than the window are pruned', async () => {
+  const { env, store } = makeEnv();
+  const old = dayKey(Date.now() - 40 * 86400 * 1000);
+  store.set('history:api', JSON.stringify({ days: { [old]: 'up' } }));
+
+  await recordHistory(env, HIST_CFG, [{ name: 'api', ok: false }]);
+
+  const days = JSON.parse(store.get('history:api')).days;
+  assert.equal(days[old], undefined, 'the document must not grow without bound');
+  assert.equal(days[dayKey()], 'down');
+});
+
+test('AN UNOBSERVED DAY IS NEVER DRAWN AS GREEN', async () => {
+  const { env, store } = makeEnv();
+  store.set('meta:last-run', JSON.stringify({ at: Date.now() }));
+  store.set('state:api', JSON.stringify({ alertedStatus: 'up' }));
+  // Only today recorded; the four preceding days were never checked.
+  store.set('history:api', JSON.stringify({ days: { [dayKey()]: 'up' } }));
+
+  const html = await (await renderStatusPage(env, HIST_CFG)).text();
+
+  const ok = (html.match(/class="seg ok"/g) || []).length;
+  const gap = (html.match(/class="seg gap"/g) || []).length;
+  assert.equal(ok, 1, 'exactly the one day that was actually observed');
+  assert.equal(gap, 4, 'the rest are gaps — absence of evidence, not evidence of health');
+  assert.match(html, /1 day observed/);
+});
+
+test('a day with a failure is drawn as a failure and counted', async () => {
+  const { env, store } = makeEnv();
+  store.set('meta:last-run', JSON.stringify({ at: Date.now() }));
+  store.set('state:api', JSON.stringify({ alertedStatus: 'up' }));
+  store.set('history:api', JSON.stringify({
+    days: { [dayKey()]: 'up', [dayKey(Date.now() - 86400 * 1000)]: 'down' },
+  }));
+
+  const html = await (await renderStatusPage(env, HIST_CFG)).text();
+  assert.equal((html.match(/class="seg down"/g) || []).length, 1);
+  assert.match(html, /2 days observed/);
+  assert.match(html, /1 with failures/);
+});
+
+test('with no history at all the bar says so rather than showing green', async () => {
+  const { env, store } = makeEnv();
+  store.set('meta:last-run', JSON.stringify({ at: Date.now() }));
+  store.set('state:api', JSON.stringify({ alertedStatus: 'up' }));
+
+  const html = await (await renderStatusPage(env, HIST_CFG)).text();
+  assert.equal((html.match(/class="seg ok"/g) || []).length, 0);
+  assert.match(html, /No history yet/);
 });
 
 // ── formatting ──────────────────────────────────────────────────────────────
