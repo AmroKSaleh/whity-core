@@ -209,14 +209,30 @@ jobs:
       # 5 minutes is generous for an apt install that normally takes well under
       # one, and three attempts still fit inside the job cap with room to run
       # the actual tests.
+      # KILLING THE PARENT DOES NOT RELEASE THE LOCK. `timeout` signals only the
+      # process it launched — npx — while the apt-get underneath survives and
+      # keeps /var/lib/apt/lists/lock. Observed 2026-09-11: attempt 1 timed out
+      # at 300s, and attempts 2 and 3 then died instantly with "Could not get
+      # lock ... held by process 10791 (apt-get)", spending both retries in 38
+      # seconds on a lock the first attempt had orphaned.
+      #
+      # So each attempt has to clean up after the previous one: kill the whole
+      # process group (`timeout -k`, and a pkill for anything that outlived it),
+      # then clear the lock files before trying again. Without that the retry
+      # loop is decorative — it runs three times and only the first can pass.
       - name: Install Playwright Chromium + system deps
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         working-directory: web
         timeout-minutes: 18
         run: |
           for i in 1 2 3; do
-            timeout 300 npx playwright install --with-deps chromium && exit 0
-            echo "install --with-deps attempt $i failed or timed out — retrying in 10s..."; sleep 10
+            timeout -k 15 300 npx playwright install --with-deps chromium && exit 0
+            echo "install --with-deps attempt $i failed or timed out — clearing apt state, retrying..."
+            sudo pkill -9 -x apt-get 2>/dev/null || true
+            sudo pkill -9 -x dpkg 2>/dev/null || true
+            sudo rm -f /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend /var/cache/apt/archives/lock 2>/dev/null || true
+            sudo dpkg --configure -a 2>/dev/null || true
+            sleep 10
           done
           exit 1
 
@@ -226,8 +242,13 @@ jobs:
         timeout-minutes: 18
         run: |
           for i in 1 2 3; do
-            timeout 300 npx playwright install-deps chromium && exit 0
-            echo "install-deps attempt $i failed or timed out — retrying in 10s..."; sleep 10
+            timeout -k 15 300 npx playwright install-deps chromium && exit 0
+            echo "install-deps attempt $i failed or timed out — clearing apt state, retrying..."
+            sudo pkill -9 -x apt-get 2>/dev/null || true
+            sudo pkill -9 -x dpkg 2>/dev/null || true
+            sudo rm -f /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/lib/dpkg/lock-frontend /var/cache/apt/archives/lock 2>/dev/null || true
+            sudo dpkg --configure -a 2>/dev/null || true
+            sleep 10
           done
           exit 1
 
