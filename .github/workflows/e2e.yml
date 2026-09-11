@@ -191,23 +191,43 @@ jobs:
       # deps — those are apt packages that live outside the cached directory.
       # Both shell out to apt, so wrap in a bounded retry to ride out a transient
       # mirror blip rather than failing the whole shard on it.
+      # A RETRY LOOP CANNOT SEE A HANG. Both loops below previously ran the
+      # install unbounded, and apt does not fail when a mirror stops responding
+      # — it waits. So `&& exit 0` never returned, the retry never fired, and
+      # the shard sat until the 25-minute job cap killed it. Observed on
+      # 2026-09-11: shards 1 and 3 died at 25m14s and 25m15s, twice in a row,
+      # while 2 and 4 passed on the same commit — the difference being a
+      # browser-cache hit, which sends a shard down the second step rather than
+      # the first.
+      #
+      # `timeout` is what turns a hang into a failure the retry can act on. The
+      # apt hardening above bounds apt's own per-request waits; this bounds the
+      # whole command, which is the only thing that covers a stall anywhere
+      # else in it. Both are wanted: one makes the common case fast, this one
+      # makes the pathological case survivable.
+      #
+      # 5 minutes is generous for an apt install that normally takes well under
+      # one, and three attempts still fit inside the job cap with room to run
+      # the actual tests.
       - name: Install Playwright Chromium + system deps
         if: steps.playwright-cache.outputs.cache-hit != 'true'
         working-directory: web
+        timeout-minutes: 18
         run: |
           for i in 1 2 3; do
-            npx playwright install --with-deps chromium && exit 0
-            echo "install --with-deps attempt $i failed — retrying in 10s..."; sleep 10
+            timeout 300 npx playwright install --with-deps chromium && exit 0
+            echo "install --with-deps attempt $i failed or timed out — retrying in 10s..."; sleep 10
           done
           exit 1
 
       - name: Install Playwright system deps (cached browser)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         working-directory: web
+        timeout-minutes: 18
         run: |
           for i in 1 2 3; do
-            npx playwright install-deps chromium && exit 0
-            echo "install-deps attempt $i failed — retrying in 10s..."; sleep 10
+            timeout 300 npx playwright install-deps chromium && exit 0
+            echo "install-deps attempt $i failed or timed out — retrying in 10s..."; sleep 10
           done
           exit 1
 
