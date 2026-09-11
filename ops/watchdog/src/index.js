@@ -150,7 +150,11 @@ async function runChecks(env) {
  */
 async function checkTarget(env, cfg, target) {
   const key = `state:${target.name}`;
-  const state = (await readJson(env, key)) || {
+  // `stored` is kept separate from the defaults below because "nothing has ever
+  // been recorded for this target" and "recorded, and healthy" are different
+  // facts that the write-skip further down must not confuse. See there.
+  const stored = await readJson(env, key);
+  const state = stored || {
     alertedStatus: 'up',
     consecutiveFailures: 0,
     downSince: null,
@@ -174,8 +178,21 @@ async function checkTarget(env, cfg, target) {
     // time has nothing to record, so the steady state now costs no writes at
     // all and the budget is spent on changes, which are the only thing anyone
     // reads this store to learn.
+    //
+    // A TARGET WITH NO STORED STATE IS A CHANGE, even though it is healthy.
+    // `state` above falls back to an up-and-clean object when KV holds nothing,
+    // so without the `stored` check a newly added target matches "unchanged" on
+    // every pass and is therefore never written — leaving /status and the public
+    // page reporting `unknown` forever for a target that is being probed
+    // successfully every two minutes. Observed on 2026-09-11 when docs and pay
+    // were added: both stayed "Unknown" on the page while their history bars
+    // filled in green, because recordHistory writes on a new day and this did
+    // not write at all. The first observation is the one that has to be saved.
     const unchanged =
-      state.alertedStatus === 'up' && (state.consecutiveFailures || 0) === 0 && !state.downSince;
+      stored !== null &&
+      state.alertedStatus === 'up' &&
+      (state.consecutiveFailures || 0) === 0 &&
+      !state.downSince;
 
     if (!unchanged) {
       await writeJson(env, key, {

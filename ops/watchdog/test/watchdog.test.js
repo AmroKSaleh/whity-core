@@ -423,6 +423,40 @@ test('a healthy, freshly-checked deployment reads as operational', async () => {
   assert.match(html, /Healthy/);
 });
 
+// A NEWLY ADDED TARGET MUST RECORD ITS FIRST HEALTHY OBSERVATION.
+//
+// The write-skip that keeps this Worker inside KV's 1,000-writes-a-day budget
+// compares against a default up-and-clean state, so a target that KV has never
+// heard of looks "unchanged" and is never written. The status page then reports
+// `unknown` forever for something it is successfully probing every two minutes
+// — which is the page lying about a healthy service, the mirror image of the
+// failure this watchdog exists to prevent. Seen in production on 2026-09-11
+// when docs and pay were added.
+test('the first healthy observation of a new target is recorded', async () => {
+  const { env, store } = makeEnv();
+  assert.equal(store.has('state:docs'), false, 'precondition: nothing stored yet');
+
+  globalThis.fetch = async () => new Response('ok', { status: 200 });
+  const result = await checkTarget(env, CFG, { name: 'docs', url: 'https://docs.test/' });
+
+  assert.equal(result.ok, true);
+  assert.equal(store.has('state:docs'), true, 'a target seen for the first time has to be written');
+  assert.equal(JSON.parse(store.get('state:docs')).alertedStatus, 'up');
+});
+
+test('a healthy target already recorded as healthy costs no write', async () => {
+  // The budget guard itself, still intact: this is the steady state and it must
+  // stay free, or the Worker runs out of writes and stops recording anything.
+  const { env, store } = makeEnv();
+  store.set('state:docs', JSON.stringify({ alertedStatus: 'up', consecutiveFailures: 0, downSince: null, lastOkAt: 1 }));
+  const before = store.get('state:docs');
+
+  globalThis.fetch = async () => new Response('ok', { status: 200 });
+  await checkTarget(env, CFG, { name: 'docs', url: 'https://docs.test/' });
+
+  assert.equal(store.get('state:docs'), before, 'an unchanged healthy target must not be rewritten');
+});
+
 // Every hostname is watched separately, so every hostname has to be READABLE.
 // A page that lists `pay` tells a customer nothing; one that lists "Payments —
 // pay.whity.dev" tells them whether the thing they are waiting on is the thing
