@@ -45,10 +45,27 @@ function makeEnv(overrides = {}) {
   };
 }
 
+/**
+ * Match the Telegram API by HOSTNAME, not by substring.
+ *
+ * `String(url).includes('api.telegram.org')` also matches
+ * `https://example.test/?x=api.telegram.org`, so a probe target that merely
+ * mentioned the host would be answered by the Telegram stub and the test would
+ * quietly assert the wrong thing. CodeQL flags this as incomplete URL
+ * sanitization and is right to.
+ */
+function isTelegram(url) {
+  try {
+    return new URL(String(url)).hostname === 'api.telegram.org';
+  } catch {
+    return false;
+  }
+}
+
 /** Capture Telegram sends without touching the network. */
 function captureAlerts(sent) {
   globalThis.fetch = async (url, init) => {
-    if (String(url).includes('api.telegram.org')) {
+    if (isTelegram(url)) {
       sent.push(JSON.parse(init.body).text);
       return new Response('{"ok":true}', { status: 200 });
     }
@@ -59,7 +76,7 @@ function captureAlerts(sent) {
 /** Make the next probe of `url` return a given status, or throw. */
 function stubProbe(sent, behaviour) {
   globalThis.fetch = async (url, init) => {
-    if (String(url).includes('api.telegram.org')) {
+    if (isTelegram(url)) {
       sent.push(JSON.parse(init.body).text);
       return new Response('{"ok":true}', { status: 200 });
     }
