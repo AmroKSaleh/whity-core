@@ -236,6 +236,24 @@ jobs:
           done
           exit 1
 
+      # ASK THE REAL QUESTION IF apt CANNOT BE REACHED.
+      #
+      # `install-deps` failing does not mean a dependency is missing — it means
+      # apt could not run. Those are different facts, and only one of them
+      # should stop a test suite. On 2026-09-11 the Ubuntu archive was
+      # unreachable from these runners for hours: every merge in the repository
+      # was blocked, on every branch, by an upstream mirror rather than by
+      # anything wrong with the code.
+      #
+      # So when the retries are exhausted, this stops testing the proxy (did
+      # apt succeed?) and tests the property that actually matters: can Chromium
+      # launch. If it can, the deps are present — GitHub's ubuntu-latest image
+      # ships them, which is why the cached-browser path so often needed nothing
+      # from apt in the first place. If it cannot, the job still fails, and now
+      # for the true reason with the real error attached.
+      #
+      # This is deliberately NOT "ignore the failure". It replaces a guess with
+      # a measurement, and the measurement can still say no.
       - name: Install Playwright system deps (cached browser)
         if: steps.playwright-cache.outputs.cache-hit == 'true'
         working-directory: web
@@ -250,7 +268,15 @@ jobs:
             sudo dpkg --configure -a 2>/dev/null || true
             sleep 10
           done
-          exit 1
+
+          echo "::warning::install-deps failed three times (apt unreachable). Checking whether Chromium can launch regardless."
+          node -e "
+            const { chromium } = require('@playwright/test');
+            chromium.launch()
+              .then(b => b.close())
+              .then(() => { console.log('Chromium launches: the system dependencies are present.'); process.exit(0); })
+              .catch(e => { console.error('Chromium cannot launch — dependencies really are missing:', e.message); process.exit(1); });
+          "
 
       # The Playwright config starts the Next dev server itself (webServer on
       # port 3010) and proxies /api/* to the stack at localhost:8000.
