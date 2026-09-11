@@ -177,6 +177,32 @@ final class ActivationServiceRealEngineTest extends TestCase
         $this->service->redeem($issued['code'], $theirs);
     }
 
+    /**
+     * A SERIAL IS RESOLVED INSIDE THE CODE'S TENANT. Two customers may hold
+     * hardware bearing the same manufacturer serial, so an unscoped lookup would
+     * let one customer's code activate the other's unit — and the caller
+     * redeeming has no tenant of their own to check against.
+     */
+    public function testASerialResolvesOnlyWithinTheCodesTenant(): void
+    {
+        $this->device('SN-SHARED', self::OTHER_TENANT);
+        $mine = $this->device('SN-SHARED', self::TENANT);
+        $issued = $this->service->issue(self::TENANT, null, maxRedemptions: 1);
+
+        $result = $this->service->redeem($issued['code'], 'SN-SHARED');
+
+        self::assertSame($mine, $result['licensed_device_id'], "it resolved the wrong tenant's unit");
+    }
+
+    public function testASerialBelongingToAnotherTenantIsNotFound(): void
+    {
+        $this->device('SN-ONLY-THEIRS', self::OTHER_TENANT);
+        $issued = $this->service->issue(self::TENANT, null, maxRedemptions: 1);
+
+        $this->expectException(LicensingException::class);
+        $this->service->redeem($issued['code'], 'SN-ONLY-THEIRS');
+    }
+
     public function testARetiredDeviceCannotBeReactivated(): void
     {
         $device = $this->device('SN-RETIRED');

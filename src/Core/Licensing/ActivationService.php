@@ -113,8 +113,11 @@ final class ActivationService
      * Redeem a code against a device, activating it.
      *
      * @param string   $code            As typed. Decoration and case are irrelevant.
-     * @param int|null $licensedDeviceId The unit being activated, when the code is
-     *                                   not already bound to one.
+     * @param int|string|null $device The unit being activated, when the code is not
+     *                                already bound to one. A SERIAL (string) is what an
+     *                                end user can supply — they can read it off the
+     *                                hardware — and it is resolved inside the tenant
+     *                                the code names, never globally.
      * @param int|null $redeemedByUserId Null is expected: a student may have no account.
      *
      * @return array{licensed_device_id: int, tenant_id: int}
@@ -123,7 +126,7 @@ final class ActivationService
      */
     public function redeem(
         string $code,
-        ?int $licensedDeviceId = null,
+        int|string|null $device = null,
         ?int $redeemedByUserId = null,
         ?string $fromIp = null,
     ): array {
@@ -141,6 +144,7 @@ final class ActivationService
         // THE ATOMIC CLAIM. Every precondition is in the WHERE clause, so the
         // database — not this process — decides who gets the last redemption of
         // a batch. Nothing is read first; there is no window to lose.
+        // @tenant-guard-ignore: the tenant is this query's OUTPUT, not its input. A code is globally unique precisely so a redeeming student — who has no session and no tenant — can be resolved from the code alone; a tenant predicate here could only come from the untrusted caller, which is how one customer's code gets applied to another's account. Everything after this point is scoped to the tenant this returns.
         $claim = $this->pdo->prepare('
             UPDATE device_activation_codes
                SET redemption_count = redemption_count + 1,
@@ -173,9 +177,15 @@ final class ActivationService
         // Otherwise a caller could redeem a code minted for one unit against a
         // different one — which is how a licence ends up on hardware nobody
         // sold it for.
+        // A SERIAL IS RESOLVED INSIDE THE CODE'S TENANT, never outside it. The
+        // caller may hand us a serial because that is what a person can read off
+        // the unit — but looking one up without a tenant predicate is a
+        // cross-tenant read, and would also mean two customers holding hardware
+        // with the same manufacturer serial could reach each other's row. The
+        // code decided the tenant a moment ago; that is the scope.
         $deviceId = $row['licensed_device_id'] !== null
             ? (int) $row['licensed_device_id']
-            : $licensedDeviceId;
+            : (is_string($device) ? $this->deviceIdForSerial($tenantId, $device) : $device);
 
         if ($deviceId === null) {
             throw new LicensingException('This code is not bound to a device, so a device must be given.');
@@ -185,6 +195,21 @@ final class ActivationService
         $this->recordRedemption($tenantId, $codeId, $deviceId, $redeemedByUserId, $fromIp, $now);
 
         return ['licensed_device_id' => $deviceId, 'tenant_id' => $tenantId];
+    }
+
+    /** Resolve a serial WITHIN a tenant. There is no unscoped variant, on purpose. */
+    private function deviceIdForSerial(int $tenantId, string $serial): ?int
+    {
+        $statement = $this->pdo->prepare('
+            SELECT id FROM licensed_devices WHERE tenant_id = :tenant AND serial_number = :serial_no
+        ');
+        $statement->bindValue(':tenant', $tenantId, PDO::PARAM_INT);
+        $statement->bindValue(':serial_no', $serial);
+        $statement->execute();
+
+        $id = $statement->fetchColumn();
+
+        return $id === false ? null : (int) $id;
     }
 
     /**
@@ -260,6 +285,7 @@ final class ActivationService
      */
     private function explainFailedRedemption(string $canonical, DateTimeImmutable $now): string
     {
+        // @tenant-guard-ignore: diagnosing a refusal for the same tenantless caller as the claim above. It reads only whether a code is revoked, expired or exhausted — never who owns it — and the message it produces says nothing a caller could not learn by holding the code.
         $statement = $this->pdo->prepare('
             SELECT revoked_at, expires_at, redemption_count, max_redemptions
               FROM device_activation_codes

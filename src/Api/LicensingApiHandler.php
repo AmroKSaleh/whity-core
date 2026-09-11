@@ -280,25 +280,23 @@ final class LicensingApiHandler
             return Response::error('Enter your activation code.', 422);
         }
 
-        // A serial is how an end user identifies their own unit: they can read
-        // it off the device. They cannot know its internal id, and accepting
-        // one here would let a caller enumerate rows by number.
+        // A SERIAL, NEVER AN INTERNAL ID. A person can read a serial off the
+        // unit in front of them; they cannot know its row id, and accepting one
+        // would let a caller enumerate rows by number.
+        //
+        // It is passed through UNRESOLVED. Turning a serial into an id here
+        // would need a query with no tenant predicate — the caller has no
+        // tenant — which is a cross-tenant read, and would let two customers
+        // holding hardware with the same manufacturer serial reach each other's
+        // row. The service resolves it inside the tenant the CODE names, which
+        // is the only trustworthy scope available.
         $serial = $body['serial_number'] ?? null;
-        $deviceId = null;
-
-        if (is_string($serial) && trim($serial) !== '') {
-            $deviceId = $this->deviceIdForSerialAnyTenant(trim($serial));
-            if ($deviceId === null) {
-                // Same message as a bad code, on purpose: an anonymous caller
-                // must not be able to probe which serials this platform knows.
-                return Response::error('That code is not valid — please check it and try again.', 422);
-            }
-        }
+        $device = is_string($serial) && trim($serial) !== '' ? trim($serial) : null;
 
         try {
             $result = $this->activations->redeem(
                 $code,
-                $deviceId,
+                $device,
                 null,
                 ClientIp::fromRequest($request),
             );
@@ -326,25 +324,6 @@ final class LicensingApiHandler
         return $statement->fetchColumn() !== false;
     }
 
-    /**
-     * Resolve a serial without a tenant, because the redeeming caller has none.
-     *
-     * Safe only because the CODE decides the tenant: {@see ActivationService::redeem()}
-     * refuses when the resolved device does not belong to the code's tenant. A
-     * serial alone activates nothing.
-     */
-    private function deviceIdForSerialAnyTenant(string $serial): ?int
-    {
-        $statement = $this->pdo->prepare('
-            SELECT id FROM licensed_devices WHERE serial_number = :serial LIMIT 1
-        ');
-        $statement->bindValue(':serial', $serial);
-        $statement->execute();
-
-        $id = $statement->fetchColumn();
-
-        return $id === false ? null : (int) $id;
-    }
 
     private function authorize(Request $request, string $permission): int|Response
     {
