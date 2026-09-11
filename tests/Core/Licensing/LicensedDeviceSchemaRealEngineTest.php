@@ -63,8 +63,7 @@ final class LicensedDeviceSchemaRealEngineTest extends TestCase
             UPDATE device_activation_codes SET redemption_count = 30 WHERE code = 'CLASSROOM30'
         ");
 
-        self::assertSame(30, (int) $this->pdo
-            ->query("SELECT redemption_count FROM device_activation_codes WHERE code = 'CLASSROOM30'")
+        self::assertSame(30, (int) $this->q("SELECT redemption_count FROM device_activation_codes WHERE code = 'CLASSROOM30'")
             ->fetchColumn());
     }
 
@@ -99,8 +98,7 @@ final class LicensedDeviceSchemaRealEngineTest extends TestCase
              WHERE serial_number = 'SN-ACTIVATED'
         ");
 
-        self::assertSame('active', (string) $this->pdo
-            ->query("SELECT status FROM licensed_devices WHERE serial_number = 'SN-ACTIVATED'")
+        self::assertSame('active', (string) $this->q("SELECT status FROM licensed_devices WHERE serial_number = 'SN-ACTIVATED'")
             ->fetchColumn());
     }
 
@@ -137,8 +135,7 @@ final class LicensedDeviceSchemaRealEngineTest extends TestCase
         $this->insertDevice('SN-SHARED', tenantId: 1);
         $this->insertDevice('SN-SHARED', tenantId: 2);
 
-        self::assertSame(2, (int) $this->pdo
-            ->query("SELECT count(*) FROM licensed_devices WHERE serial_number = 'SN-SHARED'")
+        self::assertSame(2, (int) $this->q("SELECT count(*) FROM licensed_devices WHERE serial_number = 'SN-SHARED'")
             ->fetchColumn());
     }
 
@@ -185,8 +182,7 @@ final class LicensedDeviceSchemaRealEngineTest extends TestCase
     public function testAllThreeBillingFactsAreRecordedIndependently(): void
     {
         $columns = [];
-        $statement = $this->pdo->query('SELECT * FROM licensed_devices LIMIT 0');
-        self::assertNotFalse($statement);
+        $statement = $this->q('SELECT * FROM licensed_devices LIMIT 0');
         for ($i = 0; $i < $statement->columnCount(); $i++) {
             $columns[] = $statement->getColumnMeta($i)['name'] ?? '';
         }
@@ -228,4 +224,18 @@ final class LicensedDeviceSchemaRealEngineTest extends TestCase
             ':count' => $redemptionCount,
         ]);
     }
+
+    /**
+     * `PDO::query()` returns PDOStatement|false, and chaining straight off it
+     * hides a failed query behind a fatal on the next line. Asserting here
+     * turns that into a test failure naming the SQL.
+     */
+    private function q(string $sql): \PDOStatement
+    {
+        $statement = $this->pdo->query($sql);
+        self::assertNotFalse($statement, "query failed: {$sql}");
+
+        return $statement;
+    }
+
 }
