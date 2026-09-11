@@ -202,6 +202,26 @@ test('a fresh backup is silent, and alerts once when it later goes overdue', asy
   assert.equal(sent.length, 1, 'overdue alerts once, not on every run');
 });
 
+test('a FIRST-EVER report is not announced as "reporting again"', async () => {
+  const { env, store, sent } = makeEnv();
+  captureAlerts(sent);
+
+  // Never reported -> the "has never reported" warning.
+  await checkHeartbeats(env, CFG);
+  assert.match(sent[0], /never/);
+  sent.length = 0;
+
+  // Now it reports for the very first time. It was not working and did not
+  // stop, so "again" would be a false account of what happened — and the
+  // distinction the warning drew must survive into the all-clear.
+  store.set('beat:backup', JSON.stringify({ at: Date.now() }));
+  await checkHeartbeats(env, CFG);
+
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /first time/);
+  assert.doesNotMatch(sent[0], /again/, 'it had never started, so it cannot be starting again');
+});
+
 test('a backup that starts reporting again is announced', async () => {
   const { env, store, sent } = makeEnv();
   captureAlerts(sent);

@@ -285,7 +285,19 @@ async function checkHeartbeats(env, cfg) {
   }
 
   if (state.alertedStatus !== 'ok') {
-    await notify(env, `✅ *${name} is reporting again*\nLast success ${humanDuration(age)} ago.`);
+    // THE RECOVERY HAS TO KEEP THE DISTINCTION THE ALARM MADE. "Never reported"
+    // and "went stale" are deliberately different warnings, because they send
+    // an operator on different hunts — and collapsing them back into one
+    // recovery message undoes that. Observed on 2026-09-11: a backup that had
+    // never once reported to this watchdog was announced as "reporting again",
+    // which says it had been working and stopped. It had never started.
+    const firstEver = state.alertedStatus === 'missing';
+    await notify(
+      env,
+      firstEver
+        ? `✅ *${name} is reporting for the first time*\nLast success ${humanDuration(age)} ago. The dead-man's switch is now armed.`
+        : `✅ *${name} is reporting again*\nLast success ${humanDuration(age)} ago.`
+    );
     await writeJson(env, stateKey, { alertedStatus: 'ok' });
   }
 }
