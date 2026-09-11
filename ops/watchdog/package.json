@@ -1,0 +1,16 @@
+{
+  "name": "whity-watchdog",
+  "version": "1.0.0",
+  "private": true,
+  "description": "External watchdog for a Whity deployment — a Cloudflare Worker that watches from outside the box it is watching.",
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "test": "node --test test/watchdog.test.js",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

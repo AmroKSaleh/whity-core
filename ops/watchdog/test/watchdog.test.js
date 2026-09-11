@@ -1,0 +1,329 @@
+/**
+ * Tests for the external watchdog.
+ *
+ * A MONITOR IS THE WORST THING TO LEAVE UNTESTED, because its failure mode is
+ * silence and silence is what it looks like when everything is fine. Every
+ * assertion below was checked against a deliberately broken version of the
+ * code first — a test that passes with the behaviour removed is testing
+ * nothing, which is the shape of bug this whole watchdog was written after.
+ *
+ * Run with: node --test ops/watchdog/test/
+ */
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+
+import { __test__ } from '../src/index.js';
+
+const { humanDuration, timingSafeEqual, config, checkTarget, checkHeartbeats, handleRequest } = __test__;
+
+// ── a KV stand-in ───────────────────────────────────────────────────────────
+
+function makeEnv(overrides = {}) {
+  const store = new Map();
+  const sent = [];
+
+  return {
+    env: {
+      WATCHDOG_STATE: {
+        async get(key, opts) {
+          const raw = store.get(key);
+          if (raw === undefined) return null;
+          return opts?.type === 'json' ? JSON.parse(raw) : raw;
+        },
+        async put(key, value) {
+          store.set(key, value);
+        },
+      },
+      TELEGRAM_BOT_TOKEN: 'test-token',
+      TELEGRAM_CHAT_ID: '1234',
+      HEARTBEAT_SECRET: 'shhh',
+      ...overrides,
+    },
+    store,
+    sent,
+  };
+}
+
+/** Capture Telegram sends without touching the network. */
+function captureAlerts(sent) {
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('api.telegram.org')) {
+      sent.push(JSON.parse(init.body).text);
+      return new Response('{"ok":true}', { status: 200 });
+    }
+    throw new Error(`unexpected fetch to ${url}`);
+  };
+}
+
+/** Make the next probe of `url` return a given status, or throw. */
+function stubProbe(sent, behaviour) {
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('api.telegram.org')) {
+      sent.push(JSON.parse(init.body).text);
+      return new Response('{"ok":true}', { status: 200 });
+    }
+    if (behaviour === 'throw') throw new Error('connection refused');
+    return new Response('body', { status: behaviour });
+  };
+}
+
+const CFG = { failuresBeforeAlert: 2, probeTimeoutMs: 500, backupMaxAgeHours: 26, summaryIntervalHours: 168 };
+const TARGET = { name: 'api', url: 'https://example.test/api/health' };
+
+// ── the thing that actually broke ───────────────────────────────────────────
+
+test('a 503 from /api/health counts as DOWN, not as a reachable service', async () => {
+  const { env, sent } = makeEnv();
+  stubProbe(sent, 503);
+
+  const first = await checkTarget(env, CFG, TARGET);
+  assert.equal(first.ok, false, '503 must not be treated as healthy');
+});
+
+test('one failure is not enough to alert; two consecutive failures are', async () => {
+  const { env, sent } = makeEnv();
+  stubProbe(sent, 503);
+
+  await checkTarget(env, CFG, TARGET);
+  assert.equal(sent.length, 0, 'a single blip must not page anyone');
+
+  await checkTarget(env, CFG, TARGET);
+  assert.equal(sent.length, 1, 'the second consecutive failure must alert');
+  assert.match(sent[0], /is DOWN/);
+  assert.match(sent[0], /HTTP 503/, 'the alert must carry the status that caused it');
+});
+
+test('a sustained outage alerts ONCE, not on every tick', async () => {
+  const { env, sent } = makeEnv();
+  stubProbe(sent, 503);
+
+  for (let i = 0; i < 10; i++) await checkTarget(env, CFG, TARGET);
+
+  assert.equal(sent.length, 1, 'repeating the same alert is how a monitor gets muted');
+});
+
+test('recovery is announced, and reports the outage from its FIRST failure', async () => {
+  const { env, sent } = makeEnv();
+  stubProbe(sent, 503);
+
+  await checkTarget(env, CFG, TARGET);
+  await checkTarget(env, CFG, TARGET);
+  sent.length = 0;
+
+  stubProbe(sent, 200);
+  await checkTarget(env, CFG, TARGET);
+
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /recovered/);
+  assert.match(sent[0], /Down for/, 'an outage report without a duration is half an answer');
+});
+
+test('an intermittent failure does not latch: one failure then success stays quiet', async () => {
+  const { env, sent } = makeEnv();
+  stubProbe(sent, 503);
+  await checkTarget(env, CFG, TARGET);
+
+  stubProbe(sent, 200);
+  await checkTarget(env, CFG, TARGET);
+
+  assert.equal(sent.length, 0, 'no alert was sent, so no recovery notice is owed either');
+});
+
+test('an unreachable host is DOWN and says so distinctly from an error status', async () => {
+  const { env, sent } = makeEnv();
+  stubProbe(sent, 'throw');
+
+  await checkTarget(env, CFG, TARGET);
+  await checkTarget(env, CFG, TARGET);
+
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /unreachable/, 'refused and 503 send an operator to different places');
+});
+
+// ── the dead-man's switch ───────────────────────────────────────────────────
+
+test('a backup that has NEVER reported is distinguished from one that went stale', async () => {
+  const { env, sent } = makeEnv();
+  captureAlerts(sent);
+
+  await checkHeartbeats(env, CFG);
+
+  assert.equal(sent.length, 1);
+  // The distinction is the point, so assert BOTH halves of it: this message
+  // must say "never", and must NOT use the wording reserved for a job that was
+  // working and stopped. Matching one phrase would pass if both states
+  // collapsed to the same text, which is the bug this test exists to catch.
+  assert.match(sent[0], /never/, 'a job that never ran must say so');
+  assert.doesNotMatch(sent[0], /overdue/, 'never-ran and went-stale send an operator on different hunts');
+});
+
+test('silence past the window raises the alarm — the failure a report-reader cannot see', async () => {
+  const { env, store, sent } = makeEnv();
+  captureAlerts(sent);
+
+  const twentySevenHoursAgo = Date.now() - 27 * 3600 * 1000;
+  store.set('beat:backup', JSON.stringify({ at: twentySevenHoursAgo }));
+
+  await checkHeartbeats(env, CFG);
+
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /overdue/);
+});
+
+test('a fresh backup is silent, and alerts once when it later goes overdue', async () => {
+  const { env, store, sent } = makeEnv();
+  captureAlerts(sent);
+
+  store.set('beat:backup', JSON.stringify({ at: Date.now() - 3600 * 1000 }));
+  await checkHeartbeats(env, CFG);
+  assert.equal(sent.length, 0, 'a healthy backup must say nothing');
+
+  store.set('beat:backup', JSON.stringify({ at: Date.now() - 30 * 3600 * 1000 }));
+  await checkHeartbeats(env, CFG);
+  await checkHeartbeats(env, CFG);
+  assert.equal(sent.length, 1, 'overdue alerts once, not on every run');
+});
+
+test('a backup that starts reporting again is announced', async () => {
+  const { env, store, sent } = makeEnv();
+  captureAlerts(sent);
+
+  store.set('beat:backup', JSON.stringify({ at: Date.now() - 30 * 3600 * 1000 }));
+  await checkHeartbeats(env, CFG);
+  sent.length = 0;
+
+  store.set('beat:backup', JSON.stringify({ at: Date.now() }));
+  await checkHeartbeats(env, CFG);
+
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /reporting again/);
+});
+
+// ── configuration ───────────────────────────────────────────────────────────
+
+test('an unparseable PROBE_TARGETS yields no targets rather than a crash', () => {
+  const cfg = config({ PROBE_TARGETS: 'not json' });
+  assert.deepEqual(cfg.targets, []);
+});
+
+test('malformed targets are dropped, well-formed ones survive', () => {
+  const cfg = config({
+    PROBE_TARGETS: JSON.stringify([{ name: 'ok', url: 'https://x.test' }, { name: 'no-url' }, null]),
+  });
+  assert.equal(cfg.targets.length, 1);
+  assert.equal(cfg.targets[0].name, 'ok');
+});
+
+test('a nonsense numeric var falls back to the default instead of disabling a check', () => {
+  // NaN compares false against everything, so a typo here would silently mean
+  // "never alert" — the failure mode this whole component exists to prevent.
+  const cfg = config({ FAILURES_BEFORE_ALERT: 'two' });
+  assert.equal(cfg.failuresBeforeAlert, 2);
+
+  const negative = config({ BACKUP_MAX_AGE_HOURS: '-5' });
+  assert.equal(negative.backupMaxAgeHours, 26);
+});
+
+// ── the heartbeat secret ────────────────────────────────────────────────────
+
+test('heartbeat comparison rejects wrong secrets, including prefixes', () => {
+  assert.equal(timingSafeEqual('abc123', 'abc123'), true);
+  assert.equal(timingSafeEqual('abc123', 'abc124'), false);
+  assert.equal(timingSafeEqual('abc', 'abc123'), false, 'a prefix must not authenticate');
+  assert.equal(timingSafeEqual('', ''), true);
+  assert.equal(timingSafeEqual(undefined, 'abc'), false);
+});
+
+// ── the alert hub ───────────────────────────────────────────────────────────
+//
+// Added after 2026-09-10, when two critical unauthenticated RCE advisories were
+// found live on the public deployment. No probe could have seen them — a
+// vulnerable server answers 200 exactly like a patched one — so something
+// outside the Worker has to be able to raise an alarm through it.
+
+test('an authenticated caller can raise an alert', async () => {
+  const { env, sent } = makeEnv();
+  captureAlerts(sent);
+
+  const res = await handleRequest(
+    new Request('https://w.test/alert', {
+      method: 'POST',
+      headers: { authorization: 'Bearer shhh', 'content-type': 'application/json' },
+      body: JSON.stringify({ source: 'npm audit', text: 'next 16.3.1: 2 critical advisories' }),
+    }),
+    env
+  );
+
+  assert.equal(res.status, 200);
+  assert.equal(sent.length, 1);
+  assert.match(sent[0], /npm audit/, 'the alert must say who raised it');
+  assert.match(sent[0], /2 critical advisories/);
+});
+
+test('an UNAUTHENTICATED caller cannot raise an alert', async () => {
+  const { env, sent } = makeEnv();
+  captureAlerts(sent);
+
+  for (const headers of [{}, { authorization: 'Bearer wrong' }, { authorization: 'Bearer shh' }]) {
+    const res = await handleRequest(
+      new Request('https://w.test/alert', {
+        method: 'POST',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify({ source: 'spam', text: 'ignore me' }),
+      }),
+      env
+    );
+    assert.equal(res.status, 401);
+  }
+
+  // An open alert endpoint is worse than none: anyone who found the URL could
+  // drown the real alarms in noise until they are muted.
+  assert.equal(sent.length, 0, 'nothing must reach Telegram without the secret');
+});
+
+test('an alert with no text is refused rather than sent empty', async () => {
+  const { env, sent } = makeEnv();
+  captureAlerts(sent);
+
+  const res = await handleRequest(
+    new Request('https://w.test/alert', {
+      method: 'POST',
+      headers: { authorization: 'Bearer shhh', 'content-type': 'application/json' },
+      body: JSON.stringify({ source: 'ci' }),
+    }),
+    env
+  );
+
+  assert.equal(res.status, 400);
+  assert.equal(sent.length, 0);
+});
+
+test('an authenticated heartbeat is recorded; an unauthenticated one is not', async () => {
+  const { env, store, sent } = makeEnv();
+  captureAlerts(sent);
+
+  const bad = await handleRequest(
+    new Request('https://w.test/beat/backup', { method: 'POST', headers: { authorization: 'Bearer nope' } }),
+    env
+  );
+  assert.equal(bad.status, 401);
+  assert.equal(store.has('beat:backup'), false, 'an open endpoint would let anyone silence the backup alarm');
+
+  const ok = await handleRequest(
+    new Request('https://w.test/beat/backup', { method: 'POST', headers: { authorization: 'Bearer shhh' } }),
+    env
+  );
+  assert.equal(ok.status, 200);
+  assert.equal(store.has('beat:backup'), true);
+});
+
+// ── formatting ──────────────────────────────────────────────────────────────
+
+test('durations read the way a person would say them', () => {
+  assert.equal(humanDuration(45_000), '45s');
+  assert.equal(humanDuration(90_000), '2m');
+  assert.equal(humanDuration(3 * 3600 * 1000), '3h');
+  assert.equal(humanDuration(3.5 * 3600 * 1000), '3h 30m');
+  assert.equal(humanDuration(50 * 3600 * 1000), '2d 2h');
+});

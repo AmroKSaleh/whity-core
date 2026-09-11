@@ -1,0 +1,60 @@
+name = "whity-watchdog"
+main = "src/index.js"
+compatibility_date = "2026-09-09"
+
+# EVERY TWO MINUTES. With FAILURES_BEFORE_ALERT = 2 that puts a real outage in
+# front of a human inside roughly five minutes. The incident this was built
+# after ran for three hours before anyone noticed, so the interval is chosen
+# against that number rather than against a vague sense of "often enough".
+[triggers]
+crons = ["*/2 * * * *"]
+
+# State lives in KV so the Worker can tell a NEW failure from one it has already
+# reported — which is what keeps this from sending the same alert every two
+# minutes until it gets muted. Create it once with:
+#   npx wrangler kv namespace create WATCHDOG_STATE
+# and paste the returned id below.
+[[kv_namespaces]]
+binding = "WATCHDOG_STATE"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+[vars]
+# BOTH TIERS, deliberately. On 2026-09-09 the Next.js tier answered 200 for
+# three hours while every API call behind it failed, so a watchdog pointed only
+# at the homepage would have reported a healthy site throughout the outage.
+# `/api/health` returns 503 with `db_connected: false` when the database is
+# unreachable, which is the honest signal; keeping the web probe alongside it
+# makes the alert diagnostic rather than merely alarming — "web up, api down"
+# names the failure at the moment it arrives.
+PROBE_TARGETS = '[{"name":"api","url":"https://whity.dev/api/health"},{"name":"web","url":"https://whity.dev/"}]'
+
+# Consecutive failures before an alert is sent. 1 would alert on a single
+# dropped packet; anything much higher trades away the response time this
+# exists to buy.
+FAILURES_BEFORE_ALERT = "2"
+
+# Per-probe timeout. Comfortably under the two-minute cron so a hung target
+# cannot delay the checks that follow it.
+PROBE_TIMEOUT_MS = "10000"
+
+# Nightly backup plus slack. Matches the 26h threshold in the repo's existing
+# WhityBackupStale rule (ops/alerting/prometheus-rules.yml) so there is one
+# number to reason about rather than two that drift apart.
+BACKUP_MAX_AGE_HOURS = "26"
+
+# Weekly proof that the watchdog itself is running. Every check here is silent
+# when healthy, which is indistinguishable from a Worker whose cron trigger was
+# deleted — so it says hello once a week to rule that out.
+SUMMARY_INTERVAL_HOURS = "168"
+
+# SECRETS ARE NOT SET HERE. `[vars]` is plaintext in the deployed config and in
+# this file, which is committed. Set these three with `wrangler secret put`:
+#
+#   npx wrangler secret put TELEGRAM_BOT_TOKEN   # from @BotFather
+#   npx wrangler secret put TELEGRAM_CHAT_ID     # your chat's numeric id
+#   npx wrangler secret put HEARTBEAT_SECRET     # openssl rand -base64 32
+#
+# HEARTBEAT_SECRET authenticates POST /beat/<name>. Without it, anyone who
+# found the URL could silence the backup alarm forever by sending a heartbeat,
+# which turns the safety net into something that reports success while nothing
+# is being backed up.
