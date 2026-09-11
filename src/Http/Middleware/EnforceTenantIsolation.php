@@ -299,6 +299,23 @@ class EnforceTenantIsolation
         '#^/api/v1/public/forms/[^/]+$#',
         '#^/api/v1/public/forms/[^/]+/uploads$#',
         '#^/api/v1/public/forms/[^/]+/submissions$#',
+
+        // Per-device licensing: redeeming an activation code. The person doing
+        // it may be an end user or a student with NO account, so there is no
+        // session to carry a tenant — the code itself resolves which tenant,
+        // which unit and whether the grant is live, and nothing supplied by the
+        // caller is trusted.
+        //
+        // THE SECOND OF THE TWO EDITS a public route needs. The route is
+        // registered in public/index.php; without this line the middleware
+        // refuses the request before routing and the endpoint 401s while
+        // appearing correctly registered. That exact mistake shipped once
+        // already (#1214), and was only caught by probing the deployed
+        // instance — the whole suite was green.
+        //
+        // Fully anchored, so no future route under /public/licensing/ becomes
+        // public by inheriting a prefix.
+        '#^/api/v1/public/licensing/redeem$#',
     ];
 
     /**
