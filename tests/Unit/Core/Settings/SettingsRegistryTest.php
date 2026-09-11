@@ -35,6 +35,7 @@ final class SettingsRegistryTest extends TestCase
              'mail.events.deletion_enabled', 'mail.events.password_reset_enabled',
              'mail.brand_color', 'mail.footer_text',
              'billing.enforcement_default', 'billing.grace_days',
+             'licensing.billing_basis',
              'seats.enforcement', 'seats.count_invited',
              // #billing: invoicing. Every one differs per deployment, which is
              // why none is a constant in the invoicing code. Tax defaults to
@@ -392,7 +393,11 @@ final class SettingsRegistryTest extends TestCase
         // to configure. The count going DOWN is the notable direction: this
         // assertion exists so a key cannot vanish unnoticed, and a removal has
         // to be argued for rather than absorbed.
-        self::assertCount(81, $describe);
+        // 82 since per-device pricing added licensing.billing_basis, which
+        // decides WHICH devices a per-device price counts. Migration 146 keeps
+        // provisioned_at, activated_at and last_seen_at as separate facts so
+        // that choice can be a setting rather than a schema decision.
+        self::assertCount(82, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]
