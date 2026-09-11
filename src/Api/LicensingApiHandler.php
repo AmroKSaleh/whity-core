@@ -44,6 +44,33 @@ final class LicensingApiHandler
 {
     private const MAX_BULK_SERIALS = 500;
 
+    /**
+     * EVERY SENTENCE A CALLER CAN SEE, in one reviewable place.
+     *
+     * The domain throws a REASON CODE and the wording lives here, rather than a
+     * handler echoing `$e->getMessage()` — which would publish whatever any
+     * throw site happened to say, now and after every future edit, and is what
+     * the exception-leakage guard exists to stop.
+     *
+     * These are written for the person typing the code, who may be a student
+     * with no account and no support contact: what happened, and what to do
+     * next. Note that "not valid" covers BOTH an unknown code and a mistyped
+     * one — distinguishing them would let an anonymous caller learn which
+     * well-formed codes exist.
+     *
+     * @var array<string, string>
+     */
+    private const MESSAGES = [
+        LicensingException::REASON_INVALID => 'That code is not valid — please check it and try again.',
+        LicensingException::REASON_EXPIRED => 'This code has expired. Please ask for a replacement.',
+        LicensingException::REASON_REVOKED => 'This code has been cancelled. Please ask for a replacement.',
+        LicensingException::REASON_ALREADY_USED => 'This code has already been used.',
+        LicensingException::REASON_DEVICE_REQUIRED => 'This code is not linked to a device, so the device serial number is needed.',
+        LicensingException::REASON_DEVICE_UNKNOWN => 'That code is not valid — please check it and try again.',
+        LicensingException::REASON_BAD_REDEMPTION_LIMIT => 'A code must allow at least one redemption.',
+        LicensingException::REASON_MINT_FAILED => 'Could not create a code. Please try again.',
+    ];
+
     public function __construct(
         private readonly PDO $pdo,
         private readonly ActivationService $activations,
@@ -216,7 +243,7 @@ final class LicensingApiHandler
         try {
             $issued = $this->activations->issue($tenantId, $deviceId, $maxRedemptions, $expiresAt);
         } catch (LicensingException $e) {
-            return Response::error($e->getMessage(), 422);
+            return Response::error(self::MESSAGES[$e->reason] ?? self::MESSAGES[LicensingException::REASON_INVALID], 422);
         }
 
         return Response::json([
@@ -301,7 +328,7 @@ final class LicensingApiHandler
                 ClientIp::fromRequest($request),
             );
         } catch (LicensingException $e) {
-            return Response::error($e->getMessage(), 422);
+            return Response::error(self::MESSAGES[$e->reason] ?? self::MESSAGES[LicensingException::REASON_INVALID], 422);
         }
 
         // Deliberately thin. It confirms success and nothing about the tenant,

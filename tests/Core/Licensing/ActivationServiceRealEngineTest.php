@@ -56,9 +56,7 @@ final class ActivationServiceRealEngineTest extends TestCase
 
         $this->service->redeem($issued['code']);
 
-        $this->expectException(LicensingException::class);
-        $this->expectExceptionMessage('already been used');
-        $this->service->redeem($issued['code']);
+        $this->assertRedemptionRefusedWith(LicensingException::REASON_ALREADY_USED, $issued['code']);
     }
 
     /**
@@ -220,9 +218,7 @@ final class ActivationServiceRealEngineTest extends TestCase
         $issued = $this->service->issue(self::TENANT, $this->device('SN-REV'));
         $this->pdo->exec("UPDATE device_activation_codes SET revoked_at = NOW()");
 
-        $this->expectException(LicensingException::class);
-        $this->expectExceptionMessage('cancelled');
-        $this->service->redeem($issued['code']);
+        $this->assertRedemptionRefusedWith(LicensingException::REASON_REVOKED, $issued['code']);
     }
 
     public function testAnExpiredCodeIsRefusedAndSaysSo(): void
@@ -233,9 +229,7 @@ final class ActivationServiceRealEngineTest extends TestCase
             expiresAt: $this->now->modify('-1 day')
         );
 
-        $this->expectException(LicensingException::class);
-        $this->expectExceptionMessage('expired');
-        $this->service->redeem($issued['code']);
+        $this->assertRedemptionRefusedWith(LicensingException::REASON_EXPIRED, $issued['code']);
     }
 
     /**
@@ -253,7 +247,7 @@ final class ActivationServiceRealEngineTest extends TestCase
             $this->service->redeem($typo);
             self::fail('a mistyped code was accepted');
         } catch (LicensingException $e) {
-            self::assertStringContainsString('not valid', $e->getMessage());
+            self::assertSame(LicensingException::REASON_INVALID, $e->reason);
         }
 
         self::assertSame(0, (int) $this->q('SELECT redemption_count FROM device_activation_codes')->fetchColumn());
@@ -268,9 +262,7 @@ final class ActivationServiceRealEngineTest extends TestCase
     {
         $unknown = ActivationCode::generate();
 
-        $this->expectException(LicensingException::class);
-        $this->expectExceptionMessage('not valid');
-        $this->service->redeem($unknown);
+        $this->assertRedemptionRefusedWith(LicensingException::REASON_INVALID, $unknown);
     }
 
     // ── issuing ─────────────────────────────────────────────────────────────
@@ -296,9 +288,25 @@ final class ActivationServiceRealEngineTest extends TestCase
     {
         $issued = $this->service->issue(self::TENANT);
 
-        $this->expectException(LicensingException::class);
-        $this->expectExceptionMessage('must be given');
-        $this->service->redeem($issued['code']);
+        $this->assertRedemptionRefusedWith(LicensingException::REASON_DEVICE_REQUIRED, $issued['code']);
+    }
+
+    /**
+     * Redemption must fail for a SPECIFIC reason.
+     *
+     * The reason code is the service's contract; the sentence a person reads
+     * belongs to the handler, which owns every user-facing string in one
+     * reviewable list. Asserting the prose here would couple the domain tests
+     * to copy that is deliberately not theirs.
+     */
+    private function assertRedemptionRefusedWith(string $reason, string $code, int|string|null $device = null): void
+    {
+        try {
+            $this->service->redeem($code, $device);
+            self::fail("redemption succeeded; expected refusal with reason '{$reason}'");
+        } catch (LicensingException $e) {
+            self::assertSame($reason, $e->reason);
+        }
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────

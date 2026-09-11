@@ -69,7 +69,7 @@ final class ActivationService
         ?DateTimeImmutable $expiresAt = null,
     ): array {
         if ($maxRedemptions < 1) {
-            throw new LicensingException('A code must allow at least one redemption.');
+            throw LicensingException::of(LicensingException::REASON_BAD_REDEMPTION_LIMIT, 'maxRedemptions must be >= 1.');
         }
 
         // Retry on the astronomically unlikely collision rather than surfacing
@@ -104,7 +104,7 @@ final class ActivationService
             }
         }
 
-        throw new LicensingException('Could not mint a unique activation code.');
+        throw LicensingException::of(LicensingException::REASON_MINT_FAILED, 'Exhausted retries minting a unique code.');
     }
 
     // ── redeeming ───────────────────────────────────────────────────────────
@@ -122,7 +122,7 @@ final class ActivationService
      *
      * @return array{licensed_device_id: int, tenant_id: int}
      *
-     * @throws LicensingException with a reason a person can act on.
+     * @throws LicensingException carrying a REASON code; the handler owns the wording.
      */
     public function redeem(
         string $code,
@@ -135,7 +135,7 @@ final class ActivationService
         // mistyped code never reaches the database — so it cannot be confused
         // with an unknown one, and cannot be used to probe which codes exist.
         if (!ActivationCode::isWellFormed($code)) {
-            throw new LicensingException('That code is not valid — please check it and try again.');
+            throw LicensingException::of(LicensingException::REASON_INVALID, 'Check characters did not verify.');
         }
 
         $canonical = ActivationCode::canonicalize($code);
@@ -167,7 +167,7 @@ final class ActivationService
             // Best-effort diagnosis. Advisory by nature — the world may have
             // moved since the UPDATE — but it is the difference between
             // "invalid code" and "this expired last week".
-            throw new LicensingException($this->explainFailedRedemption($canonical, $now));
+            throw LicensingException::of($this->diagnoseFailedRedemption($canonical, $now), 'Atomic claim matched no row.');
         }
 
         $codeId = (int) $row['id'];
@@ -188,7 +188,7 @@ final class ActivationService
             : (is_string($device) ? $this->deviceIdForSerial($tenantId, $device) : $device);
 
         if ($deviceId === null) {
-            throw new LicensingException('This code is not bound to a device, so a device must be given.');
+            throw LicensingException::of(LicensingException::REASON_DEVICE_REQUIRED, 'Unbound code redeemed without a device.');
         }
 
         $this->activate($tenantId, $deviceId, $now);
@@ -248,7 +248,7 @@ final class ActivationService
             // The code was valid and has now been counted, but there is no such
             // device in that tenant — or it is retired. Refusing loudly beats
             // reporting success over a device that was never touched.
-            throw new LicensingException('No such device for this code, or it has been retired.');
+            throw LicensingException::of(LicensingException::REASON_DEVICE_UNKNOWN, "Device absent from the code's tenant, or retired.");
         }
     }
 
@@ -283,7 +283,7 @@ final class ActivationService
      * into an oracle. Expired, revoked and exhausted are safe to state: knowing
      * them requires already holding a real code.
      */
-    private function explainFailedRedemption(string $canonical, DateTimeImmutable $now): string
+    private function diagnoseFailedRedemption(string $canonical, DateTimeImmutable $now): string
     {
         // @tenant-guard-ignore: diagnosing a refusal for the same tenantless caller as the claim above. It reads only whether a code is revoked, expired or exhausted — never who owns it — and the message it produces says nothing a caller could not learn by holding the code.
         $statement = $this->pdo->prepare('
@@ -298,25 +298,25 @@ final class ActivationService
         $row = $statement->fetch(PDO::FETCH_ASSOC);
 
         if ($row === false) {
-            return 'That code is not valid — please check it and try again.';
+            return LicensingException::REASON_INVALID;
         }
 
         if ($row['revoked_at'] !== null) {
-            return 'This code has been cancelled. Please ask for a replacement.';
+            return LicensingException::REASON_REVOKED;
         }
 
         if ($row['expires_at'] !== null && $row['expires_at'] <= $now->format('Y-m-d H:i:s')) {
-            return 'This code has expired. Please ask for a replacement.';
+            return LicensingException::REASON_EXPIRED;
         }
 
         if ((int) $row['redemption_count'] >= (int) $row['max_redemptions']) {
-            return 'This code has already been used.';
+            return LicensingException::REASON_ALREADY_USED;
         }
 
         // It looked usable a moment ago and the UPDATE still failed — a
         // concurrent redemption took the last one between the two statements.
         // Saying "already used" is the truthful account of what happened.
-        return 'This code has already been used.';
+        return LicensingException::REASON_ALREADY_USED;
     }
 
     private function now(): DateTimeImmutable
