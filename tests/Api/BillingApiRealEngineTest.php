@@ -17,7 +17,6 @@ use Whity\Core\Billing\InvoiceNumberAllocator;
 use Whity\Core\Billing\InvoiceRepository;
 use Whity\Core\Billing\PaymentReconciler;
 use Whity\Core\Money\Money;
-use Whity\Core\Payment\Cliq\CliqPaymentProvider;
 use Whity\Core\Payment\MockPaymentProvider;
 use Whity\Core\Payment\PaymentEventType;
 use Whity\Core\Payment\PaymentInstruction;
@@ -49,7 +48,7 @@ final class BillingApiRealEngineTest extends TestCase
     private const ADMIN = 10;
     private const OUTSIDER = 11;
 
-    private const CLIQ_SECRET = 'bank-shared-secret';
+    private const RAIL_SECRET = 'mock-secret';
 
     private PDO $pdo;
     private BillingApiHandler $handler;
@@ -102,11 +101,14 @@ final class BillingApiRealEngineTest extends TestCase
         );
         $this->dunning = new DunningService($this->invoices, $this->ledger, $this->subscriptions);
 
-        $this->mock = new MockPaymentProvider('mock-secret', fn (): DateTimeImmutable => $this->now);
-        $registry = new PaymentProviderRegistry([
-            $this->mock,
-            new CliqPaymentProvider('WHITY.JO', 'Test Bank', self::CLIQ_SECRET, 'WHT-', fn (): DateTimeImmutable => $this->now),
-        ]);
+        $this->mock = new MockPaymentProvider(self::RAIL_SECRET, fn (): DateTimeImmutable => $this->now);
+        // ONE RAIL NOW. The CliQ provider these tests were written against has
+        // been removed — Whity no longer processes payments itself — so the mock
+        // carries the seam behaviour instead. That is not a downgrade: every
+        // property asserted below is about the SEAM (settlement, idempotency,
+        // signature refusal, which instruction shape a rail returns), and the
+        // mock can produce every shape a real rail can.
+        $registry = new PaymentProviderRegistry([$this->mock]);
 
         $roleChecker = new RoleChecker($database, new PermissionRegistry());
 
@@ -141,16 +143,18 @@ final class BillingApiRealEngineTest extends TestCase
      */
     public function testOnePayEndpointServesRailsWithDifferentShapes(): void
     {
+        // A PUSH TRANSFER: the payer is handed a reference and settles later.
+        $this->mock->queueOutcome(PaymentEventType::Pending);
         $invoiceId = $this->issuedInvoice();
+        $viaTransfer = $this->json($this->pay($invoiceId, 'mock'));
+        self::assertSame(PaymentInstruction::KIND_TRANSFER, $viaTransfer['kind']);
+        self::assertNotEmpty($viaTransfer['reference'], 'a transfer the payer must quote needs a reference');
 
-        $viaCliq = $this->json($this->pay($invoiceId, 'cliq'));
-        self::assertSame(PaymentInstruction::KIND_TRANSFER, $viaCliq['kind']);
-        self::assertNotEmpty($viaCliq['reference']);
-        self::assertSame('WHITY.JO', $viaCliq['display']['alias']);
-
+        // AND AN IMMEDIATE SETTLEMENT, from the same endpoint, with no branch on
+        // the rail's name anywhere in the handler.
         $other = $this->issuedInvoice();
-        $viaMock = $this->json($this->pay($other, 'mock'));
-        self::assertSame(PaymentInstruction::KIND_SETTLED, $viaMock['kind']);
+        $viaSettled = $this->json($this->pay($other, 'mock'));
+        self::assertSame(PaymentInstruction::KIND_SETTLED, $viaSettled['kind']);
     }
 
     /** Only rails that can actually take money are offered. */
@@ -158,19 +162,21 @@ final class BillingApiRealEngineTest extends TestCase
     {
         $rows = $this->json($this->handler->methods($this->as(self::ADMIN, self::TENANT)));
         $names = array_column($rows, 'provider');
+        self::assertContains('mock', $names);
 
-        self::assertContains('cliq', $names);
-        // And the CliQ row tells a client it cannot renew unattended, which is
-        // the difference that decides whether a subscription can auto-renew.
-        $cliq = null;
+        // THE POINT IS THAT CAPABILITIES REACH THE CLIENT. Whether a rail can
+        // charge unattended decides whether a subscription may auto-renew on it,
+        // and a client that could not see the difference would offer auto-renewal
+        // on a rail that has to be pushed by hand every month.
+        $rail = null;
         foreach ($rows as $row) {
-            if ($row['provider'] === 'cliq') {
-                $cliq = $row;
+            if ($row['provider'] === 'mock') {
+                $rail = $row;
             }
         }
-        self::assertNotNull($cliq, 'the CliQ rail should be on offer');
-        self::assertFalse($cliq['supports_unattended_charge']);
-        self::assertTrue($cliq['uses_push_transfer']);
+        self::assertNotNull($rail, 'the configured rail should be on offer');
+        self::assertArrayHasKey('supports_unattended_charge', $rail);
+        self::assertArrayHasKey('uses_push_transfer', $rail);
     }
 
     /**
@@ -180,14 +186,25 @@ final class BillingApiRealEngineTest extends TestCase
      */
     public function testStartingAPaymentWritesAPendingRowFirst(): void
     {
+        // A rail that WAITS, because 'pending is written first' is only
+        // observable on one that does not settle in the same breath.
+        $this->mock->queueOutcome(PaymentEventType::Pending);
         $invoiceId = $this->issuedInvoice();
-        $body = $this->json($this->pay($invoiceId, 'cliq'));
+        $body = $this->json($this->pay($invoiceId, 'mock'));
 
         $history = $this->ledger->historyFor(self::TENANT, $invoiceId);
 
         self::assertCount(1, $history);
         self::assertSame('pending', $history[0]['status']);
-        self::assertSame($body['reference'], $history[0]['external_reference']);
+        // THE SAME REFERENCE, PRESENTED DIFFERENTLY. A rail may show the payer
+        // an upper-cased form while storing its own; what matters is that the
+        // row records the reference the callback will quote, not that the two
+        // strings are byte-identical.
+        self::assertSame(
+            0,
+            strcasecmp((string) $body['reference'], (string) $history[0]['external_reference']),
+            'the pending row must record the reference the payer was given'
+        );
         // And pending is NOT paid.
         self::assertSame(0, $this->ledger->amountSettledMinor(self::TENANT, $invoiceId));
     }
@@ -195,10 +212,14 @@ final class BillingApiRealEngineTest extends TestCase
     /** Asking twice does not open two debts. */
     public function testStartingTheSamePaymentTwiceDoesNotDuplicateTheRow(): void
     {
+        // A WAITING RAIL, twice: an instruction that settles on the spot has no
+        // reference to compare, so the property under test would be invisible.
+        $this->mock->queueOutcome(PaymentEventType::Pending);
+        $this->mock->queueOutcome(PaymentEventType::Pending);
         $invoiceId = $this->issuedInvoice();
 
-        $first = $this->json($this->pay($invoiceId, 'cliq'));
-        $second = $this->json($this->pay($invoiceId, 'cliq'));
+        $first = $this->json($this->pay($invoiceId, 'mock'));
+        $second = $this->json($this->pay($invoiceId, 'mock'));
 
         self::assertSame($first['reference'], $second['reference']);
         self::assertCount(1, $this->ledger->historyFor(self::TENANT, $invoiceId));
@@ -219,7 +240,7 @@ final class BillingApiRealEngineTest extends TestCase
         $invoiceId = $this->issuedInvoice();
         $this->settle($invoiceId, 5000, 'already-paid');
 
-        $response = $this->pay($invoiceId, 'cliq');
+        $response = $this->pay($invoiceId, 'mock');
 
         self::assertSame(409, $response->getStatusCode());
     }
@@ -229,7 +250,7 @@ final class BillingApiRealEngineTest extends TestCase
         $draft = $this->invoices->createDraft(self::TENANT, 'JOD');
         $this->invoices->addLine(self::TENANT, $draft, 'Plan', 1, 5000);
 
-        self::assertSame(409, $this->pay($draft, 'cliq')->getStatusCode());
+        self::assertSame(409, $this->pay($draft, 'mock')->getStatusCode());
     }
 
     // ── amounts a client can render ──────────────────────────────────────────
@@ -293,11 +314,19 @@ final class BillingApiRealEngineTest extends TestCase
     public function testAVerifiedCallbackSettlesTheInvoice(): void
     {
         $invoiceId = $this->issuedInvoice();
-        $reference = $this->json($this->pay($invoiceId, 'cliq'))['reference'];
+        // A rail that WAITS: this test is about a callback settling a payment,
+        // which cannot be observed on a rail that settles instantly.
+        $this->mock->queueOutcome(PaymentEventType::Pending);
+        $this->pay($invoiceId, 'mock');
+        // THE STORED REFERENCE, not the displayed one. A rail may present the
+        // payer a different casing or format; the callback quotes what the rail
+        // recorded, and settling against the displayed string would be testing a
+        // value the system never matches on.
+        $reference = (string) $this->ledger->historyFor(self::TENANT, $invoiceId)[0]['external_reference'];
 
         $response = $this->webhooks->receive(
-            $this->cliqCallback($reference, '5.000', 'BANKTXN-1'),
-            ['provider' => 'cliq']
+            $this->railCallback($reference, '5.000', 'BANKTXN-1', $invoiceId),
+            ['provider' => 'mock']
         );
 
         self::assertSame(200, $response->getStatusCode());
@@ -318,14 +347,22 @@ final class BillingApiRealEngineTest extends TestCase
         ]);
 
         $invoiceId = $this->issuedInvoice(dueAt: '2026-09-01');
-        $reference = $this->json($this->pay($invoiceId, 'cliq'))['reference'];
+        // A rail that WAITS: this test is about a callback settling a payment,
+        // which cannot be observed on a rail that settles instantly.
+        $this->mock->queueOutcome(PaymentEventType::Pending);
+        $this->pay($invoiceId, 'mock');
+        // THE STORED REFERENCE, not the displayed one. A rail may present the
+        // payer a different casing or format; the callback quotes what the rail
+        // recorded, and settling against the displayed string would be testing a
+        // value the system never matches on.
+        $reference = (string) $this->ledger->historyFor(self::TENANT, $invoiceId)[0]['external_reference'];
 
         $this->dunning->lock(self::TENANT, new DateTimeImmutable('2026-09-15'));
         self::assertFalse($this->subscriptions->decide(self::TENANT, true)->allowed);
 
         $response = $this->webhooks->receive(
-            $this->cliqCallback($reference, '5.000', 'BANKTXN-9'),
-            ['provider' => 'cliq']
+            $this->railCallback($reference, '5.000', 'BANKTXN-9', $invoiceId),
+            ['provider' => 'mock']
         );
 
         self::assertSame(200, $response->getStatusCode());
@@ -339,12 +376,20 @@ final class BillingApiRealEngineTest extends TestCase
     public function testAForgedCallbackIsRefused(): void
     {
         $invoiceId = $this->issuedInvoice();
-        $reference = $this->json($this->pay($invoiceId, 'cliq'))['reference'];
+        // A rail that WAITS: this test is about a callback settling a payment,
+        // which cannot be observed on a rail that settles instantly.
+        $this->mock->queueOutcome(PaymentEventType::Pending);
+        $this->pay($invoiceId, 'mock');
+        // THE STORED REFERENCE, not the displayed one. A rail may present the
+        // payer a different casing or format; the callback quotes what the rail
+        // recorded, and settling against the displayed string would be testing a
+        // value the system never matches on.
+        $reference = (string) $this->ledger->historyFor(self::TENANT, $invoiceId)[0]['external_reference'];
 
-        $callback = $this->cliqCallback($reference, '5.000', 'BANKTXN-2');
-        $forged = new Request('POST', '/api/payments/webhook/cliq', ['X-Cliq-Signature' => 'nope'], $callback->getBody());
+        $callback = $this->railCallback($reference, '5.000', 'BANKTXN-2', $invoiceId);
+        $forged = new Request('POST', '/api/payments/webhook/mock', [MockPaymentProvider::SIGNATURE_HEADER => 'nope'], $callback->getBody());
 
-        $response = $this->webhooks->receive($forged, ['provider' => 'cliq']);
+        $response = $this->webhooks->receive($forged, ['provider' => 'mock']);
 
         self::assertSame(400, $response->getStatusCode());
         self::assertSame(InvoiceRepository::STATUS_OPEN, $this->statusOf($invoiceId), 'nothing was settled');
@@ -357,10 +402,18 @@ final class BillingApiRealEngineTest extends TestCase
     public function testARedeliveredCallbackStillAnswers200AndPaysOnce(): void
     {
         $invoiceId = $this->issuedInvoice();
-        $reference = $this->json($this->pay($invoiceId, 'cliq'))['reference'];
+        // A rail that WAITS: this test is about a callback settling a payment,
+        // which cannot be observed on a rail that settles instantly.
+        $this->mock->queueOutcome(PaymentEventType::Pending);
+        $this->pay($invoiceId, 'mock');
+        // THE STORED REFERENCE, not the displayed one. A rail may present the
+        // payer a different casing or format; the callback quotes what the rail
+        // recorded, and settling against the displayed string would be testing a
+        // value the system never matches on.
+        $reference = (string) $this->ledger->historyFor(self::TENANT, $invoiceId)[0]['external_reference'];
 
-        $first = $this->webhooks->receive($this->cliqCallback($reference, '5.000', 'BANKTXN-3'), ['provider' => 'cliq']);
-        $second = $this->webhooks->receive($this->cliqCallback($reference, '5.000', 'BANKTXN-3'), ['provider' => 'cliq']);
+        $first = $this->webhooks->receive($this->railCallback($reference, '5.000', 'BANKTXN-3', $invoiceId), ['provider' => 'mock']);
+        $second = $this->webhooks->receive($this->railCallback($reference, '5.000', 'BANKTXN-3', $invoiceId), ['provider' => 'mock']);
 
         self::assertSame(200, $first->getStatusCode());
         self::assertSame(200, $second->getStatusCode());
@@ -444,26 +497,36 @@ final class BillingApiRealEngineTest extends TestCase
         );
     }
 
-    /** A signed CliQ settlement message. */
-    private function cliqCallback(string $reference, string $amount, string $transactionId): Request
+    /**
+     * A signed settlement message from the rail.
+     *
+     * THE CALLBACK NAMES ITS INVOICE. The removed CliQ rail encoded the invoice
+     * id inside the reference itself, so a bank's message needed only the
+     * reference; the mock's reference is a hash and carries nothing, so the
+     * event states which invoice it settles. A rail must do one or the other —
+     * the reconciler attributes by `$event->invoiceId`, and a payment it cannot
+     * attribute is recorded as unattributed rather than guessed at.
+     *
+     * BUILT BY THE PROVIDER, not imitated here. An earlier version of this
+     * helper hand-wrote a payload in the shape the removed CliQ rail used, which
+     * meant the test was asserting against a format no provider produced — it
+     * would have passed or failed for reasons unrelated to the endpoint. Asking
+     * the rail to sign its own message keeps the test honest about what the
+     * system actually receives.
+     */
+    private function railCallback(string $reference, string $amount, string $transactionId, ?int $invoiceId = null): Request
     {
-        $body = (string) json_encode([
-            'transfers' => [[
-                'transactionId' => $transactionId,
-                'remittanceInformation' => $reference,
-                'amount' => $amount,
-                'currency' => 'JOD',
-                'status' => 'ACSC',
-                'valueDate' => '2026-09-20T12:00:00+03:00',
-            ]],
-        ]);
-
-        return new Request(
-            'POST',
-            '/api/payments/webhook/cliq',
-            [CliqPaymentProvider::SIGNATURE_HEADER => hash_hmac('sha256', $body, self::CLIQ_SECRET)],
-            $body
+        $signed = $this->mock->signedWebhook(
+            PaymentEventType::Succeeded,
+            $reference,
+            Money::of((int) round((float) $amount * 1000), 'JOD'),
+            $invoiceId,
+            self::TENANT,
+            null,
+            ['transaction_id' => $transactionId],
         );
+
+        return new Request('POST', '/api/payments/webhook/mock', $signed['headers'], $signed['body']);
     }
 
     /** @param array<string, mixed>|null $body */
