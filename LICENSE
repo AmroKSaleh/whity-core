@@ -1,32 +1,90 @@
-COMMONS CLAUSE LICENSE CONDITION v1.0
-=====================================
+Whity Core
+Copyright (C) 2026 Amro K. Saleh
 
-The Software is provided to you by the Licensor under the License "as is"
-and "as available" and with all faults and defects.
+SPDX-License-Identifier: AGPL-3.0-only
 
-You may not use the Software for Commercial Purposes.
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License, version 3, as published by
+the Free Software Foundation. The full text follows below.
 
-"Commercial Purposes" means any use of the Software, directly or indirectly,
-in connection with or to support any commercial, for-profit, or revenue-
-generating activities, including but not limited to:
+There is ONE additional permission, set out immediately below: plugins written
+against the separately-licensed Plugin SDK may be licensed on any terms their
+author chooses, including proprietary and commercial terms.
 
-  • Offering the Software as a service (SaaS)
-  • Hosting the Software for a fee
-  • Selling, reselling, or white-labeling the Software
-  • Using the Software to provide paid services or products
-  • Any other commercial activity that generates revenue
+For a commercial licence of Whity Core itself, or to discuss terms other than
+the AGPL: amroksaleh@gmail.com
 
-PERMITTED USES include:
-  ✓ Non-profit organizations and charities
-  ✓ Educational institutions and academic research
-  ✓ Open-source projects and communities
-  ✓ Internal business use (not offered as a service to others)
-  ✓ Personal, hobby, and experimental projects
 
-FOR COMMERCIAL LICENSING:
-Contact: amroksaleh@gmail.com
+================================================================================
+WHITY PLUGIN EXCEPTION, version 1.0
+================================================================================
 
----
+This is an ADDITIONAL PERMISSION granted under section 7 of the GNU Affero
+General Public License, version 3 ("the AGPL"). It grants rights; it takes none
+away. You may remove it, in which case the plain AGPL applies.
+
+DEFINITIONS
+
+  "The Program" means Whity Core, licensed under the AGPL below.
+
+  "The Plugin SDK" means the package `whity/plugin-sdk`, distributed separately
+  under the MIT License. It contains interfaces, data shapes, HTTP contracts and
+  event constants, and depends on nothing but PHP at runtime.
+
+  "A Plugin" means a work that:
+    (a) uses or implements only the interfaces, classes, constants and data
+        shapes published by the Plugin SDK; and
+    (b) does not copy, modify, or incorporate the source code of the Program.
+
+GRANT
+
+  You may develop, distribute, sell and license A Plugin under terms of your own
+  choosing, including proprietary and commercial terms. You are not required to
+  license A Plugin under the AGPL, and doing so is not a condition of this
+  permission -- notwithstanding that A Plugin is loaded into the same process as
+  the Program and communicates with it at runtime.
+
+  Distributing or running A Plugin does not, by itself, make A Plugin a work
+  based on the Program for the purposes of the AGPL.
+
+LIMITS
+
+  This permission does NOT extend to:
+
+    - The Program itself. Modified versions of Whity Core remain fully subject
+      to the AGPL, including section 13: if you offer a modified Whity Core to
+      users over a network, you must offer them its source.
+
+    - Any work that incorporates the Program's source code -- by copying it,
+      by extending classes the Plugin SDK does not publish, or otherwise.
+      Depending on the SDK is the boundary; reaching past it is not.
+
+WHY THIS EXISTS
+
+  A platform is worth what its ecosystem is worth, and an ecosystem needs plugin
+  authors who can choose the terms of their own work -- including selling it --
+  without that choice being dictated by the licence of the host.
+
+  The Plugin SDK is a deliberate MIT-licensed boundary built for this purpose:
+  plugins depend on the SDK, never on the core, and the core's own HTTP types
+  are subclasses of the SDK's so that a plugin never has to touch them. This
+  exception states in the licence what the architecture already enforces,
+  because "probably not a derivative work" is not something anyone should have
+  to build a business on.
+
+  The bargain for Whity Core itself is unchanged: run it, modify it, deploy it
+  -- but improvements you serve to users over a network get shared back.
+
+  This replaces the Commons Clause condition that previously accompanied this
+  licence. That condition forbade commercial use, which made Whity neither open
+  source nor safely adoptable, and contradicted the AGPL text it was attached
+  to. It is withdrawn in full. Commercial use of Whity Core is permitted, on
+  the AGPL's terms.
+
+
+================================================================================
+The GNU Affero General Public License, version 3, follows verbatim.
+================================================================================
 
                     GNU AFFERO GENERAL PUBLIC LICENSE
                        Version 3, 19 November 2007

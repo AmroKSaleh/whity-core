@@ -2,7 +2,7 @@
   "name": "@amroksaleh/features",
   "version": "0.2.0",
   "description": "Client-safe, data-source-agnostic feature UI extracted from web/ — reusable by non-Next clients (Tauri/Vite SPA, Flutter). Formalizes the app-shell nav contract and the adapter-injection pattern feature pages follow.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
