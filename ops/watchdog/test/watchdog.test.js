@@ -423,6 +423,55 @@ test('a healthy, freshly-checked deployment reads as operational', async () => {
   assert.match(html, /Healthy/);
 });
 
+// Every hostname is watched separately, so every hostname has to be READABLE.
+// A page that lists `pay` tells a customer nothing; one that lists "Payments —
+// pay.whity.dev" tells them whether the thing they are waiting on is the thing
+// that is broken. A target added to wrangler.toml without a label here would
+// silently publish the internal key instead, which is how status pages end up
+// reading like log lines.
+test('each component is named for a human and says which host it is', async () => {
+  const { env, store } = makeEnv();
+  store.set('meta:last-run', JSON.stringify({ at: Date.now() }));
+  for (const n of ['api', 'web', 'site', 'docs', 'pay']) {
+    store.set(`state:${n}`, JSON.stringify({ alertedStatus: 'up' }));
+  }
+
+  const cfg = {
+    ...CFG,
+    targets: [
+      { name: 'api', url: 'https://app.whity.dev/api/health' },
+      { name: 'web', url: 'https://app.whity.dev/' },
+      { name: 'site', url: 'https://whity.dev/' },
+      { name: 'docs', url: 'https://docs.whity.dev/' },
+      { name: 'pay', url: 'https://pay.whity.dev/' },
+    ],
+  };
+  const html = await (await renderStatusPage(env, cfg)).text();
+
+  for (const [label, host] of [
+    ['API', 'app.whity.dev/api'],
+    ['Application', 'app.whity.dev'],
+    ['Website', 'whity.dev'],
+    ['Documentation', 'docs.whity.dev'],
+    ['Payments', 'pay.whity.dev'],
+  ]) {
+    assert.match(html, new RegExp(`>${label}<`), `${label} should be shown by name`);
+    assert.match(html, new RegExp(`>${host.replace(/\./g, '\\.')}<`), `${label} should name its host`);
+  }
+});
+
+test('an unlabelled target still renders, under its key', async () => {
+  // Falling back rather than rendering an empty row: a component nobody named
+  // is still a component somebody needs to see the status of.
+  const { env, store } = makeEnv();
+  store.set('meta:last-run', JSON.stringify({ at: Date.now() }));
+  store.set('state:queue', JSON.stringify({ alertedStatus: 'up' }));
+
+  const cfg = { ...CFG, targets: [{ name: 'queue', url: 'https://q.test/' }] };
+  const html = await (await renderStatusPage(env, cfg)).text();
+  assert.match(html, />queue</);
+});
+
 test('STALE DATA IS NEVER REPORTED AS OPERATIONAL', async () => {
   const { env, store } = makeEnv();
   // Everything it last saw was fine — and it stopped looking an hour ago.
