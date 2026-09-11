@@ -193,10 +193,14 @@ class CreateLicensedDevices
                 id BIGSERIAL PRIMARY KEY,
 
                 tenant_id BIGINT NOT NULL REFERENCES tenants(id) ON DELETE RESTRICT,
-                activation_code_id BIGINT NOT NULL
-                    REFERENCES device_activation_codes(id) ON DELETE RESTRICT,
-                licensed_device_id BIGINT NOT NULL
-                    REFERENCES licensed_devices(id) ON DELETE RESTRICT,
+                -- ON ONE LINE EACH, deliberately. The undeclared-reference guard
+                -- reads a column's definition per line, so a REFERENCES clause
+                -- wrapped onto the next one is invisible to it and the column is
+                -- reported as an undeclared edge. It errs safely — a false alarm
+                -- rather than a missed violation — but the fix is to write these
+                -- the way every other migration here does.
+                activation_code_id BIGINT NOT NULL REFERENCES device_activation_codes(id) ON DELETE RESTRICT,
+                licensed_device_id BIGINT NOT NULL REFERENCES licensed_devices(id) ON DELETE RESTRICT,
 
                 -- Who redeemed it, when known. NULL is expected and legitimate:
                 -- the whole point is that an end user or student may redeem
