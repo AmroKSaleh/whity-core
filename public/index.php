@@ -2419,6 +2419,15 @@ if (($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_MOCK
     ));
 }
 
+// The card rail is ALWAYS registered and never configured — see
+// CardPaymentProviderAdapter. Registering it keeps the extension point visible
+// (and its refusal testable) without ever offering it to a customer, because
+// `available()` filters on isConfigured(). It outlived the CliQ removal on
+// purpose: it is a seam, not an implementation.
+$paymentProviders->register(new \Whity\Core\Payment\CardPaymentProviderAdapter());
+
+$invoiceRepository = new \Whity\Core\Billing\InvoiceRepository($db->getPdo());
+
 $paymentLedger = new \Whity\Core\Payment\PaymentLedger($db->getPdo());
 $paymentReconciler = new \Whity\Core\Billing\PaymentReconciler(
     $invoiceRepository,
