@@ -375,6 +375,33 @@ async function handleRequest(request, env) {
     return new Response('sent\n', { status: 200 });
   }
 
+  // POST /run — force a check cycle now, instead of waiting for the cron.
+  //
+  // Earns its place twice. It is the only way to tell "the checks are broken"
+  // apart from "the schedule is not firing" — two failures that look identical
+  // from outside, since both leave the state empty and say nothing. And it lets
+  // a change be verified on deploy rather than on faith, which for a component
+  // whose healthy state is silence is the difference between working and
+  // merely appearing to.
+  //
+  // Authenticated, because a forced run sends real alerts.
+  if (request.method === 'POST' && url.pathname === '/run') {
+    const provided = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
+    if (!env.HEARTBEAT_SECRET || !timingSafeEqual(provided, env.HEARTBEAT_SECRET)) {
+      return new Response('unauthorized\n', { status: 401 });
+    }
+
+    try {
+      // Awaited rather than handed to waitUntil: the caller asked for a result,
+      // and a run whose errors vanish into the background is exactly what made
+      // this endpoint necessary.
+      await runChecks(env);
+      return Response.json({ ran: true });
+    } catch (error) {
+      return Response.json({ ran: false, error: String(error?.stack || error) }, { status: 500 });
+    }
+  }
+
   // GET /status — for a human wondering what this thing currently believes.
   // Unauthenticated and deliberately thin: it publishes no URL, no secret and
   // no detail beyond up/down, which is already visible to anyone who can load

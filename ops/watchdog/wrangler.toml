@@ -16,7 +16,7 @@ crons = ["*/2 * * * *"]
 # and paste the returned id below.
 [[kv_namespaces]]
 binding = "WATCHDOG_STATE"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "3c6d9867a58b4085a9d5b19f2d8d8f18"
 
 [vars]
 # BOTH TIERS, deliberately. On 2026-09-09 the Next.js tier answered 200 for
