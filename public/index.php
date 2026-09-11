@@ -2384,55 +2384,41 @@ $router->register('DELETE', '/api/plans/{id:\d+}/prices/{priceId:\d+}',    [$pla
 
 // #billing — the payment rails this instance offers.
 //
-// BUILT FROM SETTINGS, NOT FROM ENV, because which rails an instance runs is an
-// operator decision made in the product rather than a deployment decision made
-// in a file. The CliQ webhook secret is the exception: it lives in the
-// encrypted-secret store under a key that is deliberately NOT a SettingsRegistry
-// key, exactly as the SMTP password does, so it can never be read back through
-// GET /settings.
+// WHITY NO LONGER PROCESSES PAYMENTS ITSELF. The CliQ rail that used to be
+// registered here was removed: taking money against a bank moved to a separate
+// payment service, and a second implementation inside the application would be
+// a second place for money to go wrong.
+//
+// WHAT REMAINS IS THE SEAM, and it is the point of the exercise. Whity records
+// what it is owed and what has been paid; a "rail" is simply whatever tells it
+// money arrived. The payment service will register here as one more adapter,
+// and nothing downstream of this line — the ledger, reconciliation, dunning,
+// the invoice lifecycle — needs to know which rail it was.
 //
 // A RAIL THAT IS OFF IS NOT REGISTERED AT ALL. The registry's `available()`
-// already filters unconfigured ones, but not registering an rail an operator
+// already filters unconfigured ones, but not registering a rail an operator
 // has switched off means its webhook route answers 404 rather than accepting
 // callbacks for a rail nobody is using.
 $paymentProviders = new \Whity\Core\Payment\PaymentProviderRegistry();
 $globalPaymentSettings = $settingsService->getGlobal();
 
-if (($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ_ENABLED] ?? 'false') === 'true') {
-    $paymentProviders->register(new \Whity\Core\Payment\Cliq\CliqPaymentProvider(
-        (string) ($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ_ALIAS] ?? ''),
-        (string) ($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ_BANK_NAME] ?? ''),
-        \Whity\Core\Payment\Cliq\CliqSecrets::read(
-            $globalSettingsRepository,
-            $secretStore,
-            \Whity\Core\Payment\Cliq\CliqSecrets::WEBHOOK_SECRET_KEY,
-            $logger
-        ),
-        (string) ($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ_REFERENCE_PREFIX] ?? 'WHT-'),
-    ));
-}
-
-// The fake rail, for a deployment exercising the lifecycle without a bank. OFF
-// by default and global-only: a tenant able to switch on a rail that settles
-// its own invoices for free is the sharpest possible privilege escalation.
+// The fake rail, for a deployment exercising the lifecycle without any real
+// one. OFF by default and global-only: a tenant able to switch on a rail that
+// settles its own invoices for free is the sharpest possible privilege
+// escalation. It is also the only rail left until the payment service adapter
+// lands, so an instance with this off currently offers none — which is correct
+// rather than broken.
 if (($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_MOCK_ENABLED] ?? 'false') === 'true') {
     $paymentProviders->register(new \Whity\Core\Payment\MockPaymentProvider(
-        \Whity\Core\Payment\Cliq\CliqSecrets::read(
+        \Whity\Core\Payment\PaymentSecrets::read(
             $globalSettingsRepository,
             $secretStore,
-            \Whity\Core\Payment\Cliq\CliqSecrets::MOCK_SECRET_KEY,
+            \Whity\Core\Payment\PaymentSecrets::MOCK_SECRET_KEY,
             $logger
-        ) ?: 'mock-secret'
+        )
     ));
 }
 
-// The card rail is ALWAYS registered and never configured — see
-// CardPaymentProviderAdapter. Registering it keeps the extension point visible
-// (and its refusal testable) without ever offering it to a customer, because
-// `available()` filters on isConfigured().
-$paymentProviders->register(new \Whity\Core\Payment\CardPaymentProviderAdapter());
-
-$invoiceRepository = new \Whity\Core\Billing\InvoiceRepository($db->getPdo());
 $paymentLedger = new \Whity\Core\Payment\PaymentLedger($db->getPdo());
 $paymentReconciler = new \Whity\Core\Billing\PaymentReconciler(
     $invoiceRepository,

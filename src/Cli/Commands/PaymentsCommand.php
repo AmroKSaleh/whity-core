@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Whity\Cli\Commands;
 
-use Whity\Core\Payment\Cliq\CliqSecrets;
+use Whity\Core\Payment\PaymentSecrets;
 use Whity\Core\Security\EncryptedSecretStore;
 use Whity\Core\Settings\GlobalSettingsRepository;
 use Whity\Database\Database;
@@ -67,11 +67,11 @@ class PaymentsCommand extends BaseCommand implements CliCommand
 
     private function set(string $provider, string $secret): int
     {
-        $key = CliqSecrets::KEY_FOR_PROVIDER[$provider] ?? null;
+        $key = PaymentSecrets::KEY_FOR_PROVIDER[$provider] ?? null;
 
         if ($key === null) {
             echo "Unknown payment rail: '{$provider}'.\n";
-            echo 'Known rails: ' . implode(', ', array_keys(CliqSecrets::KEY_FOR_PROVIDER)) . "\n";
+            echo 'Known rails: ' . implode(', ', array_keys(PaymentSecrets::KEY_FOR_PROVIDER)) . "\n";
 
             return 1;
         }
@@ -79,7 +79,7 @@ class PaymentsCommand extends BaseCommand implements CliCommand
         [$globals, $secrets] = $this->stores();
 
         try {
-            CliqSecrets::write($globals, $secrets, $key, $secret);
+            PaymentSecrets::write($globals, $secrets, $key, $secret);
         } catch (\InvalidArgumentException $e) {
             echo "Refused: {$e->getMessage()}\n";
 
@@ -110,8 +110,8 @@ class PaymentsCommand extends BaseCommand implements CliCommand
 
         echo "Payment rail signing secrets\n\n";
 
-        foreach (CliqSecrets::KEY_FOR_PROVIDER as $provider => $key) {
-            $configured = CliqSecrets::isConfigured($globals, $secrets, $key);
+        foreach (PaymentSecrets::KEY_FOR_PROVIDER as $provider => $key) {
+            $configured = PaymentSecrets::isConfigured($globals, $secrets, $key);
 
             printf(
                 "  %-6s %s\n",
@@ -164,10 +164,10 @@ class PaymentsCommand extends BaseCommand implements CliCommand
           set <rail> <secret>       Store a rail's signing secret (16+ characters).
           clear <rail>              Remove it. That rail then refuses every callback.
 
-        Rails: cliq, mock
+        Rails: mock
 
         Example:
-          whity-cli payments:secret set cliq "\$(openssl rand -base64 32)"
+          whity-cli payments:secret set mock "\$(openssl rand -base64 32)"
           whity-cli payments:secret status
 
         After setting one on a running instance, restart the workers: the rails are
