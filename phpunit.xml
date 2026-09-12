@@ -65,8 +65,24 @@
              "Allowed memory size exhausted" partway through the run (a real,
              reproducible failure, not a flake). Raised to 768M for headroom;
              the coverage-free default local/SQLite gate was never affected,
-             only the coverage-instrumented CI path. -->
-        <ini name="memory_limit" value="768M"/>
+             only the coverage-instrumented CI path.
+
+             THIRD BUMP, AND THIS IS WHERE IT HAS TO BE FIXED. 768M then failed
+             the same way with every test passing: "Tests: 1779, Assertions:
+             7119" and then a fatal in php-code-coverage's PHP writer, because a
+             shard serialises its coverage object AFTER the last assertion — the
+             peak arrives when the suite is already green. Raising it on the
+             workflow's command line does NOT work and is worth knowing: PHPUnit
+             applies this element with ini_set() during bootstrap, so it LOWERS
+             a `php -d memory_limit=-1` back to whatever is written here. This
+             value is the only one that counts.
+
+             STILL A CAP RATHER THAN -1, deliberately. Unbounded, a genuinely
+             leaking test eats the whole runner and dies as an opaque OOM kill
+             instead of a clean PHP fatal naming the file. 2G is ~3.4x the
+             measured peak and ~3.5x below the runner's memory, so growth is
+             free and a leak is still caught. -->
+        <ini name="memory_limit" value="2G"/>
         <env name="INITIAL_ADMIN_PASSWORD" value="test_initial_admin_password_min_32_chars"/>
         <env name="INITIAL_USER_PASSWORD" value="test_initial_user_password_min_32_chars_"/>
         <env name="INITIAL_SYSTEM_ADMIN_PASSWORD" value="test_initial_system_admin_password_min32"/>

@@ -101,6 +101,90 @@ the rows of an entitled tenant's uploads and then fail to find the objects in
 that tenant's own bucket, reporting a successful sweep while storage kept
 growing.
 
+### Billing Access Reconciliation
+
+**Command**: `php /var/www/whity/public/index.php billing:reconcile-access [--limit=100]`
+
+**Purpose**: Re-asks the billing service which tenants may use paid features, and
+writes the answer locally.
+
+**Why**: notifications from the billing service are best-effort with a bounded
+number of retries. That endpoint **will** be down during a deploy, or behind a
+certificate that expired on a Sunday, or simply slow enough that an event
+exhausts its attempts. A product whose access control depends only on
+notifications arriving will eventually charge somebody and not let them in. This
+sweep is what makes a missed delivery cost a delay instead of a wrong answer, so
+scheduling it is **not optional on a deployment that sells anything**.
+
+**Recommended Schedule**: `*/15 * * * * php /var/www/whity/public/index.php billing:reconcile-access`
+
+**Expected Output**:
+`Reconciled access: checked=12 changed=0 unreachable=0 skipped=0`
+
+**It never revokes on silence.** When the billing service cannot be reached the
+honest local answer is "I do not know", and nothing follows from not knowing — so
+a short interval is safe even while the billing service is having a bad day. The
+alternative would turn their outage into ours, amplified: every tenant revoked at
+once, at exactly the moment nobody can process a payment to fix it.
+
+**Watch `changed`.** A persistently non-zero value means notifications are not
+arriving and the sweep is carrying the whole system on its own. That is worth
+investigating long before a customer complains.
+
+**Exit code 1 means it stopped early** because the billing service rate limited
+it. A sweep that keeps stopping early never reaches the tail of the tenant list,
+and those tenants quietly stop being reconciled at all.
+
+**A deployment with no billing service** prints
+`No billing service configured; nothing to reconcile.` and exits 0. Self-hosted
+installations bill nobody; that is a supported state, not a misconfiguration.
+
+### Device Quantity Sync
+
+**Command**: `php /var/www/whity/public/index.php billing:sync-device-quantity [--limit=100]`
+
+**Purpose**: Keeps a per-device subscription billing for the devices actually in
+service.
+
+**Why**: without it, "per device" is a label on a price rather than a thing that
+happens. A tenant buys the add-on with three scanners, activates nine more, and
+is billed for three — next month, and the month after, until somebody adds up a
+year of invoices. It fails the other way too: a customer who retires half their
+fleet keeps paying for it, and that is the half that gets noticed and asked for
+back.
+
+**Recommended Schedule**: `17 */6 * * * php /var/www/whity/public/index.php billing:sync-device-quantity`
+
+Four times a day, not every quarter-hour. Devices are billed monthly, so hours of
+drift cost nothing — and each pass spends one request per candidate tenant from
+the same allowance a customer's checkout is waiting on. That is a reason to be
+less eager here than with the access sweep, not more.
+
+**Expected Output**:
+`Synced device quantities: checked=4 changed=1 unchanged=3 skipped=0 unreachable=0`
+
+**Which devices count is a per-tenant setting** (`licensing.billing_basis`):
+billed from provisioning, from activation, or only for units actually seen in the
+period. The same setting drives the invoice line, so a tenant's subscription and
+their invoice cannot disagree about the size of their fleet.
+
+**Tenants billed `active_in_period` are skipped, by design.** That basis counts
+units seen between two dates, and how many will be seen before the month ends is
+not knowable now. The billing service applies decreases only at renewal, so a
+running tally would ratchet the customer's bill upward permanently. Those tenants
+are billed correctly by the invoice run, which counts the period after it closes.
+
+**Read `— N paying for devices they no longer run`.** It appears only when it
+happens, and it is the line that asks a human to act: the billing service's
+minimum quantity is one, so a tenant whose fleet has gone to nothing cannot be
+resized down to match. What they need is the subscription **cancelled**, which
+this job cannot do.
+
+**It never resizes on silence, and running it twice is safe.** It compares the
+count against the quantity and acts only on the difference — which matters more
+here than for most jobs, because the thing a careless retry would repeat is
+charging somebody.
+
 ## How it is scheduled
 
 The cleanup is **genuinely wired into the running stack**, not just documented:
@@ -147,6 +231,14 @@ Add the revoked tokens cleanup job:
 
 # Delete form attachments nobody ever submitted, daily at 3:30 AM UTC
 30 3 * * * php /var/www/whity/public/index.php form-uploads:sweep >> /var/log/whity-cleanup.log 2>&1
+
+# Re-ask the billing service who may use paid features, every 15 minutes.
+# Not optional on a deployment that sells anything: it is what makes a missed
+# notification cost a delay instead of a customer who paid and cannot get in.
+*/15 * * * * php /var/www/whity/public/index.php billing:reconcile-access >> /var/log/whity-billing.log 2>&1
+
+# Bill per-device subscriptions for the devices in service, four times a day.
+17 */6 * * * php /var/www/whity/public/index.php billing:sync-device-quantity >> /var/log/whity-billing.log 2>&1
 ```
 
 ### 3. Verify Cron Setup

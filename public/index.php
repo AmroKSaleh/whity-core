@@ -95,14 +95,12 @@ if ($isCli && isset($argv[1])) {
     // indistinguishable from working until somebody pays. So it is also a plain
     // command a cron can call, like the two sweeps below.
     //
-    // THE PORTAL IS BUILT EXACTLY AS THE HTTP PATH BUILDS IT, so "configured"
-    // means the same thing to both and a deployment cannot reconcile against a
-    // service it does not otherwise talk to.
+    // THE PORTAL IS BUILT EXACTLY AS THE HTTP PATH BUILDS IT — by the same
+    // factory, so "configured" cannot come to mean two different things and a
+    // deployment cannot reconcile against a service it does not otherwise
+    // talk to.
     if ($command === 'billing:reconcile-access') {
         $db = \Whity\Database\Database::connect();
-
-        $payBaseUrl = rtrim((string) ($_ENV['PAY_BASE_URL'] ?? getenv('PAY_BASE_URL') ?: ''), '/');
-        $payApiKey = (string) ($_ENV['PAY_API_KEY'] ?? getenv('PAY_API_KEY') ?: '');
 
         $limit = null;
         foreach ($argv as $arg) {
@@ -113,15 +111,31 @@ if ($isCli && isset($argv[1])) {
 
         exit((new \Whity\Commands\BillingReconcileAccessCommand(
             $db->getPdo(),
-            ($payBaseUrl !== '' && $payApiKey !== '')
-                ? new \Whity\Core\Billing\External\HttpBillingPortal(
-                    new \Whity\Core\Billing\External\CurlBillingTransport(
-                        max(1, (int) ($_ENV['PAY_TIMEOUT_SECONDS'] ?? getenv('PAY_TIMEOUT_SECONDS') ?: 10))
-                    ),
-                    $payBaseUrl,
-                    $payApiKey
-                )
-                : new \Whity\Core\Billing\External\NullBillingPortal(),
+            \Whity\Core\Billing\External\BillingPortalFactory::fromEnvironment(),
+        ))->execute($limit));
+    }
+
+    // The sweep that keeps a per-device subscription billing for the devices
+    // that actually exist. Without it "per device" is a label on a price: a
+    // tenant activates nine more scanners and is billed for the three they
+    // started with, every month, until somebody notices.
+    //
+    // Scheduled like the access sweep and for the same reason — it is also
+    // registered as a queue job, and a deployment running no worker would have
+    // that job registered, invocable and never invoked.
+    if ($command === 'billing:sync-device-quantity') {
+        $db = \Whity\Database\Database::connect();
+
+        $limit = null;
+        foreach ($argv as $arg) {
+            if (is_string($arg) && str_starts_with($arg, '--limit=')) {
+                $limit = max(1, (int) substr($arg, 8));
+            }
+        }
+
+        exit((new \Whity\Commands\BillingSyncDeviceQuantityCommand(
+            $db->getPdo(),
+            \Whity\Core\Billing\External\BillingPortalFactory::fromEnvironment(),
         ))->execute($limit));
     }
 
@@ -210,6 +224,7 @@ if ($isCli && isset($argv[1])) {
     echo "  revoked-tokens:cleanup     Cleanup expired revoked tokens\n";
     echo "  form-uploads:sweep         Delete form attachments nobody ever submitted\n";
     echo "  billing:reconcile-access   Re-ask the billing service who may use paid features\n";
+    echo "  billing:sync-device-quantity  Bill per-device subscriptions for the devices in service\n";
     echo "  update:check               Compare the core version against the latest GitHub release\n";
     echo "  queue:work                 Run the durable async job worker loop\n";
     echo "  schedule:run               Run the cron-tick scheduler (exactly-once per minute)\n";
@@ -2566,21 +2581,9 @@ $router->register('POST', '/api/payments/webhook/{provider}', [$paymentWebhookHa
 // An unconfigured deployment gets NullBillingPortal rather than a broken one —
 // self-hosted installations bill nobody, and that is a supported state, not a
 // misconfiguration. See NullBillingPortal for why that walls nobody.
-$payBaseUrl = rtrim((string) ($_ENV['PAY_BASE_URL'] ?? getenv('PAY_BASE_URL') ?: ''), '/');
-$payApiKey = (string) ($_ENV['PAY_API_KEY'] ?? getenv('PAY_API_KEY') ?: '');
 $payWebhookSecret = (string) ($_ENV['PAY_WEBHOOK_SECRET'] ?? getenv('PAY_WEBHOOK_SECRET') ?: '');
 
-$billingPortal = ($payBaseUrl !== '' && $payApiKey !== '')
-    ? new \Whity\Core\Billing\External\HttpBillingPortal(
-        new \Whity\Core\Billing\External\CurlBillingTransport(
-            // Bounded, because an unbounded wait on a third party is an outage
-            // of our own. Tunable per deployment rather than compiled in.
-            timeoutSeconds: max(1, (int) ($_ENV['PAY_TIMEOUT_SECONDS'] ?? getenv('PAY_TIMEOUT_SECONDS') ?: 10)),
-        ),
-        $payBaseUrl,
-        $payApiKey,
-    )
-    : new \Whity\Core\Billing\External\NullBillingPortal();
+$billingPortal = \Whity\Core\Billing\External\BillingPortalFactory::fromEnvironment();
 
 $billingAccessRecorder = new \Whity\Core\Billing\External\AccessRecorder(
     new \Whity\Core\Subscription\SubscriptionService(
@@ -2614,6 +2617,14 @@ $router->register('GET',  '/api/billing/return',   [$externalBillingHandler, 're
 // which is gated on plans:manage — a permission a paying customer never holds,
 // which left checkout naming a plan_key the tenant had no way to discover.
 $router->register('GET',  '/api/billing/plans',    [$externalBillingHandler, 'plans'],      null, null, CorePermissions::BILLING_VIEW);
+// What this tenant has PAID. A tenant billed externally has no local invoice —
+// the local run stands down so nobody is charged twice — so without this the
+// billing screen showed an empty table to somebody who had just paid.
+$router->register('GET',  '/api/billing/receipts', [$externalBillingHandler, 'receipts'], null, null, CorePermissions::BILLING_VIEW);
+// More seats, or fewer. The only change the billing service supports in place:
+// a PLAN swap would mean cancelling and buying again, which either double-charges
+// or leaves a gap, so it is refused rather than faked.
+$router->register('POST', '/api/billing/quantity', [$externalBillingHandler, 'changeQuantity'], null, null, CorePermissions::BILLING_PAY);
 
 // UNAUTHENTICATED, NECESSARILY: the sender is a server and holds no session.
 // Registering it here is only half the job — EnforceTenantIsolation must also
