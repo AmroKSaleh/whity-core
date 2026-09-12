@@ -2201,6 +2201,70 @@ export interface paths {
         patch: operations["patch_api_v1_languages_id"];
         trace?: never;
     };
+    "/api/v1/licensing/codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mint an activation code
+         * @description The commercial act: something was sold, so a code exists to redeem. THE CODE IS RETURNED ONCE AND IS NEVER RETRIEVABLE IN FULL AGAIN — stored canonically, the same contract as a generated API token. Bind it to a unit with `licensed_device_id` (which must belong to the caller's tenant, or 404), or omit it and let the redeemer name the serial. `max_redemptions` defaults to 1; higher values exist for a classroom set redeemed from one printed card. `expires_at` is YYYY-MM-DD or YYYY-MM-DD HH:MM:SS.
+         */
+        post: operations["post_api_v1_licensing_codes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/licensing/codes/{id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Kill a code that leaked
+         * @description Irreversible, and scoped to the caller's tenant. Redemptions already made STAND — revoking cancels what the code can still do, not what it did, because the units it activated are in service and de-licensing them would strand a classroom mid-lesson. A code that does not exist, belongs to another tenant, or was already revoked answers 404 alike.
+         */
+        post: operations["post_api_v1_licensing_codes_id_revoke"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/licensing/devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The units this tenant is licensed for
+         * @description Newest first, capped at 500. Carries the three timestamps separately — `provisioned_at` (the serial was imported), `activated_at` (a code was redeemed against it) and `last_seen_at` (it last checked in) — because which one a per-device price bills on is configuration, not a property of the row. A unit with `activated_at` set has been put into service; one without is stock.
+         */
+        get: operations["get_api_v1_licensing_devices"];
+        put?: never;
+        /**
+         * Provision serials in bulk
+         * @description BULK BECAUSE STOCK ARRIVES IN BOXES — up to 500 per request. Each entry is a serial string, or an object with `serial_number` and an optional `label`. A serial this tenant already has is SKIPPED, not rejected: re-uploading a spreadsheet is the normal way this goes wrong, and failing the whole batch on row 400 would leave the caller with no idea which 399 landed. The response counts what was created and what was already there; answers 207 when some entries were refused, with a reason for each. Serials are unique WITHIN a tenant — two customers may hold hardware carrying the same manufacturer serial.
+         */
+        post: operations["post_api_v1_licensing_devices"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/login": {
         parameters: {
             query?: never;
@@ -3337,7 +3401,7 @@ export interface paths {
         put?: never;
         /**
          * Price this plan on a set of terms (operator)
-         * @description A plan may carry many prices — one per currency, billing period and seat basis — but only ONE LIVE price per combination of those. A second live price for the same terms is refused with 409 rather than accepted, because two of them would make the checkout, the invoice and the price list each pick differently and somebody be charged an amount no screen displayed. Retire the existing one first. `unit_amount` must be an integer of minor units; a decimal is refused with 422, since 49.9 truncating to 49 is a hundredfold error that looks like a real price.
+         * @description A plan may carry many prices — one per currency, billing period and unit basis — but only ONE LIVE price per combination of those. A second live price for the same terms is refused with 409 rather than accepted, because two of them would make the checkout, the invoice and the price list each pick differently and somebody be charged an amount no screen displayed. Retire the existing one first. `unit_amount` must be an integer of minor units; a decimal is refused with 422, since 49.9 truncating to 49 is a hundredfold error that looks like a real price. THE UNIT BASIS IS WHAT `unit_amount` MULTIPLIES BY: neither flag set prices the plan flat, `is_per_seat` multiplies by the seats the tenant holds, and `is_per_device` by its licensed devices. Both at once is refused with 422 — a price multiplies by one thing, or by nothing. Which devices count on a per-device price is the `licensing.billing_basis` setting, resolved per tenant.
          */
         post: operations["post_api_v1_plans_id_prices"];
         delete?: never;
@@ -3694,6 +3758,26 @@ export interface paths {
          * @description The anonymous half of the upload above, and the route that made `file` fields servable on a public form at all. A file input is NOT the membership oracle a person or unit picker is: it offers no list, resolves no id against this organisation, and returns one opaque reference to the caller's own bytes — so there is no question about the tenant it can be asked. THE TENANT IS RESOLVED FROM THE SLUG, and every reason there is no publicly served form behind it collapses to the SAME 404 as the render and the submit. BOUNDED, because what a stranger can spend here is storage: 10 uploads per IP per hour, 400 per form per hour across all addresses, and a size ceiling of 5 MiB — HALF the authenticated one, so bytes-per-address-per-hour is what is capped rather than just the count. Same three accepted kinds, same magic-byte check. Anything never submitted is deleted by the retention sweep, so an abandoned upload costs a day of storage rather than a permanent one.
          */
         post: operations["post_api_v1_public_forms_slug_uploads"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/licensing/redeem": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Activate a device with a code (public, unauthenticated)
+         * @description UNAUTHENTICATED BY DESIGN. The person typing the code may be an end user or a student with no account and no session, so they are authorised by POSSESSION: the code's own entropy and check characters, the pre-auth IP rate limiter, and the fact that every fact used to resolve the activation comes from the code rather than the caller. Nothing the caller sends is trusted, including any tenant they name. Send `serial_number` — the number printed on the unit — when the code is not already bound to one; never an internal id, which a person cannot know and which would let a caller enumerate rows by number. ERRORS NEVER DISTINGUISH AN UNKNOWN CODE FROM A MISTYPED ONE, because doing so would let an anonymous caller learn which well-formed codes exist.
+         */
+        post: operations["post_api_v1_public_licensing_redeem"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4864,6 +4948,28 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ActivationCodeIssueRequest: {
+            licensed_device_id?: number | null;
+            max_redemptions?: number;
+            expires_at?: string | null;
+        };
+        ActivationCodeIssuedResponse: {
+            id: number;
+            code: string;
+            max_redemptions: number;
+            expires_at?: string | null;
+        };
+        ActivationCodeRevokedResponse: {
+            revoked: boolean;
+        };
+        ActivationRedeemRequest: {
+            code: string;
+            serial_number?: string | null;
+        };
+        ActivationRedeemResponse: {
+            activated: boolean;
+            device_id?: number | null;
+        };
         AdminPasswordResetSentResponse: {
             data: {
                 /** @enum {string} */
@@ -5191,6 +5297,20 @@ export interface components {
             data: {
                 [key: string]: unknown;
             };
+        };
+        DeviceProvisionRequest: {
+            serial_numbers: (string | {
+                serial_number: string;
+                label?: string | null;
+            })[];
+        };
+        DeviceProvisionResponse: {
+            created: number;
+            already_present: number;
+            rejected: {
+                serial_number?: string | null;
+                reason: string;
+            }[];
         };
         Document: {
             id: number;
@@ -6184,6 +6304,19 @@ export interface components {
             direction?: "ltr" | "rtl";
             enabled?: boolean;
         };
+        LicensedDevice: {
+            id: number;
+            serial_number: string;
+            label?: string | null;
+            /** @enum {string} */
+            status: "provisioned" | "active" | "retired";
+            provisioned_at?: string | null;
+            activated_at?: string | null;
+            last_seen_at?: string | null;
+        };
+        LicensedDeviceListResponse: {
+            data: components["schemas"]["LicensedDevice"][];
+        };
         /** @description Language code => text. At least one entry. */
         LocalizedLabel: {
             [key: string]: string;
@@ -6850,6 +6983,7 @@ export interface components {
             /** @enum {string} */
             billing_period: "month" | "year" | "once";
             is_per_seat: boolean;
+            is_per_device: boolean;
             is_active: boolean;
             created_at?: string;
             updated_at?: string;
@@ -6860,6 +6994,7 @@ export interface components {
             /** @enum {string} */
             billing_period: "month" | "year" | "once";
             is_per_seat?: boolean;
+            is_per_device?: boolean;
         };
         PlanPriceListResponse: {
             data: components["schemas"]["PlanPrice"][];
@@ -20604,6 +20739,321 @@ export interface operations {
             };
         };
     };
+    post_api_v1_licensing_codes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActivationCodeIssueRequest"];
+            };
+        };
+        responses: {
+            /** @description The code, shown for the only time */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivationCodeIssuedResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such device in this tenant */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The redemption limit or expiry cannot be used */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_licensing_codes_id_revoke: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The code is dead */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivationCodeRevokedResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such code, or it was already revoked */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_licensing_devices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description This tenant's licensed units */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LicensedDeviceListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_licensing_devices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceProvisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Every serial was accepted or already present */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceProvisionResponse"];
+                };
+            };
+            /** @description Imported, with some entries refused */
+            207: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceProvisionResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description serial_numbers missing, empty, or over the 500 limit */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     post_api_v1_login: {
         parameters: {
             query?: never;
@@ -28285,6 +28735,84 @@ export interface operations {
             };
             /** @description Temporarily unavailable */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_public_licensing_redeem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActivationRedeemRequest"];
+            };
+        };
+        responses: {
+            /** @description The unit is activated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivationRedeemResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The code cannot be redeemed — invalid, expired, revoked, spent, or needing a serial */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many redemption attempts from this address */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
