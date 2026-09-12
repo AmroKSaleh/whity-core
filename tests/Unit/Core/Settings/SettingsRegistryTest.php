@@ -23,6 +23,7 @@ final class SettingsRegistryTest extends TestCase
              'branding_logo_wide', 'branding_logo_square', 'branding_favicon',
              'mcp.enabled',
              'auth.self_registration_enabled', 'auth.registration_approval_required',
+             'auth.registration_payment_required',
              'auth.self_password_reset_enabled', 'auth.password_reset_approval_required',
              'auth.self_2fa_recovery_enabled',
              'auth.sso_enabled', 'auth.desktop_login_max_hours',
@@ -397,7 +398,7 @@ final class SettingsRegistryTest extends TestCase
         // decides WHICH devices a per-device price counts. Migration 146 keeps
         // provisioned_at, activated_at and last_seen_at as separate facts so
         // that choice can be a setting rather than a schema decision.
-        self::assertCount(82, $describe);
+        self::assertCount(83, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

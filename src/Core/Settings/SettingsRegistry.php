@@ -56,6 +56,10 @@ final class SettingsRegistry
     //     Default 'true' (approval required).
     public const SELF_REGISTRATION_ENABLED = 'auth.self_registration_enabled';
     public const REGISTRATION_APPROVAL_REQUIRED = 'auth.registration_approval_required';
+    // Whether a self-provisioned workspace must be paid for before it does
+    // anything. Off by default: turning it on is a commercial decision, and a
+    // sovereign instance that sells nothing has no billing service to pay.
+    public const REGISTRATION_PAYMENT_REQUIRED = 'auth.registration_payment_required';
 
     // Forgotten-password + 2FA-recovery instance governance
     // (WC-password-reset-2fa-recovery). Same two-toggle model as self-service
@@ -640,6 +644,7 @@ final class SettingsRegistry
         self::ERROR_TRACKING_RETENTION_DAYS,
         self::SELF_REGISTRATION_ENABLED,
         self::REGISTRATION_APPROVAL_REQUIRED,
+        self::REGISTRATION_PAYMENT_REQUIRED,
         self::SELF_PASSWORD_RESET_ENABLED,
         self::PASSWORD_RESET_APPROVAL_REQUIRED,
         self::SELF_2FA_RECOVERY_ENABLED,
@@ -702,6 +707,7 @@ final class SettingsRegistry
         self::MCP_ENABLED,
         self::SELF_REGISTRATION_ENABLED,
         self::REGISTRATION_APPROVAL_REQUIRED,
+        self::REGISTRATION_PAYMENT_REQUIRED,
         self::SELF_PASSWORD_RESET_ENABLED,
         self::PASSWORD_RESET_APPROVAL_REQUIRED,
         self::SELF_2FA_RECOVERY_ENABLED,
@@ -766,6 +772,7 @@ final class SettingsRegistry
         self::MCP_ENABLED,
         self::SELF_REGISTRATION_ENABLED,
         self::REGISTRATION_APPROVAL_REQUIRED,
+        self::REGISTRATION_PAYMENT_REQUIRED,
         self::SELF_PASSWORD_RESET_ENABLED,
         self::PASSWORD_RESET_APPROVAL_REQUIRED,
         self::SELF_2FA_RECOVERY_ENABLED,
@@ -836,6 +843,7 @@ final class SettingsRegistry
         // Secure-by-default: signup CLOSED, approval REQUIRED when opened.
         self::SELF_REGISTRATION_ENABLED => 'false',
         self::REGISTRATION_APPROVAL_REQUIRED => 'true',
+        self::REGISTRATION_PAYMENT_REQUIRED => 'false',
         // Opposite defaults from signup above: forgetting a password is routine
         // and expected (OPEN by default), and approval is an opt-in extra gate
         // (OFF by default — frictionless self-service unless a tenant opts in).
@@ -1257,6 +1265,7 @@ final class SettingsRegistry
             self::MCP_ENABLED => self::validateMcpEnabled($value),
             self::SELF_REGISTRATION_ENABLED => self::validateBoolean($value, self::SELF_REGISTRATION_ENABLED),
             self::REGISTRATION_APPROVAL_REQUIRED => self::validateBoolean($value, self::REGISTRATION_APPROVAL_REQUIRED),
+            self::REGISTRATION_PAYMENT_REQUIRED => self::validateBoolean($value, self::REGISTRATION_PAYMENT_REQUIRED),
             self::SELF_PASSWORD_RESET_ENABLED => self::validateBoolean($value, self::SELF_PASSWORD_RESET_ENABLED),
             self::PASSWORD_RESET_APPROVAL_REQUIRED => self::validateBoolean($value, self::PASSWORD_RESET_APPROVAL_REQUIRED),
             self::SELF_2FA_RECOVERY_ENABLED => self::validateBoolean($value, self::SELF_2FA_RECOVERY_ENABLED),
