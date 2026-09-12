@@ -49,10 +49,24 @@ custom_domain = true
 # watchdog would have alerted "api is DOWN" permanently, from its first run.
 # A monitor that cries wolf on day one is how monitors get muted, which is the
 # exact failure this whole component exists to prevent.
+# EVERY PUBLIC HOSTNAME, because each one fails on its own. `site` and `docs`
+# are separate Cloudflare Workers and `pay` is a separate service behind the
+# tunnel — none of them shares a failure mode with the application, so watching
+# one says nothing about the others. A bad deploy, a deleted route or a lapsed
+# custom domain takes a single hostname down while everything else stays green,
+# and that is precisely the outage nobody is watching for.
+#
+# `pay` HAS NO HEALTH ENDPOINT TODAY — /health, /api/health, /healthz and
+# /status all 404, so `/` is the only thing there is to probe. That is the
+# weaker signal this file warns about above: it proves the service answers, not
+# that it can take a payment. Point this at a real health route when the service
+# grows one, the way `api` already is.
 PROBE_TARGETS = '''[
   {"name":"api",  "url":"https://app.whity.dev/api/health"},
   {"name":"web",  "url":"https://app.whity.dev/"},
-  {"name":"site", "url":"https://whity.dev/"}
+  {"name":"site", "url":"https://whity.dev/"},
+  {"name":"docs", "url":"https://docs.whity.dev/"},
+  {"name":"pay",  "url":"https://pay.whity.dev/"}
 ]'''
 
 # Consecutive failures before an alert is sent. 1 would alert on a single

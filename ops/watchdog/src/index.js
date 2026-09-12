@@ -150,7 +150,11 @@ async function runChecks(env) {
  */
 async function checkTarget(env, cfg, target) {
   const key = `state:${target.name}`;
-  const state = (await readJson(env, key)) || {
+  // `stored` is kept separate from the defaults below because "nothing has ever
+  // been recorded for this target" and "recorded, and healthy" are different
+  // facts that the write-skip further down must not confuse. See there.
+  const stored = await readJson(env, key);
+  const state = stored || {
     alertedStatus: 'up',
     consecutiveFailures: 0,
     downSince: null,
@@ -174,8 +178,21 @@ async function checkTarget(env, cfg, target) {
     // time has nothing to record, so the steady state now costs no writes at
     // all and the budget is spent on changes, which are the only thing anyone
     // reads this store to learn.
+    //
+    // A TARGET WITH NO STORED STATE IS A CHANGE, even though it is healthy.
+    // `state` above falls back to an up-and-clean object when KV holds nothing,
+    // so without the `stored` check a newly added target matches "unchanged" on
+    // every pass and is therefore never written — leaving /status and the public
+    // page reporting `unknown` forever for a target that is being probed
+    // successfully every two minutes. Observed on 2026-09-11 when docs and pay
+    // were added: both stayed "Unknown" on the page while their history bars
+    // filled in green, because recordHistory writes on a new day and this did
+    // not write at all. The first observation is the one that has to be saved.
     const unchanged =
-      state.alertedStatus === 'up' && (state.consecutiveFailures || 0) === 0 && !state.downSince;
+      stored !== null &&
+      state.alertedStatus === 'up' &&
+      (state.consecutiveFailures || 0) === 0 &&
+      !state.downSince;
 
     if (!unchanged) {
       await writeJson(env, key, {
@@ -542,6 +559,22 @@ const LABELS = {
   api: 'API',
   web: 'Application',
   site: 'Website',
+  docs: 'Documentation',
+  pay: 'Payments',
+};
+
+/**
+ * What each component IS, for a reader who does not know the architecture.
+ * A status page is read by people who are not the operator — a customer
+ * deciding whether to wait or escalate — and "pay: Down" means nothing to them
+ * unless the page says what pay is.
+ */
+const DESCRIPTIONS = {
+  api: 'app.whity.dev/api',
+  web: 'app.whity.dev',
+  site: 'whity.dev',
+  docs: 'docs.whity.dev',
+  pay: 'pay.whity.dev',
 };
 
 async function renderStatusPage(env, cfg) {
@@ -559,6 +592,7 @@ async function renderStatusPage(env, cfg) {
     const history = await readJson(env, `history:${target.name}`);
     components.push({
       name: LABELS[target.name] || target.name,
+      detail: DESCRIPTIONS[target.name] || '',
       status: state?.alertedStatus ?? 'unknown',
       downSince: state?.alertedStatus === 'down' ? state?.downSince ?? null : null,
       days: history?.days ?? {},
@@ -623,7 +657,9 @@ async function renderStatusPage(env, cfg) {
       (c) => `
       <li class="row">
         <div class="rowtop">
-          <span class="label">${escapeHtml(c.name)}</span>
+          <span class="label">${escapeHtml(c.name)}${
+            c.detail ? `<span class="host">${escapeHtml(c.detail)}</span>` : ''
+          }</span>
           <span class="state ${kindOf(c.status)}">${dot(kindOf(c.status))}${wordOf(c.status)}${
             c.downSince ? ` <span class="since">for ${escapeHtml(humanDuration(Date.now() - c.downSince))}</span>` : ''
           }</span>
@@ -635,12 +671,14 @@ async function renderStatusPage(env, cfg) {
 
   const backupRow = `
       <li class="row">
-        <span class="label">Backups</span>
-        <span class="state ${backupAge === null ? 'stale' : backupOk ? 'ok' : 'down'}">
-          ${dot(backupAge === null ? 'stale' : backupOk ? 'ok' : 'down')}${
-            backupAge === null ? 'Never reported' : backupOk ? 'Healthy' : 'Overdue'
-          }
-        </span>
+        <div class="rowtop">
+          <span class="label">Backups<span class="host">dead-man's switch</span></span>
+          <span class="state ${backupAge === null ? 'stale' : backupOk ? 'ok' : 'down'}">
+            ${dot(backupAge === null ? 'stale' : backupOk ? 'ok' : 'down')}${
+              backupAge === null ? 'Never reported' : backupOk ? 'Healthy' : 'Overdue'
+            }
+          </span>
+        </div>
       </li>`;
 
   const html = `<!doctype html>
@@ -651,57 +689,121 @@ async function renderStatusPage(env, cfg) {
 <meta name="robots" content="noindex">
 <title>Whity Status</title>
 <style>
+  /* Whity's palette, from packages/tokens — neutral "paper" greys with a blue
+     primary, and the same semantic green/red/amber the product uses.
+     EVERYTHING THIS PAGE REFERENCES IS INLINE, deliberately: it requests no
+     stylesheet, font or image, from whity.dev or from anywhere else. A status
+     page that loads assets from the system it reports on goes blank in exactly
+     the outage it exists to explain. The webfonts are named in case a visitor
+     already has them; the fallbacks do the real work.
+     (Cloudflare injects its Web Analytics beacon into HTML at the edge, so one
+     third-party script does end up on the page. It is not referenced here, it
+     is cookieless, and it cannot affect rendering — nothing above waits on it.) */
   :root{
-    --bg:#f4f5f7; --card:#ffffff; --ink:#16202e; --soft:#5a6878; --line:#e2e6eb;
-    --ok:#1c7a4e; --down:#b1402a; --stale:#8a6a15;
+    --bg:#eeeeee;              --bg:oklch(95% 0 0);
+    --card:#ffffff;            --card:oklch(100% 0 0);
+    --ink:#0a0a0a;             --ink:oklch(14.5% 0 0);
+    --soft:#737373;            --soft:oklch(55.6% 0 0);
+    --line:#e5e5e5;            --line:oklch(92.2% 0 0);
+    --accent:#3f63a6;          --accent:oklch(50% 0.16 255);
+    --ok:#2f7d4a;              --ok:oklch(48% 0.14 150);
+    --down:#b3261e;            --down:oklch(50% 0.19 27);
+    --stale:#7a5d12;           --stale:oklch(52% 0.11 75);
+    color-scheme:light;
   }
   @media (prefers-color-scheme: dark){
-    :root{ --bg:#0f141b; --card:#161d26; --ink:#e6eaf0; --soft:#9aa6b5; --line:#252e3a;
-           --ok:#5cba85; --down:#e0805f; --stale:#d3a64a; }
+    :root{
+      --bg:#0a0a0a;            --bg:oklch(14.5% 0 0);
+      --card:#171717;          --card:oklch(20.5% 0 0);
+      --ink:#fafafa;           --ink:oklch(98.5% 0 0);
+      --soft:#a3a3a3;          --soft:oklch(70.8% 0 0);
+      --line:#2a2a2a;          --line:oklch(100% 0 0 / 12%);
+      --accent:#85a6e0;        --accent:oklch(70% 0.15 255);
+      --ok:#6fc28c;            --ok:oklch(72% 0.16 150);
+      --down:#e08a7a;          --down:oklch(70% 0.18 25);
+      --stale:#d8b45f;         --stale:oklch(80% 0.14 80);
+      color-scheme:dark;
+    }
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--ink);
-       font:16px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+       font:16px/1.6 "Noto Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
        -webkit-font-smoothing:antialiased}
-  .wrap{max-width:660px;margin-inline:auto;padding:clamp(1.5rem,5vw,3.5rem) 1.25rem 3rem}
-  h1{font-size:1rem;font-weight:600;letter-spacing:.02em;margin:0 0 1.5rem;color:var(--soft)}
-  .banner{background:var(--card);border:1px solid var(--line);border-radius:8px;
-          padding:1.4rem 1.5rem;display:flex;align-items:center;gap:.85rem}
-  .banner strong{font-size:1.3rem;font-weight:600;line-height:1.2}
+  .mono{font-family:"Geist Mono",ui-monospace,"Cascadia Code",Menlo,Consolas,monospace}
+  .wrap{max-width:720px;margin-inline:auto;padding:clamp(1.5rem,5vw,3.5rem) 1.25rem 3rem}
+
+  /* Masthead, matching whity.dev: the lettermark, the name, a mono eyebrow. */
+  .head{display:flex;align-items:center;gap:.6rem;margin:0 0 1.75rem}
+  .brand{display:inline-flex;align-items:center;gap:.55rem;font-weight:600;
+         font-size:1.05rem;letter-spacing:-.01em;color:var(--ink);text-decoration:none}
+  .mark{width:1.6rem;height:1.6rem;border-radius:.4rem;background:var(--ink);color:var(--bg);
+        display:inline-grid;place-items:center;font-size:.8rem;font-weight:600;flex:none}
+  .eyebrow{font-size:.72rem;font-weight:500;letter-spacing:.08em;text-transform:uppercase;
+           color:var(--soft);border:1px solid var(--line);border-radius:999px;padding:.1rem .55rem}
+
+  .banner{background:var(--card);border:1px solid var(--line);border-radius:.75rem;
+          padding:1.5rem 1.6rem;display:flex;align-items:center;gap:.9rem}
+  .banner strong{font-size:1.45rem;font-weight:600;line-height:1.15;letter-spacing:-.02em}
   .dot{width:10px;height:10px;border-radius:50%;display:inline-block;flex:none}
   .dot.ok{background:var(--ok)} .dot.down{background:var(--down)} .dot.stale{background:var(--stale)}
   .banner .dot{width:13px;height:13px}
-  ul{list-style:none;margin:1.25rem 0 0;padding:0;background:var(--card);
-     border:1px solid var(--line);border-radius:8px}
-  .row{padding:1rem 1.5rem 1.05rem;border-top:1px solid var(--line)}
+
+  ul{list-style:none;margin:1rem 0 0;padding:0;background:var(--card);
+     border:1px solid var(--line);border-radius:.75rem;overflow:hidden}
+  .row{padding:1.1rem 1.6rem 1.15rem;border-top:1px solid var(--line)}
   .row:first-child{border-top:0}
-  .rowtop{display:flex;justify-content:space-between;align-items:center;gap:1rem}
+  .rowtop{display:flex;justify-content:space-between;align-items:baseline;gap:1rem;flex-wrap:wrap}
+  .label{font-weight:600;display:flex;flex-direction:column;gap:.1rem;letter-spacing:-.01em}
+  /* The hostname under each name: a reader who does not know the architecture
+     still learns what "Payments" actually refers to. */
+  .host{font-family:"Geist Mono",ui-monospace,Menlo,Consolas,monospace;
+        font-size:.72rem;font-weight:400;color:var(--soft);letter-spacing:0}
+
+  /* The status pill, in the shape whity.dev uses: a dot, a word, a hairline
+     ring in the status colour. */
+  .state{display:inline-flex;align-items:center;gap:.45rem;font-size:.8rem;font-weight:500;
+         color:var(--soft);border:1px solid var(--line);border-radius:999px;padding:.2rem .65rem;
+         white-space:nowrap}
+  .state.ok{color:var(--ok);border-color:var(--ok)}
+  .state.down{color:var(--down);border-color:var(--down)}
+  .state.stale{color:var(--stale);border-color:var(--stale)}
+  .since{color:var(--soft);font-weight:400}
+
   /* One segment per day. flex lets 90 of them share the width at any size,
      and min-width keeps them touchable rather than hairlines on a phone. */
-  .bar{display:flex;gap:2px;margin-top:.7rem;height:26px}
+  .bar{display:flex;gap:2px;margin-top:.85rem;height:26px}
   .seg{flex:1 1 0;min-width:2px;border-radius:2px;display:block}
   .seg.ok{background:var(--ok)}
   .seg.down{background:var(--down)}
   /* A day nobody looked at is NOT green. Deliberately inert and low-contrast,
      so a gap reads as "no data" rather than as a result. */
   .seg.gap{background:var(--line)}
-  .barfoot{display:flex;justify-content:space-between;gap:1rem;margin-top:.45rem;
-           font-size:.74rem;color:var(--soft)}
+  .barfoot{display:flex;justify-content:space-between;gap:1rem;margin-top:.5rem;
+           font-size:.72rem;color:var(--soft);
+           font-family:"Geist Mono",ui-monospace,Menlo,Consolas,monospace}
   .barfoot span:nth-child(2){text-align:center}
-  .label{font-weight:500}
-  .state{display:inline-flex;align-items:center;gap:.5rem;font-size:.92rem;color:var(--soft)}
-  .state.ok{color:var(--ok)} .state.down{color:var(--down)} .state.stale{color:var(--stale)}
-  .since{color:var(--soft)}
-  .note{margin-top:1.25rem;padding:1rem 1.25rem;background:var(--card);
-        border:1px solid var(--line);border-radius:8px;font-size:.86rem;color:var(--soft)}
+
+  .note{margin-top:1rem;padding:1rem 1.25rem;background:var(--card);
+        border:1px solid var(--line);border-radius:.75rem;font-size:.88rem;color:var(--soft)}
+  .note strong{color:var(--ink)}
   .warn{border-color:var(--stale)}
-  footer{margin-top:1.5rem;font-size:.8rem;color:var(--soft)}
-  a{color:inherit}
+  footer{margin-top:1.75rem;font-size:.78rem;color:var(--soft);
+         display:flex;gap:1.25rem;flex-wrap:wrap;
+         font-family:"Geist Mono",ui-monospace,Menlo,Consolas,monospace}
+  footer a{color:var(--soft)}
+  footer a:hover{color:var(--ink)}
+  a{color:var(--accent)}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>WHITY STATUS</h1>
+  <div class="head">
+    <a class="brand" href="https://whity.dev/">
+      <span class="mark mono" aria-hidden="true">W</span>Whity
+    </a>
+    <span class="eyebrow mono">Status</span>
+  </div>
+  <h1 class="sr-only" style="position:absolute;left:-9999px">Whity status</h1>
 
   <div class="banner">
     ${dot(overall.kind)}<strong>${escapeHtml(overall.text)}</strong>
@@ -723,7 +825,11 @@ async function renderStatusPage(env, cfg) {
     which is the only condition under which a status page is worth reading.
   </div>
 
-  <footer>Whity &middot; <a href="/status">JSON</a></footer>
+  <footer>
+    <a href="https://whity.dev/">whity.dev</a>
+    <a href="https://docs.whity.dev/">docs</a>
+    <a href="/status">JSON</a>
+  </footer>
 </div>
 </body>
 </html>`;
