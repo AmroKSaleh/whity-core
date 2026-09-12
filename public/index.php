@@ -2496,6 +2496,71 @@ $paymentWebhookHandler = new \Whity\Api\PaymentWebhookApiHandler(
 );
 $router->register('POST', '/api/payments/webhook/{provider}', [$paymentWebhookHandler, 'receive'], null);
 
+// ── The external billing service ────────────────────────────────────────────
+//
+// whity-core does not take money. A separate service does, and knows nothing
+// about tenants, features or permissions — only an opaque id we hand it. The
+// relationship is two questions: where to send a tenant to pay, and whether a
+// tenant may use paid features.
+//
+// CREDENTIALS COME FROM THE ENVIRONMENT, never from settings: settings live in
+// the database, are readable through an API by anyone holding the right
+// permission, and are dumped into every backup. A signing secret that can be
+// read is a signing secret that can be used.
+//
+// An unconfigured deployment gets NullBillingPortal rather than a broken one —
+// self-hosted installations bill nobody, and that is a supported state, not a
+// misconfiguration. See NullBillingPortal for why that walls nobody.
+$payBaseUrl = rtrim((string) ($_ENV['PAY_BASE_URL'] ?? getenv('PAY_BASE_URL') ?: ''), '/');
+$payApiKey = (string) ($_ENV['PAY_API_KEY'] ?? getenv('PAY_API_KEY') ?: '');
+$payWebhookSecret = (string) ($_ENV['PAY_WEBHOOK_SECRET'] ?? getenv('PAY_WEBHOOK_SECRET') ?: '');
+
+$billingPortal = ($payBaseUrl !== '' && $payApiKey !== '')
+    ? new \Whity\Core\Billing\External\HttpBillingPortal(
+        new \Whity\Core\Billing\External\CurlBillingTransport(
+            // Bounded, because an unbounded wait on a third party is an outage
+            // of our own. Tunable per deployment rather than compiled in.
+            timeoutSeconds: max(1, (int) ($_ENV['PAY_TIMEOUT_SECONDS'] ?? getenv('PAY_TIMEOUT_SECONDS') ?: 10)),
+        ),
+        $payBaseUrl,
+        $payApiKey,
+    )
+    : new \Whity\Core\Billing\External\NullBillingPortal();
+
+$billingAccessRecorder = new \Whity\Core\Billing\External\AccessRecorder(
+    new \Whity\Core\Subscription\SubscriptionService(
+        new \Whity\Core\Subscription\SubscriptionRepository($db->getPdo()),
+        $settingsService
+    ),
+    new \Whity\Core\Plan\PlanRepository($db->getPdo()),
+    $logger
+);
+
+$externalBillingHandler = new \Whity\Api\ExternalBillingApiHandler(
+    $billingPortal,
+    $billingAccessRecorder,
+    new \Whity\Core\Billing\External\EventLedger(new DatabaseSharedStore($db->getPdo())),
+    new \Whity\Core\Billing\External\WebhookVerifier(
+        $payWebhookSecret,
+        max(1, (int) ($_ENV['PAY_WEBHOOK_TOLERANCE_SECONDS']
+            ?? getenv('PAY_WEBHOOK_TOLERANCE_SECONDS')
+            ?: \Whity\Core\Billing\External\WebhookVerifier::DEFAULT_TOLERANCE_SECONDS)),
+    ),
+    $settingsService,
+    $roleChecker,
+    $db->getPdo(),
+    $appUrl,
+    $logger
+);
+
+$router->register('POST', '/api/billing/checkout', [$externalBillingHandler, 'checkout'], null, null, CorePermissions::BILLING_PAY);
+$router->register('GET',  '/api/billing/return',   [$externalBillingHandler, 'returnFrom'], null, null, CorePermissions::BILLING_VIEW);
+
+// UNAUTHENTICATED, NECESSARILY: the sender is a server and holds no session.
+// Registering it here is only half the job — EnforceTenantIsolation must also
+// list the path, or this 401s before it is ever routed. See the entry there.
+$router->register('POST', '/api/billing/webhook', [$externalBillingHandler, 'webhook'], null);
+
 // Early birds, offers and promo codes — one object, three ways of being found.
 // A promotion carrying a `code` is typed by the customer; one without applies
 // automatically to whoever qualifies, which is the only structural difference

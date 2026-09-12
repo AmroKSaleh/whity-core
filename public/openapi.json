@@ -2452,6 +2452,133 @@
                 }
             }
         },
+        "/api/v1/billing/checkout": {
+            "post": {
+                "operationId": "post_api_v1_billing_checkout",
+                "summary": "Somewhere to send this tenant to pay",
+                "tags": [
+                    "billing"
+                ],
+                "description": "Names a PLAN, never a price on the billing service \u2014 letting a caller pass the other side's price identifier through would make \"which plan am I buying\" a decision taken in the browser, and a tenant could name the cheapest price for the most expensive plan. Answers a single `url` to redirect to. WHAT IS BEHIND THAT URL IS NOT KNOWABLE HERE and must not become knowable: a card page, transfer instructions, or a method that does not exist yet. Requires the plan to be priced on these terms AND to carry the handle the billing service knows it by; without one, 422.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CheckoutStartRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Where to send the payer",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/CheckoutStartResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "This deployment does not sell subscriptions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "That plan cannot be bought on these terms",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "The billing service refused the request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "The billing service is temporarily unreachable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/billing/invoices": {
             "get": {
                 "operationId": "get_api_v1_billing_invoices",
@@ -2828,6 +2955,183 @@
                         "bearerAuth": []
                     }
                 ]
+            }
+        },
+        "/api/v1/billing/return": {
+            "get": {
+                "operationId": "get_api_v1_billing_return",
+                "summary": "The payer is back \u2014 what actually happened?",
+                "tags": [
+                    "billing"
+                ],
+                "description": "THE QUERY STRING IS EVIDENCE OF NOTHING. The payer arrives at `?checkout=<ref>&status=<s>` in a browser they control, and anyone can type `status=completed` into an address bar. Nothing in it is signed and nothing about it proves a payment ever happened. This route ignores it as an answer and re-reads access from the billing service, which is the authority. `checkout_status` in the reply is read server-to-server for WORDING only \u2014 so \"your card was declined\" can be shown instead of a silent redirect \u2014 and is null when the billing service could not be asked. Access is decided by `has_access` alone.",
+                "responses": {
+                    "200": {
+                        "description": "What the billing service says about this tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BillingAccessResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "The billing service refused the request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "The billing service is temporarily unreachable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/billing/webhook": {
+            "post": {
+                "operationId": "post_api_v1_billing_webhook",
+                "summary": "Subscription-change notifications (signed, not user-authenticated)",
+                "tags": [
+                    "billing"
+                ],
+                "description": "UNAUTHENTICATED BY NECESSITY: the sender is a server, holds no session, and never will. THE SIGNATURE IS THE CREDENTIAL \u2014 `X-Pay-Signature` is `sha256=` plus the HMAC-SHA256 of `X-Pay-Timestamp . \".\" . rawBody`, verified with a constant-time comparison over the RAW bytes before the payload is decoded, and refused outright when no secret is configured. Deliveries repeat by design, so `X-Pay-Event-Id` is recorded and a replay is acknowledged without being acted on twice. THE BODY IS NOT A WRITE PATH: the only thing taken from it is which subject to go and ask about, so even a correctly signed forgery can do no more than make this deployment re-read its own state. Events other than subscription changes are acknowledged and ignored \u2014 a non-2xx would just burn the sender's retry budget on something that will never become interesting.",
+                "responses": {
+                    "200": {
+                        "description": "Received, or deliberately ignored",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "received": {
+                                            "type": "boolean"
+                                        }
+                                    },
+                                    "required": [
+                                        "received"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "The signature did not verify, or the delivery was stale",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Temporarily could not be acted on \u2014 retry",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
             }
         },
         "/api/v1/branding": {
@@ -36006,6 +36310,44 @@
                     "pagination"
                 ]
             },
+            "BillingAccessResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "has_access": {
+                                "type": "boolean"
+                            },
+                            "status": {
+                                "type": "string",
+                                "nullable": true
+                            },
+                            "plan": {
+                                "type": "string",
+                                "nullable": true
+                            },
+                            "access_until": {
+                                "type": "string",
+                                "nullable": true
+                            },
+                            "cancel_at_period_end": {
+                                "type": "boolean"
+                            },
+                            "checkout_status": {
+                                "type": "string",
+                                "nullable": true
+                            }
+                        },
+                        "required": [
+                            "has_access"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
             "Branding": {
                 "type": "object",
                 "properties": {
@@ -36153,6 +36495,44 @@
                     "code",
                     "reason",
                     "detail"
+                ]
+            },
+            "CheckoutStartRequest": {
+                "type": "object",
+                "properties": {
+                    "plan_key": {
+                        "type": "string"
+                    },
+                    "billing_period": {
+                        "type": "string",
+                        "enum": [
+                            "month",
+                            "year",
+                            "once"
+                        ]
+                    }
+                },
+                "required": [
+                    "plan_key"
+                ]
+            },
+            "CheckoutStartResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "url": {
+                                "type": "string"
+                            }
+                        },
+                        "required": [
+                            "url"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "ConveningBody": {

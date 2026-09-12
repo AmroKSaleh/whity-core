@@ -485,6 +485,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/billing/checkout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Somewhere to send this tenant to pay
+         * @description Names a PLAN, never a price on the billing service — letting a caller pass the other side's price identifier through would make "which plan am I buying" a decision taken in the browser, and a tenant could name the cheapest price for the most expensive plan. Answers a single `url` to redirect to. WHAT IS BEHIND THAT URL IS NOT KNOWABLE HERE and must not become knowable: a card page, transfer instructions, or a method that does not exist yet. Requires the plan to be priced on these terms AND to carry the handle the billing service knows it by; without one, 422.
+         */
+        post: operations["post_api_v1_billing_checkout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/billing/invoices": {
         parameters: {
             query?: never;
@@ -559,6 +579,46 @@ export interface paths {
         get: operations["get_api_v1_billing_methods"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/return": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The payer is back — what actually happened?
+         * @description THE QUERY STRING IS EVIDENCE OF NOTHING. The payer arrives at `?checkout=<ref>&status=<s>` in a browser they control, and anyone can type `status=completed` into an address bar. Nothing in it is signed and nothing about it proves a payment ever happened. This route ignores it as an answer and re-reads access from the billing service, which is the authority. `checkout_status` in the reply is read server-to-server for WORDING only — so "your card was declined" can be shown instead of a silent redirect — and is null when the billing service could not be asked. Access is decided by `has_access` alone.
+         */
+        get: operations["get_api_v1_billing_return"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/webhook": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Subscription-change notifications (signed, not user-authenticated)
+         * @description UNAUTHENTICATED BY NECESSITY: the sender is a server, holds no session, and never will. THE SIGNATURE IS THE CREDENTIAL — `X-Pay-Signature` is `sha256=` plus the HMAC-SHA256 of `X-Pay-Timestamp . "." . rawBody`, verified with a constant-time comparison over the RAW bytes before the payload is decoded, and refused outright when no secret is configured. Deliveries repeat by design, so `X-Pay-Event-Id` is recorded and a replay is acknowledged without being acted on twice. THE BODY IS NOT A WRITE PATH: the only thing taken from it is which subject to go and ask about, so even a correctly signed forgery can do no more than make this deployment re-read its own state. Events other than subscription changes are acknowledged and ignored — a non-2xx would just burn the sender's retry budget on something that will never become interesting.
+         */
+        post: operations["post_api_v1_billing_webhook"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5022,6 +5082,16 @@ export interface components {
             data: components["schemas"]["AuditLogEntry"][];
             pagination: components["schemas"]["Pagination"];
         };
+        BillingAccessResponse: {
+            data: {
+                has_access: boolean;
+                status?: string | null;
+                plan?: string | null;
+                access_until?: string | null;
+                cancel_at_period_end?: boolean;
+                checkout_status?: string | null;
+            };
+        };
         Branding: {
             siteName: string;
             logoWideUrl: string | null;
@@ -5057,6 +5127,16 @@ export interface components {
             code: "no-resource" | "no-route" | "forbidden";
             reason: string;
             detail: string | null;
+        };
+        CheckoutStartRequest: {
+            plan_key: string;
+            /** @enum {string} */
+            billing_period?: "month" | "year" | "once";
+        };
+        CheckoutStartResponse: {
+            data: {
+                url: string;
+            };
         };
         ConveningBody: {
             id: number;
@@ -10261,6 +10341,111 @@ export interface operations {
             };
         };
     };
+    post_api_v1_billing_checkout: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CheckoutStartRequest"];
+            };
+        };
+        responses: {
+            /** @description Where to send the payer */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CheckoutStartResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description This deployment does not sell subscriptions */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description That plan cannot be bought on these terms */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The billing service refused the request */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The billing service is temporarily unreachable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_billing_invoices: {
         parameters: {
             query?: never;
@@ -10556,6 +10741,156 @@ export interface operations {
             };
             /** @description Internal server error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_billing_return: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What the billing service says about this tenant */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillingAccessResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The billing service refused the request */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The billing service is temporarily unreachable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_billing_webhook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Received, or deliberately ignored */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        received: boolean;
+                    };
+                };
+            };
+            /** @description The signature did not verify, or the delivery was stale */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Temporarily could not be acted on — retry */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

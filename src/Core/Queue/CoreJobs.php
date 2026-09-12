@@ -138,6 +138,42 @@ final class CoreJobs
                 ),
                 false
             );
+
+            // The sweep that backstops the billing service's notifications.
+            //
+            // Registered even when no billing service is configured: the run
+            // answers with zero counts in that case rather than failing, so a
+            // self-hosted deployment schedules a job that costs nothing instead
+            // of one that errors every night and teaches an operator to ignore
+            // it. The portal is built exactly as public/index.php builds it, so
+            // "configured" means the same thing to both.
+            $payBaseUrl = rtrim((string) ($_ENV['PAY_BASE_URL'] ?? getenv('PAY_BASE_URL') ?: ''), '/');
+            $payApiKey = (string) ($_ENV['PAY_API_KEY'] ?? getenv('PAY_API_KEY') ?: '');
+
+            $registry->register(
+                \Whity\Core\Billing\Jobs\ReconcileExternalAccessJob::NAME,
+                new \Whity\Core\Billing\Jobs\ReconcileExternalAccessJob(
+                    new \Whity\Core\Billing\External\AccessReconciliationRun(
+                        $pdo,
+                        ($payBaseUrl !== '' && $payApiKey !== '')
+                            ? new \Whity\Core\Billing\External\HttpBillingPortal(
+                                new \Whity\Core\Billing\External\CurlBillingTransport(
+                                    max(1, (int) ($_ENV['PAY_TIMEOUT_SECONDS'] ?? getenv('PAY_TIMEOUT_SECONDS') ?: 10))
+                                ),
+                                $payBaseUrl,
+                                $payApiKey
+                            )
+                            : new \Whity\Core\Billing\External\NullBillingPortal(),
+                        new \Whity\Core\Billing\External\AccessRecorder(
+                            $billingSubscriptions,
+                            new \Whity\Core\Plan\PlanRepository($pdo),
+                            $logger ?? new \Psr\Log\NullLogger()
+                        ),
+                        $logger ?? new \Psr\Log\NullLogger()
+                    )
+                ),
+                false
+            );
         }
     }
 }

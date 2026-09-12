@@ -266,6 +266,27 @@ class EnforceTenantIsolation
         // GET to this path is a 404 from the router rather than an
         // unauthenticated read that got this far.
         '#^/api/v1/payments/webhook/[^/]+$#',
+        // Migration 149: the EXTERNAL billing service's notification endpoint.
+        // Same reasoning as the callback above and the same non-negotiable
+        // consequence: without this entry the route 401s before it is routed, so
+        // no notification is ever delivered, no subscription change is ever
+        // heard, and a tenant who paid waits for the reconciliation sweep to let
+        // them in. That is a latency bug rather than a lockout — the sweep is
+        // the real mechanism — but it silently throws away the thing that makes
+        // access appear in a second instead of an hour.
+        //
+        // WHAT MAKES IT SAFE IS THE SIGNATURE, verified over the RAW bytes with
+        // hash_equals before the payload is decoded, and refused outright when
+        // no secret is configured. And the payload is not a write path at all:
+        // the only thing taken from it is WHICH subject to go and ask about, so
+        // even a correctly signed forgery can do no more than make this
+        // deployment re-read its own state from the billing service.
+        //
+        // EXACTLY ONE SEGMENT AND NO PARAMETER, following the lesson
+        // `/api/v1/translations/` records above. There is one sender and one
+        // path; a parametrised form would make the next route added under
+        // `/billing/` public by default, on the surface where that is worst.
+        '#^/api/v1/billing/webhook$#',
         // Migration 132: an OPT-IN public form. The person filling in an
         // external application has no account and, in the case this exists for,
         // never will — so there is nothing here for this middleware to resolve.

@@ -97,6 +97,7 @@ final class SanctionedGlobalTables
         // recovery requests for a global profile. Same rationale as
         // password_resets above: identity is per-person, not per-tenant.
         'two_factor_recovery_requests' => '2FA-recovery requests for the global profiles identity (WC-password-reset-2fa-recovery); rows join only to profiles — no tenant_id column.',
+
     ];
 
     /**
