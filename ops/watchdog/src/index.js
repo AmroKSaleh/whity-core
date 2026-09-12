@@ -691,11 +691,14 @@ async function renderStatusPage(env, cfg) {
 <style>
   /* Whity's palette, from packages/tokens — neutral "paper" greys with a blue
      primary, and the same semantic green/red/amber the product uses.
-     EVERYTHING IS INLINE AND SELF-CONTAINED, deliberately: no stylesheet, no
-     font and no image is fetched from whity.dev or anywhere else. A status page
-     that loads assets from the system it reports on goes blank in exactly the
-     outage it exists to explain. The webfonts are named in case a visitor
-     already has them; the fallbacks do the real work. */
+     EVERYTHING THIS PAGE REFERENCES IS INLINE, deliberately: it requests no
+     stylesheet, font or image, from whity.dev or from anywhere else. A status
+     page that loads assets from the system it reports on goes blank in exactly
+     the outage it exists to explain. The webfonts are named in case a visitor
+     already has them; the fallbacks do the real work.
+     (Cloudflare injects its Web Analytics beacon into HTML at the edge, so one
+     third-party script does end up on the page. It is not referenced here, it
+     is cookieless, and it cannot affect rendering — nothing above waits on it.) */
   :root{
     --bg:#eeeeee;              --bg:oklch(95% 0 0);
     --card:#ffffff;            --card:oklch(100% 0 0);
