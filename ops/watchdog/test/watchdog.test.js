@@ -489,8 +489,11 @@ test('each component is named for a human and says which host it is', async () =
     ['Documentation', 'docs.whity.dev'],
     ['Payments', 'pay.whity.dev'],
   ]) {
-    assert.match(html, new RegExp(`>${label}<`), `${label} should be shown by name`);
-    assert.match(html, new RegExp(`>${host.replace(/\./g, '\\.')}<`), `${label} should name its host`);
+    // Substring checks rather than a regex built from a string: the hostnames
+    // contain dots, and hand-escaping them is both noise and a thing to get
+    // wrong (CodeQL flagged the first attempt for escaping `.` but not `\`).
+    assert.ok(html.includes(`>${label}<`), `${label} should be shown by name`);
+    assert.ok(html.includes(`>${host}<`), `${label} should name its host`);
   }
 });
 
