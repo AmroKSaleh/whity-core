@@ -48,6 +48,35 @@ class PlanAddons
             CREATE INDEX IF NOT EXISTS idx_plans_addon_active
                 ON plans(is_addon, is_active)
         ');
+
+        // A PER-DEVICE PLAN IS AN ADD-ON, AND THE MIGRATION SAYS SO ITSELF.
+        //
+        // Defaulting every existing plan to FALSE and leaving somebody to flip
+        // the right rows afterwards is a deploy step that works the first time
+        // and is forgotten every time after. The failure it leaves behind is
+        // silent and points the wrong way: the device plan keeps being offered
+        // as a TIER, so a tenant with no subscription can buy devices and be let
+        // into the product by them, while a tenant who already has a tier is
+        // refused the add-on they actually want. Both are the exact bugs the
+        // column was added to prevent.
+        //
+        // DERIVED FROM THE PRICE, NOT FROM A NAME. Matching `plan_key = 'devices'`
+        // would encode one deployment's catalogue into every deployment's
+        // schema. "Priced per device" is what actually makes something bought
+        // beside a subscription rather than as one, and it is already recorded.
+        //
+        // Inactive prices count. A per-device plan withdrawn from sale is still
+        // an add-on — its existing subscribers did not become tier customers
+        // because the catalogue moved on.
+        $pdo->exec('
+            UPDATE plans SET is_addon = TRUE
+             WHERE is_addon = FALSE
+               AND EXISTS (
+                     SELECT 1 FROM plan_prices pp
+                      WHERE pp.plan_id = plans.id
+                        AND pp.is_per_device = TRUE
+                   )
+        ');
     }
 
     public static function down(Database $db): void
