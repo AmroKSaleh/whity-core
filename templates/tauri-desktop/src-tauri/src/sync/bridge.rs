@@ -75,10 +75,16 @@ pub struct BridgeResource {
 /// at a server that cannot honour the contract. So the relay stays off until
 /// the server side exists, rather than half-working.
 ///
-/// Re-enabling needs: server-side sync endpoints (the cutover `DocumentsPlugin`
-/// defers, and the equivalent for Relations), plus a per-leg path on
-/// `BridgeResource` — one `base_path` cannot express `/api/persons` locally and
-/// `/persons` under `api_base` remotely.
+/// Re-enabling needs server-side sync endpoints for these resources, plus a
+/// per-leg path on `BridgeResource` — one `base_path` cannot express
+/// `/api/persons` locally and `/persons` under `api_base` remotely.
+///
+/// It will not arrive by the route this comment once pointed at. The plan was a
+/// cutover: offline twin plugins for Documents, Relations and Taxonomy would
+/// eventually replace core's versions and bring their sync endpoints with them.
+/// Those plugins have been retired — they duplicated features core already owns
+/// and were inert on every server — so whatever serves a changes feed here will
+/// be core's own, not a plugin's.
 pub static BRIDGE_RESOURCES: &[&BridgeResource] = &[];
 
 #[derive(Debug, Default, Clone)]
