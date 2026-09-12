@@ -155,7 +155,14 @@ final class PaymentWallRealEngineTest extends TestCase
     {
         $this->lapse(SubscriptionService::MODE_BLOCK_ALL);
 
-        foreach (['/api/v1/me/notifications', '/api/v1/me/emails', '/api/v1/me', '/api/v1/documents'] as $path) {
+        // `/api/v1/me` is deliberately NOT in this list. It looks like the
+        // obvious sibling to check, and asserting it here would encode a false
+        // belief about production: EnforceTenantIsolation treats that exact path
+        // as public, so it never carries a tenant context and the wall passes it
+        // regardless of what this list says. Verified against the deployment —
+        // these three answer 402 for a walled tenant and `/api/v1/me` answers
+        // 200.
+        foreach (['/api/v1/me/notifications', '/api/v1/me/emails', '/api/v1/me/inbox', '/api/v1/documents'] as $path) {
             TenantContext::reset();
             TenantContext::setTenantId(self::TENANT);
             $this->nextCalled = false;
