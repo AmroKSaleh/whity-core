@@ -14,6 +14,7 @@ use Whity\Core\Billing\External\BillingPortalException;
 use Whity\Core\Billing\External\BillingSubject;
 use Whity\Core\Billing\External\EventLedger;
 use Whity\Core\Billing\External\WebhookVerifier;
+use Whity\Core\Db\DbBool;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\Settings\SettingsRegistry;
 use Whity\Core\Settings\SettingsService;
@@ -274,6 +275,72 @@ final class ExternalBillingApiHandler
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────
+
+    /**
+     * GET /api/v1/billing/plans — what this tenant can actually buy.
+     *
+     * WITHOUT THIS, CHECKOUT IS UNREACHABLE FROM THE PRODUCT. Buying names a
+     * `plan_key`, and every other plan endpoint requires `plans:manage` — an
+     * OPERATOR permission a paying customer will never hold. So a tenant sitting
+     * behind the payment wall could be told to pay and had no way to find out
+     * what for.
+     *
+     * ONLY WHAT IS GENUINELY PURCHASABLE. A plan with no price in this tenant's
+     * currency, or a price the billing service does not know a handle for,
+     * cannot be checked out — offering it would produce a button that 422s.
+     *
+     * AMOUNTS STAY IN MINOR UNITS. The dinar has three decimal places, so
+     * anything that divides by 100 on the way out is wrong by a factor of ten;
+     * the caller formats from the integer and the currency code.
+     */
+    public function plans(Request $request): Response
+    {
+        $tenantId = $this->requireTenant($request, CorePermissions::BILLING_VIEW);
+        if ($tenantId instanceof Response) {
+            return $tenantId;
+        }
+
+        $currency = strtoupper($this->setting(
+            $tenantId,
+            SettingsRegistry::BILLING_DEFAULT_CURRENCY,
+            'JOD'
+        ));
+
+        $statement = $this->pdo->prepare(
+            'SELECT p.plan_key, p.name, p.description,
+                    pp.unit_amount, pp.currency, pp.billing_period,
+                    pp.is_per_seat, pp.is_per_device
+               FROM plan_prices pp
+               JOIN plans p ON p.id = pp.plan_id
+              WHERE p.is_active = :plan_on
+                AND pp.is_active = :price_on
+                AND pp.currency = :currency
+                AND pp.external_ref IS NOT NULL
+              ORDER BY pp.unit_amount ASC, p.plan_key ASC'
+        );
+        $statement->bindValue(':plan_on', true, PDO::PARAM_BOOL);
+        $statement->bindValue(':price_on', true, PDO::PARAM_BOOL);
+        $statement->bindValue(':currency', $currency);
+        $statement->execute();
+
+        $rows = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            $rows[] = [
+                'plan_key' => (string) $row['plan_key'],
+                'name' => (string) $row['name'],
+                'description' => $row['description'] !== null ? (string) $row['description'] : null,
+                'unit_amount' => (int) $row['unit_amount'],
+                'currency' => (string) $row['currency'],
+                'billing_period' => (string) $row['billing_period'],
+                // What the amount multiplies by, so a price can be shown as
+                // "per seat" rather than as a total nobody will be charged.
+                'is_per_seat' => DbBool::of($row['is_per_seat']),
+                'is_per_device' => DbBool::of($row['is_per_device'] ?? false),
+            ];
+        }
+
+        return Response::json(['data' => $rows]);
+    }
 
     /**
      * The billing service's handle for a plan on these terms, in the tenant's

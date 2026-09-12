@@ -2957,6 +2957,83 @@
                 ]
             }
         },
+        "/api/v1/billing/plans": {
+            "get": {
+                "operationId": "get_api_v1_billing_plans",
+                "summary": "What this tenant can buy",
+                "tags": [
+                    "billing"
+                ],
+                "description": "The operator's plan catalogue is gated on `plans:manage`, which a paying customer never holds \u2014 so without this a tenant could be told to pay and had no way to discover what for, since checkout names a `plan_key`. ONLY GENUINELY PURCHASABLE PLANS: active, priced in this tenant's currency, and carrying the handle the billing service knows the price by. A plan missing any of those would produce a button that 422s. Amounts are MINOR UNITS \u2014 15000 is 15.000 in a three-decimal currency like the dinar \u2014 so format from the integer and the code, and never divide by 100. `is_per_seat` and `is_per_device` say what the amount multiplies by, so a price can be shown as \"per seat\" rather than as a total nobody is charged. An empty list is the ordinary answer on a deployment that sells nothing.",
+                "responses": {
+                    "200": {
+                        "description": "Plans this tenant can buy",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PurchasablePlanListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/billing/return": {
             "get": {
                 "operationId": "get_api_v1_billing_return",
@@ -44876,6 +44953,62 @@
                             "routed",
                             "ignored_keys"
                         ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "PurchasablePlan": {
+                "type": "object",
+                "properties": {
+                    "plan_key": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "unit_amount": {
+                        "type": "integer"
+                    },
+                    "currency": {
+                        "type": "string"
+                    },
+                    "billing_period": {
+                        "type": "string",
+                        "enum": [
+                            "month",
+                            "year",
+                            "once"
+                        ]
+                    },
+                    "is_per_seat": {
+                        "type": "boolean"
+                    },
+                    "is_per_device": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "plan_key",
+                    "name",
+                    "unit_amount",
+                    "currency",
+                    "billing_period"
+                ]
+            },
+            "PurchasablePlanListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PurchasablePlan"
+                        }
                     }
                 },
                 "required": [
