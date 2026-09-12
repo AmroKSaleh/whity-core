@@ -174,6 +174,22 @@ final class SettingsRegistry
     //     been promised, and not counting it lets a tenant invite a thousand
     //     people past a limit of ten and reach it the moment they accept.
     //     Instances that treat a seat as "someone actually working" set it off.
+    // WHICH DEVICES A PER-DEVICE PRICE COUNTS. "Per device" is at least three
+    // billing models and they produce different invoices from identical facts:
+    //
+    //   activated         — billed from the moment a code was redeemed and the
+    //                       unit entered service. The default, because it is
+    //                       what a customer intuitively thinks they pay for and
+    //                       it does not bill them for stock in a cupboard.
+    //   provisioned       — billed from the moment a serial was imported.
+    //   active_in_period  — billed only if the unit was seen during the period.
+    //
+    // Migration 146 records provisioned_at, activated_at and last_seen_at as
+    // SEPARATE facts precisely so this can be a setting rather than a schema
+    // decision: a deployment that changes its mind changes a value here instead
+    // of migrating historical invoices.
+    public const LICENSING_BILLING_BASIS = 'licensing.billing_basis';
+
     public const SEATS_ENFORCEMENT = 'seats.enforcement';
     public const SEATS_COUNT_INVITED = 'seats.count_invited';
 
@@ -656,6 +672,7 @@ final class SettingsRegistry
         self::BILLING_INVOICE_NUMBER_SCOPE,
         self::BILLING_INVOICE_NUMBER_RESET,
         self::PAYMENTS_MOCK_ENABLED,
+        self::LICENSING_BILLING_BASIS,
         self::SEATS_ENFORCEMENT,
         self::SEATS_COUNT_INVITED,
         self::PLUGINS_STORE_ALLOWED_HOSTS,
@@ -774,6 +791,7 @@ final class SettingsRegistry
         // Seat strictness. Three levels rather than the wall's four: a seat
         // limit is only ever consulted when something is being ADDED, so
         // "block writes" and "block everything" would be the same rule.
+        self::LICENSING_BILLING_BASIS => ['activated', 'provisioned', 'active_in_period'],
         self::SEATS_ENFORCEMENT => ['off', 'warn', 'block'],
         self::BILLING_INVOICE_NUMBER_SCOPE => ['shared', 'per_tenant'],
         self::BILLING_INVOICE_NUMBER_RESET => ['never', 'yearly', 'monthly'],
@@ -868,6 +886,7 @@ final class SettingsRegistry
         // that never sold a seat must not start refusing members because a
         // limit it never set has a default. 'warn' counts and reports without
         // refusing; an operator opts into 'block'.
+        self::LICENSING_BILLING_BASIS => 'activated',
         self::SEATS_ENFORCEMENT => 'warn',
         self::SEATS_COUNT_INVITED => 'true',
         // Zero tax until an operator says otherwise — see the constant.
@@ -1273,6 +1292,7 @@ final class SettingsRegistry
             self::PAYMENTS_MOCK_ENABLED => self::validateBoolean($value, self::PAYMENTS_MOCK_ENABLED),
             self::DUNNING_RETRY_SCHEDULE_DAYS => \Whity\Core\Billing\DunningSchedule::parseProblem($value),
             self::DUNNING_LOCK_AFTER_DAYS => self::validateLockAfterDays($value),
+            self::LICENSING_BILLING_BASIS => self::validateEnum($key, $value),
             self::SEATS_COUNT_INVITED => self::validateBoolean($value, self::SEATS_COUNT_INVITED),
             self::MAIL_BRAND_COLOR => self::validateHexColor($value),
             self::MAIL_SMTP_HOST,

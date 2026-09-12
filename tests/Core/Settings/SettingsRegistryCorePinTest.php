@@ -82,6 +82,7 @@ final class SettingsRegistryCorePinTest extends TestCase
             'mail.footer_text',
             'billing.enforcement_default',
             'billing.grace_days',
+            'licensing.billing_basis',
             'seats.enforcement',
             'seats.count_invited',
             // #billing — invoicing. Eight tenant-overridable (tax treatment
@@ -235,6 +236,7 @@ final class SettingsRegistryCorePinTest extends TestCase
             'mail.footer_text' => '',
             'billing.enforcement_default' => 'warn',
             'billing.grace_days' => '7',
+            'licensing.billing_basis' => 'activated',
             'seats.enforcement' => 'warn',
             'seats.count_invited' => 'true',
             // Tax defaults to ZERO, not to any country's rate: charging tax
