@@ -258,6 +258,19 @@ final class SubscriptionBillingRun
      * month still owes this month; stopping the meter because they are behind
      * would quietly forgive the debt the dunning machine is chasing them for.
      *
+     * A TENANT BILLED BY SOMEONE ELSE IS EXCLUDED ENTIRELY. `external_ref` marks
+     * a tenant whose subscription is held by the external billing service: that
+     * service charges them, renews them, and owns their period. This run would
+     * otherwise see the period end that reconciliation copied down, decide the
+     * month was due, and raise a SECOND bill for a month already paid — charged
+     * once by them and invoiced again by us, in a way that looks exactly like
+     * every other invoice.
+     *
+     * The predicate is the whole mechanism, deliberately: which engine bills a
+     * tenant is decided by whether that tenant has an external subscription,
+     * rather than by a deployment-wide switch that would be wrong for any
+     * installation running both — a self-hosted customer alongside a paying one.
+     *
      * @return list<array<string, mixed>>
      *
      * @tenant-guard-ignore: the billing run has no tenant context by design —
@@ -273,6 +286,7 @@ final class SubscriptionBillingRun
                 AND current_period_end IS NOT NULL
                 AND current_period_end <= :now
                 AND tenant_id <> :system
+                AND external_ref IS NULL
               ORDER BY current_period_end ASC, tenant_id ASC
               LIMIT :limit'
         );

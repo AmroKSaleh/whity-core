@@ -143,7 +143,8 @@ final class CoreApiSchemas
             self::dataTypeRoutes(),
             self::reportRoutes(),
             self::resourceRoleGrantRoutes(),
-            self::licensingRoutes()
+            self::licensingRoutes(),
+            self::externalBillingRoutes()
         );
     }
 
@@ -4396,6 +4397,31 @@ final class CoreApiSchemas
                 'activated' => self::bool(),
                 'device_id' => self::int(true),
             ], ['activated']),
+
+            // ── Buying a subscription (migration 149) ─────────────────────────
+            // whity-core does not take money; a separate service does. These
+            // shapes are the whole of what crosses that boundary — note what is
+            // absent: no amount, no currency, no payment method, no transaction,
+            // no provider. None of them are whity-core's business, and a field
+            // here would invite a client to act on one.
+            'CheckoutStartRequest' => self::object([
+                'plan_key' => self::str(),
+                'billing_period' => ['type' => 'string', 'enum' => ['month', 'year', 'once']],
+            ], ['plan_key']),
+            // Only a destination. The session reference is a capability token
+            // and is deliberately not returned — the browser needs somewhere to
+            // go, and nothing else here has to reach it.
+            'CheckoutStartResponse' => self::dataEnvelope(self::object([
+                'url' => self::str(),
+            ], ['url'])),
+            'BillingAccessResponse' => self::dataEnvelope(self::object([
+                'has_access' => self::bool(),
+                'status' => self::str(true),
+                'plan' => self::str(true),
+                'access_until' => self::str(true),
+                'cancel_at_period_end' => self::bool(),
+                'checkout_status' => self::str(true),
+            ], ['has_access'])),
 
             'PlanPriceListResponse' => self::listEnvelope('PlanPrice'),
             'PlanPriceResponse' => self::dataEnvelope(SchemaBuilder::ref('PlanPrice')),
@@ -9001,6 +9027,97 @@ final class CoreApiSchemas
                         400 => self::errorResponse('The payload could not be verified'),
                         404 => self::errorResponse('No such payment provider on this instance'),
                         422 => self::errorResponse('Authentic but unintelligible'),
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Buying a subscription, and finding out whether one was bought.
+     *
+     * whity-core's entire relationship with whoever takes the money is two
+     * questions — where to send a tenant to pay, and whether a tenant may use
+     * paid features — and that is all these routes are.
+     *
+     * THE WEBHOOK IS DOCUMENTED BUT NOT CALLABLE BY A CLIENT. It is listed so
+     * the surface is honest about what exists and what is open, not because
+     * anybody integrating should POST to it: the only sender that can is one
+     * holding the signing secret.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function externalBillingRoutes(): array
+    {
+        return [
+            self::permissionRoute('POST', '/api/billing/checkout', 'billing:pay', [
+                'summary' => 'Somewhere to send this tenant to pay',
+                'description' =>
+                    'Names a PLAN, never a price on the billing service — letting a caller pass the '
+                    . 'other side\'s price identifier through would make "which plan am I buying" a '
+                    . 'decision taken in the browser, and a tenant could name the cheapest price for '
+                    . 'the most expensive plan. Answers a single `url` to redirect to. '
+                    . 'WHAT IS BEHIND THAT URL IS NOT KNOWABLE HERE and must not become knowable: a '
+                    . 'card page, transfer instructions, or a method that does not exist yet. '
+                    . 'Requires the plan to be priced on these terms AND to carry the handle the '
+                    . 'billing service knows it by; without one, 422.',
+                'tags' => ['billing'],
+                'request' => 'CheckoutStartRequest',
+                'responses' => [
+                    200 => self::jsonResponse('Where to send the payer', 'CheckoutStartResponse'),
+                    404 => self::errorResponse('This deployment does not sell subscriptions'),
+                    422 => self::errorResponse('That plan cannot be bought on these terms'),
+                    502 => self::errorResponse('The billing service refused the request'),
+                    503 => self::errorResponse('The billing service is temporarily unreachable'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/billing/return', 'billing:view', [
+                'summary' => 'The payer is back — what actually happened?',
+                'description' =>
+                    'THE QUERY STRING IS EVIDENCE OF NOTHING. The payer arrives at '
+                    . '`?checkout=<ref>&status=<s>` in a browser they control, and anyone can type '
+                    . '`status=completed` into an address bar. Nothing in it is signed and nothing '
+                    . 'about it proves a payment ever happened. This route ignores it as an answer '
+                    . 'and re-reads access from the billing service, which is the authority. '
+                    . '`checkout_status` in the reply is read server-to-server for WORDING only — '
+                    . 'so "your card was declined" can be shown instead of a silent redirect — and '
+                    . 'is null when the billing service could not be asked. Access is decided by '
+                    . '`has_access` alone.',
+                'tags' => ['billing'],
+                'responses' => [
+                    200 => self::jsonResponse('What the billing service says about this tenant', 'BillingAccessResponse'),
+                    502 => self::errorResponse('The billing service refused the request'),
+                    503 => self::errorResponse('The billing service is temporarily unreachable'),
+                ] + self::authErrors(),
+            ]),
+            [
+                'method' => 'POST',
+                'path' => '/api/billing/webhook',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Subscription-change notifications (signed, not user-authenticated)',
+                    'description' =>
+                        'UNAUTHENTICATED BY NECESSITY: the sender is a server, holds no session, and '
+                        . 'never will. THE SIGNATURE IS THE CREDENTIAL — `X-Pay-Signature` is '
+                        . '`sha256=` plus the HMAC-SHA256 of `X-Pay-Timestamp . "." . rawBody`, '
+                        . 'verified with a constant-time comparison over the RAW bytes before the '
+                        . 'payload is decoded, and refused outright when no secret is configured. '
+                        . 'Deliveries repeat by design, so `X-Pay-Event-Id` is recorded and a '
+                        . 'replay is acknowledged without being acted on twice. '
+                        . 'THE BODY IS NOT A WRITE PATH: the only thing taken from it is which '
+                        . 'subject to go and ask about, so even a correctly signed forgery can do no '
+                        . 'more than make this deployment re-read its own state. Events other than '
+                        . 'subscription changes are acknowledged and ignored — a non-2xx would just '
+                        . 'burn the sender\'s retry budget on something that will never become '
+                        . 'interesting.',
+                    'tags' => ['billing'],
+                    'responses' => [
+                        200 => self::jsonResponse('Received, or deliberately ignored', self::object([
+                            'received' => self::bool(),
+                        ], ['received'])),
+                        401 => self::errorResponse('The signature did not verify, or the delivery was stale'),
+                        503 => self::errorResponse('Temporarily could not be acted on — retry'),
                     ],
                 ],
             ],
