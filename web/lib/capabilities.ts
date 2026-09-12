@@ -65,6 +65,15 @@ export const PLANS_MANAGE = 'plans:manage';
 export const BILLING_VIEW = 'billing:view';
 export const BILLING_PAY = 'billing:pay';
 
+// #licensing — hardware a tenant is licensed for, and the codes that activate
+// it. THREE capabilities because they are three different jobs: reading the
+// estate, importing stock that arrived, and MINTING A CODE — the last being a
+// commercial act (something was sold) that a warehouse hand who unpacks boxes
+// has no business performing.
+export const LICENSING_VIEW = 'licensing:view';
+export const LICENSING_MANAGE = 'licensing:manage';
+export const LICENSING_ISSUE = 'licensing:issue';
+
 /**
  * i18n admin management (WC-583). LANGUAGES_MANAGE is a PLATFORM capability —
  * the backend additionally requires the caller to be acting in the SYSTEM
