@@ -302,7 +302,16 @@ jobs:
           fi
 
           echo "Shard ${{ matrix.shard }}/${shards}: ${#files[@]} of ${total} test files"
-          vendor/bin/phpunit \
+
+          # `memory_limit=-1` for the same reason the merge job below carries it:
+          # the ceiling must not be the thing that fails the build. A shard runs
+          # to completion and THEN serialises its coverage object, so the peak
+          # arrives after the last assertion — which is how this failed once with
+          # every test green ("Tests: 1779 ... OK", then a fatal in
+          # php-code-coverage's PHP writer at the 768M default). A red build
+          # whose only real signal is "the suite grew" teaches people to re-run
+          # CI rather than read it. The runner has ~7 GB; the shard peaked at 0.6.
+          php -d memory_limit=-1 vendor/bin/phpunit \
             --coverage-php "coverage-shards/shard-${{ matrix.shard }}.cov" \
             "${files[@]}"
 
