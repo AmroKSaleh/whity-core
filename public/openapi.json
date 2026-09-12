@@ -15848,6 +15848,392 @@
                 ]
             }
         },
+        "/api/v1/licensing/codes": {
+            "post": {
+                "operationId": "post_api_v1_licensing_codes",
+                "summary": "Mint an activation code",
+                "tags": [
+                    "licensing"
+                ],
+                "description": "The commercial act: something was sold, so a code exists to redeem. THE CODE IS RETURNED ONCE AND IS NEVER RETRIEVABLE IN FULL AGAIN \u2014 stored canonically, the same contract as a generated API token. Bind it to a unit with `licensed_device_id` (which must belong to the caller's tenant, or 404), or omit it and let the redeemer name the serial. `max_redemptions` defaults to 1; higher values exist for a classroom set redeemed from one printed card. `expires_at` is YYYY-MM-DD or YYYY-MM-DD HH:MM:SS.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ActivationCodeIssueRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The code, shown for the only time",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ActivationCodeIssuedResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such device in this tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "The redemption limit or expiry cannot be used",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/licensing/codes/{id}/revoke": {
+            "post": {
+                "operationId": "post_api_v1_licensing_codes_id_revoke",
+                "summary": "Kill a code that leaked",
+                "tags": [
+                    "licensing"
+                ],
+                "description": "Irreversible, and scoped to the caller's tenant. Redemptions already made STAND \u2014 revoking cancels what the code can still do, not what it did, because the units it activated are in service and de-licensing them would strand a classroom mid-lesson. A code that does not exist, belongs to another tenant, or was already revoked answers 404 alike.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The code is dead",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ActivationCodeRevokedResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such code, or it was already revoked",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/licensing/devices": {
+            "get": {
+                "operationId": "get_api_v1_licensing_devices",
+                "summary": "The units this tenant is licensed for",
+                "tags": [
+                    "licensing"
+                ],
+                "description": "Newest first, capped at 500. Carries the three timestamps separately \u2014 `provisioned_at` (the serial was imported), `activated_at` (a code was redeemed against it) and `last_seen_at` (it last checked in) \u2014 because which one a per-device price bills on is configuration, not a property of the row. A unit with `activated_at` set has been put into service; one without is stock.",
+                "responses": {
+                    "200": {
+                        "description": "This tenant's licensed units",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/LicensedDeviceListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_v1_licensing_devices",
+                "summary": "Provision serials in bulk",
+                "tags": [
+                    "licensing"
+                ],
+                "description": "BULK BECAUSE STOCK ARRIVES IN BOXES \u2014 up to 500 per request. Each entry is a serial string, or an object with `serial_number` and an optional `label`. A serial this tenant already has is SKIPPED, not rejected: re-uploading a spreadsheet is the normal way this goes wrong, and failing the whole batch on row 400 would leave the caller with no idea which 399 landed. The response counts what was created and what was already there; answers 207 when some entries were refused, with a reason for each. Serials are unique WITHIN a tenant \u2014 two customers may hold hardware carrying the same manufacturer serial.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DeviceProvisionRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Every serial was accepted or already present",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DeviceProvisionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "207": {
+                        "description": "Imported, with some entries refused",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DeviceProvisionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "serial_numbers missing, empty, or over the 500 limit",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/login": {
             "post": {
                 "operationId": "post_api_v1_login",
@@ -23395,7 +23781,7 @@
                 "tags": [
                     "plans"
                 ],
-                "description": "A plan may carry many prices \u2014 one per currency, billing period and seat basis \u2014 but only ONE LIVE price per combination of those. A second live price for the same terms is refused with 409 rather than accepted, because two of them would make the checkout, the invoice and the price list each pick differently and somebody be charged an amount no screen displayed. Retire the existing one first. `unit_amount` must be an integer of minor units; a decimal is refused with 422, since 49.9 truncating to 49 is a hundredfold error that looks like a real price.",
+                "description": "A plan may carry many prices \u2014 one per currency, billing period and unit basis \u2014 but only ONE LIVE price per combination of those. A second live price for the same terms is refused with 409 rather than accepted, because two of them would make the checkout, the invoice and the price list each pick differently and somebody be charged an amount no screen displayed. Retire the existing one first. `unit_amount` must be an integer of minor units; a decimal is refused with 422, since 49.9 truncating to 49 is a hundredfold error that looks like a real price. THE UNIT BASIS IS WHAT `unit_amount` MULTIPLIES BY: neither flag set prices the plan flat, `is_per_seat` multiplies by the seats the tenant holds, and `is_per_device` by its licensed devices. Both at once is refused with 422 \u2014 a price multiplies by one thing, or by nothing. Which devices count on a per-device price is the `licensing.billing_basis` setting, resolved per tenant.",
                 "parameters": [
                     {
                         "name": "id",
@@ -25453,6 +25839,98 @@
                     },
                     "503": {
                         "description": "Temporarily unavailable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/public/licensing/redeem": {
+            "post": {
+                "operationId": "post_api_v1_public_licensing_redeem",
+                "summary": "Activate a device with a code (public, unauthenticated)",
+                "tags": [
+                    "licensing"
+                ],
+                "description": "UNAUTHENTICATED BY DESIGN. The person typing the code may be an end user or a student with no account and no session, so they are authorised by POSSESSION: the code's own entropy and check characters, the pre-auth IP rate limiter, and the fact that every fact used to resolve the activation comes from the code rather than the caller. Nothing the caller sends is trusted, including any tenant they name. Send `serial_number` \u2014 the number printed on the unit \u2014 when the code is not already bound to one; never an internal id, which a person cannot know and which would let a caller enumerate rows by number. ERRORS NEVER DISTINGUISH AN UNKNOWN CODE FROM A MISTYPED ONE, because doing so would let an anonymous caller learn which well-formed codes exist.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ActivationRedeemRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The unit is activated",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ActivationRedeemResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "The code cannot be redeemed \u2014 invalid, expired, revoked, spent, or needing a serial",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many redemption attempts from this address",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -35259,6 +35737,86 @@
     },
     "components": {
         "schemas": {
+            "ActivationCodeIssueRequest": {
+                "type": "object",
+                "properties": {
+                    "licensed_device_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "max_redemptions": {
+                        "type": "integer"
+                    },
+                    "expires_at": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                }
+            },
+            "ActivationCodeIssuedResponse": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "code": {
+                        "type": "string"
+                    },
+                    "max_redemptions": {
+                        "type": "integer"
+                    },
+                    "expires_at": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "id",
+                    "code",
+                    "max_redemptions"
+                ]
+            },
+            "ActivationCodeRevokedResponse": {
+                "type": "object",
+                "properties": {
+                    "revoked": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "revoked"
+                ]
+            },
+            "ActivationRedeemRequest": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string"
+                    },
+                    "serial_number": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "code"
+                ]
+            },
+            "ActivationRedeemResponse": {
+                "type": "object",
+                "properties": {
+                    "activated": {
+                        "type": "boolean"
+                    },
+                    "device_id": {
+                        "type": "integer",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "activated"
+                ]
+            },
             "AdminPasswordResetSentResponse": {
                 "type": "object",
                 "properties": {
@@ -36617,6 +37175,74 @@
                 },
                 "required": [
                     "data"
+                ]
+            },
+            "DeviceProvisionRequest": {
+                "type": "object",
+                "properties": {
+                    "serial_numbers": {
+                        "type": "array",
+                        "maxItems": 500,
+                        "items": {
+                            "oneOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "serial_number": {
+                                            "type": "string"
+                                        },
+                                        "label": {
+                                            "type": "string",
+                                            "nullable": true
+                                        }
+                                    },
+                                    "required": [
+                                        "serial_number"
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                },
+                "required": [
+                    "serial_numbers"
+                ]
+            },
+            "DeviceProvisionResponse": {
+                "type": "object",
+                "properties": {
+                    "created": {
+                        "type": "integer"
+                    },
+                    "already_present": {
+                        "type": "integer"
+                    },
+                    "rejected": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "serial_number": {
+                                    "type": "string",
+                                    "nullable": true
+                                },
+                                "reason": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "reason"
+                            ]
+                        }
+                    }
+                },
+                "required": [
+                    "created",
+                    "already_present",
+                    "rejected"
                 ]
             },
             "Document": {
@@ -40426,6 +41052,60 @@
                     }
                 }
             },
+            "LicensedDevice": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "serial_number": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "provisioned",
+                            "active",
+                            "retired"
+                        ]
+                    },
+                    "provisioned_at": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "activated_at": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "last_seen_at": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "id",
+                    "serial_number",
+                    "status"
+                ]
+            },
+            "LicensedDeviceListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/LicensedDevice"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
             "LocalizedLabel": {
                 "type": "object",
                 "additionalProperties": {
@@ -43179,6 +43859,9 @@
                     "is_per_seat": {
                         "type": "boolean"
                     },
+                    "is_per_device": {
+                        "type": "boolean"
+                    },
                     "is_active": {
                         "type": "boolean"
                     },
@@ -43196,6 +43879,7 @@
                     "unit_amount",
                     "billing_period",
                     "is_per_seat",
+                    "is_per_device",
                     "is_active"
                 ]
             },
@@ -43217,6 +43901,9 @@
                         ]
                     },
                     "is_per_seat": {
+                        "type": "boolean"
+                    },
+                    "is_per_device": {
                         "type": "boolean"
                     }
                 },

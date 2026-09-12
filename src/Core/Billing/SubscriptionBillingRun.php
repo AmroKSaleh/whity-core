@@ -68,13 +68,21 @@ final class SubscriptionBillingRun
     /**
      * Bill every subscription whose period has ended.
      *
-     * @return array{invoiced: int, skipped: int, unpriced: int}
+     * `nothing_to_bill` is COUNTED SEPARATELY from `skipped`, because they mean
+     * different things to whoever reads the tally: skipped is "not due yet",
+     * while nothing_to_bill is "due, and the bill came to nothing" — a
+     * per-device plan with no devices in service. A run reporting forty of the
+     * latter is telling an operator something real about their customers;
+     * folding it into skipped would hide it.
+     *
+     * @return array{invoiced: int, skipped: int, unpriced: int, nothing_to_bill: int}
      */
     public function run(DateTimeImmutable $now): array
     {
         $invoiced = 0;
         $skipped = 0;
         $unpriced = 0;
+        $nothingToBill = 0;
 
         foreach ($this->dueSubscriptions($now) as $subscription) {
             $tenantId = (int) $subscription['tenant_id'];
@@ -104,11 +112,17 @@ final class SubscriptionBillingRun
             match ($outcome) {
                 'invoiced' => $invoiced++,
                 'unpriced' => $unpriced++,
+                'nothing_to_bill' => $nothingToBill++,
                 default => $skipped++,
             };
         }
 
-        return ['invoiced' => $invoiced, 'skipped' => $skipped, 'unpriced' => $unpriced];
+        return [
+            'invoiced' => $invoiced,
+            'skipped' => $skipped,
+            'unpriced' => $unpriced,
+            'nothing_to_bill' => $nothingToBill,
+        ];
     }
 
     /**
@@ -116,7 +130,7 @@ final class SubscriptionBillingRun
      *
      * @param array<string, mixed> $subscription
      *
-     * @return 'invoiced'|'unpriced'|'skipped'
+     * @return 'invoiced'|'unpriced'|'skipped'|'nothing_to_bill'
      */
     private function billOne(array $subscription, DateTimeImmutable $now): string
     {
@@ -148,6 +162,32 @@ final class SubscriptionBillingRun
         $periodStart = $this->previousPeriodStart($periodEnd, $period);
         $nextPeriodEnd = $this->advance($periodEnd, $period);
 
+        $quantity = $this->quantityFor($tenantId, $price, $periodStart, $periodEnd);
+
+        // NOTHING TO BILL IS NOT AN ERROR, and it is not an invoice either. A
+        // per-device price with no devices in service means the tenant owes
+        // nothing this period — so the period is ADVANCED and no invoice is
+        // raised. The alternatives are both worse: a zero-quantity line is
+        // refused by the schema, and inventing a phantom unit to avoid that
+        // would charge for hardware nobody is using.
+        //
+        // The period still advances, because not advancing would retry the
+        // same empty period forever and the tenant would never be billed for
+        // the month they finally activate something.
+        if ($quantity < 1) {
+            $this->subscriptions->setSubscription($tenantId, [
+                'current_period_end' => $nextPeriodEnd->format('Y-m-d H:i:s'),
+            ]);
+
+            $this->logger->info('Nothing to bill this period; advancing without an invoice.', [
+                'tenant_id' => $tenantId,
+                'plan_id' => $planId,
+                'period_end' => $periodEnd->format('Y-m-d'),
+            ]);
+
+            return 'nothing_to_bill';
+        }
+
         // ONE TRANSACTION. Invoicing without advancing would re-bill the same
         // period next tick; advancing without invoicing would skip a month
         // silently, which is the worse of the two.
@@ -166,7 +206,7 @@ final class SubscriptionBillingRun
                 $tenantId,
                 $draft,
                 $this->lineDescription($subscription, $periodStart, $periodEnd),
-                $this->quantityFor($tenantId, $price),
+                $quantity,
                 (int) $price['unit_amount'],
                 $this->taxRateFor($tenantId),
             );
@@ -259,6 +299,21 @@ final class SubscriptionBillingRun
      * figure labelled JOD would be wrong by roughly a factor of one and a half
      * — an error that looks like a price rise rather than a bug.
      *
+     * ONE SUBSCRIPTION BILLS ONE PRICE. The active-price index permits a plan
+     * to carry a flat, a per-seat and a per-device price side by side, because
+     * those are ALTERNATIVES a plan may offer — not lines that add up on one
+     * invoice. A subscription records the plan, not which of its prices it is
+     * on, so when several are active the choice below is the whole decision,
+     * and it is made explicitly rather than left to insertion order.
+     *
+     * THE TIE-BREAK PREFERS THE PRICE THAT MULTIPLIES BY THE LEAST: flat, then
+     * per-device, then per-seat. Not because that ordering is meaningful in
+     * itself, but because the alternative — whichever row happened to be
+     * created first — makes an invoice depend on the order somebody typed
+     * things into an admin screen. Carrying more than one active price is an
+     * ambiguity the operator has to resolve, so it is logged rather than
+     * silently decided.
+     *
      * @return array<string, mixed>|null
      */
     private function activePriceFor(int $tenantId, int $planId): ?array
@@ -268,17 +323,34 @@ final class SubscriptionBillingRun
         $statement = $this->pdo->prepare(
             'SELECT * FROM plan_prices
               WHERE plan_id = :plan_id AND currency = :currency AND is_active = :on
-              ORDER BY is_per_seat ASC, id ASC
-              LIMIT 1'
+              ORDER BY is_per_seat ASC, is_per_device ASC, id ASC'
         );
         $statement->bindValue(':plan_id', $planId, PDO::PARAM_INT);
         $statement->bindValue(':currency', $currency);
         $statement->bindValue(':on', true, PDO::PARAM_BOOL);
         $statement->execute();
 
-        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        /** @var list<array<string, mixed>> $rows */
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
 
-        return $row === false ? null : $row;
+        if ($rows === []) {
+            return null;
+        }
+
+        if (count($rows) > 1) {
+            $this->logger->warning(
+                'Plan has more than one active price in this currency; billing the first by tie-break.',
+                [
+                    'tenant_id' => $tenantId,
+                    'plan_id' => $planId,
+                    'currency' => $currency,
+                    'price_ids' => array_map(static fn (array $r): int => (int) $r['id'], $rows),
+                    'billed_price_id' => (int) $rows[0]['id'],
+                ]
+            );
+        }
+
+        return $rows[0];
     }
 
     /**
@@ -291,8 +363,16 @@ final class SubscriptionBillingRun
      *
      * @param array<string, mixed> $price
      */
-    private function quantityFor(int $tenantId, array $price): int
-    {
+    private function quantityFor(
+        int $tenantId,
+        array $price,
+        DateTimeImmutable $periodStart,
+        DateTimeImmutable $periodEnd,
+    ): int {
+        if ($this->isTrue($price['is_per_device'] ?? false)) {
+            return $this->deviceCountFor($tenantId, $periodStart, $periodEnd);
+        }
+
         if (!$this->isTrue($price['is_per_seat'] ?? false)) {
             return 1;
         }
@@ -306,6 +386,76 @@ final class SubscriptionBillingRun
         // At least one: a tenant with no active members still has a
         // subscription, and a zero-quantity line is refused by the schema.
         return max(1, (int) $statement->fetchColumn());
+    }
+
+    /**
+     * How many licensed devices this period bills for.
+     *
+     * WHICH DEVICES COUNT IS A SETTING, not a decision taken here. "Per device"
+     * is at least three billing models — billed from provisioning, from
+     * activation, or only for units actually seen in the period — and they
+     * produce different invoices from identical facts. Migration 146 records
+     * provisioned_at, activated_at and last_seen_at as separate columns
+     * precisely so this can be configuration: a deployment that changes its
+     * mind changes a value instead of migrating invoices it has already sent.
+     *
+     * COUNTED AGAINST THE PERIOD, not against now. A device retired last month
+     * must not appear on this month's invoice, and one activated on the last
+     * day of the period must — the same discipline the per-seat count above
+     * follows, for the same reason: the invoice describes a period, and an
+     * invoice that silently re-counts when it is re-read is not an invoice.
+     */
+    private function deviceCountFor(
+        int $tenantId,
+        DateTimeImmutable $periodStart,
+        DateTimeImmutable $periodEnd,
+    ): int {
+        // PER TENANT, falling back to the deployment default. Two customers on
+        // per-device plans can genuinely bill differently — one pays for every
+        // unit it has been shipped, another only for units its staff actually
+        // used this month — and that is a term in a contract, not a property of
+        // the installation. Reading only the global value would force the first
+        // customer's deal onto the second.
+        $basis = $this->setting($tenantId, SettingsRegistry::LICENSING_BILLING_BASIS, 'activated');
+
+        $end = $periodEnd->format('Y-m-d H:i:s');
+        $start = $periodStart->format('Y-m-d H:i:s');
+
+        // Every arm excludes units retired BEFORE the period began: they were
+        // not in service for any of it. A unit retired DURING the period still
+        // counts, because it was.
+        $sql = match ($basis) {
+            'provisioned' => 'SELECT COUNT(*) FROM licensed_devices
+                               WHERE tenant_id = :tenant_id
+                                 AND provisioned_at <= :period_end
+                                 AND (retired_at IS NULL OR retired_at >= :period_start)',
+            'active_in_period' => 'SELECT COUNT(*) FROM licensed_devices
+                                    WHERE tenant_id = :tenant_id
+                                      AND last_seen_at IS NOT NULL
+                                      AND last_seen_at >= :period_start
+                                      AND last_seen_at <= :period_end',
+            // 'activated', and the fallback for an unrecognised value: billing
+            // for units put into service is the safest reading of "per device",
+            // and a typo in a setting must not silently widen an invoice.
+            default => 'SELECT COUNT(*) FROM licensed_devices
+                         WHERE tenant_id = :tenant_id
+                           AND activated_at IS NOT NULL
+                           AND activated_at <= :period_end
+                           AND (retired_at IS NULL OR retired_at >= :period_start)',
+        };
+
+        $statement = $this->pdo->prepare($sql);
+        $statement->execute([
+            ':tenant_id' => $tenantId,
+            ':period_end' => $end,
+            ':period_start' => $start,
+        ]);
+
+        // ZERO IS A REAL ANSWER HERE, unlike the seat count. A tenant with no
+        // activated devices owes nothing for devices, and the caller decides
+        // whether that means no line at all — inventing a phantom unit would
+        // put a charge on an invoice for hardware nobody is using.
+        return max(0, (int) $statement->fetchColumn());
     }
 
     /** @param array<string, mixed> $subscription */

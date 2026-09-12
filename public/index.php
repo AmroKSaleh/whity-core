@@ -2384,55 +2384,50 @@ $router->register('DELETE', '/api/plans/{id:\d+}/prices/{priceId:\d+}',    [$pla
 
 // #billing — the payment rails this instance offers.
 //
-// BUILT FROM SETTINGS, NOT FROM ENV, because which rails an instance runs is an
-// operator decision made in the product rather than a deployment decision made
-// in a file. The CliQ webhook secret is the exception: it lives in the
-// encrypted-secret store under a key that is deliberately NOT a SettingsRegistry
-// key, exactly as the SMTP password does, so it can never be read back through
-// GET /settings.
+// WHITY NO LONGER PROCESSES PAYMENTS ITSELF. The CliQ rail that used to be
+// registered here was removed: taking money against a bank moved to a separate
+// payment service, and a second implementation inside the application would be
+// a second place for money to go wrong.
+//
+// WHAT REMAINS IS THE SEAM, and it is the point of the exercise. Whity records
+// what it is owed and what has been paid; a "rail" is simply whatever tells it
+// money arrived. The payment service will register here as one more adapter,
+// and nothing downstream of this line — the ledger, reconciliation, dunning,
+// the invoice lifecycle — needs to know which rail it was.
 //
 // A RAIL THAT IS OFF IS NOT REGISTERED AT ALL. The registry's `available()`
-// already filters unconfigured ones, but not registering an rail an operator
+// already filters unconfigured ones, but not registering a rail an operator
 // has switched off means its webhook route answers 404 rather than accepting
 // callbacks for a rail nobody is using.
 $paymentProviders = new \Whity\Core\Payment\PaymentProviderRegistry();
 $globalPaymentSettings = $settingsService->getGlobal();
 
-if (($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ_ENABLED] ?? 'false') === 'true') {
-    $paymentProviders->register(new \Whity\Core\Payment\Cliq\CliqPaymentProvider(
-        (string) ($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ_ALIAS] ?? ''),
-        (string) ($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ_BANK_NAME] ?? ''),
-        \Whity\Core\Payment\Cliq\CliqSecrets::read(
-            $globalSettingsRepository,
-            $secretStore,
-            \Whity\Core\Payment\Cliq\CliqSecrets::WEBHOOK_SECRET_KEY,
-            $logger
-        ),
-        (string) ($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_CLIQ_REFERENCE_PREFIX] ?? 'WHT-'),
-    ));
-}
-
-// The fake rail, for a deployment exercising the lifecycle without a bank. OFF
-// by default and global-only: a tenant able to switch on a rail that settles
-// its own invoices for free is the sharpest possible privilege escalation.
+// The fake rail, for a deployment exercising the lifecycle without any real
+// one. OFF by default and global-only: a tenant able to switch on a rail that
+// settles its own invoices for free is the sharpest possible privilege
+// escalation. It is also the only rail left until the payment service adapter
+// lands, so an instance with this off currently offers none — which is correct
+// rather than broken.
 if (($globalPaymentSettings[\Whity\Core\Settings\SettingsRegistry::PAYMENTS_MOCK_ENABLED] ?? 'false') === 'true') {
     $paymentProviders->register(new \Whity\Core\Payment\MockPaymentProvider(
-        \Whity\Core\Payment\Cliq\CliqSecrets::read(
+        \Whity\Core\Payment\PaymentSecrets::read(
             $globalSettingsRepository,
             $secretStore,
-            \Whity\Core\Payment\Cliq\CliqSecrets::MOCK_SECRET_KEY,
+            \Whity\Core\Payment\PaymentSecrets::MOCK_SECRET_KEY,
             $logger
-        ) ?: 'mock-secret'
+        )
     ));
 }
 
 // The card rail is ALWAYS registered and never configured — see
 // CardPaymentProviderAdapter. Registering it keeps the extension point visible
 // (and its refusal testable) without ever offering it to a customer, because
-// `available()` filters on isConfigured().
+// `available()` filters on isConfigured(). It outlived the CliQ removal on
+// purpose: it is a seam, not an implementation.
 $paymentProviders->register(new \Whity\Core\Payment\CardPaymentProviderAdapter());
 
 $invoiceRepository = new \Whity\Core\Billing\InvoiceRepository($db->getPdo());
+
 $paymentLedger = new \Whity\Core\Payment\PaymentLedger($db->getPdo());
 $paymentReconciler = new \Whity\Core\Billing\PaymentReconciler(
     $invoiceRepository,
@@ -2461,6 +2456,34 @@ $router->register('GET',  '/api/billing/invoices',              [$billingHandler
 $router->register('GET',  '/api/billing/invoices/{id:\d+}',     [$billingHandler, 'invoice'],  null, null, CorePermissions::BILLING_VIEW);
 $router->register('GET',  '/api/billing/methods',               [$billingHandler, 'methods'],  null, null, CorePermissions::BILLING_VIEW);
 $router->register('POST', '/api/billing/invoices/{id:\d+}/pay', [$billingHandler, 'pay'],      null, null, CorePermissions::BILLING_PAY);
+
+// ── per-device licensing ────────────────────────────────────────────────────
+//
+// Three capabilities, because they are three jobs: reading what is billable,
+// SELLING (minting a code), and provisioning or destroying stock. See
+// migration 147 for why they anchor on the capabilities they do.
+$licensingHandler = new \Whity\Api\LicensingApiHandler(
+    $db->getPdo(),
+    new \Whity\Core\Licensing\ActivationService($db->getPdo()),
+    $roleChecker
+);
+$router->register('GET',  '/api/licensing/devices',                 [$licensingHandler, 'devices'],    null, null, CorePermissions::LICENSING_VIEW);
+$router->register('POST', '/api/licensing/devices',                 [$licensingHandler, 'provision'],  null, null, CorePermissions::LICENSING_MANAGE);
+$router->register('POST', '/api/licensing/codes',                   [$licensingHandler, 'issueCode'],  null, null, CorePermissions::LICENSING_ISSUE);
+$router->register('POST', '/api/licensing/codes/{id:\d+}/revoke',   [$licensingHandler, 'revokeCode'], null, null, CorePermissions::LICENSING_MANAGE);
+
+// PUBLIC AND UNAUTHENTICATED, necessarily: the person redeeming may be an end
+// user or a student with no account at all. They are authorised by POSSESSION
+// of the code, which carries 50 bits of entropy and check characters, and every
+// fact used to resolve the activation comes from the code rather than from the
+// caller.
+//
+// REGISTERING THIS IS TWO EDITS. The line below is one; the other is the
+// pattern in EnforceTenantIsolation::PUBLIC_ROUTE_PATTERNS. Without the second,
+// the middleware refuses the request before routing happens and the endpoint
+// 401s while looking correctly registered — which this project has shipped once
+// already (#1214).
+$router->register('POST', '/api/public/licensing/redeem', [$licensingHandler, 'redeem'], null);
 
 // UNAUTHENTICATED, NECESSARILY: a bank cannot hold a session. What makes it
 // safe is that verification happens inside translateWebhook() before anything

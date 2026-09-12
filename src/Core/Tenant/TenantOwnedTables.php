@@ -140,6 +140,23 @@ final class TenantOwnedTables
         'payment_transactions' => '143_create_payment_transactions.php',
         'payment_methods' => '143_create_payment_transactions.php',
 
+        // Per-device licensing (migration 146). NOT `devices` — that name
+        // belongs to auth (migration 044: trusted browsers and device
+        // credentials). A row here is hardware with a serial that somebody pays
+        // for, which is a different thing that happens to share a word.
+        //
+        // `device_activation_codes` carries tenant_id even though the code
+        // itself is globally unique, because a redemption has to resolve the
+        // tenant FROM the code rather than be told it: an end user or student
+        // may redeem, and a tenant hint accepted from an untrusted caller is
+        // how one customer's code gets applied to another's account.
+        // `device_activation_redemptions` denormalises tenant_id from its
+        // parent for the same reason the invoice tables above do — so a read is
+        // policed directly instead of trusting a join.
+        'licensed_devices' => '146_create_licensed_devices.php',
+        'device_activation_codes' => '146_create_licensed_devices.php',
+        'device_activation_redemptions' => '146_create_licensed_devices.php',
+
         // WC-docdesigner — document/label designer persistence (migration 059).
         // Saved templates and reusable blocks; the client object is stored as JSON
         // in `data`. Tenant-scoped + RBAC-gated visibility; every query binds

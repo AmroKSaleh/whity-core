@@ -35,6 +35,7 @@ final class SettingsRegistryTest extends TestCase
              'mail.events.deletion_enabled', 'mail.events.password_reset_enabled',
              'mail.brand_color', 'mail.footer_text',
              'billing.enforcement_default', 'billing.grace_days',
+             'licensing.billing_basis',
              'seats.enforcement', 'seats.count_invited',
              // #billing: invoicing. Every one differs per deployment, which is
              // why none is a constant in the invoicing code. Tax defaults to
@@ -58,8 +59,6 @@ final class SettingsRegistryTest extends TestCase
              // escalation. The dunning policy is per-tenant, because a
              // deployment chases its enterprise customers differently from its
              // self-service ones.
-             'payments.cliq_enabled', 'payments.cliq_alias',
-             'payments.cliq_bank_name', 'payments.cliq_reference_prefix',
              'payments.mock_enabled',
              'dunning.retry_schedule_days', 'dunning.lock_after_days',
              'plugins.store_allowed_hosts', 'plugins.store_enabled',
@@ -388,7 +387,17 @@ final class SettingsRegistryTest extends TestCase
         // 62 since #1068 added ui.hide_dates.
         // 65 since #1072 added the three documents.flow_max_* ceilings.
         // 67 since seats added seats.enforcement + seats.count_invited.
-        self::assertCount(85, $describe);
+        // 81 since the CliQ rail was removed, taking payments.cliq_enabled,
+        // _alias, _bank_name and _reference_prefix with it — Whity no longer
+        // processes payments against a bank, so there is nothing here for them
+        // to configure. The count going DOWN is the notable direction: this
+        // assertion exists so a key cannot vanish unnoticed, and a removal has
+        // to be argued for rather than absorbed.
+        // 82 since per-device pricing added licensing.billing_basis, which
+        // decides WHICH devices a per-device price counts. Migration 146 keeps
+        // provisioned_at, activated_at and last_seen_at as separate facts so
+        // that choice can be a setting rather than a schema decision.
+        self::assertCount(82, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

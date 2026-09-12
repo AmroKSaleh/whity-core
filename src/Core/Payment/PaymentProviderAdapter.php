@@ -49,7 +49,7 @@ namespace Whity\Core\Payment;
 interface PaymentProviderAdapter
 {
     /**
-     * The stable identifier this provider is stored under — 'cliq', 'mock'.
+     * The stable identifier this provider is stored under — 'mock', and whichever name the payment service adapter takes.
      *
      * It is written into `payment_transactions.provider` and forms half of the
      * idempotency key, so it must never change once rows exist. Lower case,
