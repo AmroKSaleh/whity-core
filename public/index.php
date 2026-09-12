@@ -86,6 +86,45 @@ if ($isCli && isset($argv[1])) {
         exit(0);
     }
 
+    // The safety net under the billing service's notifications (migration 149).
+    //
+    // Deliveries are best-effort with bounded retries, so this is what makes a
+    // missed one cost a delay rather than a customer who paid and cannot get in.
+    // Registered as a queue job too, but a deployment that runs no scheduler and
+    // no worker would have that job registered, invocable, and never invoked —
+    // indistinguishable from working until somebody pays. So it is also a plain
+    // command a cron can call, like the two sweeps below.
+    //
+    // THE PORTAL IS BUILT EXACTLY AS THE HTTP PATH BUILDS IT, so "configured"
+    // means the same thing to both and a deployment cannot reconcile against a
+    // service it does not otherwise talk to.
+    if ($command === 'billing:reconcile-access') {
+        $db = \Whity\Database\Database::connect();
+
+        $payBaseUrl = rtrim((string) ($_ENV['PAY_BASE_URL'] ?? getenv('PAY_BASE_URL') ?: ''), '/');
+        $payApiKey = (string) ($_ENV['PAY_API_KEY'] ?? getenv('PAY_API_KEY') ?: '');
+
+        $limit = null;
+        foreach ($argv as $arg) {
+            if (is_string($arg) && str_starts_with($arg, '--limit=')) {
+                $limit = max(1, (int) substr($arg, 8));
+            }
+        }
+
+        exit((new \Whity\Commands\BillingReconcileAccessCommand(
+            $db->getPdo(),
+            ($payBaseUrl !== '' && $payApiKey !== '')
+                ? new \Whity\Core\Billing\External\HttpBillingPortal(
+                    new \Whity\Core\Billing\External\CurlBillingTransport(
+                        max(1, (int) ($_ENV['PAY_TIMEOUT_SECONDS'] ?? getenv('PAY_TIMEOUT_SECONDS') ?: 10))
+                    ),
+                    $payBaseUrl,
+                    $payApiKey
+                )
+                : new \Whity\Core\Billing\External\NullBillingPortal(),
+        ))->execute($limit));
+    }
+
     // The retention sweep for form attachments nobody ever submitted (migration
     // 134). A `file` answer's bytes are written BEFORE the submission exists —
     // they have to be — so every abandoned form leaves an object no row will
@@ -170,6 +209,7 @@ if ($isCli && isset($argv[1])) {
     echo "  seed                       Seed database with default data\n";
     echo "  revoked-tokens:cleanup     Cleanup expired revoked tokens\n";
     echo "  form-uploads:sweep         Delete form attachments nobody ever submitted\n";
+    echo "  billing:reconcile-access   Re-ask the billing service who may use paid features\n";
     echo "  update:check               Compare the core version against the latest GitHub release\n";
     echo "  queue:work                 Run the durable async job worker loop\n";
     echo "  schedule:run               Run the cron-tick scheduler (exactly-once per minute)\n";
