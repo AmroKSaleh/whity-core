@@ -82,6 +82,7 @@ jobs:
       i18n: ${{ steps.filter.outputs.i18n }}
       date_display: ${{ steps.filter.outputs.date_display }}
       desktop_host: ${{ steps.filter.outputs.desktop_host }}
+      watchdog: ${{ steps.filter.outputs.watchdog }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -116,6 +117,12 @@ jobs:
             # php-host/ rather than the whole template — the Rust and TS sides
             # cannot move this guard, and pulling them in would run PHP static
             # analysis for every icon change.
+            # The external watchdog is a standalone Cloudflare Worker with its
+            # own `node --test` suite and no dependency on anything else here,
+            # so it gets its own filter rather than riding on `backend`.
+            watchdog:
+              - 'ops/watchdog/**'
+              - '.github/workflows/automated-tests.yml'
             desktop_host:
               - 'templates/tauri-desktop/php-host/**'
               - '.github/workflows/automated-tests.yml'
@@ -1088,6 +1095,40 @@ jobs:
   # Playwright here. A mutation-coverage regression surfaces on the next
   # scheduled run after merge.
 
+  # THE WATCHDOG'S OWN TESTS HAD NO RUNNER. 35 of them shipped in #1221 with an
+  # `npm test` script and nothing that ever invoked it, so the component whose
+  # entire purpose is noticing when something is broken was itself unverified on
+  # every commit after the one that added it. Caught by the frontend job's
+  # test-file reachability gate, which only ran here because this PR happened to
+  # touch a frontend path — the watchdog PR itself changed none, so the job
+  # skipped and merged green.
+  #
+  # No dependencies to install: `node --test` is in the runtime, and wrangler is
+  # a devDependency needed only to deploy. Seconds, not minutes.
+  watchdog:
+    name: External watchdog (unit tests)
+    needs: changes
+    if: needs.changes.outputs.watchdog == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # A GLOB, NOT A DIRECTORY AND NOT ONE NAMED FILE. `node --test test/`
+      # resolves `test` as a MODULE and dies with MODULE_NOT_FOUND, and naming
+      # the single file would leave a second one added later claimed by the
+      # reachability gate but run by nothing — the same orphan this job exists
+      # to close, quietly reintroduced. Quoted so Node expands it, not the shell.
+      - name: Run the watchdog unit tests
+        working-directory: ops/watchdog
+        run: npm test
+
   render-service:
     name: Render microservice (build, unit tests, real Puppeteer smoke)
     needs: changes
@@ -1616,6 +1657,7 @@ jobs:
       - postgres-integration
       - postgres-dialect
       - render-service
+      - watchdog
       - web
     runs-on: ubuntu-latest
     steps:

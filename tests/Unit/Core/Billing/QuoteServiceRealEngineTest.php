@@ -287,17 +287,43 @@ final class QuoteServiceRealEngineTest extends TestCase
         self::assertIsInt($array['total']);
     }
 
+    /**
+     * A PER-DEVICE PRICE IS REFUSED, NOT QUOTED AS ONE UNIT.
+     *
+     * This is the money test in this file. Falling through to the flat branch
+     * would quote 1 × unit for a price the billing run invoices at N × unit —
+     * the customer agrees to one number and is charged another, and the quote
+     * looks entirely plausible on screen. A thrown exception is a bug report; a
+     * wrong total is a dispute.
+     *
+     * It is not merely unimplemented, either. The quantity depends on a billing
+     * PERIOD a pre-purchase quote does not have: `licensing.billing_basis` may
+     * be `active_in_period`, which counts units seen between two dates, and
+     * there is no honest default window for a tenant who has bought nothing
+     * yet. Whoever wires checkout to per-device plans has to decide what a
+     * quote means there — this makes it a decision rather than an accident.
+     */
+    public function testAPerDevicePriceIsRefusedRatherThanQuotedAsASingleUnit(): void
+    {
+        $price = $this->price(1500, perSeat: false, perDevice: true);
+
+        $this->expectException(MoneyException::class);
+
+        $this->quotes->quote(self::TENANT, $price);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /** @return array<string, mixed> */
-    private function price(int $amount, bool $perSeat = false): array
+    private function price(int $amount, bool $perSeat = false, bool $perDevice = false): array
     {
         $id = $this->prices->create(
             $this->planId,
             'SAR',
             $amount,
             PlanPriceRepository::PERIOD_MONTH,
-            $perSeat
+            $perSeat,
+            $perDevice
         );
         $row = $this->prices->findById($id);
         self::assertNotNull($row);

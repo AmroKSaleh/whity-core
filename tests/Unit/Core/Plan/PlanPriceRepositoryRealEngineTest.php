@@ -159,6 +159,66 @@ final class PlanPriceRepositoryRealEngineTest extends TestCase
     }
 
     /**
+     * A flat and a per-device price are different terms too, since migration 148
+     * widened the live-price index. Without that widening this pair collides,
+     * and a plan could not be offered on both bases at once.
+     */
+    public function testFlatAndPerDeviceCanCoexistOnTheSameTerms(): void
+    {
+        $this->prices->create($this->planId, 'SAR', 9900, PlanPriceRepository::PERIOD_MONTH, false, false);
+        $this->prices->create($this->planId, 'SAR', 1500, PlanPriceRepository::PERIOD_MONTH, false, true);
+
+        self::assertCount(2, $this->prices->listForPlan($this->planId));
+    }
+
+    /**
+     * A PRICE MULTIPLIES BY ONE THING, OR BY NOTHING. Both flags together is not
+     * a price, it is an ambiguity — the billing run would have to choose a
+     * multiplier, and whichever it chose would be wrong half the time on an
+     * invoice somebody already paid.
+     *
+     * Refused HERE rather than left to the database CHECK, because a constraint
+     * violation arrives as a PDOException that the API handler reports as a 409
+     * about a duplicate price — the wrong answer entirely: nothing is
+     * duplicated, the price is incoherent.
+     */
+    public function testAPriceCannotBePerSeatAndPerDeviceAtOnce(): void
+    {
+        $this->expectException(PlanValidationException::class);
+
+        $this->prices->create($this->planId, 'SAR', 9900, PlanPriceRepository::PERIOD_MONTH, true, true);
+    }
+
+    /**
+     * THE FLAG SURVIVES THE ROUND TRIP AS A BOOLEAN. PostgreSQL hands back 'f'
+     * for false and `(bool) 'f'` is TRUE in PHP, so a raw cast would make every
+     * flat price read as per-device on the real engine and as flat on SQLite —
+     * every test passing while every production row lied.
+     */
+    public function testThePerDeviceFlagRoundTripsAsABoolean(): void
+    {
+        $flat = $this->prices->create($this->planId, 'SAR', 9900, PlanPriceRepository::PERIOD_MONTH, false, false);
+        $device = $this->prices->create($this->planId, 'SAR', 1500, PlanPriceRepository::PERIOD_MONTH, false, true);
+
+        self::assertFalse($this->row($flat)['is_per_device'], 'a flat price is not per-device');
+        self::assertTrue($this->row($device)['is_per_device']);
+    }
+
+    /**
+     * THE PRICE LIST MUST NOT DESCRIBE A DIFFERENT PRODUCT FROM THE INVOICE.
+     * The billing run reads `is_per_device` from its own SELECT; if this
+     * repository dropped the column while hydrating, every caller reading a
+     * price through it — the price list, the quote, the admin screen — would
+     * show a per-device price as flat.
+     */
+    public function testTheHydratedRowCarriesThePerDeviceFlagAtAll(): void
+    {
+        $id = $this->prices->create($this->planId, 'SAR', 1500, PlanPriceRepository::PERIOD_MONTH, false, true);
+
+        self::assertArrayHasKey('is_per_device', $this->row($id));
+    }
+
+    /**
      * THE POINT OF RETIRING RATHER THAN DELETING. The slot is freed for the new
      * price while the old row survives as the record of what somebody was
      * charged.
@@ -205,6 +265,33 @@ final class PlanPriceRepositoryRealEngineTest extends TestCase
         self::assertNull(
             $this->prices->findActive($this->planId, 'SAR', PlanPriceRepository::PERIOD_MONTH, true),
             'a flat price must not answer a per-seat question'
+        );
+    }
+
+    /**
+     * "SINGLE BY CONSTRUCTION" HAS TO STAY TRUE. findActive() promises callers
+     * it cannot pick between two rows — that is the sentence standing between a
+     * customer and a charge no screen displayed. Migration 148 put that promise
+     * at risk: a flat price and a per-device price share `is_per_seat = false`,
+     * so matching on seat-ness alone makes BOTH satisfy the query and hands back
+     * whichever the engine happened to return first.
+     */
+    public function testFindActiveDistinguishesPerDeviceFromFlat(): void
+    {
+        $flat = $this->prices->create($this->planId, 'SAR', 9900, PlanPriceRepository::PERIOD_MONTH, false, false);
+        $device = $this->prices->create($this->planId, 'SAR', 1500, PlanPriceRepository::PERIOD_MONTH, false, true);
+
+        $foundFlat = $this->prices->findActive($this->planId, 'SAR', PlanPriceRepository::PERIOD_MONTH, false, false);
+        $foundDevice = $this->prices->findActive($this->planId, 'SAR', PlanPriceRepository::PERIOD_MONTH, false, true);
+
+        self::assertNotNull($foundFlat);
+        self::assertNotNull($foundDevice);
+        self::assertSame($flat, $foundFlat['id'], 'the flat question must return the flat price');
+        self::assertSame($device, $foundDevice['id'], 'the per-device question must return the per-device price');
+        self::assertNotSame(
+            $foundFlat['id'],
+            $foundDevice['id'],
+            'two different questions returning one row means the predicate is not discriminating'
         );
     }
 

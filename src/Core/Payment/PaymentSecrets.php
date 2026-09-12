@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Whity\Core\Payment\Cliq;
+namespace Whity\Core\Payment;
 
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
@@ -11,6 +11,13 @@ use Whity\Core\Settings\GlobalSettingsRepository;
 
 /**
  * The payment rails' shared secrets: where they live, and how they are read.
+ *
+ * PROVIDER-AGNOSTIC BY DESIGN, and that is why it survived the removal of the
+ * CliQ rail it was originally written for. Whity no longer processes payments
+ * against a bank itself — that moved to a separate payment service — but any
+ * rail that receives a signed callback needs a shared secret kept out of the
+ * settings API, so the MECHANISM outlives the provider that prompted it.
+ * Adding a rail means adding a key below, not rebuilding this.
  *
  * THEY ARE DELIBERATELY NOT {@see \Whity\Core\Settings\SettingsRegistry} KEYS.
  * The settings API iterates registry keys, so anything registered there is
@@ -34,18 +41,17 @@ use Whity\Core\Settings\GlobalSettingsRepository;
  * A docblock is not a mechanism. {@see self::read()} and {@see self::write()}
  * are, and `whity-cli payments:secret` is how an operator reaches them.
  */
-final class CliqSecrets
+final class PaymentSecrets
 {
     /**
-     * The HMAC secret a CliQ settlement callback is signed with.
+     * The HMAC secret a callback is signed with.
      *
      * When it is absent the rail refuses EVERY callback rather than trusting
-     * them — see {@see CliqPaymentProvider::translateWebhook()}. That is the
+     * them — a rail verifies its own callbacks before parsing them. That is the
      * safe direction: an instance quietly accepting anything posted to its
      * callback URL loses money to whoever finds it, while one that refuses is
      * noticed the same day.
      */
-    public const WEBHOOK_SECRET_KEY = 'payments.cliq.webhook_secret_encrypted';
 
     /**
      * The fake rail's signing secret, so the development mock behaves like a
@@ -55,7 +61,6 @@ final class CliqSecrets
 
     /** The provider names `whity-cli payments:secret` accepts. */
     public const KEY_FOR_PROVIDER = [
-        'cliq' => self::WEBHOOK_SECRET_KEY,
         'mock' => self::MOCK_SECRET_KEY,
     ];
 

@@ -49,7 +49,7 @@ use Whity\Core\Money\Money;
 final class PaymentEvent
 {
     /**
-     * @param string $provider          Which rail produced this ('cliq', 'mock', …).
+     * @param string $provider          Which rail produced this ('mock', and whichever the payment service registers as).
      * @param string $externalReference The provider's identifier. Never empty.
      * @param Money  $amount            Negative for a refund.
      * @param ?int   $invoiceId         The invoice this settles, when known.

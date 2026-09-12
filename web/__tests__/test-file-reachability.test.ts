@@ -97,6 +97,20 @@ const RUNNERS: { name: string; owns: (file: string) => boolean }[] = [
     name: 'Playwright E2E',
     owns: (file) => file.startsWith('web/e2e/'),
   },
+  {
+    // `node --test test/` in ops/watchdog, run by the `External watchdog` CI
+    // job. Node's own runner, no framework — the Worker has no build step and
+    // nothing to configure.
+    //
+    // THIS ENTRY WAS ADDED WITH THE JOB, NOT BEFORE IT. The 35 tests here
+    // shipped with an `npm test` script that CI never invoked, which is
+    // precisely the orphan this file exists to catch; claiming ownership here
+    // without a runner that actually runs them would have silenced the gate
+    // instead of fixing the gap, and left the watchdog unverified while
+    // reading as covered.
+    name: 'watchdog node --test',
+    owns: (file) => file.startsWith('ops/watchdog/test/'),
+  },
 ];
 
 describe('test-file reachability', () => {

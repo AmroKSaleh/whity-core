@@ -142,7 +142,8 @@ final class CoreApiSchemas
             self::twoFactorRecoveryRoutes(),
             self::dataTypeRoutes(),
             self::reportRoutes(),
-            self::resourceRoleGrantRoutes()
+            self::resourceRoleGrantRoutes(),
+            self::licensingRoutes()
         );
     }
 
@@ -4186,10 +4187,11 @@ final class CoreApiSchemas
                 'unit_amount' => self::int(),
                 'billing_period' => ['type' => 'string', 'enum' => ['month', 'year', 'once']],
                 'is_per_seat' => self::bool(),
+                'is_per_device' => self::bool(),
                 'is_active' => self::bool(),
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
-            ], ['id', 'plan_id', 'currency', 'unit_amount', 'billing_period', 'is_per_seat', 'is_active']),
+            ], ['id', 'plan_id', 'currency', 'unit_amount', 'billing_period', 'is_per_seat', 'is_per_device', 'is_active']),
             // Early birds, offers and promo codes are ONE object (#billing). A
             // promotion carrying a `code` is typed by the customer; one without
             // applies automatically to whoever qualifies. Exactly one of
@@ -4315,6 +4317,86 @@ final class CoreApiSchemas
                 'plan_ids' => ['type' => 'array', 'items' => self::int()],
             ], ['name']),
 
+            // ── Per-device licensing (#licensing) ─────────────────────────────
+            // A unit of hardware a tenant is licensed for. THE THREE TIMESTAMPS
+            // ARE SEPARATE ON PURPOSE: `provisioned_at` is when the serial was
+            // imported, `activated_at` when someone redeemed a code against it,
+            // `last_seen_at` when it last checked in. Which of them a price
+            // bills on is `licensing.billing_basis`, so collapsing them into one
+            // "date" would destroy the distinction the invoice depends on.
+            'LicensedDevice' => self::object([
+                'id' => self::int(),
+                'serial_number' => self::str(),
+                'label' => self::str(true),
+                'status' => ['type' => 'string', 'enum' => ['provisioned', 'active', 'retired']],
+                'provisioned_at' => self::str(true),
+                'activated_at' => self::str(true),
+                'last_seen_at' => self::str(true),
+            ], ['id', 'serial_number', 'status']),
+            'LicensedDeviceListResponse' => self::listEnvelope('LicensedDevice'),
+            // Each entry is either a bare serial string or an object carrying a
+            // label, because stock arrives both ways: a column pasted out of a
+            // spreadsheet, or a proper export with names attached.
+            'DeviceProvisionRequest' => self::object([
+                'serial_numbers' => [
+                    'type' => 'array',
+                    'maxItems' => 500,
+                    'items' => ['oneOf' => [
+                        self::str(),
+                        self::object([
+                            'serial_number' => self::str(),
+                            'label' => self::str(true),
+                        ], ['serial_number']),
+                    ]],
+                ],
+            ], ['serial_numbers']),
+            // A PARTIAL IMPORT IS LEGIBLE, not mysterious: re-uploading a
+            // spreadsheet is the normal way this goes wrong, so serials already
+            // present are counted rather than failing the batch, and anything
+            // refused comes back with the reason. 207 when some were rejected.
+            'DeviceProvisionResponse' => self::object([
+                'created' => self::int(),
+                'already_present' => self::int(),
+                'rejected' => [
+                    'type' => 'array',
+                    'items' => self::object([
+                        'serial_number' => self::str(true),
+                        'reason' => self::str(),
+                    ], ['reason']),
+                ],
+            ], ['created', 'already_present', 'rejected']),
+            'ActivationCodeIssueRequest' => self::object([
+                'licensed_device_id' => self::int(true),
+                'max_redemptions' => self::int(),
+                'expires_at' => self::str(true),
+            ], []),
+            // `code` APPEARS HERE AND NOWHERE ELSE, EVER. It is stored
+            // canonically and never returned in full again — the same contract
+            // as a generated API token. A caller that does not keep this
+            // response has to issue a new code.
+            'ActivationCodeIssuedResponse' => self::object([
+                'id' => self::int(),
+                'code' => self::str(),
+                'max_redemptions' => self::int(),
+                'expires_at' => self::str(true),
+            ], ['id', 'code', 'max_redemptions']),
+            'ActivationCodeRevokedResponse' => self::object([
+                'revoked' => self::bool(),
+            ], ['revoked']),
+            // A SERIAL, NEVER AN INTERNAL ID: a person can read a serial off the
+            // unit in front of them, and accepting a row id would let a caller
+            // enumerate rows by number. The tenant is NOT a field — it comes
+            // from the code, which is the only trustworthy scope available when
+            // the caller is anonymous.
+            'ActivationRedeemRequest' => self::object([
+                'code' => self::str(),
+                'serial_number' => self::str(true),
+            ], ['code']),
+            'ActivationRedeemResponse' => self::object([
+                'activated' => self::bool(),
+                'device_id' => self::int(true),
+            ], ['activated']),
+
             'PlanPriceListResponse' => self::listEnvelope('PlanPrice'),
             'PlanPriceResponse' => self::dataEnvelope(SchemaBuilder::ref('PlanPrice')),
             'PlanPriceCreateRequest' => self::object([
@@ -4322,6 +4404,11 @@ final class CoreApiSchemas
                 'unit_amount' => self::int(),
                 'billing_period' => ['type' => 'string', 'enum' => ['month', 'year', 'once']],
                 'is_per_seat' => self::bool(),
+                // At most ONE of these. Both set is refused with 422 rather
+                // than accepted, because the billing run would have to choose a
+                // multiplier and whichever it chose would be wrong half the
+                // time, on an invoice somebody already paid.
+                'is_per_device' => self::bool(),
             ], ['currency', 'unit_amount', 'billing_period']),
 
             'PlanListResponse' => self::listEnvelope('PlanSummary'),
@@ -8921,6 +9008,117 @@ final class CoreApiSchemas
     }
 
     /**
+     * Per-device licensing: stock, codes, and the redemption a student performs.
+     *
+     * THE LAST ROUTE HERE IS NOT LIKE THE OTHERS. Four are authenticated,
+     * tenant-scoped and RBAC-gated; `POST /api/public/licensing/redeem` has no
+     * capability at all, because the caller may be an end user or a student
+     * with no account, no session and no relationship to the tenant at the
+     * moment they type the code. They are authorised by POSSESSION, and every
+     * fact used to resolve the activation comes from the code rather than from
+     * the caller — including which tenant it belongs to.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function licensingRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/licensing/devices', 'licensing:view', [
+                'summary' => 'The units this tenant is licensed for',
+                'description' =>
+                    'Newest first, capped at 500. Carries the three timestamps separately — '
+                    . '`provisioned_at` (the serial was imported), `activated_at` (a code was redeemed '
+                    . 'against it) and `last_seen_at` (it last checked in) — because which one a '
+                    . 'per-device price bills on is configuration, not a property of the row. '
+                    . 'A unit with `activated_at` set has been put into service; one without is stock.',
+                'tags' => ['licensing'],
+                'responses' => [
+                    200 => self::jsonResponse('This tenant\'s licensed units', 'LicensedDeviceListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/licensing/devices', 'licensing:manage', [
+                'summary' => 'Provision serials in bulk',
+                'description' =>
+                    'BULK BECAUSE STOCK ARRIVES IN BOXES — up to 500 per request. Each entry is a '
+                    . 'serial string, or an object with `serial_number` and an optional `label`. '
+                    . 'A serial this tenant already has is SKIPPED, not rejected: re-uploading a '
+                    . 'spreadsheet is the normal way this goes wrong, and failing the whole batch on '
+                    . 'row 400 would leave the caller with no idea which 399 landed. The response '
+                    . 'counts what was created and what was already there; answers 207 when some '
+                    . 'entries were refused, with a reason for each. Serials are unique WITHIN a '
+                    . 'tenant — two customers may hold hardware carrying the same manufacturer serial.',
+                'tags' => ['licensing'],
+                'request' => 'DeviceProvisionRequest',
+                'responses' => [
+                    200 => self::jsonResponse('Every serial was accepted or already present', 'DeviceProvisionResponse'),
+                    207 => self::jsonResponse('Imported, with some entries refused', 'DeviceProvisionResponse'),
+                    422 => self::errorResponse('serial_numbers missing, empty, or over the 500 limit'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/licensing/codes', 'licensing:issue', [
+                'summary' => 'Mint an activation code',
+                'description' =>
+                    'The commercial act: something was sold, so a code exists to redeem. '
+                    . 'THE CODE IS RETURNED ONCE AND IS NEVER RETRIEVABLE IN FULL AGAIN — stored '
+                    . 'canonically, the same contract as a generated API token. Bind it to a unit '
+                    . 'with `licensed_device_id` (which must belong to the caller\'s tenant, or 404), '
+                    . 'or omit it and let the redeemer name the serial. `max_redemptions` defaults '
+                    . 'to 1; higher values exist for a classroom set redeemed from one printed card. '
+                    . '`expires_at` is YYYY-MM-DD or YYYY-MM-DD HH:MM:SS.',
+                'tags' => ['licensing'],
+                'request' => 'ActivationCodeIssueRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The code, shown for the only time', 'ActivationCodeIssuedResponse'),
+                    404 => self::errorResponse('No such device in this tenant'),
+                    422 => self::errorResponse('The redemption limit or expiry cannot be used'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/licensing/codes/{id:\d+}/revoke', 'licensing:manage', [
+                'summary' => 'Kill a code that leaked',
+                'description' =>
+                    'Irreversible, and scoped to the caller\'s tenant. Redemptions already made '
+                    . 'STAND — revoking cancels what the code can still do, not what it did, because '
+                    . 'the units it activated are in service and de-licensing them would strand a '
+                    . 'classroom mid-lesson. A code that does not exist, belongs to another tenant, '
+                    . 'or was already revoked answers 404 alike.',
+                'tags' => ['licensing'],
+                'responses' => [
+                    200 => self::jsonResponse('The code is dead', 'ActivationCodeRevokedResponse'),
+                    404 => self::errorResponse('No such code, or it was already revoked'),
+                ] + self::authErrors(),
+            ]),
+            [
+                'method' => 'POST',
+                'path' => '/api/public/licensing/redeem',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Activate a device with a code (public, unauthenticated)',
+                    'description' =>
+                        'UNAUTHENTICATED BY DESIGN. The person typing the code may be an end user or '
+                        . 'a student with no account and no session, so they are authorised by '
+                        . 'POSSESSION: the code\'s own entropy and check characters, the pre-auth IP '
+                        . 'rate limiter, and the fact that every fact used to resolve the activation '
+                        . 'comes from the code rather than the caller. Nothing the caller sends is '
+                        . 'trusted, including any tenant they name. '
+                        . 'Send `serial_number` — the number printed on the unit — when the code is '
+                        . 'not already bound to one; never an internal id, which a person cannot know '
+                        . 'and which would let a caller enumerate rows by number. '
+                        . 'ERRORS NEVER DISTINGUISH AN UNKNOWN CODE FROM A MISTYPED ONE, because '
+                        . 'doing so would let an anonymous caller learn which well-formed codes exist.',
+                    'tags' => ['licensing'],
+                    'request' => 'ActivationRedeemRequest',
+                    'responses' => [
+                        200 => self::jsonResponse('The unit is activated', 'ActivationRedeemResponse'),
+                        422 => self::errorResponse('The code cannot be redeemed — invalid, expired, revoked, spent, or needing a serial'),
+                        429 => self::errorResponse('Too many redemption attempts from this address'),
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
      * The operator's plan catalogue, prices and promotions.
      *
      * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
@@ -8988,13 +9186,18 @@ final class CoreApiSchemas
             self::permissionRoute('POST', '/api/plans/{id:\d+}/prices', 'plans:manage', [
                 'summary' => 'Price this plan on a set of terms (operator)',
                 'description' =>
-                    'A plan may carry many prices — one per currency, billing period and seat basis — '
+                    'A plan may carry many prices — one per currency, billing period and unit basis — '
                     . 'but only ONE LIVE price per combination of those. A second live price for the '
                     . 'same terms is refused with 409 rather than accepted, because two of them would '
                     . 'make the checkout, the invoice and the price list each pick differently and '
                     . 'somebody be charged an amount no screen displayed. Retire the existing one first. '
                     . '`unit_amount` must be an integer of minor units; a decimal is refused with 422, '
-                    . 'since 49.9 truncating to 49 is a hundredfold error that looks like a real price.',
+                    . 'since 49.9 truncating to 49 is a hundredfold error that looks like a real price. '
+                    . 'THE UNIT BASIS IS WHAT `unit_amount` MULTIPLIES BY: neither flag set prices the '
+                    . 'plan flat, `is_per_seat` multiplies by the seats the tenant holds, and '
+                    . '`is_per_device` by its licensed devices. Both at once is refused with 422 — a '
+                    . 'price multiplies by one thing, or by nothing. Which devices count on a '
+                    . 'per-device price is the `licensing.billing_basis` setting, resolved per tenant.',
                 'tags' => ['plans'],
                 'request' => 'PlanPriceCreateRequest',
                 'responses' => [
