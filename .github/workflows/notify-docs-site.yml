@@ -1,0 +1,58 @@
+name: Notify docs site
+
+# The published documentation at https://docs.whity.dev is compiled from the
+# markdown in this repository, so a docs change here has to trigger a rebuild
+# there. This job does nothing else: it sends one repository_dispatch to
+# AmroKSaleh/whity-web, which owns the build.
+#
+# Activate-by-config, same as deploy-staging: without DOCS_SITE_DISPATCH_TOKEN
+# the job skips, so merging this workflow cannot turn the pipeline red on a
+# fork or on a checkout that has no docs site attached.
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+    paths:
+      - 'docs/**'
+      - '.github/workflows/notify-docs-site.yml'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: notify-docs-site
+  cancel-in-progress: true
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check whether a docs site is configured
+        id: config
+        env:
+          TOKEN: ${{ secrets.DOCS_SITE_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "${TOKEN}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::DOCS_SITE_DISPATCH_TOKEN is not set — skipping."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Dispatch a rebuild
+        if: steps.config.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.DOCS_SITE_DISPATCH_TOKEN }}
+          SHA: ${{ github.sha }}
+          REF: ${{ github.ref_name }}
+        run: |
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            /repos/AmroKSaleh/whity-web/dispatches \
+            -f event_type=docs-updated \
+            -F "client_payload[sha]=${SHA}" \
+            -F "client_payload[ref]=${REF}"
+          echo "::notice::Requested a docs.whity.dev rebuild for ${REF}@${SHA}."
