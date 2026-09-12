@@ -21,6 +21,7 @@ import {
 import { useTranslation } from '@amroksaleh/features/i18n';
 import { formatMoney } from '@amroksaleh/ui/money/currency';
 import { navigateExternal } from '@/lib/external-navigate';
+import { AvailablePlans } from './available-plans';
 
 /**
  * BILLING: what this tenant owes, and how to pay it.
@@ -241,6 +242,13 @@ export default function BillingPage() {
           'Your invoices, what is still owed, and how to pay.'
         )}
       />
+
+      {/* WHAT CAN BE BOUGHT COMES FIRST, above the invoice history. This page is
+          where a walled tenant is sent, and for one that has never paid the
+          history below is empty — so the offer has to be the thing they see,
+          not something under a table of nothing. It renders nothing at all on a
+          deployment that sells nothing. */}
+      <AvailablePlans />
 
       {/* A LOAD FAILURE IS SAID OUT LOUD. An empty table and a failed request
           look identical, and "no invoices" is a far more comforting thing to

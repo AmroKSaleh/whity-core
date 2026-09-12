@@ -2595,6 +2595,10 @@ $externalBillingHandler = new \Whity\Api\ExternalBillingApiHandler(
 
 $router->register('POST', '/api/billing/checkout', [$externalBillingHandler, 'checkout'], null, null, CorePermissions::BILLING_PAY);
 $router->register('GET',  '/api/billing/return',   [$externalBillingHandler, 'returnFrom'], null, null, CorePermissions::BILLING_VIEW);
+// What this tenant can buy. Separate from the operator's plan catalogue above,
+// which is gated on plans:manage — a permission a paying customer never holds,
+// which left checkout naming a plan_key the tenant had no way to discover.
+$router->register('GET',  '/api/billing/plans',    [$externalBillingHandler, 'plans'],      null, null, CorePermissions::BILLING_VIEW);
 
 // UNAUTHENTICATED, NECESSARILY: the sender is a server and holds no session.
 // Registering it here is only half the job — EnforceTenantIsolation must also

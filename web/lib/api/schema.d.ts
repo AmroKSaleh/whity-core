@@ -585,6 +585,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/billing/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What this tenant can buy
+         * @description The operator's plan catalogue is gated on `plans:manage`, which a paying customer never holds — so without this a tenant could be told to pay and had no way to discover what for, since checkout names a `plan_key`. ONLY GENUINELY PURCHASABLE PLANS: active, priced in this tenant's currency, and carrying the handle the billing service knows the price by. A plan missing any of those would produce a button that 422s. Amounts are MINOR UNITS — 15000 is 15.000 in a three-decimal currency like the dinar — so format from the integer and the code, and never divide by 100. `is_per_seat` and `is_per_device` say what the amount multiplies by, so a price can be shown as "per seat" rather than as a total nobody is charged. An empty list is the ordinary answer on a deployment that sells nothing.
+         */
+        get: operations["get_api_v1_billing_plans"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/billing/return": {
         parameters: {
             query?: never;
@@ -7227,6 +7247,20 @@ export interface components {
                 ignored_keys: string[];
             };
         };
+        PurchasablePlan: {
+            plan_key: string;
+            name: string;
+            description?: string | null;
+            unit_amount: number;
+            currency: string;
+            /** @enum {string} */
+            billing_period: "month" | "year" | "once";
+            is_per_seat?: boolean;
+            is_per_device?: boolean;
+        };
+        PurchasablePlanListResponse: {
+            data: components["schemas"]["PurchasablePlan"][];
+        };
         RecordSectionDenial: {
             /** @enum {string} */
             code: "permission" | "record";
@@ -10701,6 +10735,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaymentMethodListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_billing_plans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Plans this tenant can buy */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PurchasablePlanListResponse"];
                 };
             };
             /** @description Missing or invalid authentication */

@@ -6,6 +6,7 @@
  * 2. On 401 response, automatically calls /api/v1/auth/refresh
  * 3. If refresh succeeds, retries the original request
  * 4. If refresh fails or skipRefresh is true, returns the original response
+ * 5. On 402 (the payment wall), sends the reader to the page where they can pay
  */
 
 export interface ApiClientOptions extends RequestInit {
@@ -55,6 +56,53 @@ async function refreshAccessToken(): Promise<boolean> {
  *   - If refresh fails: returns original 401 response
  * - For any other status: returns as-is
  */
+/**
+ * Where a walled tenant is sent.
+ *
+ * The billing routes are exempt from the payment wall precisely so that a
+ * tenant who cannot use anything else can still reach the thing that un-walls
+ * them. Sending them anywhere else would be sending them to another 402.
+ */
+const BILLING_PATH = '/billing';
+
+/**
+ * Has a redirect already been started this page-load?
+ *
+ * A dashboard fires a dozen requests at once and EVERY ONE of them comes back
+ * 402 for a walled tenant. Without this, each would call navigation in turn —
+ * a dozen redirects to the same place, and any of them able to interrupt the
+ * one before it.
+ */
+let walledRedirectStarted = false;
+
+/**
+ * THE PAYMENT WALL IS INVISIBLE OTHERWISE, and that is the bug this fixes.
+ *
+ * A tenant that has not paid gets 402 on every call. Nothing in the UI knew
+ * what that meant, so each screen simply rendered whatever it renders with no
+ * data: a dashboard with an empty sidebar, no error, nothing to click. The
+ * product looked broken rather than unpaid, and the one action that would fix
+ * it — paying — was the one thing not on screen.
+ *
+ * NEVER REDIRECTS AWAY FROM BILLING. The billing pages are exempt from the
+ * wall, but a 402 from some unrelated call made while sitting on one of them
+ * would otherwise bounce the reader off the page they need, possibly in a loop.
+ */
+function redirectToBilling(): void {
+  if (typeof window === 'undefined' || walledRedirectStarted) {
+    return;
+  }
+
+  if (window.location.pathname.startsWith(BILLING_PATH)) {
+    return;
+  }
+
+  walledRedirectStarted = true;
+  // `replace`, not `assign`: the page they could not use does not belong in
+  // history, and Back from billing should not land on it again.
+  window.location.replace(BILLING_PATH);
+}
+
 export async function apiClient(
   url: string,
   options?: ApiClientOptions
@@ -97,6 +145,15 @@ export async function apiClient(
 
   // Make the initial request
   const response = await fetch(fullUrl, requestInit);
+
+  // The payment wall. Handled BEFORE the 401 branch below because it is not an
+  // authentication problem and refreshing a token cannot resolve it — the
+  // caller is perfectly authenticated and simply may not use this.
+  if (response.status === 402) {
+    redirectToBilling();
+
+    return response;
+  }
 
   // If successful or not a 401, return immediately
   if (response.ok || response.status !== 401 || skipRefresh) {

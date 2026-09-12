@@ -4414,6 +4414,23 @@ final class CoreApiSchemas
             'CheckoutStartResponse' => self::dataEnvelope(self::object([
                 'url' => self::str(),
             ], ['url'])),
+            // WHAT A TENANT MAY BUY. Separate from the operator's plan catalogue,
+            // which is gated on plans:manage — a permission a paying customer
+            // never holds. Amounts are MINOR UNITS with a currency code; the
+            // dinar has three decimal places, so anything dividing by 100 is
+            // wrong by a factor of ten.
+            'PurchasablePlan' => self::object([
+                'plan_key' => self::str(),
+                'name' => self::str(),
+                'description' => self::str(true),
+                'unit_amount' => self::int(),
+                'currency' => self::str(),
+                'billing_period' => ['type' => 'string', 'enum' => ['month', 'year', 'once']],
+                'is_per_seat' => self::bool(),
+                'is_per_device' => self::bool(),
+            ], ['plan_key', 'name', 'unit_amount', 'currency', 'billing_period']),
+            'PurchasablePlanListResponse' => self::listEnvelope('PurchasablePlan'),
+
             'BillingAccessResponse' => self::dataEnvelope(self::object([
                 'has_access' => self::bool(),
                 'status' => self::str(true),
@@ -9069,6 +9086,25 @@ final class CoreApiSchemas
                     422 => self::errorResponse('That plan cannot be bought on these terms'),
                     502 => self::errorResponse('The billing service refused the request'),
                     503 => self::errorResponse('The billing service is temporarily unreachable'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/billing/plans', 'billing:view', [
+                'summary' => 'What this tenant can buy',
+                'description' =>
+                    'The operator\'s plan catalogue is gated on `plans:manage`, which a paying '
+                    . 'customer never holds — so without this a tenant could be told to pay and had '
+                    . 'no way to discover what for, since checkout names a `plan_key`. '
+                    . 'ONLY GENUINELY PURCHASABLE PLANS: active, priced in this tenant\'s currency, '
+                    . 'and carrying the handle the billing service knows the price by. A plan '
+                    . 'missing any of those would produce a button that 422s. '
+                    . 'Amounts are MINOR UNITS — 15000 is 15.000 in a three-decimal currency like '
+                    . 'the dinar — so format from the integer and the code, and never divide by 100. '
+                    . '`is_per_seat` and `is_per_device` say what the amount multiplies by, so a '
+                    . 'price can be shown as "per seat" rather than as a total nobody is charged. '
+                    . 'An empty list is the ordinary answer on a deployment that sells nothing.',
+                'tags' => ['billing'],
+                'responses' => [
+                    200 => self::jsonResponse('Plans this tenant can buy', 'PurchasablePlanListResponse'),
                 ] + self::authErrors(),
             ]),
             self::permissionRoute('GET', '/api/billing/return', 'billing:view', [
