@@ -8,6 +8,7 @@ use Whity\Core\Billing\External\AccessSnapshot;
 use Whity\Core\Billing\External\BillingPortal;
 use Whity\Core\Billing\External\BillingPortalException;
 use Whity\Core\Billing\External\CheckoutHandoff;
+use Whity\Core\Billing\External\Receipt;
 
 /**
  * A billing service that answers whatever a test needs it to.
@@ -33,6 +34,9 @@ final class FakeBillingPortal implements BillingPortal
     public ?string $lastPrice = null;
     public ?string $lastReturnUrl = null;
     public string $checkoutStatus = 'completed';
+    /** @var list<Receipt> */
+    public array $receipts = [];
+    public ?int $lastQuantity = null;
 
     public function __construct()
     {
@@ -83,5 +87,24 @@ final class FakeBillingPortal implements BillingPortal
         }
 
         return $this->checkoutStatus;
+    }
+
+    /** @return list<Receipt> */
+    public function receiptsFor(string $subjectRef): array
+    {
+        if ($this->failWith !== null) {
+            throw $this->failWith;
+        }
+
+        return $this->receipts;
+    }
+
+    public function changeQuantity(string $subscriptionRef, int $quantity): void
+    {
+        if ($this->failWith !== null) {
+            throw $this->failWith;
+        }
+
+        $this->lastQuantity = $quantity;
     }
 }

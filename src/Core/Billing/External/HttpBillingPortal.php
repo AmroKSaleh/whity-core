@@ -88,6 +88,50 @@ final class HttpBillingPortal implements BillingPortal
     }
 
     /**
+     * @return list<Receipt>
+     */
+    public function receiptsFor(string $subjectRef): array
+    {
+        // The customer object carries the 50 most recent invoices. A subject the
+        // service has never heard of is a 404 here, which is the ordinary state
+        // of a tenant before their first purchase — not an error, and certainly
+        // not something to show a customer as one.
+        try {
+            $payload = $this->call('GET', '/v1/customers/' . rawurlencode($subjectRef));
+        } catch (BillingPortalException $e) {
+            if ($e->reason === BillingPortalException::REASON_REFUSED) {
+                return [];
+            }
+
+            throw $e;
+        }
+
+        $invoices = $payload['invoices'] ?? [];
+        if (!is_array($invoices)) {
+            return [];
+        }
+
+        $receipts = [];
+        foreach ($invoices as $invoice) {
+            if (is_array($invoice)) {
+                /** @var array<string, mixed> $invoice */
+                $receipts[] = Receipt::fromPayload($invoice);
+            }
+        }
+
+        return $receipts;
+    }
+
+    public function changeQuantity(string $subscriptionRef, int $quantity): void
+    {
+        $this->call(
+            'POST',
+            '/v1/subscriptions/' . rawurlencode($subscriptionRef) . '/quantity',
+            ['quantity' => $quantity]
+        );
+    }
+
+    /**
      * @param array<string, mixed>|null $body
      *
      * @return array<string, mixed>

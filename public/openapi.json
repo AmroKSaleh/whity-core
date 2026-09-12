@@ -2531,6 +2531,16 @@
                             }
                         }
                     },
+                    "409": {
+                        "description": "This workspace already has an active subscription",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
                     "422": {
                         "description": "That plan cannot be bought on these terms",
                         "content": {
@@ -3018,6 +3028,240 @@
                     },
                     "500": {
                         "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/billing/quantity": {
+            "post": {
+                "operationId": "post_api_v1_billing_quantity",
+                "summary": "Buy more seats, or fewer",
+                "tags": [
+                    "billing"
+                ],
+                "description": "THE ONLY CHANGE THE BILLING SERVICE SUPPORTS IN PLACE. There is no way to move a subscription to a different PLAN: doing so would mean cancelling and buying again, which either charges twice or leaves a gap in cover, so it is refused rather than faked. THE SUBSCRIPTION IS TAKEN FROM THIS DEPLOYMENT'S OWN RECORD, never from the request \u2014 a caller naming a subscription identifier would be naming somebody else's the moment they guessed one. PRORATION IS NOT DESCRIBED HERE BECAUSE IT IS NOT OURS: an increase is charged immediately for the unused part of the period, and a decrease is never charged or refunded and applies at the next renewal. Quoting a figure of our own would put a number on screen that the invoice then contradicts. A quantity below 1 is refused \u2014 that is a cancellation by another name.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/BillingQuantityRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The change was applied",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BillingQuantityResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "This workspace has no subscription to change",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "quantity must be a whole number of at least 1",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "The billing service refused the request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "The billing service is temporarily unreachable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/billing/receipts": {
+            "get": {
+                "operationId": "get_api_v1_billing_receipts",
+                "summary": "What this tenant has paid",
+                "tags": [
+                    "billing"
+                ],
+                "description": "RECEIPTS, NOT INVOICES THIS DEPLOYMENT ISSUED. A tenant billed by the external service has no local invoice at all \u2014 the local billing run stands down for them precisely so nobody is charged twice \u2014 so the invoice list on the billing screen was empty for customers who had just paid. Accurate about our records, and a lie about their money. These are read back from whoever took the payment and are NEVER used to decide access: whether a tenant may use paid features is a separate question with a separate answer, and reconstructing it from payments would mean keeping a copy of a status table this side does not maintain. Amounts are MINOR UNITS with a currency code. Newest first. An empty list is the ordinary answer for a tenant who has never paid, and for a deployment that sells nothing.",
+                "responses": {
+                    "200": {
+                        "description": "What this tenant has paid",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BillingReceiptListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "The billing service refused the request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "The billing service is temporarily unreachable",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -36419,6 +36663,81 @@
                         "required": [
                             "has_access"
                         ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "BillingQuantityRequest": {
+                "type": "object",
+                "properties": {
+                    "quantity": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "quantity"
+                ]
+            },
+            "BillingQuantityResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "has_access": {
+                                "type": "boolean"
+                            }
+                        },
+                        "required": [
+                            "has_access"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "BillingReceipt": {
+                "type": "object",
+                "properties": {
+                    "number": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "total_minor": {
+                        "type": "integer"
+                    },
+                    "currency": {
+                        "type": "string"
+                    },
+                    "paid_at": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "issued_at": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "number",
+                    "status",
+                    "total_minor",
+                    "currency"
+                ]
+            },
+            "BillingReceiptListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/BillingReceipt"
+                        }
                     }
                 },
                 "required": [

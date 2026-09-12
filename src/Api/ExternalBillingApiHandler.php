@@ -13,6 +13,7 @@ use Whity\Core\Billing\External\BillingPortal;
 use Whity\Core\Billing\External\BillingPortalException;
 use Whity\Core\Billing\External\BillingSubject;
 use Whity\Core\Billing\External\EventLedger;
+use Whity\Core\Billing\External\Receipt;
 use Whity\Core\Billing\External\WebhookVerifier;
 use Whity\Core\Db\DbBool;
 use Whity\Core\RBAC\CorePermissions;
@@ -86,6 +87,34 @@ final class ExternalBillingApiHandler
             return Response::error('This deployment does not sell subscriptions.', 404);
         }
 
+        // ALREADY PAID IS NOT A REASON TO PAY AGAIN.
+        //
+        // Buying opens a SECOND subscription beside the first: the billing
+        // service has no notion that this customer already has one, so it would
+        // charge them again, renew both, and leave two live subscriptions where
+        // the product only ever reads one. The customer pays twice a month for
+        // as long as it takes somebody to notice.
+        //
+        // Refused HERE rather than by hiding the button, because a hidden button
+        // is not a rule. Anyone can POST this endpoint, and the screen that
+        // renders the button is the one thing guaranteed to be out of date the
+        // moment a payment lands.
+        //
+        // A FAILURE TO ASK IS NOT A LICENCE TO CHARGE. If the billing service
+        // cannot be reached, this refuses rather than assuming they have not
+        // paid — the cost of a wrong "yes" is a double charge, the cost of a
+        // wrong "no" is a retry.
+        try {
+            if ($this->portal->accessFor(BillingSubject::forTenant($tenantId))->hasAccess) {
+                return Response::error(
+                    'This workspace already has an active subscription.',
+                    409
+                );
+            }
+        } catch (BillingPortalException $e) {
+            return $this->portalFailure($e, 'check an existing subscription', ['tenant_id' => $tenantId]);
+        }
+
         $body = JsonBody::parsed($request);
         $planKey = $body['plan_key'] ?? null;
         if (!is_string($planKey) || trim($planKey) === '') {
@@ -105,7 +134,10 @@ final class ExternalBillingApiHandler
                 BillingSubject::forTenant($tenantId),
                 $priceRef,
                 $this->appUrl . '/billing/return',
-                $this->appUrl . '/billing/plans',
+                // `/billing`, not `/billing/plans`: the latter does not exist
+                // and 404'd every payer who abandoned the hosted page — the same
+                // dead end the return URL had, found the same way.
+                $this->appUrl . '/billing',
             );
         } catch (BillingPortalException $e) {
             return $this->portalFailure($e, 'start a checkout', ['tenant_id' => $tenantId]);
@@ -277,6 +309,88 @@ final class ExternalBillingApiHandler
     // ── helpers ─────────────────────────────────────────────────────────────
 
     /**
+     * GET /api/v1/billing/receipts — what this tenant has paid.
+     *
+     * A TENANT BILLED EXTERNALLY HAS NO LOCAL INVOICE, by design: the local
+     * billing run stands down for them so nobody is charged twice. Which meant
+     * the billing screen showed an empty invoice table to a customer who had
+     * just paid — accurate about our records, and a lie about their money.
+     *
+     * These are receipts, not invoices we issued. They are never read to decide
+     * anything; access is a separate question with a separate answer.
+     */
+    public function receipts(Request $request): Response
+    {
+        $tenantId = $this->requireTenant($request, CorePermissions::BILLING_VIEW);
+        if ($tenantId instanceof Response) {
+            return $tenantId;
+        }
+
+        if (!$this->portal->isConfigured()) {
+            // Nothing was ever paid through a service this deployment does not
+            // have. An empty list, not an error.
+            return Response::json(['data' => []]);
+        }
+
+        try {
+            $receipts = $this->portal->receiptsFor(BillingSubject::forTenant($tenantId));
+        } catch (BillingPortalException $e) {
+            return $this->portalFailure($e, 'read payment history', ['tenant_id' => $tenantId]);
+        }
+
+        return Response::json([
+            'data' => array_map(static fn (Receipt $r): array => $r->toArray(), $receipts),
+        ]);
+    }
+
+    /**
+     * POST /api/v1/billing/quantity — buy more seats, or fewer.
+     *
+     * THE ONLY CHANGE THE BILLING SERVICE SUPPORTS. There is no way to move a
+     * subscription to a different PLAN in place; that would mean cancelling and
+     * buying again, which either double-charges or leaves a gap in cover, so it
+     * is refused rather than faked.
+     *
+     * PRORATION IS NOT DESCRIBED HERE, because it is not ours. An increase is
+     * charged immediately for the unused part of the period; a decrease is never
+     * charged or refunded and applies at renewal. Quoting a figure of our own
+     * would put a number on screen that the invoice then contradicts.
+     */
+    public function changeQuantity(Request $request): Response
+    {
+        $tenantId = $this->requireTenant($request, CorePermissions::BILLING_PAY);
+        if ($tenantId instanceof Response) {
+            return $tenantId;
+        }
+
+        $body = JsonBody::parsed($request);
+        $quantity = $body['quantity'] ?? null;
+        if (!is_int($quantity) || $quantity < 1) {
+            return Response::error('quantity must be a whole number of at least 1.', 422);
+        }
+
+        // THE SUBSCRIPTION REFERENCE COMES FROM OUR OWN RECORD, never from the
+        // request. A caller naming a subscription id would be naming somebody
+        // else's the moment they guessed one, and the billing service has no way
+        // to know the caller is not entitled to it.
+        $subscriptionRef = $this->subscriptionRefFor($tenantId);
+        if ($subscriptionRef === null) {
+            return Response::error('This workspace has no subscription to change.', 409);
+        }
+
+        try {
+            $this->portal->changeQuantity($subscriptionRef, $quantity);
+            $snapshot = $this->portal->accessFor(BillingSubject::forTenant($tenantId));
+        } catch (BillingPortalException $e) {
+            return $this->portalFailure($e, 'change the subscription quantity', ['tenant_id' => $tenantId]);
+        }
+
+        $this->recorder->record($tenantId, $snapshot);
+
+        return Response::json(['data' => ['has_access' => $snapshot->hasAccess]]);
+    }
+
+    /**
      * GET /api/v1/billing/plans — what this tenant can actually buy.
      *
      * WITHOUT THIS, CHECKOUT IS UNREACHABLE FROM THE PRODUCT. Buying names a
@@ -372,6 +486,22 @@ final class ExternalBillingApiHandler
         $statement->bindValue(':on', true, PDO::PARAM_BOOL);
         $statement->execute();
 
+        $ref = $statement->fetchColumn();
+
+        return is_string($ref) && $ref !== '' ? $ref : null;
+    }
+
+    /**
+     * The billing service's handle for this tenant's subscription, from our own
+     * record of it. Null when this tenant has never had one.
+     */
+    private function subscriptionRefFor(int $tenantId): ?string
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT external_ref FROM tenant_plan WHERE tenant_id = :tenant_id'
+        );
+        $statement->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+        $statement->execute();
         $ref = $statement->fetchColumn();
 
         return is_string($ref) && $ref !== '' ? $ref : null;

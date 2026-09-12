@@ -605,6 +605,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/billing/quantity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Buy more seats, or fewer
+         * @description THE ONLY CHANGE THE BILLING SERVICE SUPPORTS IN PLACE. There is no way to move a subscription to a different PLAN: doing so would mean cancelling and buying again, which either charges twice or leaves a gap in cover, so it is refused rather than faked. THE SUBSCRIPTION IS TAKEN FROM THIS DEPLOYMENT'S OWN RECORD, never from the request — a caller naming a subscription identifier would be naming somebody else's the moment they guessed one. PRORATION IS NOT DESCRIBED HERE BECAUSE IT IS NOT OURS: an increase is charged immediately for the unused part of the period, and a decrease is never charged or refunded and applies at the next renewal. Quoting a figure of our own would put a number on screen that the invoice then contradicts. A quantity below 1 is refused — that is a cancellation by another name.
+         */
+        post: operations["post_api_v1_billing_quantity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/receipts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What this tenant has paid
+         * @description RECEIPTS, NOT INVOICES THIS DEPLOYMENT ISSUED. A tenant billed by the external service has no local invoice at all — the local billing run stands down for them precisely so nobody is charged twice — so the invoice list on the billing screen was empty for customers who had just paid. Accurate about our records, and a lie about their money. These are read back from whoever took the payment and are NEVER used to decide access: whether a tenant may use paid features is a separate question with a separate answer, and reconstructing it from payments would mean keeping a copy of a status table this side does not maintain. Amounts are MINOR UNITS with a currency code. Newest first. An empty list is the ordinary answer for a tenant who has never paid, and for a deployment that sells nothing.
+         */
+        get: operations["get_api_v1_billing_receipts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/billing/return": {
         parameters: {
             query?: never;
@@ -5111,6 +5151,25 @@ export interface components {
                 cancel_at_period_end?: boolean;
                 checkout_status?: string | null;
             };
+        };
+        BillingQuantityRequest: {
+            quantity: number;
+        };
+        BillingQuantityResponse: {
+            data: {
+                has_access: boolean;
+            };
+        };
+        BillingReceipt: {
+            number: string;
+            status: string;
+            total_minor: number;
+            currency: string;
+            paid_at?: string | null;
+            issued_at?: string | null;
+        };
+        BillingReceiptListResponse: {
+            data: components["schemas"]["BillingReceipt"][];
         };
         Branding: {
             siteName: string;
@@ -10442,6 +10501,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description This workspace already has an active subscription */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description That plan cannot be bought on these terms */
             422: {
                 headers: {
@@ -10840,6 +10908,203 @@ export interface operations {
             };
             /** @description Internal server error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_billing_quantity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BillingQuantityRequest"];
+            };
+        };
+        responses: {
+            /** @description The change was applied */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillingQuantityResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description This workspace has no subscription to change */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description quantity must be a whole number of at least 1 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The billing service refused the request */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The billing service is temporarily unreachable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_billing_receipts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What this tenant has paid */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillingReceiptListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The billing service refused the request */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The billing service is temporarily unreachable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

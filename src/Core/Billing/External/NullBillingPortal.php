@@ -49,4 +49,20 @@ final class NullBillingPortal implements BillingPortal
     {
         throw BillingPortalException::notConfigured();
     }
+
+    /**
+     * Nobody has paid, so there is nothing to show — and an empty list is the
+     * truth here rather than a failure to report.
+     *
+     * @return list<Receipt>
+     */
+    public function receiptsFor(string $subjectRef): array
+    {
+        return [];
+    }
+
+    public function changeQuantity(string $subscriptionRef, int $quantity): void
+    {
+        throw BillingPortalException::notConfigured();
+    }
 }

@@ -4430,6 +4430,26 @@ final class CoreApiSchemas
                 'is_per_device' => self::bool(),
             ], ['plan_key', 'name', 'unit_amount', 'currency', 'billing_period']),
             'PurchasablePlanListResponse' => self::listEnvelope('PurchasablePlan'),
+            // A RECEIPT, NOT AN INVOICE THIS DEPLOYMENT ISSUED. A tenant billed
+            // externally has no local invoice — the local billing run stands
+            // down for them so nobody is charged twice — so this is what they
+            // paid, read back from whoever took the money. Never used to decide
+            // access. Amounts are minor units.
+            'BillingReceipt' => self::object([
+                'number' => self::str(),
+                'status' => self::str(),
+                'total_minor' => self::int(),
+                'currency' => self::str(),
+                'paid_at' => self::str(true),
+                'issued_at' => self::str(true),
+            ], ['number', 'status', 'total_minor', 'currency']),
+            'BillingReceiptListResponse' => self::listEnvelope('BillingReceipt'),
+            'BillingQuantityRequest' => self::object([
+                'quantity' => self::int(),
+            ], ['quantity']),
+            'BillingQuantityResponse' => self::dataEnvelope(self::object([
+                'has_access' => self::bool(),
+            ], ['has_access'])),
 
             'BillingAccessResponse' => self::dataEnvelope(self::object([
                 'has_access' => self::bool(),
@@ -9083,7 +9103,55 @@ final class CoreApiSchemas
                 'responses' => [
                     200 => self::jsonResponse('Where to send the payer', 'CheckoutStartResponse'),
                     404 => self::errorResponse('This deployment does not sell subscriptions'),
+                    409 => self::errorResponse('This workspace already has an active subscription'),
                     422 => self::errorResponse('That plan cannot be bought on these terms'),
+                    502 => self::errorResponse('The billing service refused the request'),
+                    503 => self::errorResponse('The billing service is temporarily unreachable'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/billing/receipts', 'billing:view', [
+                'summary' => 'What this tenant has paid',
+                'description' =>
+                    'RECEIPTS, NOT INVOICES THIS DEPLOYMENT ISSUED. A tenant billed by the external '
+                    . 'service has no local invoice at all — the local billing run stands down for '
+                    . 'them precisely so nobody is charged twice — so the invoice list on the '
+                    . 'billing screen was empty for customers who had just paid. Accurate about our '
+                    . 'records, and a lie about their money. '
+                    . 'These are read back from whoever took the payment and are NEVER used to '
+                    . 'decide access: whether a tenant may use paid features is a separate question '
+                    . 'with a separate answer, and reconstructing it from payments would mean '
+                    . 'keeping a copy of a status table this side does not maintain. '
+                    . 'Amounts are MINOR UNITS with a currency code. Newest first. An empty list is '
+                    . 'the ordinary answer for a tenant who has never paid, and for a deployment '
+                    . 'that sells nothing.',
+                'tags' => ['billing'],
+                'responses' => [
+                    200 => self::jsonResponse('What this tenant has paid', 'BillingReceiptListResponse'),
+                    502 => self::errorResponse('The billing service refused the request'),
+                    503 => self::errorResponse('The billing service is temporarily unreachable'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/billing/quantity', 'billing:pay', [
+                'summary' => 'Buy more seats, or fewer',
+                'description' =>
+                    'THE ONLY CHANGE THE BILLING SERVICE SUPPORTS IN PLACE. There is no way to move '
+                    . 'a subscription to a different PLAN: doing so would mean cancelling and buying '
+                    . 'again, which either charges twice or leaves a gap in cover, so it is refused '
+                    . 'rather than faked. '
+                    . 'THE SUBSCRIPTION IS TAKEN FROM THIS DEPLOYMENT\'S OWN RECORD, never from the '
+                    . 'request — a caller naming a subscription identifier would be naming somebody '
+                    . 'else\'s the moment they guessed one. '
+                    . 'PRORATION IS NOT DESCRIBED HERE BECAUSE IT IS NOT OURS: an increase is '
+                    . 'charged immediately for the unused part of the period, and a decrease is '
+                    . 'never charged or refunded and applies at the next renewal. Quoting a figure '
+                    . 'of our own would put a number on screen that the invoice then contradicts. '
+                    . 'A quantity below 1 is refused — that is a cancellation by another name.',
+                'tags' => ['billing'],
+                'request' => 'BillingQuantityRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The change was applied', 'BillingQuantityResponse'),
+                    409 => self::errorResponse('This workspace has no subscription to change'),
+                    422 => self::errorResponse('quantity must be a whole number of at least 1'),
                     502 => self::errorResponse('The billing service refused the request'),
                     503 => self::errorResponse('The billing service is temporarily unreachable'),
                 ] + self::authErrors(),

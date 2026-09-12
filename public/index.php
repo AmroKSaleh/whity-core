@@ -2614,6 +2614,14 @@ $router->register('GET',  '/api/billing/return',   [$externalBillingHandler, 're
 // which is gated on plans:manage — a permission a paying customer never holds,
 // which left checkout naming a plan_key the tenant had no way to discover.
 $router->register('GET',  '/api/billing/plans',    [$externalBillingHandler, 'plans'],      null, null, CorePermissions::BILLING_VIEW);
+// What this tenant has PAID. A tenant billed externally has no local invoice —
+// the local run stands down so nobody is charged twice — so without this the
+// billing screen showed an empty table to somebody who had just paid.
+$router->register('GET',  '/api/billing/receipts', [$externalBillingHandler, 'receipts'], null, null, CorePermissions::BILLING_VIEW);
+// More seats, or fewer. The only change the billing service supports in place:
+// a PLAN swap would mean cancelling and buying again, which either double-charges
+// or leaves a gap, so it is refused rather than faked.
+$router->register('POST', '/api/billing/quantity', [$externalBillingHandler, 'changeQuantity'], null, null, CorePermissions::BILLING_PAY);
 
 // UNAUTHENTICATED, NECESSARILY: the sender is a server and holds no session.
 // Registering it here is only half the job — EnforceTenantIsolation must also

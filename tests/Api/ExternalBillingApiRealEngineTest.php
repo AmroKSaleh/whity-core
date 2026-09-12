@@ -427,6 +427,132 @@ final class ExternalBillingApiRealEngineTest extends TestCase
         self::assertSame('price_01ABC', $this->portal->lastPrice, 'the plan resolved to its handle');
     }
 
+    /**
+     * PAYING TWICE FOR THE SAME MONTH IS THE FAILURE THIS GUARDS.
+     *
+     * Buying again opens a SECOND subscription beside the first — the billing
+     * service has no notion that this customer already has one — so it charges
+     * again, renews both, and leaves two live subscriptions where the product
+     * reads one. The customer pays twice a month until somebody notices.
+     *
+     * Asserted at the ENDPOINT, not by checking a button is hidden: anyone can
+     * POST this, and the screen that draws the button is the one thing certain
+     * to be stale the moment a payment lands.
+     */
+    public function testATenantThatAlreadyHasAccessCannotBuyAgain(): void
+    {
+        $this->portal->access = new AccessSnapshot('tenant-1', true, 'pro', 'active', '2026-10-12T00:00:00+00:00');
+
+        $response = $this->handler->checkout(
+            $this->asTenant('POST', '/api/v1/billing/checkout', ['plan_key' => 'pro'])
+        );
+
+        self::assertSame(409, $response->getStatusCode());
+        self::assertNull($this->portal->lastPrice, 'no checkout may be opened at all');
+    }
+
+    /**
+     * AND A FAILURE TO ASK IS NOT A LICENCE TO CHARGE. If the billing service
+     * cannot be reached, the honest answer is "I do not know whether they have
+     * paid" — and the cost of guessing wrong in one direction is a double
+     * charge, in the other a retry.
+     */
+    public function testCheckoutRefusesWhenItCannotTellWhetherTheyAlreadyPaid(): void
+    {
+        $this->portal->failWith = BillingPortalException::unreachable('down');
+
+        $response = $this->handler->checkout(
+            $this->asTenant('POST', '/api/v1/billing/checkout', ['plan_key' => 'pro'])
+        );
+
+        self::assertSame(503, $response->getStatusCode());
+        self::assertNull($this->portal->lastPrice, 'nothing may be opened on a guess');
+    }
+
+    // ── what they have paid ─────────────────────────────────────────────────
+
+    /**
+     * A TENANT BILLED EXTERNALLY HAS NO LOCAL INVOICE, by design — the local run
+     * stands down so nobody is charged twice. Without this the billing screen
+     * showed an empty table to somebody who had just paid: accurate about our
+     * records, a lie about their money.
+     */
+    public function testPaymentHistoryComesFromTheBillingService(): void
+    {
+        $this->portal->receipts = [
+            new \Whity\Core\Billing\External\Receipt(
+                'INV-202609-00003',
+                'paid',
+                15000,
+                'JOD',
+                '2026-09-12T14:11:33+00:00',
+                '2026-09-12T14:10:00+00:00'
+            ),
+        ];
+
+        $response = $this->handler->receipts($this->asTenant('GET', '/api/v1/billing/receipts'));
+
+        self::assertSame(200, $response->getStatusCode());
+        $rows = json_decode((string) $response->getBody(), true)['data'];
+        self::assertCount(1, $rows);
+        self::assertSame('INV-202609-00003', $rows[0]['number']);
+        self::assertSame('paid', $rows[0]['status']);
+        self::assertSame(15000, $rows[0]['total_minor'], 'minor units, never divided');
+        self::assertSame('JOD', $rows[0]['currency']);
+    }
+
+    /** Nothing paid is an empty list, not an error to show a customer. */
+    public function testNoPaymentHistoryIsAnEmptyListRatherThanAFailure(): void
+    {
+        $response = $this->handler->receipts($this->asTenant('GET', '/api/v1/billing/receipts'));
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame([], json_decode((string) $response->getBody(), true)['data']);
+    }
+
+    // ── more seats, or fewer ────────────────────────────────────────────────
+
+    /**
+     * THE SUBSCRIPTION COMES FROM OUR RECORD, NEVER FROM THE REQUEST. A caller
+     * naming a subscription id would be naming somebody else's the moment they
+     * guessed one, and the billing service cannot know they are not entitled.
+     */
+    public function testChangingQuantityUsesTheTenantsOwnSubscription(): void
+    {
+        $this->deliver('evt_a', 'active', true);
+
+        $response = $this->handler->changeQuantity(
+            $this->asTenant('POST', '/api/v1/billing/quantity', ['quantity' => 5])
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame(5, $this->portal->lastQuantity);
+    }
+
+    /** A tenant with no subscription has nothing to resize. */
+    public function testChangingQuantityWithNoSubscriptionIsRefused(): void
+    {
+        $response = $this->handler->changeQuantity(
+            $this->asTenant('POST', '/api/v1/billing/quantity', ['quantity' => 5])
+        );
+
+        self::assertSame(409, $response->getStatusCode());
+        self::assertNull($this->portal->lastQuantity);
+    }
+
+    /** Zero seats is not a downgrade, it is a cancellation by another name. */
+    public function testQuantityBelowOneIsRefused(): void
+    {
+        $this->deliver('evt_a', 'active', true);
+
+        $response = $this->handler->changeQuantity(
+            $this->asTenant('POST', '/api/v1/billing/quantity', ['quantity' => 0])
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertNull($this->portal->lastQuantity);
+    }
+
     /** A plan this deployment does not sell on these terms cannot be bought. */
     public function testCheckoutRefusesAPlanWithNoPriceHandle(): void
     {

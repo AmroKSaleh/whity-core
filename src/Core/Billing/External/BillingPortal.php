@@ -81,6 +81,39 @@ interface BillingPortal
      */
     public function checkoutStatus(string $reference): string;
 
+    /**
+     * What this subject has paid, for them to look at.
+     *
+     * FOR DISPLAY, NEVER FOR A DECISION. Access is {@see self::accessFor()} and
+     * nothing else; working out "may they use it" from what they have paid would
+     * mean keeping a copy of a status table this side does not maintain. This
+     * exists because a tenant billed externally has NO local invoice — the local
+     * billing run stands down for them so nobody is charged twice — which left
+     * the billing screen showing an empty table to somebody who had just paid.
+     *
+     * @return list<Receipt> Newest first. Empty is an ordinary answer.
+     *
+     * @throws BillingPortalException
+     */
+    public function receiptsFor(string $subjectRef): array;
+
+    /**
+     * Change how many units a subscription is for.
+     *
+     * THE ONLY KIND OF CHANGE THE BILLING SERVICE SUPPORTS. There is no way to
+     * move a subscription to a different PLAN in place — doing that would mean
+     * cancelling and buying again, which either double-charges or leaves a gap,
+     * so it is refused higher up rather than faked here.
+     *
+     * PRORATION IS THEIRS, NOT OURS. An increase is charged immediately for the
+     * unused part of the period; a decrease is never charged or refunded and
+     * takes effect at renewal. Re-deriving either would put a number on a screen
+     * that the invoice then contradicts.
+     *
+     * @throws BillingPortalException
+     */
+    public function changeQuantity(string $subscriptionRef, int $quantity): void;
+
     /** Whether this deployment has a billing service at all. */
     public function isConfigured(): bool;
 }
