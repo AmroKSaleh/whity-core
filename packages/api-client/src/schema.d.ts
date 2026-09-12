@@ -7316,6 +7316,7 @@ export interface components {
             billing_period: "month" | "year" | "once";
             is_per_seat?: boolean;
             is_per_device?: boolean;
+            is_addon: boolean;
         };
         PurchasablePlanListResponse: {
             data: components["schemas"]["PurchasablePlan"][];

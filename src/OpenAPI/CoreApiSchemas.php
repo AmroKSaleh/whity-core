@@ -4428,7 +4428,8 @@ final class CoreApiSchemas
                 'billing_period' => ['type' => 'string', 'enum' => ['month', 'year', 'once']],
                 'is_per_seat' => self::bool(),
                 'is_per_device' => self::bool(),
-            ], ['plan_key', 'name', 'unit_amount', 'currency', 'billing_period']),
+                'is_addon' => self::bool(),
+            ], ['plan_key', 'name', 'unit_amount', 'currency', 'billing_period', 'is_addon']),
             'PurchasablePlanListResponse' => self::listEnvelope('PurchasablePlan'),
             // A RECEIPT, NOT AN INVOICE THIS DEPLOYMENT ISSUED. A tenant billed
             // externally has no local invoice — the local billing run stands

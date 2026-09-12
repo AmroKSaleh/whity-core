@@ -45310,6 +45310,9 @@
                     },
                     "is_per_device": {
                         "type": "boolean"
+                    },
+                    "is_addon": {
+                        "type": "boolean"
                     }
                 },
                 "required": [
@@ -45317,7 +45320,8 @@
                     "name",
                     "unit_amount",
                     "currency",
-                    "billing_period"
+                    "billing_period",
+                    "is_addon"
                 ]
             },
             "PurchasablePlanListResponse": {

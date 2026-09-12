@@ -87,38 +87,52 @@ final class ExternalBillingApiHandler
             return Response::error('This deployment does not sell subscriptions.', 404);
         }
 
-        // ALREADY PAID IS NOT A REASON TO PAY AGAIN.
-        //
-        // Buying opens a SECOND subscription beside the first: the billing
-        // service has no notion that this customer already has one, so it would
-        // charge them again, renew both, and leave two live subscriptions where
-        // the product only ever reads one. The customer pays twice a month for
-        // as long as it takes somebody to notice.
-        //
-        // Refused HERE rather than by hiding the button, because a hidden button
-        // is not a rule. Anyone can POST this endpoint, and the screen that
-        // renders the button is the one thing guaranteed to be out of date the
-        // moment a payment lands.
-        //
-        // A FAILURE TO ASK IS NOT A LICENCE TO CHARGE. If the billing service
-        // cannot be reached, this refuses rather than assuming they have not
-        // paid — the cost of a wrong "yes" is a double charge, the cost of a
-        // wrong "no" is a retry.
-        try {
-            if ($this->portal->accessFor(BillingSubject::forTenant($tenantId))->hasAccess) {
-                return Response::error(
-                    'This workspace already has an active subscription.',
-                    409
-                );
-            }
-        } catch (BillingPortalException $e) {
-            return $this->portalFailure($e, 'check an existing subscription', ['tenant_id' => $tenantId]);
-        }
-
         $body = JsonBody::parsed($request);
         $planKey = $body['plan_key'] ?? null;
         if (!is_string($planKey) || trim($planKey) === '') {
             return Response::error('Name the plan to buy with plan_key.', 422);
+        }
+
+        // ── WHICH KIND IS THIS, AND MAY THEY BUY IT ────────────────────────
+        //
+        // A TIER and an ADD-ON have opposite preconditions, and getting either
+        // backwards sells the wrong thing.
+        //
+        // Buying a SECOND TIER opens a second subscription beside the first —
+        // the billing service has no notion this customer already has one — so
+        // it charges again, renews both, and the customer pays twice a month
+        // until somebody notices.
+        //
+        // Buying an ADD-ON with NO tier is the mirror image: devices are sold
+        // beside a subscription, not instead of one, and a tenant who bought
+        // them alone would be let into the product by an add-on nobody sold
+        // them a tier for.
+        //
+        // Enforced HERE rather than by which buttons a screen draws. Anyone can
+        // POST this, and the screen is the one thing certain to be stale the
+        // moment a payment lands.
+        //
+        // A FAILURE TO ASK IS NOT A LICENCE TO CHARGE: if the billing service
+        // cannot be reached this refuses, because the cost of a wrong "they have
+        // not paid" is a double charge and the cost of a wrong "they have" is a
+        // retry.
+        $isAddon = $this->planIsAddon($planKey);
+
+        try {
+            $hasAccess = $this->portal->accessFor(BillingSubject::forTenant($tenantId))->hasAccess;
+        } catch (BillingPortalException $e) {
+            return $this->portalFailure($e, 'check an existing subscription', ['tenant_id' => $tenantId]);
+        }
+
+        if (!$isAddon && $hasAccess) {
+            return Response::error('This workspace already has an active subscription.', 409);
+        }
+
+        if ($isAddon && !$hasAccess) {
+            return Response::error(
+                'This workspace needs an active subscription before it can buy add-ons.',
+                409
+            );
         }
 
         $interval = $body['billing_period'] ?? 'month';
@@ -421,7 +435,7 @@ final class ExternalBillingApiHandler
         ));
 
         $statement = $this->pdo->prepare(
-            'SELECT p.plan_key, p.name, p.description,
+            'SELECT p.plan_key, p.name, p.description, p.is_addon,
                     pp.unit_amount, pp.currency, pp.billing_period,
                     pp.is_per_seat, pp.is_per_device
                FROM plan_prices pp
@@ -430,7 +444,7 @@ final class ExternalBillingApiHandler
                 AND pp.is_active = :price_on
                 AND pp.currency = :currency
                 AND pp.external_ref IS NOT NULL
-              ORDER BY pp.unit_amount ASC, p.plan_key ASC'
+              ORDER BY p.is_addon ASC, pp.unit_amount ASC, p.plan_key ASC'
         );
         $statement->bindValue(':plan_on', true, PDO::PARAM_BOOL);
         $statement->bindValue(':price_on', true, PDO::PARAM_BOOL);
@@ -450,6 +464,12 @@ final class ExternalBillingApiHandler
                 // "per seat" rather than as a total nobody will be charged.
                 'is_per_seat' => DbBool::of($row['is_per_seat']),
                 'is_per_device' => DbBool::of($row['is_per_device'] ?? false),
+                // A TIER OR AN ADD-ON, and the caller needs to know which: they
+                // have opposite preconditions. A tier is refused to a tenant
+                // that already has one; an add-on is refused to a tenant that
+                // does not. Offering them in one undifferentiated list would
+                // show every tenant at least one button that answers 409.
+                'is_addon' => DbBool::of($row['is_addon'] ?? false),
             ];
         }
 
@@ -489,6 +509,23 @@ final class ExternalBillingApiHandler
         $ref = $statement->fetchColumn();
 
         return is_string($ref) && $ref !== '' ? $ref : null;
+    }
+
+    /**
+     * Whether this plan is bought BESIDE a subscription rather than as one.
+     *
+     * Unknown plans answer false — a plan that does not exist is refused a
+     * moment later by the price lookup, and guessing "add-on" here would give
+     * the caller a different error about a plan that is not there.
+     */
+    private function planIsAddon(string $planKey): bool
+    {
+        $statement = $this->pdo->prepare('SELECT is_addon FROM plans WHERE plan_key = :plan_key');
+        $statement->bindValue(':plan_key', $planKey);
+        $statement->execute();
+        $value = $statement->fetchColumn();
+
+        return $value !== false && DbBool::of($value);
     }
 
     /**

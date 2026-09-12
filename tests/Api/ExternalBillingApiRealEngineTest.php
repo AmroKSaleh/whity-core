@@ -80,6 +80,11 @@ final class ExternalBillingApiRealEngineTest extends TestCase
                           VALUES (1, 'pro', 'Pro', true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
         $this->pdo->exec("INSERT INTO plan_prices (plan_id, currency, unit_amount, billing_period, is_per_seat, is_active, external_ref, created_at, updated_at)
                           VALUES (1, 'JOD', 15000, 'month', false, true, 'price_01ABC', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
+        // An ADD-ON: bought beside a tier, never instead of one.
+        $this->pdo->exec("INSERT INTO plans (id, plan_key, name, is_active, is_addon, created_at, updated_at)
+                          VALUES (2, 'devices', 'Devices', true, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
+        $this->pdo->exec("INSERT INTO plan_prices (plan_id, currency, unit_amount, billing_period, is_per_seat, is_per_device, is_active, external_ref, created_at, updated_at)
+                          VALUES (2, 'JOD', 20000, 'month', false, true, true, 'price_DEV', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
         SchemaFromMigrations::syncSequences($this->pdo);
 
         $database = Database::withFactory(fn (): PDO => $this->pdo);
@@ -467,6 +472,57 @@ final class ExternalBillingApiRealEngineTest extends TestCase
 
         self::assertSame(503, $response->getStatusCode());
         self::assertNull($this->portal->lastPrice, 'nothing may be opened on a guess');
+    }
+
+    /**
+     * AN ADD-ON IS NOT A WAY INTO THE PRODUCT.
+     *
+     * Devices are sold BESIDE a subscription, never instead of one. Without this
+     * a tenant with no tier could buy twenty dinars of devices and be let in by
+     * them — an account nobody had sold a tier for, paying the wrong price for
+     * the wrong thing, and looking exactly like a legitimate customer.
+     */
+    public function testAnAddOnCannotBeBoughtWithoutASubscription(): void
+    {
+        // No access: the default snapshot is "never heard of them".
+        $response = $this->handler->checkout(
+            $this->asTenant('POST', '/api/v1/billing/checkout', ['plan_key' => 'devices'])
+        );
+
+        self::assertSame(409, $response->getStatusCode());
+        self::assertNull($this->portal->lastPrice, 'no checkout may be opened at all');
+    }
+
+    /**
+     * AND THE GUARD THAT STOPS A SECOND TIER MUST NOT STOP AN ADD-ON. They have
+     * opposite preconditions, so a single "already has access → refuse" would
+     * make add-ons unsellable to exactly the tenants allowed to buy them.
+     */
+    public function testASubscribedTenantCanBuyAnAddOn(): void
+    {
+        $this->portal->access = new AccessSnapshot('tenant-1', true, 'pro', 'active', '2026-10-12T00:00:00+00:00');
+
+        $response = $this->handler->checkout(
+            $this->asTenant('POST', '/api/v1/billing/checkout', ['plan_key' => 'devices'])
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('price_DEV', $this->portal->lastPrice);
+    }
+
+    /** The catalogue says which kind each plan is, or no screen can separate them. */
+    public function testThePlanlistSaysWhichPlansAreAddOns(): void
+    {
+        $response = $this->handler->plans($this->asTenant('GET', '/api/v1/billing/plans'));
+
+        $rows = json_decode((string) $response->getBody(), true)['data'];
+        $byKey = [];
+        foreach ($rows as $row) {
+            $byKey[$row['plan_key']] = $row['is_addon'];
+        }
+
+        self::assertFalse($byKey['pro'] ?? null, 'a tier is not an add-on');
+        self::assertTrue($byKey['devices'] ?? null, 'devices are an add-on');
     }
 
     // ── what they have paid ─────────────────────────────────────────────────

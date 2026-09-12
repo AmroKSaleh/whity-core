@@ -126,9 +126,15 @@ export function SubscriptionPanel() {
           </p>
         </section>
       ) : (
-        /* Offered ONLY when the server says there is no access. */
-        <AvailablePlans />
+        /* TIERS ONLY. An add-on bought without a subscription would let a tenant
+           into the product by the wrong door, so the server refuses it and this
+           does not offer it. */
+        <AvailablePlans kind="tier" />
       )}
+
+      {/* ADD-ONS, and only to a workspace that already has a plan to add them to.
+          Devices are sold beside a subscription, never instead of one. */}
+      {access?.has_access === true && <AvailablePlans kind="addon" />}
 
       <section className="space-y-2" data-testid="payment-history">
         <h2 className="text-base font-medium">

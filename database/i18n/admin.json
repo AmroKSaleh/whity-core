@@ -125,6 +125,8 @@
         "billing.payment.status.refunded": "Refunded",
         "billing.payment.status.succeeded": "Received",
         "billing.plan.inactive": "Inactive",
+        "billing.plans.addons.description": "Bought alongside your plan. Devices are billed for each unit in service.",
+        "billing.plans.addons.title": "Add-ons",
         "billing.plans.description": "Choose a plan to activate this workspace. Everything else stays locked until then.",
         "billing.plans.error.start": "Could not start checkout. Please try again.",
         "billing.plans.needsPermission": "You do not have permission to pay. Ask a workspace administrator.",
