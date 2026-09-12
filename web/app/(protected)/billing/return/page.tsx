@@ -8,6 +8,7 @@ import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { Badge } from '@amroksaleh/ui/badge';
 import { Button } from '@amroksaleh/ui/button';
+import { useDateDisplay } from '@amroksaleh/features/datetime';
 import { useTranslation } from '@amroksaleh/features/i18n';
 
 /**
@@ -46,6 +47,7 @@ interface BillingReturn {
 function BillingReturnContent() {
   const { apiClient } = useAuth();
   const t = useTranslation('admin');
+  const dates = useDateDisplay();
   const searchParams = useSearchParams();
 
   // Passed through to the server, never trusted here. It only names WHICH
@@ -93,6 +95,8 @@ function BillingReturnContent() {
   }
 
   if (data.has_access) {
+    const renewalDate = dates.date(data.access_until);
+
     return (
       <div className="flex flex-col items-start gap-4">
         <Badge variant="success">{t('billing.return.active', 'Your subscription is active')}</Badge>
@@ -103,7 +107,16 @@ function BillingReturnContent() {
               <dd className="font-medium">{data.plan}</dd>
             </div>
           )}
-          {data.access_until !== null && (
+          {/* FORMATTED IN THE READER'S RESOLVED LANGUAGE, not the browser's.
+              `toLocaleDateString()` would use whatever locale the device
+              happens to be set to, which on an Arabic deployment is routinely
+              not the one the reader chose.
+
+              When the reader has dates hidden, `date()` answers null and the
+              WHOLE ROW goes — a label with an em dash beside it is worse than
+              no label, and the fallback would print the wire timestamp the
+              formatter just declined to print. */}
+          {renewalDate !== null && (
             <div className="flex gap-2">
               <dt className="text-muted-foreground">
                 {/* `cancel_at_period_end` does NOT mean locked now: access is live
@@ -112,9 +125,7 @@ function BillingReturnContent() {
                   ? t('billing.return.endsOn', 'Your plan ends on')
                   : t('billing.return.renewsOn', 'Renews on')}
               </dt>
-              <dd className="font-medium">
-                {new Date(data.access_until).toLocaleDateString()}
-              </dd>
+              <dd className="font-medium">{renewalDate}</dd>
             </div>
           )}
         </dl>
