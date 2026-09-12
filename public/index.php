@@ -1442,7 +1442,22 @@ $kernel->use(new \Whity\Http\Middleware\PaymentWall(
     // dressed as security: the wall answers 402, so the payment that would
     // lift the wall can never be made or recorded, and the tenant stays
     // locked forever having paid.
-    exemptPrefixes: ['/api/v1/subscription', '/api/v1/billing', '/api/v1/payments'],
+    // `/api/v1/me/capabilities` is the same deadlock one layer up, and it is
+    // the one that actually bit. The billing pages are exempt so a locked
+    // tenant can reach them — but the screen there decides whether to show the
+    // "pay" button by asking what the caller may do, and THAT question was
+    // walled. So the page loaded, the prices loaded, and the button said "you
+    // do not have permission to pay" to the very person who did.
+    //
+    // Exempting it is safe in the way the others are: it is read-only and tells
+    // a caller only about THEMSELVES — the permissions they already hold in a
+    // tenant they are already authenticated for. It grants nothing; it reports.
+    //
+    // NARROW ON PURPOSE. `/api/v1/me` would be a prefix over notifications,
+    // emails, inbox and preferences, quietly unwalling a slice of the product
+    // nobody reviewed. This exempts one path and its children, of which there
+    // are none.
+    exemptPrefixes: \Whity\Http\Middleware\PaymentWall::DEADLOCK_EXEMPT_PREFIXES,
     billingUrl: ($_ENV['BILLING_URL'] ?? getenv('BILLING_URL')) ?: null,
     logger: $logger,
 ));
