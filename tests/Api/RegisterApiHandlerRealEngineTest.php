@@ -12,6 +12,9 @@ use Whity\Core\Identity\AccountActivationPolicy;
 use Whity\Core\Identity\EmailVerificationPolicy;
 use Whity\Core\Identity\EmailVerificationProvider;
 use Whity\Core\Request;
+use Whity\Core\Settings\SettingsRegistry;
+use Whity\Core\Subscription\SubscriptionRepository;
+use Whity\Core\Subscription\SubscriptionService;
 
 /**
  * Real-engine tests for public self-service registration (WC-235).
@@ -51,6 +54,101 @@ final class RegisterApiHandlerRealEngineTest extends TestCase
         // Never leak the enforcement flags into other tests.
         unset($_ENV[EmailVerificationPolicy::ENV_FLAG]);
         unset($_ENV[AccountActivationPolicy::ENV_FLAG]);
+    }
+
+    // ── the payment gate ────────────────────────────────────────────────────
+
+    /**
+     * A SELF-PROVISIONED WORKSPACE NOBODY HAS PAID FOR DOES NOTHING.
+     *
+     * Asserted through the WALL, not on the column, because the column is an
+     * implementation detail and being let in is the actual harm. The wall treats
+     * a tenant with no recorded status as "not billed, never block" — which is
+     * what keeps free-tier and self-hosted tenants working — so a workspace
+     * created without this row would be a workspace that signed up for free.
+     */
+    public function testAnUnpaidSelfEnrolledWorkspaceIsBlockedByTheWall(): void
+    {
+        $this->settings->setGlobal(SettingsRegistry::REGISTRATION_PAYMENT_REQUIRED, 'true');
+        $this->settings->setGlobal(SettingsRegistry::REGISTRATION_APPROVAL_REQUIRED, 'false');
+
+        $res = $this->register([
+            'email' => 'payer@example.test',
+            'password' => 'Sufficiently-Long-Passw0rd!',
+            'tenant_name' => 'Paid Workspace',
+            'display_name' => 'Payer',
+        ]);
+        self::assertSame(201, $res->getStatusCode());
+
+        $tenantId = $this->tenantIdBySlugLike('paid-workspace');
+        $decision = $this->subscriptions()->decide($tenantId, false);
+
+        self::assertFalse($decision->allowed, 'an unpaid workspace must not be usable');
+    }
+
+    /**
+     * AND THE GATE IS OFF BY DEFAULT. Every deployment that upgrades keeps the
+     * behaviour it had; turning this on is a commercial decision, and a
+     * sovereign instance that sells nothing has no billing service to pay.
+     */
+    public function testRegistrationIsUngatedUnlessTheOperatorTurnsThePaymentGateOn(): void
+    {
+        $this->settings->setGlobal(SettingsRegistry::REGISTRATION_APPROVAL_REQUIRED, 'false');
+
+        $res = $this->register([
+            'email' => 'free@example.test',
+            'password' => 'Sufficiently-Long-Passw0rd!',
+            'tenant_name' => 'Free Workspace',
+            'display_name' => 'Free',
+        ]);
+        self::assertSame(201, $res->getStatusCode());
+
+        $tenantId = $this->tenantIdBySlugLike('free-workspace');
+
+        self::assertTrue(
+            $this->subscriptions()->decide($tenantId, true)->allowed,
+            'without the gate a self-provisioned workspace works as it always has'
+        );
+    }
+
+    /**
+     * THE GATE AND THE WORKSPACE ARE ONE ACT OR NEITHER. If the billing row were
+     * written after the commit, a crash between them would leave a workspace
+     * that exists and is not gated — free for whoever created it, and invisible
+     * because nothing failed.
+     */
+    public function testTheGateIsWrittenInTheSameTransactionAsTheWorkspace(): void
+    {
+        $this->settings->setGlobal(SettingsRegistry::REGISTRATION_PAYMENT_REQUIRED, 'true');
+        $this->settings->setGlobal(SettingsRegistry::REGISTRATION_APPROVAL_REQUIRED, 'false');
+
+        $this->register([
+            'email' => 'atomic@example.test',
+            'password' => 'Sufficiently-Long-Passw0rd!',
+            'tenant_name' => 'Atomic Workspace',
+            'display_name' => 'Atomic',
+        ]);
+
+        $tenantId = $this->tenantIdBySlugLike('atomic-workspace');
+        $statement = $this->pdo->prepare('SELECT COUNT(*) FROM tenant_plan WHERE tenant_id = :t');
+        $statement->execute([':t' => $tenantId]);
+
+        self::assertSame(1, (int) $statement->fetchColumn(), 'every gated workspace has its gate');
+    }
+
+    private function subscriptions(): SubscriptionService
+    {
+        return new SubscriptionService(new SubscriptionRepository($this->pdo), $this->settings);
+    }
+
+    private function tenantIdBySlugLike(string $slug): int
+    {
+        $statement = $this->pdo->prepare('SELECT id FROM tenants WHERE slug LIKE :slug ORDER BY id DESC LIMIT 1');
+        $statement->execute([':slug' => $slug . '%']);
+        $id = $statement->fetchColumn();
+        self::assertNotFalse($id, "no tenant created for slug {$slug}");
+
+        return (int) $id;
     }
 
     /**

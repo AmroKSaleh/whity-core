@@ -82,6 +82,17 @@ final class RegisterApiHandler
                 return Response::error('Self-service registration is disabled', 403);
             }
 
+            // Whether a self-provisioned workspace has to be paid for before it
+            // does anything. Read here, used inside the transaction below.
+            //
+            // DEFAULTS TO FALSE, which preserves exactly what every existing
+            // deployment does today. Turning it on is an operator decision about
+            // a commercial model; defaulting it on would silently wall the next
+            // signup on every instance that upgraded, including sovereign ones
+            // that sell nothing and have no billing service to pay.
+            $paymentRequired =
+                ($global[SettingsRegistry::REGISTRATION_PAYMENT_REQUIRED] ?? 'false') === 'true';
+
             $body = JsonBody::parsed($request);
 
             $email       = strtolower(trim((string) ($body['email'] ?? '')));
@@ -234,6 +245,39 @@ final class RegisterApiHandler
                     ':status'     => $membershipStatus,
                 ]);
                 $membershipId = (int) $this->db->lastInsertId();
+
+                // 5. PAYMENT GATE. When this deployment sells self-service
+                // workspaces, the new tenant starts BLOCKED and stays blocked
+                // until the billing service says it may use paid features.
+                //
+                // WRITTEN INSIDE THE TRANSACTION, deliberately. A tenant that
+                // existed for even a moment without this row would be a tenant
+                // the wall lets through: SubscriptionService::decide() treats a
+                // null status as "not billed, never block", which is what keeps
+                // free-tier and self-hosted tenants working. Creating the
+                // workspace and gating it are therefore one act or neither.
+                //
+                // `expired` is the status because it is the one the wall already
+                // refuses, and `block_all` because a workspace nobody has paid
+                // for should do nothing except accept payment — the billing
+                // routes are exempt from the wall precisely so that stays
+                // reachable.
+                //
+                // The status is later overwritten by whatever the billing
+                // service says. It is not a claim that a subscription lapsed;
+                // it is the closed state the wall understands, chosen because
+                // inventing a sixth status would mean teaching every existing
+                // consumer of that column about it.
+                if ($paymentRequired) {
+                    $this->db->prepare(
+                        'INSERT INTO tenant_plan (tenant_id, status, enforcement_mode, assigned_at)
+                         VALUES (:tenant_id, :status, :mode, NOW())'
+                    )->execute([
+                        ':tenant_id' => $tenantId,
+                        ':status'    => 'expired',
+                        ':mode'      => 'block_all',
+                    ]);
+                }
 
                 if ($ownTx) {
                     $this->db->commit();
