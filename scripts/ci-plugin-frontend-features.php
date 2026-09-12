@@ -59,47 +59,21 @@ use Whity\Sdk\PluginFrontendInterface;
  * ever refuses it for a DIFFERENT reason, CI reports the new one instead of
  * silently accepting it.
  *
- * All four current entries are the same case (#969). Documents, Relations and
- * Taxonomy are the offline halves of an in-flight strangler-fig extraction
- * (ADR 0003 / the desktop feature-parity effort): each is the SOLE provider of
- * its resource on the Tauri desktop's offline PHP host, where no core equivalent
- * exists, and each is deliberately inert on the server until the cutover removes
- * core's version. All three say so in their own class docblock.
+ * EMPTY, AND THAT IS THE HEALTHY STATE. Every entry this list ever held was one
+ * of the same four: the Documents, Relations and Taxonomy screens, which were
+ * offline twins of features core already owned, declared on a server where they
+ * could never register. Those plugins have been retired, so the dormancy they
+ * described no longer exists to describe.
  *
- * Their screens are NOT left unverified by being listed here. The device host
- * validates a screen:'blocks' feature with BlockValidator plus a permission GATE
- * only — deliberately WITHOUT the cross-plugin ownership policing production
- * applies, because every plugin on a device was already vetted by the release
- * pipeline (see templates/tauri-desktop/php-host/src/Api/FrontendFeaturesHandler.php).
- * That narrower contract is what tests/Plugins/DocumentsPluginFrontendTest.php,
- * RelationsPluginFrontendTest.php and TaxonomyPluginFrontendTest.php assert.
+ * The list stays because the gate needs somewhere to put the next reviewed
+ * dormancy — and because an empty one is a real assertion, not a placeholder: it
+ * says every screen an in-tree plugin declares actually reaches a user. The day
+ * that stops being true, CI says so rather than this file quietly growing an
+ * entry nobody argued for.
  *
  * @var array<string, array{expect: string, why: string}>
  */
-const SERVER_DORMANT_FEATURES = [
-    'Documents/document-templates' => [
-        'expect' => "requiredPermission 'documents:read' collides with a core permission",
-        'why' => 'Offline twin of the core Document Designer (migration 059; epic #947 extends '
-            . 'the core side further). Core owns documents:* and /api/document-templates on the '
-            . 'server; the plugin is the sole provider on the offline desktop host.',
-    ],
-    'Documents/document-blocks' => [
-        'expect' => "requiredPermission 'documents:read' collides with a core permission",
-        'why' => 'The reusable-fragment half of the same port as Documents/document-templates.',
-    ],
-    'Relations/relations' => [
-        'expect' => "requiredPermission 'relations:read' collides with a core permission",
-        'why' => 'Offline twin of core Family Relations (#774/#775 generalise the core side). '
-            . 'Core owns relations:* and /api/persons on the server; the plugin is the sole '
-            . 'provider on the offline desktop host.',
-    ],
-    'Taxonomy/taxonomy' => [
-        'expect' => "requiredPermission 'tags:read' collides with a core permission",
-        'why' => 'Offline twin of core Taxonomy (#714 develops the core side). Core owns tags:* '
-            . 'and /api/tags + /api/tag-groups on the server; the plugin is the sole provider on '
-            . 'the offline desktop host.',
-    ],
-];
+const SERVER_DORMANT_FEATURES = [];
 
 $projectRoot = dirname(__DIR__);
 
