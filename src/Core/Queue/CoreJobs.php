@@ -139,36 +139,42 @@ final class CoreJobs
                 false
             );
 
-            // The sweep that backstops the billing service's notifications.
+            // The two sweeps that keep local billing state honest against the
+            // billing service: who may use paid features, and how many devices
+            // they are being charged for.
             //
-            // Registered even when no billing service is configured: the run
-            // answers with zero counts in that case rather than failing, so a
-            // self-hosted deployment schedules a job that costs nothing instead
-            // of one that errors every night and teaches an operator to ignore
-            // it. The portal is built exactly as public/index.php builds it, so
-            // "configured" means the same thing to both.
-            $payBaseUrl = rtrim((string) ($_ENV['PAY_BASE_URL'] ?? getenv('PAY_BASE_URL') ?: ''), '/');
-            $payApiKey = (string) ($_ENV['PAY_API_KEY'] ?? getenv('PAY_API_KEY') ?: '');
+            // Registered even when no billing service is configured: both runs
+            // answer with zero counts in that case rather than failing, so a
+            // self-hosted deployment schedules jobs that cost nothing instead of
+            // ones that error every night and teach an operator to ignore them.
+            // The portal comes from the same factory public/index.php uses, so
+            // "configured" cannot mean two different things.
+            $billingPortal = \Whity\Core\Billing\External\BillingPortalFactory::fromEnvironment();
 
             $registry->register(
                 \Whity\Core\Billing\Jobs\ReconcileExternalAccessJob::NAME,
                 new \Whity\Core\Billing\Jobs\ReconcileExternalAccessJob(
                     new \Whity\Core\Billing\External\AccessReconciliationRun(
                         $pdo,
-                        ($payBaseUrl !== '' && $payApiKey !== '')
-                            ? new \Whity\Core\Billing\External\HttpBillingPortal(
-                                new \Whity\Core\Billing\External\CurlBillingTransport(
-                                    max(1, (int) ($_ENV['PAY_TIMEOUT_SECONDS'] ?? getenv('PAY_TIMEOUT_SECONDS') ?: 10))
-                                ),
-                                $payBaseUrl,
-                                $payApiKey
-                            )
-                            : new \Whity\Core\Billing\External\NullBillingPortal(),
+                        $billingPortal,
                         new \Whity\Core\Billing\External\AccessRecorder(
                             $billingSubscriptions,
                             new \Whity\Core\Plan\PlanRepository($pdo),
                             $logger ?? new \Psr\Log\NullLogger()
                         ),
+                        $logger ?? new \Psr\Log\NullLogger()
+                    )
+                ),
+                false
+            );
+
+            $registry->register(
+                \Whity\Core\Billing\Jobs\SyncDeviceQuantityJob::NAME,
+                new \Whity\Core\Billing\Jobs\SyncDeviceQuantityJob(
+                    new \Whity\Core\Billing\External\DeviceQuantitySyncRun(
+                        $pdo,
+                        $billingPortal,
+                        new \Whity\Core\Billing\LicensedDeviceCount($pdo, $billingSettings),
                         $logger ?? new \Psr\Log\NullLogger()
                     )
                 ),

@@ -98,6 +98,27 @@ interface BillingPortal
     public function receiptsFor(string $subjectRef): array;
 
     /**
+     * Every subscription this subject holds.
+     *
+     * FOR FINDING ONE, NOT FOR JUDGING ANY. A payer can hold a tier and an
+     * add-on at once, and the add-on's quantity has to follow the number of
+     * devices in service — which first requires knowing WHICH of their
+     * subscriptions is the add-on. `accessFor()` cannot answer that: it
+     * deliberately collapses a customer into one verdict.
+     *
+     * Access is still {@see self::accessFor()} and nothing else. A caller that
+     * looped over these to work out whether somebody may use the product would
+     * be reimplementing the service's own status rules, and would disagree with
+     * it the first time it changed a grace period.
+     *
+     * @return list<SubscriptionLine> Empty when the service has never heard of
+     *         this subject, which is the ordinary state before a first purchase.
+     *
+     * @throws BillingPortalException
+     */
+    public function subscriptionsFor(string $subjectRef): array;
+
+    /**
      * Change how many units a subscription is for.
      *
      * THE ONLY KIND OF CHANGE THE BILLING SERVICE SUPPORTS. There is no way to

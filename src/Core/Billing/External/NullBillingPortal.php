@@ -61,6 +61,19 @@ final class NullBillingPortal implements BillingPortal
         return [];
     }
 
+    /**
+     * Nobody holds a subscription here, so there is nothing to list — and an
+     * empty list is the truth rather than a failure to report. It also keeps the
+     * device-quantity sweep a no-op on a self-hosted install instead of an error
+     * every time its cron fires.
+     *
+     * @return list<SubscriptionLine>
+     */
+    public function subscriptionsFor(string $subjectRef): array
+    {
+        return [];
+    }
+
     public function changeQuantity(string $subscriptionRef, int $quantity): void
     {
         throw BillingPortalException::notConfigured();

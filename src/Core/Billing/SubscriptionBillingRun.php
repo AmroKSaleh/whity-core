@@ -384,7 +384,13 @@ final class SubscriptionBillingRun
         DateTimeImmutable $periodEnd,
     ): int {
         if ($this->isTrue($price['is_per_device'] ?? false)) {
-            return $this->deviceCountFor($tenantId, $periodStart, $periodEnd);
+            // SHARED WITH THE DEVICE-QUANTITY SWEEP, deliberately. Both have to
+            // apply the same `licensing.billing_basis` rules or a customer's
+            // invoice and their external subscription would disagree about how
+            // many devices they have — invisibly, until somebody added up a
+            // year of statements.
+            return (new LicensedDeviceCount($this->pdo, $this->settings))
+                ->between($tenantId, $periodStart, $periodEnd);
         }
 
         if (!$this->isTrue($price['is_per_seat'] ?? false)) {
@@ -400,76 +406,6 @@ final class SubscriptionBillingRun
         // At least one: a tenant with no active members still has a
         // subscription, and a zero-quantity line is refused by the schema.
         return max(1, (int) $statement->fetchColumn());
-    }
-
-    /**
-     * How many licensed devices this period bills for.
-     *
-     * WHICH DEVICES COUNT IS A SETTING, not a decision taken here. "Per device"
-     * is at least three billing models — billed from provisioning, from
-     * activation, or only for units actually seen in the period — and they
-     * produce different invoices from identical facts. Migration 146 records
-     * provisioned_at, activated_at and last_seen_at as separate columns
-     * precisely so this can be configuration: a deployment that changes its
-     * mind changes a value instead of migrating invoices it has already sent.
-     *
-     * COUNTED AGAINST THE PERIOD, not against now. A device retired last month
-     * must not appear on this month's invoice, and one activated on the last
-     * day of the period must — the same discipline the per-seat count above
-     * follows, for the same reason: the invoice describes a period, and an
-     * invoice that silently re-counts when it is re-read is not an invoice.
-     */
-    private function deviceCountFor(
-        int $tenantId,
-        DateTimeImmutable $periodStart,
-        DateTimeImmutable $periodEnd,
-    ): int {
-        // PER TENANT, falling back to the deployment default. Two customers on
-        // per-device plans can genuinely bill differently — one pays for every
-        // unit it has been shipped, another only for units its staff actually
-        // used this month — and that is a term in a contract, not a property of
-        // the installation. Reading only the global value would force the first
-        // customer's deal onto the second.
-        $basis = $this->setting($tenantId, SettingsRegistry::LICENSING_BILLING_BASIS, 'activated');
-
-        $end = $periodEnd->format('Y-m-d H:i:s');
-        $start = $periodStart->format('Y-m-d H:i:s');
-
-        // Every arm excludes units retired BEFORE the period began: they were
-        // not in service for any of it. A unit retired DURING the period still
-        // counts, because it was.
-        $sql = match ($basis) {
-            'provisioned' => 'SELECT COUNT(*) FROM licensed_devices
-                               WHERE tenant_id = :tenant_id
-                                 AND provisioned_at <= :period_end
-                                 AND (retired_at IS NULL OR retired_at >= :period_start)',
-            'active_in_period' => 'SELECT COUNT(*) FROM licensed_devices
-                                    WHERE tenant_id = :tenant_id
-                                      AND last_seen_at IS NOT NULL
-                                      AND last_seen_at >= :period_start
-                                      AND last_seen_at <= :period_end',
-            // 'activated', and the fallback for an unrecognised value: billing
-            // for units put into service is the safest reading of "per device",
-            // and a typo in a setting must not silently widen an invoice.
-            default => 'SELECT COUNT(*) FROM licensed_devices
-                         WHERE tenant_id = :tenant_id
-                           AND activated_at IS NOT NULL
-                           AND activated_at <= :period_end
-                           AND (retired_at IS NULL OR retired_at >= :period_start)',
-        };
-
-        $statement = $this->pdo->prepare($sql);
-        $statement->execute([
-            ':tenant_id' => $tenantId,
-            ':period_end' => $end,
-            ':period_start' => $start,
-        ]);
-
-        // ZERO IS A REAL ANSWER HERE, unlike the seat count. A tenant with no
-        // activated devices owes nothing for devices, and the caller decides
-        // whether that means no line at all — inventing a phantom unit would
-        // put a charge on an invoice for hardware nobody is using.
-        return max(0, (int) $statement->fetchColumn());
     }
 
     /** @param array<string, mixed> $subscription */
