@@ -6,7 +6,7 @@
   "type": "module",
   "license": "AGPL-3.0-only",
   "scripts": {
-    "test": "node --test test/watchdog.test.js",
+    "test": "node --test \"test/**/*.test.js\"",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail"
   },

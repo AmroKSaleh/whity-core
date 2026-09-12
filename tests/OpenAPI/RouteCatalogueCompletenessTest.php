@@ -116,22 +116,6 @@ final class RouteCatalogueCompletenessTest extends TestCase
         // OpenAPI components land with the desktop-updates documentation task,
         // per the KNOWN_UNDOCUMENTED-first path this file establishes.
         'GET /api/desktop-app-updates/latest',
-
-        // Per-device licensing (#licensing). Schema, service and API land
-        // first so the deployment driving this can provision and redeem;
-        // OpenAPI components follow, per the KNOWN_UNDOCUMENTED-first path
-        // this file establishes.
-        //
-        // THE COST IS NOT ONLY DOCUMENTATION. Routes become MCP tools by
-        // carrying schemas, so until these do, an agent cannot provision a
-        // unit or issue a code — which is exactly the kind of ordinary
-        // operation the MCP surface exists for. Worth closing sooner than a
-        // purely cosmetic doc gap would be.
-        'GET /api/licensing/devices',
-        'POST /api/licensing/devices',
-        'POST /api/licensing/codes',
-        'POST /api/licensing/codes/{id}/revoke',
-        'POST /api/public/licensing/redeem',
     ];
 
     public function testEveryLiveRouteIsDocumentedOrOptedOut(): void
