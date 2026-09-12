@@ -8,6 +8,8 @@ use Whity\Core\Billing\External\AccessSnapshot;
 use Whity\Core\Billing\External\BillingPortal;
 use Whity\Core\Billing\External\BillingPortalException;
 use Whity\Core\Billing\External\CheckoutHandoff;
+use Whity\Core\Billing\External\Receipt;
+use Whity\Core\Billing\External\SubscriptionLine;
 
 /**
  * A billing service that answers whatever a test needs it to.
@@ -26,6 +28,8 @@ final class FakeBillingPortal implements BillingPortal
 {
     public AccessSnapshot $access;
     public ?BillingPortalException $failWith = null;
+    /** Fails ONLY the resize, so a test can let the read succeed and the write not. */
+    public ?BillingPortalException $failResizeWith = null;
     public int $accessCalls = 0;
     /** Attempts, including ones that threw — `accessCalls` only counts answers. */
     public int $accessAttempts = 0;
@@ -33,6 +37,14 @@ final class FakeBillingPortal implements BillingPortal
     public ?string $lastPrice = null;
     public ?string $lastReturnUrl = null;
     public string $checkoutStatus = 'completed';
+    /** @var list<Receipt> */
+    public array $receipts = [];
+    /** @var list<SubscriptionLine> */
+    public array $subscriptions = [];
+    public ?int $lastQuantity = null;
+    public ?string $lastResizedSubscription = null;
+    /** Attempts to resize, including ones that threw — so a test can assert one did NOT happen. */
+    public int $quantityCalls = 0;
 
     public function __construct()
     {
@@ -83,5 +95,43 @@ final class FakeBillingPortal implements BillingPortal
         }
 
         return $this->checkoutStatus;
+    }
+
+    /** @return list<Receipt> */
+    public function receiptsFor(string $subjectRef): array
+    {
+        if ($this->failWith !== null) {
+            throw $this->failWith;
+        }
+
+        return $this->receipts;
+    }
+
+    /** @return list<SubscriptionLine> */
+    public function subscriptionsFor(string $subjectRef): array
+    {
+        if ($this->failWith !== null) {
+            throw $this->failWith;
+        }
+
+        $this->lastSubject = $subjectRef;
+
+        return $this->subscriptions;
+    }
+
+    public function changeQuantity(string $subscriptionRef, int $quantity): void
+    {
+        $this->quantityCalls++;
+
+        if ($this->failResizeWith !== null) {
+            throw $this->failResizeWith;
+        }
+
+        if ($this->failWith !== null) {
+            throw $this->failWith;
+        }
+
+        $this->lastResizedSubscription = $subscriptionRef;
+        $this->lastQuantity = $quantity;
     }
 }
