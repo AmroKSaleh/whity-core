@@ -48,42 +48,23 @@ class ExternalBilling
                 ADD COLUMN IF NOT EXISTS external_ref VARCHAR(64)
         ');
 
-        // WHICH NOTIFICATIONS WE HAVE ALREADY ACTED ON.
+        // NO TABLE FOR NOTIFICATION RECEIPTS, deliberately.
         //
-        // Deliveries repeat — that is designed behaviour, not a fault. A
-        // notification whose response timed out is re-sent with the SAME event
-        // id, so the only way to apply it exactly once is to remember the id.
+        // Deliveries repeat by design, so an event id has to be remembered to
+        // apply it exactly once — but that memory is a counter with a lifetime
+        // measured in hours, not a record worth keeping. A dedicated table would
+        // have needed a pruning job to stop it growing for the life of the
+        // deployment, and one more entry on the sanctioned-global allowlist,
+        // whose whole purpose is to stay short.
         //
-        // The PRIMARY KEY is the mechanism, not a lookup convenience: two
-        // workers can receive the same retry simultaneously, and a
-        // check-then-insert has a window in which both see "not seen yet". The
-        // insert either succeeds or collides, and the collision IS the answer.
-        //
-        // NO tenant_id, deliberately: this is an idempotency ledger for messages
-        // arriving from outside, deduplicated before anything is known about who
-        // they concern. Registered in SanctionedGlobalTables for that reason.
-        $pdo->exec('
-            CREATE TABLE IF NOT EXISTS billing_event_receipts (
-                event_id    VARCHAR(64)  NOT NULL PRIMARY KEY,
-                event_type  VARCHAR(64)  NOT NULL,
-                received_at TIMESTAMP    NOT NULL DEFAULT NOW()
-            )
-        ');
-
-        // Only ever read to answer "have I seen this id", but swept by age when
-        // the ledger is pruned — a table that grows forever is its own outage.
-        $pdo->exec('
-            CREATE INDEX IF NOT EXISTS idx_billing_event_receipts_received_at
-                ON billing_event_receipts(received_at)
-        ');
+        // {@see \Whity\Core\Billing\External\EventLedger} uses the existing
+        // atomic counter store instead, which expires its own keys.
     }
 
     public static function down(Database $db): void
     {
         $pdo = $db->getPdo();
 
-        $pdo->exec('DROP INDEX IF EXISTS idx_billing_event_receipts_received_at');
-        $pdo->exec('DROP TABLE IF EXISTS billing_event_receipts');
         $pdo->exec('ALTER TABLE plan_prices DROP COLUMN IF EXISTS external_ref');
     }
 }

@@ -21,6 +21,7 @@ use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Settings\GlobalSettingsRepository;
 use Whity\Core\Settings\SettingsService;
 use Whity\Core\Settings\TenantSettingsRepository;
+use Whity\Core\Store\ArraySharedStore;
 use Whity\Core\Subscription\SubscriptionRepository;
 use Whity\Core\Subscription\SubscriptionService;
 use Whity\Core\Tenant\TenantContext;
@@ -49,6 +50,7 @@ final class ExternalBillingApiRealEngineTest extends TestCase
     private ExternalBillingApiHandler $handler;
     private FakeBillingPortal $portal;
     private SubscriptionService $subscriptions;
+    private ArraySharedStore $store;
     private int $now = 1789185988;
 
     protected function setUp(): void
@@ -94,11 +96,12 @@ final class ExternalBillingApiRealEngineTest extends TestCase
             $settings,
         );
         $this->portal = new FakeBillingPortal();
+        $this->store = new ArraySharedStore();
 
         $this->handler = new ExternalBillingApiHandler(
             $this->portal,
             new AccessRecorder($this->subscriptions, new PlanRepository($this->pdo), new NullLogger()),
-            new EventLedger($this->pdo),
+            new EventLedger($this->store),
             new WebhookVerifier(self::SECRET, 300, fn (): int => $this->now),
             $settings,
             new RoleChecker($database, new PermissionRegistry()),
@@ -179,7 +182,7 @@ final class ExternalBillingApiRealEngineTest extends TestCase
         self::assertSame(200, $first->getStatusCode());
         self::assertSame(200, $second->getStatusCode(), 'a replay is a success, not an error');
         self::assertSame(1, $this->portal->accessCalls, 'the second delivery must not re-ask');
-        self::assertSame(1, $this->receiptCount('evt_dup'));
+        self::assertTrue($this->claimIsHeld('evt_dup'), 'the claim is held, so a third delivery is dropped too');
     }
 
     /**
@@ -204,7 +207,7 @@ final class ExternalBillingApiRealEngineTest extends TestCase
 
         $first = $this->handler->webhook($this->signed($body, 'evt_retry'));
         self::assertSame(503, $first->getStatusCode(), 'the sender must be asked to try again');
-        self::assertSame(0, $this->receiptCount('evt_retry'), 'the claim must have been released');
+        self::assertFalse($this->claimIsHeld('evt_retry'), 'the claim must have been released');
 
         $this->portal->failWith = null;
         $second = $this->handler->webhook($this->signed($body, 'evt_retry'));
@@ -449,7 +452,7 @@ final class ExternalBillingApiRealEngineTest extends TestCase
         $unconfigured = new ExternalBillingApiHandler(
             new \Whity\Core\Billing\External\NullBillingPortal(),
             new AccessRecorder($this->subscriptions, new PlanRepository($this->pdo), new NullLogger()),
-            new EventLedger($this->pdo),
+            new EventLedger($this->store),
             new WebhookVerifier(self::SECRET, 300, fn (): int => $this->now),
             new SettingsService(
                 new GlobalSettingsRepository($this->pdo),
@@ -553,12 +556,19 @@ final class ExternalBillingApiRealEngineTest extends TestCase
         return is_string($status) && $status !== '' ? $status : null;
     }
 
-    private function receiptCount(string $eventId): int
+    /**
+     * Whether this event id is still claimed.
+     *
+     * Deliberately a BOOLEAN, not the counter. The ledger counts every delivery
+     * it sees, so a replayed event reaches 2 — while the property under test is
+     * that only the FIRST caller was allowed to do the work, which is what
+     * `accessCalls` measures. Asserting the raw count here would pin the
+     * counter's arithmetic rather than the guarantee, and would have to be
+     * rewritten every time the mechanism changed.
+     */
+    private function claimIsHeld(string $eventId): bool
     {
-        $statement = $this->pdo->prepare('SELECT COUNT(*) FROM billing_event_receipts WHERE event_id = :e');
-        $statement->execute([':e' => $eventId]);
-
-        return (int) $statement->fetchColumn();
+        return $this->store->count('billing:event:' . $eventId) > 0;
     }
 
     /** @return array<string, mixed> */

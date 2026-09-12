@@ -27,6 +27,8 @@ final class BillingPortalException extends RuntimeException
 {
     /** The service could not be reached, or did not answer in time. */
     public const REASON_UNREACHABLE = 'unreachable';
+    /** Asked too often. A real answer about the REQUEST, never about the tenant. */
+    public const REASON_RATE_LIMITED = 'rate_limited';
     /** It answered, but not with something this code can read. */
     public const REASON_UNREADABLE = 'unreadable';
     /** It refused the request — a bad key, or a rejected return host. */
@@ -44,6 +46,11 @@ final class BillingPortalException extends RuntimeException
     public static function unreachable(string $detail): self
     {
         return new self(self::REASON_UNREACHABLE, $detail);
+    }
+
+    public static function rateLimited(string $detail): self
+    {
+        return new self(self::REASON_RATE_LIMITED, $detail);
     }
 
     public static function unreadable(string $detail): self
@@ -70,9 +77,18 @@ final class BillingPortalException extends RuntimeException
      * The reconciler and the access check both need this distinction to decide
      * whether silence is safe to act on. It is a method rather than a
      * comparison at each call site so there is one place to be right.
+     *
+     * RATE LIMITING COUNTS AS NOT KNOWING, and getting that wrong is subtle: it
+     * arrives as a 4xx, and every other 4xx here is a real answer about the
+     * request that will not change by waiting. This one changes by waiting and
+     * by nothing else. Classified as a refusal it would make a notification be
+     * acknowledged and never retried, and a reconciliation sweep record a
+     * failure for a tenant whose access is perfectly fine — turning "you asked
+     * too often" into "this customer may not use the product".
      */
     public function isTransient(): bool
     {
-        return $this->reason === self::REASON_UNREACHABLE;
+        return $this->reason === self::REASON_UNREACHABLE
+            || $this->reason === self::REASON_RATE_LIMITED;
     }
 }

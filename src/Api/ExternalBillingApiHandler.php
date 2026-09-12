@@ -219,7 +219,7 @@ final class ExternalBillingApiHandler
         $payload = json_decode($raw, true);
         $type = is_array($payload) && is_string($payload['type'] ?? null) ? $payload['type'] : '';
 
-        if (!$this->ledger->claim($eventId, $type)) {
+        if (!$this->ledger->claim($eventId)) {
             // Already seen, or unidentifiable. Either way this is a success from
             // the sender's point of view: the event has been dealt with.
             return Response::json(self::ACK);

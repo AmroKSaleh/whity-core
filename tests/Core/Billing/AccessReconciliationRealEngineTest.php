@@ -151,6 +151,52 @@ final class AccessReconciliationRealEngineTest extends TestCase
         self::assertSame(1, $this->portal->accessCalls, 'tenant 2 has no billing state to reconcile');
     }
 
+    /**
+     * BEING RATE LIMITED IS NOT BEING TOLD NO, and it must not read as one.
+     *
+     * It arrives as a 4xx, like every genuine refusal — and it is the only 4xx
+     * that becomes untrue by waiting. Classified as a refusal it would mark a
+     * paying tenant as a failed reconciliation on nothing more than this job
+     * having asked too often.
+     */
+    public function testRateLimitingNeverRevokesAndIsNotCountedAsARefusal(): void
+    {
+        $this->localState(1, 'active');
+        $this->portal->failWith = BillingPortalException::rateLimited('429');
+
+        $result = $this->sweeper()->run();
+
+        self::assertTrue($result['rate_limited']);
+        self::assertSame(0, $result['skipped'], 'a rate limit is not a refusal');
+        self::assertSame(
+            SubscriptionService::STATUS_ACTIVE,
+            $this->statusOf(1),
+            'a tenant we were not allowed to ask about keeps what they have'
+        );
+    }
+
+    /**
+     * AND THE SWEEP STOPS RATHER THAN HAMMERING. Carrying on would spend a
+     * request per remaining tenant against an allowance already exhausted,
+     * starving the checkouts and returns a customer is actually waiting on —
+     * and none of those tenants would get an answer either.
+     */
+    public function testTheSweepStopsAtTheFirstRateLimitInsteadOfHammering(): void
+    {
+        foreach ([1, 2] as $tenantId) {
+            $this->localState($tenantId, 'active');
+        }
+        $this->portal->failWith = BillingPortalException::rateLimited('429');
+
+        $this->sweeper()->run();
+
+        self::assertSame(
+            1,
+            $this->portal->accessAttempts,
+            'the second tenant must not be asked about once the limit is known'
+        );
+    }
+
     /** A deployment that bills nobody has nothing to sweep and must not try. */
     public function testADeploymentWithNoBillingServiceSweepsNothing(): void
     {
@@ -164,7 +210,7 @@ final class AccessReconciliationRealEngineTest extends TestCase
         );
 
         self::assertSame(
-            ['checked' => 0, 'changed' => 0, 'unreachable' => 0, 'skipped' => 0],
+            ['checked' => 0, 'changed' => 0, 'unreachable' => 0, 'skipped' => 0, 'rate_limited' => false],
             $run->run()
         );
     }

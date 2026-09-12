@@ -98,14 +98,6 @@ final class SanctionedGlobalTables
         // password_resets above: identity is per-person, not per-tenant.
         'two_factor_recovery_requests' => '2FA-recovery requests for the global profiles identity (WC-password-reset-2fa-recovery); rows join only to profiles — no tenant_id column.',
 
-        // Migration 149 — the idempotency ledger for notifications arriving from
-        // the external billing service. An event id is deduplicated BEFORE
-        // anything is known about whose access it concerns, so there is nothing
-        // to scope it by at the moment it is written; the ids are unique across
-        // the sender's whole account, not per tenant. The tenant is resolved
-        // afterwards, from the subject the event names, and every write that
-        // follows binds it.
-        'billing_event_receipts' => 'Idempotency ledger for inbound billing notifications (migration 149); ids are deduplicated before the tenant is known and are unique per sending account — no tenant_id column.',
     ];
 
     /**

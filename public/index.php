@@ -2539,7 +2539,7 @@ $billingAccessRecorder = new \Whity\Core\Billing\External\AccessRecorder(
 $externalBillingHandler = new \Whity\Api\ExternalBillingApiHandler(
     $billingPortal,
     $billingAccessRecorder,
-    new \Whity\Core\Billing\External\EventLedger($db->getPdo()),
+    new \Whity\Core\Billing\External\EventLedger(new DatabaseSharedStore($db->getPdo())),
     new \Whity\Core\Billing\External\WebhookVerifier(
         $payWebhookSecret,
         max(1, (int) ($_ENV['PAY_WEBHOOK_TOLERANCE_SECONDS']

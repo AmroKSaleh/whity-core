@@ -27,6 +27,8 @@ final class FakeBillingPortal implements BillingPortal
     public AccessSnapshot $access;
     public ?BillingPortalException $failWith = null;
     public int $accessCalls = 0;
+    /** Attempts, including ones that threw — `accessCalls` only counts answers. */
+    public int $accessAttempts = 0;
     public ?string $lastSubject = null;
     public ?string $lastPrice = null;
     public ?string $lastReturnUrl = null;
@@ -62,6 +64,8 @@ final class FakeBillingPortal implements BillingPortal
 
     public function accessFor(string $subjectRef): AccessSnapshot
     {
+        $this->accessAttempts++;
+
         if ($this->failWith !== null) {
             throw $this->failWith;
         }

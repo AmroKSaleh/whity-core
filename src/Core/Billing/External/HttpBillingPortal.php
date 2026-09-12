@@ -127,6 +127,15 @@ final class HttpBillingPortal implements BillingPortal
             );
         }
 
+        // ASKED TOO OFTEN IS NOT A REFUSAL. It arrives as a 4xx like every
+        // genuine refusal below, and it is the one that becomes untrue by
+        // waiting — so it is separated out and treated as "we do not know". Read
+        // as a refusal it would make a notification be acknowledged and never
+        // retried, and a sweep mark a paying tenant as a failure.
+        if ($response['status'] === 429) {
+            throw BillingPortalException::rateLimited('the billing service is rate limiting this key');
+        }
+
         // 4xx is a real answer about this request: a bad credential, a rejected
         // return host, a reference that does not exist. It will not become true
         // by waiting, so it is not transient.

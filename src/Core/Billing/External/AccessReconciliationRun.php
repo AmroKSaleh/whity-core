@@ -42,22 +42,37 @@ final class AccessReconciliationRun
     }
 
     /**
+     * How many tenants one sweep re-checks.
+     *
+     * ONE REQUEST PER TENANT, AGAINST A SHARED BUDGET. The billing service rate
+     * limits per API key, and this job is not its only user — checkouts, returns
+     * and notification follow-ups all spend from the same allowance while a
+     * sweep is running. A batch sized at the whole limit would spend it, and the
+     * requests it starved would be the ones a customer is waiting on.
+     *
+     * So the default is a fraction of the budget rather than all of it, and a
+     * backlog is drained across several sweeps instead of one long one.
+     */
+    public const DEFAULT_BATCH = 100;
+
+    /**
      * @param int $limit How many tenants one sweep will re-check, so a backlog
      *                   cannot run forever.
      *
-     * @return array{checked: int, changed: int, unreachable: int, skipped: int}
+     * @return array{checked: int, changed: int, unreachable: int, skipped: int, rate_limited: bool}
      */
-    public function run(int $limit = 500): array
+    public function run(int $limit = self::DEFAULT_BATCH): array
     {
         $checked = 0;
         $changed = 0;
         $unreachable = 0;
         $skipped = 0;
+        $rateLimited = false;
 
         if (!$this->portal->isConfigured()) {
             // A deployment that bills nobody has nothing to reconcile. Not an
             // error, and not worth a log line every sweep.
-            return ['checked' => 0, 'changed' => 0, 'unreachable' => 0, 'skipped' => 0];
+            return ['checked' => 0, 'changed' => 0, 'unreachable' => 0, 'skipped' => 0, 'rate_limited' => false];
         }
 
         foreach ($this->candidates($limit) as $row) {
@@ -67,6 +82,20 @@ final class AccessReconciliationRun
             try {
                 $snapshot = $this->portal->accessFor(BillingSubject::forTenant($tenantId));
             } catch (BillingPortalException $e) {
+                if ($e->reason === BillingPortalException::REASON_RATE_LIMITED) {
+                    // STOP, DO NOT CARRY ON. Every remaining tenant would spend
+                    // another request against an allowance that is already
+                    // exhausted, starving the checkouts and returns a customer is
+                    // actually waiting on — and none of them would get an answer
+                    // either. The rest of the batch waits for the next sweep.
+                    $rateLimited = true;
+                    $unreachable++;
+                    $this->logger->warning('Reconciliation stopped early: the billing service is rate limiting', [
+                        'checked' => $checked,
+                    ]);
+                    break;
+                }
+
                 if ($e->isTransient()) {
                     // Not known, so not changed. The next sweep asks again.
                     $unreachable++;
@@ -104,6 +133,10 @@ final class AccessReconciliationRun
             'changed' => $changed,
             'unreachable' => $unreachable,
             'skipped' => $skipped,
+            // Surfaced rather than logged only: a sweep that keeps stopping
+            // early is one that never reaches the tail of the tenant list, and
+            // those tenants would silently stop being reconciled at all.
+            'rate_limited' => $rateLimited,
         ];
     }
 
