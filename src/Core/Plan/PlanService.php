@@ -117,8 +117,12 @@ final class PlanService
      * @throws PlanValidationException When the plan is unknown, or the entitlement
      *         key/value is invalid.
      */
-    public function setPlanEntitlement(int $planId, string $key, string $value): void
-    {
+    public function setPlanEntitlement(
+        int $planId,
+        string $key,
+        string $value,
+        bool $confirmReduction = false,
+    ): void {
         if ($this->plans->findById($planId) === null) {
             throw new PlanValidationException('plan_id', "Plan {$planId} not found");
         }
@@ -130,7 +134,75 @@ final class PlanService
             throw new PlanValidationException($key, $reason);
         }
 
-        $this->plans->setEntitlement($planId, $key, EntitlementRegistry::normalize($key, $value));
+        $normalized = EntitlementRegistry::normalize($key, $value);
+        $this->assertNotASilentReduction($planId, $key, $normalized, $confirmReduction);
+
+        $this->plans->setEntitlement($planId, $key, $normalized);
+    }
+
+    /**
+     * Refuse a change that takes something away from live customers, unless
+     * somebody has said they mean it.
+     *
+     * ── Why the guard is here and not at resolution ────────────────────────
+     *
+     * A tier's bundle is read LIVE now, so an edit reaches every tenant on that
+     * tier immediately. That is the entire point — a promotion should not need
+     * anybody to re-apply plans one at a time — but it makes the edit box a
+     * place where a typo silently restricts paying customers. Nothing about the
+     * resolution can tell a deliberate repricing from a slip; only the person
+     * typing knows, so this is where they are asked.
+     *
+     * It refuses rather than warns, and the message CARRIES THE COUNT. "This
+     * affects 40 workspaces" is a sentence somebody reads; "are you sure?" is
+     * one they click through.
+     *
+     * A TIER WITH NOBODY ON IT IS NOT GUARDED. Pricing a new tier means setting
+     * every value from its default, which is a reduction more often than not —
+     * and there is no customer to protect. Guarding it would train whoever
+     * builds a price list to pass the confirmation flag by reflex, which is how
+     * the guard stops working for the case it exists for.
+     *
+     * @throws PlanValidationException When the change reduces a live tier and
+     *         the reduction was not confirmed.
+     */
+    private function assertNotASilentReduction(
+        int $planId,
+        string $key,
+        string $normalized,
+        bool $confirmed,
+    ): void {
+        if ($confirmed) {
+            return;
+        }
+
+        $affected = $this->plans->countTenantsOnPlan($planId);
+        if ($affected === 0) {
+            return;
+        }
+
+        // What a tenant on this tier resolves to TODAY for this key. The
+        // comparison is against the tier's own current answer including its
+        // fallthrough to the baseline — not against "unset", which would read
+        // every first-time grant as a reduction from nothing.
+        $bundle = $this->plans->getEntitlements($planId);
+        $current = $bundle[$key] ?? EntitlementRegistry::defaultFor($key);
+
+        if (EntitlementRegistry::definition($key)->grantsAtLeast($normalized, $current)) {
+            return;
+        }
+
+        throw new PlanValidationException(
+            $key,
+            sprintf(
+                'This reduces %s from "%s" to "%s" for %d workspace(s) already on this plan, '
+                . 'and takes effect for them immediately. Confirm the reduction to apply it.',
+                $key,
+                $current,
+                $normalized,
+                $affected
+            )
+        );
     }
 
     public function removePlanEntitlement(int $planId, string $key): bool
@@ -164,10 +236,28 @@ final class PlanService
     }
 
     /**
-     * Apply a plan to a tenant: MATERIALISE its bundle into the tenant's
-     * entitlements (reset to exactly the plan) and record the assignment — all in
-     * one transaction. The tenant's effective entitlements become the plan's
-     * values, with every unset key falling back to the registry default.
+     * Put a tenant on a plan.
+     *
+     * IT NO LONGER MATERIALISES THE BUNDLE, and that is the change that makes a
+     * tier editable. It used to copy every value from the plan into
+     * `tenant_entitlements` inside a transaction, which looked tidy and had one
+     * consequence nobody wanted: those copies are PER-TENANT OVERRIDES, the
+     * most specific layer there is. Every subscriber therefore carried a frozen
+     * snapshot of their tier taken on the day they joined, outranking the tier
+     * itself — so marketing could change what "Pro" includes and not one
+     * existing Pro customer would notice. Worse, an operator's genuine
+     * per-tenant grant became indistinguishable from a copied plan value, so
+     * re-applying a plan silently erased it.
+     *
+     * Now the assignment is just that: a row saying which plan this tenant is
+     * on. {@see \Whity\Core\Entitlement\EntitlementService::effective()} reads
+     * the bundle live, so the tier stays the source of truth for everyone on it
+     * and an override means what it says again.
+     *
+     * ANY OVERRIDES LEFT BY THE OLD BEHAVIOUR ARE CLEARED as the tenant moves
+     * plans — migration 151 clears the historical ones, and this stops new ones
+     * appearing. Without that, tenants who subscribed under the old code would
+     * keep their snapshot for good and the tier would never reach them.
      *
      * @throws PlanValidationException When the plan is unknown or the tenant is the
      *         system tenant (implicitly unlimited — never assigned a plan).
@@ -181,15 +271,15 @@ final class PlanService
             throw new PlanValidationException('plan_id', "Plan {$planId} not found");
         }
 
-        $bundle = $this->plans->getEntitlements($planId);
-
         $this->db->beginTransaction();
         try {
-            // Deterministic reset: every registry key the plan sets → that value;
-            // every key it does not set → cleared (null) to the registry default.
+            // Clear any per-tenant copies a previous plan left behind, so the
+            // new tier is what this tenant resolves to. Deliberately a RESET of
+            // the override layer rather than a write of the new bundle: the
+            // bundle is read live, and writing it here is exactly the bug this
+            // method used to have.
             foreach (EntitlementRegistry::keys() as $key) {
-                $value = array_key_exists($key, $bundle) ? $bundle[$key] : null;
-                $this->entitlements->set($tenantId, $key, $value, $appliedBy);
+                $this->entitlements->set($tenantId, $key, null, $appliedBy);
             }
             $this->plans->setTenantPlan($tenantId, $planId, $appliedBy);
 

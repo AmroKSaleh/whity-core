@@ -2430,6 +2430,11 @@ $planService = new \Whity\Core\Plan\PlanService(
 $plansHandler = new \Whity\Api\PlansApiHandler($planService, $roleChecker, $db->getPdo());
 $router->register('GET',    '/api/plans',                       [$plansHandler, 'list'],            null, null, CorePermissions::PLANS_MANAGE);
 $router->register('POST',   '/api/plans',                       [$plansHandler, 'create'],          null, null, CorePermissions::PLANS_MANAGE);
+// BEFORE the {id} route, because a word is not a digit but the catalogue is the
+// more specific path and reading it that way costs nothing. Registered here so
+// whoever prices a tier can discover WHAT can be priced without first naming a
+// tenant.
+$router->register('GET',    '/api/plans/entitlement-catalogue',  [$plansHandler, 'entitlementCatalogue'], null, null, CorePermissions::PLANS_MANAGE);
 $router->register('GET',    '/api/plans/{id:\d+}',              [$plansHandler, 'show'],            null, null, CorePermissions::PLANS_MANAGE);
 $router->register('PATCH',  '/api/plans/{id:\d+}',              [$plansHandler, 'update'],          null, null, CorePermissions::PLANS_MANAGE);
 $router->register('DELETE', '/api/plans/{id:\d+}',              [$plansHandler, 'destroy'],         null, null, CorePermissions::PLANS_MANAGE);

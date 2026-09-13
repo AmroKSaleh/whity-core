@@ -214,19 +214,60 @@ final class PlansApiHandler
             return Response::error('Validation failed', 422, $details);
         }
 
+        // TAKING SOMETHING AWAY NEEDS TO BE MEANT. A tier's bundle is read live,
+        // so an edit reaches every workspace on that tier immediately — which is
+        // the point, and which makes this endpoint a place where a typo restricts
+        // paying customers. The service refuses a reduction unless the caller
+        // says they mean it, and the refusal names how many workspaces it would
+        // affect. `confirm_reduction` is the client saying the person saw that
+        // number and went ahead.
+        $confirmReduction = ($body['confirm_reduction'] ?? false) === true;
+
         try {
             foreach ($normalised as $key => $value) {
                 if ($value === null) {
                     $this->plans->removePlanEntitlement($id, $key);
                 } else {
-                    $this->plans->setPlanEntitlement($id, $key, $value);
+                    $this->plans->setPlanEntitlement($id, $key, $value, $confirmReduction);
                 }
             }
         } catch (PlanValidationException $e) {
-            return Response::error('Validation failed', 422, [$e->field() => $e->reason()]);
+            // 409 rather than 422: the value is perfectly valid, and the request
+            // is refused because of who it would affect. A client telling those
+            // apart can offer "apply anyway" for one and not the other.
+            $status = str_contains($e->reason(), 'Confirm the reduction') ? 409 : 422;
+
+            return Response::error(
+                $status === 409 ? 'This change reduces access for existing workspaces' : 'Validation failed',
+                $status,
+                [$e->field() => $e->reason()]
+            );
         }
 
         return Response::json(['data' => $this->plans->getPlanWithEntitlements($id)]);
+    }
+
+    /**
+     * The vocabulary of sellable limits: every key, its kind, its baseline, and
+     * who declared it.
+     *
+     * SEPARATE FROM THE PER-TENANT ENTITLEMENTS ENDPOINT, which answers "what
+     * does THIS workspace get" and needs a tenant in the path. Pricing a tier is
+     * a question about the catalogue, not about any one customer, and making
+     * whoever prices things pick an arbitrary tenant first to discover what can
+     * be priced would be a strange thing to ask.
+     *
+     * It carries `period` and `owner` so the editor can render a meter ("5 per
+     * day") differently from a standing cap ("500 of them"), and group a
+     * plugin's limits under the plugin that sells them.
+     */
+    public function entitlementCatalogue(Request $request): Response
+    {
+        if (($r = $this->authorize($request)) instanceof Response) {
+            return $r;
+        }
+
+        return Response::json(['data' => EntitlementRegistry::catalogue()]);
     }
 
     /**
