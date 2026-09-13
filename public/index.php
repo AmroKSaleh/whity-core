@@ -2438,6 +2438,13 @@ $router->register('GET',    '/api/plans/entitlement-catalogue',  [$plansHandler,
 $router->register('GET',    '/api/plans/{id:\d+}',              [$plansHandler, 'show'],            null, null, CorePermissions::PLANS_MANAGE);
 $router->register('PATCH',  '/api/plans/{id:\d+}',              [$plansHandler, 'update'],          null, null, CorePermissions::PLANS_MANAGE);
 $router->register('DELETE', '/api/plans/{id:\d+}',              [$plansHandler, 'destroy'],         null, null, CorePermissions::PLANS_MANAGE);
+// What still points at a tier, and the remedy when it cannot be deleted. A
+// tier with live subscribers or paid invoices is RETIRED, never removed:
+// `tenant_plan.plan_id` and `invoices.plan_id` are both ON DELETE SET NULL, so
+// deleting one silently detaches its customers and blanks it out of invoices
+// that have already been paid.
+$router->register('GET',    '/api/plans/{id:\d+}/usage',        [$plansHandler, 'usage'],           null, null, CorePermissions::PLANS_MANAGE);
+$router->register('POST',   '/api/plans/{id:\d+}/move-subscribers', [$plansHandler, 'moveSubscribers'], null, null, CorePermissions::PLANS_MANAGE);
 $router->register('PUT',    '/api/plans/{id:\d+}/entitlements', [$plansHandler, 'setEntitlements'], null, null, CorePermissions::PLANS_MANAGE);
 
 // What each plan COSTS. Same gate as the catalogue above — `plans:manage` AND

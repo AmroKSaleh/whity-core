@@ -96,9 +96,97 @@ final class PlanService
         return $this->plans->updatePlan($id, $fields) > 0;
     }
 
+    /**
+     * Delete a tier, but only one that nothing has ever used.
+     *
+     * THIS USED TO BE AN UNCONDITIONAL `DELETE FROM plans`, and the schema made
+     * that look safe: `tenant_plan.plan_id` and `invoices.plan_id` are both
+     * `ON DELETE SET NULL`, so tidying an old tier detached its live subscribers
+     * and blanked it out of paid invoices — silently, with no cascade refusal
+     * and nothing in a log. The evidence appeared months later as a report that
+     * stopped adding up, by which time the tier's name was gone.
+     *
+     * @throws PlanValidationException When the tier is unknown, or something
+     *         still points at it. The reason names the counts and the remedy.
+     */
     public function deletePlan(int $id): bool
     {
+        if ($this->plans->findById($id) === null) {
+            return false;
+        }
+
+        $usage = $this->plans->usageFor($id);
+        $reason = $usage->refusalReason();
+        if ($reason !== null) {
+            throw new PlanValidationException('plan_id', $reason);
+        }
+
         return $this->plans->deletePlan($id) > 0;
+    }
+
+    /** What still points at a tier — for a confirmation, or to decide what to offer. */
+    public function usageFor(int $planId): PlanUsage
+    {
+        return $this->plans->usageFor($planId);
+    }
+
+    /**
+     * Move every workspace off one tier onto another.
+     *
+     * THE REMEDY THAT MAKES RETIRING A TIER POSSIBLE WITHOUT ABANDONING ANYONE.
+     * A tier with subscribers cannot be deleted and should not simply be
+     * switched off underneath them — deactivating it stops it being SOLD but
+     * leaves those workspaces on a tier nobody maintains, quietly diverging from
+     * every other customer as the catalogue moves on.
+     *
+     * REFUSES TO MOVE A TIER ONTO ITSELF, and refuses an unknown destination:
+     * both would report a cheerful "moved 0" or silently strand everyone.
+     *
+     * THE DESTINATION'S ACTIVE FLAG IS NOT CHECKED, deliberately. Consolidating
+     * two retired tiers into one retired tier is a legitimate tidy-up, and
+     * refusing it would force an operator to reactivate a tier — putting it back
+     * on sale — as a step in cleaning up.
+     *
+     * @return int How many workspaces moved.
+     *
+     * @throws PlanValidationException When either tier is unknown or they are
+     *         the same tier.
+     */
+    public function moveSubscribers(int $fromPlanId, int $toPlanId, ?int $movedBy = null): int
+    {
+        if ($fromPlanId === $toPlanId) {
+            throw new PlanValidationException('to_plan_id', 'Choose a different tier to move these workspaces to.');
+        }
+        if ($this->plans->findById($fromPlanId) === null) {
+            throw new PlanValidationException('plan_id', "Plan {$fromPlanId} not found");
+        }
+        if ($this->plans->findById($toPlanId) === null) {
+            throw new PlanValidationException('to_plan_id', "Plan {$toPlanId} not found");
+        }
+
+        return $this->plans->moveSubscribers($fromPlanId, $toPlanId, $movedBy);
+    }
+
+    /**
+     * Take a tier off sale without deleting it.
+     *
+     * The honest end state for a tier that has customers or history: it stops
+     * being offered, and every row pointing at it keeps pointing at something
+     * that still has a name.
+     */
+    public function retirePlan(int $id): bool
+    {
+        return $this->updatePlan($id, ['is_active' => false]);
+    }
+
+    /**
+     * The workspaces on a tier, for recording a move tenant by tenant.
+     *
+     * @return list<int>
+     */
+    public function subscriberTenantIds(int $planId): array
+    {
+        return $this->plans->subscriberTenantIds($planId);
     }
 
     /**

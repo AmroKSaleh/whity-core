@@ -146,11 +146,101 @@ final class PlansApiHandler
             return $r;
         }
 
-        if (!$this->plans->deletePlan((int) ($params['id'] ?? 0))) {
-            return Response::error('Plan not found', 404);
+        try {
+            if (!$this->plans->deletePlan((int) ($params['id'] ?? 0))) {
+                return Response::error('Plan not found', 404);
+            }
+        } catch (PlanValidationException $e) {
+            // 409, NOT 422. The request is perfectly well formed; it is refused
+            // because of what the tier still holds. A client telling the two
+            // apart can offer the remedy — move these workspaces, or retire it —
+            // instead of asking somebody to correct a field that is not wrong.
+            return Response::error(
+                'This tier is still in use',
+                409,
+                [$e->field() => $e->reason()]
+            );
         }
 
         return Response::json([], 204);
+    }
+
+    /**
+     * GET /api/plans/{id}/usage — what still points at a tier.
+     *
+     * Asked before offering a delete, so the screen can say WHY it is not on
+     * offer rather than showing a disabled button with no explanation. Cheap
+     * enough to ask for every row.
+     *
+     * @param array<string, string> $params
+     */
+    public function usage(Request $request, array $params): Response
+    {
+        if (($r = $this->authorize($request)) instanceof Response) {
+            return $r;
+        }
+
+        $id = (int) ($params['id'] ?? 0);
+        if ($this->plans->getPlanWithEntitlements($id) === null) {
+            return Response::error('Plan not found', 404);
+        }
+
+        $usage = $this->plans->usageFor($id);
+
+        return Response::json(['data' => [
+            'subscribers' => $usage->subscribers,
+            'invoices' => $usage->invoices,
+            'prices' => $usage->prices,
+            'limits' => $usage->limits,
+            'promotions' => $usage->promotions,
+            'deletable' => $usage->isDeletable(),
+            // Separate from `deletable` because it changes what an interface
+            // should OFFER: a tier with subscribers has a route to deletion
+            // (move them), a tier with invoices never will.
+            'permanently_undeletable' => $usage->isPermanentlyUndeletable(),
+            'refusal_reason' => $usage->refusalReason(),
+        ]]);
+    }
+
+    /**
+     * POST /api/plans/{id}/move-subscribers — put every workspace on this tier
+     * onto another one. Body: `{ "to_plan_id": <int> }`.
+     *
+     * The remedy for a tier that cannot be deleted because people are on it.
+     * Moving them is what makes retiring it honest: the tier stops being sold
+     * and nobody is left on something nobody maintains.
+     *
+     * @param array<string, string> $params
+     */
+    public function moveSubscribers(Request $request, array $params): Response
+    {
+        if (($r = $this->authorize($request)) instanceof Response) {
+            return $r;
+        }
+
+        $body = JsonBody::parsed($request);
+        $to = $body['to_plan_id'] ?? null;
+        if (!is_int($to) && !(is_string($to) && ctype_digit($to))) {
+            return Response::error('Request body must include an integer "to_plan_id"', 400);
+        }
+
+        $from = (int) ($params['id'] ?? 0);
+
+        try {
+            $moved = $this->plans->moveSubscribers($from, (int) $to, null);
+        } catch (PlanValidationException $e) {
+            return Response::error('Validation failed', 422, [$e->field() => $e->reason()]);
+        }
+
+        return Response::json(['data' => [
+            'moved' => $moved,
+            // Returned so the caller can act on the new state without a second
+            // round trip — most often to retire the tier it has just emptied.
+            'usage' => [
+                'subscribers' => $this->plans->usageFor($from)->subscribers,
+                'deletable' => $this->plans->usageFor($from)->isDeletable(),
+            ],
+        ]]);
     }
 
     /**

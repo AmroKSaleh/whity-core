@@ -1,6 +1,7 @@
 'use client';
 
 import { TierFeatures } from './tier-features';
+import { TierLifecycle } from './tier-lifecycle';
 import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
@@ -169,6 +170,22 @@ export default function BillingPage() {
                 </Button>
               )}
             </div>
+
+            {/* WHAT THIS TIER STILL HOLDS, and what may be done about it.
+                Shown per tier rather than behind a delete attempt: somebody
+                deciding whether to retire a tier needs to know it has
+                subscribers before they act, not after being refused. */}
+            {canManage && (
+              <TierLifecycle
+                plan={plan}
+                allPlans={(data ?? []).map((entry) => ({
+                  id: entry.plan.id,
+                  name: entry.plan.name,
+                  is_active: entry.plan.is_active,
+                }))}
+                onChanged={refetch}
+              />
+            )}
 
             {/* A plan whose prices could not be read says so. An empty list here
                 would be indistinguishable from "this plan has no prices", which

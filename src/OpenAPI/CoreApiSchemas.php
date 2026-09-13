@@ -4506,6 +4506,28 @@ final class CoreApiSchemas
                 'additionalProperties' => SchemaBuilder::ref('EntitlementDefinitionSchema'),
             ]),
 
+            'PlanUsage' => self::object([
+                'subscribers' => self::int(),
+                'invoices' => self::int(),
+                'prices' => self::int(),
+                'limits' => self::int(),
+                'promotions' => self::int(),
+                'deletable' => self::bool(),
+                // Separate from `deletable` because it changes what a client
+                // should OFFER: a tier with subscribers has a route to deletion
+                // (move them); a tier with invoices never will.
+                'permanently_undeletable' => self::bool(),
+                'refusal_reason' => self::str(true),
+            ], ['subscribers', 'invoices', 'prices', 'limits', 'promotions', 'deletable', 'permanently_undeletable']),
+            'PlanUsageResponse' => self::dataEnvelope(SchemaBuilder::ref('PlanUsage')),
+            'PlanMoveSubscribersRequest' => self::object([
+                'to_plan_id' => self::int(),
+            ], ['to_plan_id']),
+            'PlanMoveSubscribersResponse' => self::dataEnvelope(SchemaBuilder::ref('PlanMoveSubscribersResult')),
+            'PlanMoveSubscribersResult' => self::object([
+                'moved' => self::int(),
+            ], ['moved']),
+
             'PlanListResponse' => self::listEnvelope('PlanSummary'),
             'PlanResponse' => self::dataEnvelope(SchemaBuilder::ref('Plan')),
             'PlanCreateRequest' => self::object([
@@ -9516,6 +9538,30 @@ final class CoreApiSchemas
                 'responses' => [
                     200 => self::jsonResponse('The updated plan', 'PlanResponse'),
                     404 => self::errorResponse('Plan not found'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/plans/{id:\d+}/usage', 'plans:manage', [
+                'summary' => 'What still points at a tier (operator)',
+                'description' => 'Subscribers, invoices, prices, limits and promotion links, plus '
+                    . 'whether the tier may be deleted. A tier with live subscribers or invoices is '
+                    . 'RETIRED rather than removed: tenant_plan.plan_id and invoices.plan_id are both '
+                    . 'ON DELETE SET NULL, so deleting one would silently detach its customers and '
+                    . 'blank it out of invoices that have already been paid.',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('What the tier still holds', 'PlanUsageResponse'),
+                    404 => self::errorResponse('Plan not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/plans/{id:\d+}/move-subscribers', 'plans:manage', [
+                'summary' => 'Move every workspace on a tier to another one (operator)',
+                'description' => 'The remedy for a tier that cannot be deleted because people are on '
+                    . 'it. Each workspace resolves to the limits of the destination tier immediately.',
+                'tags' => ['plans'],
+                'request' => 'PlanMoveSubscribersRequest',
+                'responses' => [
+                    200 => self::jsonResponse('How many workspaces moved', 'PlanMoveSubscribersResponse'),
                     422 => self::errorResponse('Validation failed'),
                 ] + self::authErrors(),
             ]),

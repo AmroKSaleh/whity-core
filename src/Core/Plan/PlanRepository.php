@@ -82,6 +82,104 @@ final class PlanRepository
         return $stmt->rowCount();
     }
 
+    /**
+     * What still points at this tier.
+     *
+     * ONE QUERY, not five round trips: the caller asks this before every delete
+     * and before rendering every row of the tier screen, and five scalar
+     * subqueries against small indexed tables is one plan either way.
+     *
+     * @tenant-guard-ignore: the plan catalogue is operator-owned and global by
+     * design, and this counts ACROSS tenants on purpose — "how many workspaces
+     * are on this tier" is the question being asked. It returns counts and reads
+     * no tenant data.
+     */
+    public function usageFor(int $planId): PlanUsage
+    {
+        $stmt = $this->db->prepare('
+            SELECT
+                (SELECT COUNT(*) FROM tenant_plan       WHERE plan_id = :p1) AS subscribers,
+                (SELECT COUNT(*) FROM invoices          WHERE plan_id = :p2) AS invoices,
+                (SELECT COUNT(*) FROM plan_prices       WHERE plan_id = :p3) AS prices,
+                (SELECT COUNT(*) FROM plan_entitlements WHERE plan_id = :p4) AS limits,
+                (SELECT COUNT(*) FROM promotion_plans   WHERE plan_id = :p5) AS promotions
+        ');
+        foreach (['p1', 'p2', 'p3', 'p4', 'p5'] as $name) {
+            $stmt->bindValue(':' . $name, $planId, PDO::PARAM_INT);
+        }
+        $stmt->execute();
+
+        /** @var array<string, mixed>|false $row */
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) {
+            return new PlanUsage(0, 0, 0, 0, 0);
+        }
+
+        return new PlanUsage(
+            (int) $row['subscribers'],
+            (int) $row['invoices'],
+            (int) $row['prices'],
+            (int) $row['limits'],
+            (int) $row['promotions'],
+        );
+    }
+
+    /**
+     * Move every workspace on one tier to another.
+     *
+     * A PLAIN UPDATE, not a loop of applyToTenant(). The bundle is read live
+     * now, so moving a workspace between tiers IS this single write — there is
+     * no per-tenant state to re-materialise, and doing it row by row would only
+     * add a way for the operation to half-finish.
+     *
+     * `assigned_at` is refreshed because the assignment genuinely changed; an
+     * untouched timestamp would report that these workspaces had been on the new
+     * tier since whenever they joined the old one.
+     *
+     * @return int How many workspaces moved.
+     *
+     * @tenant-guard-ignore: moving every workspace off a retiring tier is an
+     * operator action across tenants by definition — the tier is the subject,
+     * not any one tenant. The predicate that scopes it is `plan_id`.
+     */
+    public function moveSubscribers(int $fromPlanId, int $toPlanId, ?int $movedBy = null): int
+    {
+        $stmt = $this->db->prepare('
+            UPDATE tenant_plan
+               SET plan_id = :to_plan, assigned_by = :moved_by, assigned_at = CURRENT_TIMESTAMP
+             WHERE plan_id = :from_plan
+        ');
+        $stmt->bindValue(':to_plan', $toPlanId, PDO::PARAM_INT);
+        $stmt->bindValue(':from_plan', $fromPlanId, PDO::PARAM_INT);
+        $stmt->bindValue(':moved_by', $movedBy, $movedBy === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
+        $stmt->execute();
+
+        return $stmt->rowCount();
+    }
+
+    /**
+     * Which workspaces are on a tier, so a move can be recorded per tenant.
+     *
+     * @return list<int>
+     *
+     * @tenant-guard-ignore: the same cross-tenant question as usageFor() — who
+     * is on this tier — asked by an operator screen so the move can be audited
+     * tenant by tenant.
+     */
+    public function subscriberTenantIds(int $planId): array
+    {
+        $stmt = $this->db->prepare('SELECT tenant_id FROM tenant_plan WHERE plan_id = :plan_id');
+        $stmt->bindValue(':plan_id', $planId, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $ids = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) {
+            $ids[] = (int) $id;
+        }
+
+        return $ids;
+    }
+
     public function deletePlan(int $id): int
     {
         $stmt = $this->db->prepare('DELETE FROM plans WHERE id = :id');

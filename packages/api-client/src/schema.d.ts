@@ -3526,6 +3526,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/plans/{id}/move-subscribers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move every workspace on a tier to another one (operator)
+         * @description The remedy for a tier that cannot be deleted because people are on it. Each workspace resolves to the limits of the destination tier immediately.
+         */
+        post: operations["post_api_v1_plans_id_move_subscribers"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/plans/{id}/prices": {
         parameters: {
             query?: never;
@@ -3565,6 +3585,26 @@ export interface paths {
          * @description RETIRES rather than destroys, and returns the retired row. The price is what a past charge was made against, so deleting it would throw away the record of what somebody was charged; the partial unique index frees its slot the moment it stops being active, so a replacement can be created immediately.
          */
         delete: operations["delete_api_v1_plans_id_prices_priceid"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plans/{id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What still points at a tier (operator)
+         * @description Subscribers, invoices, prices, limits and promotion links, plus whether the tier may be deleted. A tier with live subscribers or invoices is RETIRED rather than removed: tenant_plan.plan_id and invoices.plan_id are both ON DELETE SET NULL, so deleting one would silently detach its customers and blank it out of invoices that have already been paid.
+         */
+        get: operations["get_api_v1_plans_id_usage"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -7168,6 +7208,15 @@ export interface components {
         PlanListResponse: {
             data: components["schemas"]["PlanSummary"][];
         };
+        PlanMoveSubscribersRequest: {
+            to_plan_id: number;
+        };
+        PlanMoveSubscribersResponse: {
+            data: components["schemas"]["PlanMoveSubscribersResult"];
+        };
+        PlanMoveSubscribersResult: {
+            moved: number;
+        };
         PlanPrice: {
             id: number;
             plan_id: number;
@@ -7219,6 +7268,19 @@ export interface components {
             description?: string | null;
             is_active?: boolean;
             sort_order?: number;
+        };
+        PlanUsage: {
+            subscribers: number;
+            invoices: number;
+            prices: number;
+            limits: number;
+            promotions: number;
+            deletable: boolean;
+            permanently_undeletable: boolean;
+            refusal_reason?: string | null;
+        };
+        PlanUsageResponse: {
+            data: components["schemas"]["PlanUsage"];
         };
         PlatformLatestReleaseResponse: {
             /** @enum {string} */
@@ -27807,6 +27869,95 @@ export interface operations {
             };
         };
     };
+    post_api_v1_plans_id_move_subscribers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanMoveSubscribersRequest"];
+            };
+        };
+        responses: {
+            /** @description How many workspaces moved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanMoveSubscribersResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_plans_id_prices: {
         parameters: {
             query?: never;
@@ -28012,6 +28163,73 @@ export interface operations {
                 };
             };
             /** @description No such price on this plan */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_plans_id_usage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What the tier still holds */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanUsageResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Plan not found */
             404: {
                 headers: {
                     [name: string]: unknown;
