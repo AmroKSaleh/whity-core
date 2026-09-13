@@ -4475,6 +4475,29 @@ final class CoreApiSchemas
                 'is_per_device' => self::bool(),
             ], ['currency', 'unit_amount', 'billing_period']),
 
+            // One sellable limit, as the tier editor needs to render it.
+            //
+            // `period` is what separates a standing CAP from a metered
+            // ALLOWANCE — "500 students" against "5 renders per day" — and the
+            // two are priced and displayed differently, so a client must not
+            // have to infer it from the key's spelling. `owner` names the
+            // plugin that declared the limit, or is null for core, so a vertical
+            // product's own limits group under the plugin that sells them.
+            'EntitlementDefinitionSchema' => self::object([
+                'type' => self::str(),
+                'default' => self::str(),
+                'description' => self::str(),
+                'period' => ['type' => 'string', 'enum' => ['day', 'week', 'month'], 'nullable' => true],
+                'owner' => ['type' => 'string', 'nullable' => true],
+            ], ['type', 'default', 'description']),
+            // Keyed by entitlement key, which is open-ended by design: plugins
+            // add their own at boot, so the property names cannot be enumerated
+            // in a static schema.
+            'EntitlementCatalogueResponse' => self::dataEnvelope([
+                'type' => 'object',
+                'additionalProperties' => SchemaBuilder::ref('EntitlementDefinitionSchema'),
+            ]),
+
             'PlanListResponse' => self::listEnvelope('PlanSummary'),
             'PlanResponse' => self::dataEnvelope(SchemaBuilder::ref('Plan')),
             'PlanCreateRequest' => self::object([
@@ -9456,6 +9479,18 @@ final class CoreApiSchemas
                 'responses' => [
                     201 => self::jsonResponse('The created plan', 'PlanResponse'),
                     422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/plans/entitlement-catalogue', 'plans:manage', [
+                'summary' => 'The catalogue of sellable limits (operator)',
+                'description' => 'Every entitlement a tier can set: its kind (bool flag or int cap), '
+                    . 'its baseline grant, a human description, the calendar period it resets on when '
+                    . 'it is a metered allowance, and the plugin that declared it (null for core). '
+                    . 'Distinct from GET /api/v1/tenants/{id}/entitlements, which answers what one '
+                    . 'workspace receives; this answers what can be priced at all, and needs no tenant.',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('The sellable-limit catalogue', 'EntitlementCatalogueResponse'),
                 ] + self::authErrors(),
             ]),
             self::permissionRoute('GET', '/api/plans/{id:\d+}', 'plans:manage', [

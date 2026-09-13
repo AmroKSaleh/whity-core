@@ -1,5 +1,6 @@
 'use client';
 
+import { TierFeatures } from './tier-features';
 import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
@@ -235,6 +236,13 @@ export default function BillingPage() {
           </section>
         ))}
       </div>
+
+      {/* WHAT EACH TIER INCLUDES, on the same screen as what each tier COSTS.
+          They are one decision — "is there a reason to move up from Plus" is
+          answered by reading a price against a feature list — and splitting
+          them across two screens is how you end up selling three tiers that
+          differ only in the number on the invoice. */}
+      {!loading && !error && canManage && <TierFeatures />}
 
       {pricing && (
         <AddPriceDialog

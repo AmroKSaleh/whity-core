@@ -23921,6 +23921,83 @@
                 ]
             }
         },
+        "/api/v1/plans/entitlement-catalogue": {
+            "get": {
+                "operationId": "get_api_v1_plans_entitlement_catalogue",
+                "summary": "The catalogue of sellable limits (operator)",
+                "tags": [
+                    "plans"
+                ],
+                "description": "Every entitlement a tier can set: its kind (bool flag or int cap), its baseline grant, a human description, the calendar period it resets on when it is a metered allowance, and the plugin that declared it (null for core). Distinct from GET /api/v1/tenants/{id}/entitlements, which answers what one workspace receives; this answers what can be priced at all, and needs no tenant.",
+                "responses": {
+                    "200": {
+                        "description": "The sellable-limit catalogue",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/EntitlementCatalogueResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/plans/{id}": {
             "delete": {
                 "operationId": "delete_api_v1_plans_id",
@@ -39562,6 +39639,52 @@
                     },
                     "description": {
                         "type": "string"
+                    }
+                },
+                "required": [
+                    "type",
+                    "default",
+                    "description"
+                ]
+            },
+            "EntitlementCatalogueResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "$ref": "#/components/schemas/EntitlementDefinitionSchema"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "EntitlementDefinitionSchema": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string"
+                    },
+                    "default": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "period": {
+                        "type": "string",
+                        "enum": [
+                            "day",
+                            "week",
+                            "month"
+                        ],
+                        "nullable": true
+                    },
+                    "owner": {
+                        "type": "string",
+                        "nullable": true
                     }
                 },
                 "required": [

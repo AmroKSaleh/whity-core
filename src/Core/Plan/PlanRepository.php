@@ -186,6 +186,26 @@ final class PlanRepository
     // ── tenant_plan (tenant-owned) ──────────────────────────────────────────
 
     /**
+     * How many tenants are currently on a plan.
+     *
+     * Exists for the downgrade guard: when somebody reduces what a tier grants,
+     * the refusal names how many workspaces it would restrict. A number in that
+     * sentence is the difference between a confirmation somebody reads and one
+     * they click through.
+     *
+     * @tenant-guard-ignore: "how many tenants does this pricing change affect"
+     * is inherently cross-tenant and is asked by an operator screen. It returns
+     * a count and reads no tenant data.
+     */
+    public function countTenantsOnPlan(int $planId): int
+    {
+        $stmt = $this->db->prepare('SELECT COUNT(*) FROM tenant_plan WHERE plan_id = :plan_id');
+        $stmt->execute([':plan_id' => $planId]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
      * @return array<string, mixed>|null
      */
     public function getTenantPlan(int $tenantId): ?array

@@ -102,6 +102,33 @@ final class LicensedDeviceCount
     }
 
     /**
+     * How many devices this tenant HOLDS right now, for capping rather than
+     * billing.
+     *
+     * ALWAYS ANSWERS, which is the difference from {@see inServiceNow()}. That
+     * one returns null for a retrospectively-billed tenant because there is no
+     * honest forward-looking figure to put on a subscription. A CAP has no such
+     * luxury: somebody is trying to activate a device right now and the answer
+     * is yes or no. On that basis it falls back to counting units put into
+     * service, which is what "how many do they have" means when the billing
+     * question is about usage rather than inventory.
+     *
+     * COUNTS WHAT THE BILL COUNTS wherever it can, deliberately. A tenant billed
+     * from provisioning who was capped on activations could be charged for ten
+     * units while the product told them they had eight left — a contradiction
+     * they would find on an invoice rather than on a screen.
+     */
+    public function heldNow(int $tenantId, DateTimeImmutable $now): int
+    {
+        $basis = $this->basisFor($tenantId);
+        if ($basis === self::RETROSPECTIVE_BASIS) {
+            $basis = 'activated';
+        }
+
+        return $this->count($basis, $tenantId, $now, $now);
+    }
+
+    /**
      * Which units count, for this tenant.
      *
      * An unrecognised value falls through to `activated` below rather than

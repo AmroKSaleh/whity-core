@@ -50,6 +50,12 @@ final class FeatureRegistry
      */
     private const ENTITLEMENT_FOR = [
         SettingsRegistry::SSO_ENABLED => EntitlementRegistry::SSO_TENANT_IDP,
+        // The AI/MCP surface is sold by tier. The flag remains the operator's
+        // kill switch for the whole instance — the two stay separate for the
+        // reason in the class note above: merged, you get either a plan that
+        // overrides an incident response, or a paid subsystem nobody can turn
+        // off during one.
+        SettingsRegistry::MCP_ENABLED => EntitlementRegistry::MCP_ACCESS,
     ];
 
     /**
