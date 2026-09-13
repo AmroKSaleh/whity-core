@@ -24391,6 +24391,123 @@
                 ]
             }
         },
+        "/api/v1/plans/{id}/move-subscribers": {
+            "post": {
+                "operationId": "post_api_v1_plans_id_move_subscribers",
+                "summary": "Move every workspace on a tier to another one (operator)",
+                "tags": [
+                    "plans"
+                ],
+                "description": "The remedy for a tier that cannot be deleted because people are on it. Each workspace resolves to the limits of the destination tier immediately.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PlanMoveSubscribersRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "How many workspaces moved",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PlanMoveSubscribersResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/plans/{id}/prices": {
             "get": {
                 "operationId": "get_api_v1_plans_id_prices",
@@ -24662,6 +24779,93 @@
                     },
                     "404": {
                         "description": "No such price on this plan",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/plans/{id}/usage": {
+            "get": {
+                "operationId": "get_api_v1_plans_id_usage",
+                "summary": "What still points at a tier (operator)",
+                "tags": [
+                    "plans"
+                ],
+                "description": "Subscribers, invoices, prices, limits and promotion links, plus whether the tier may be deleted. A tier with live subscribers or invoices is RETIRED rather than removed: tenant_plan.plan_id and invoices.plan_id are both ON DELETE SET NULL, so deleting one would silently detach its customers and blank it out of invoices that have already been paid.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "What the tier still holds",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PlanUsageResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Plan not found",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -44736,6 +44940,39 @@
                     "data"
                 ]
             },
+            "PlanMoveSubscribersRequest": {
+                "type": "object",
+                "properties": {
+                    "to_plan_id": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "to_plan_id"
+                ]
+            },
+            "PlanMoveSubscribersResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/PlanMoveSubscribersResult"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "PlanMoveSubscribersResult": {
+                "type": "object",
+                "properties": {
+                    "moved": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "moved"
+                ]
+            },
             "PlanPrice": {
                 "type": "object",
                 "properties": {
@@ -44931,6 +45168,56 @@
                         "type": "integer"
                     }
                 }
+            },
+            "PlanUsage": {
+                "type": "object",
+                "properties": {
+                    "subscribers": {
+                        "type": "integer"
+                    },
+                    "invoices": {
+                        "type": "integer"
+                    },
+                    "prices": {
+                        "type": "integer"
+                    },
+                    "limits": {
+                        "type": "integer"
+                    },
+                    "promotions": {
+                        "type": "integer"
+                    },
+                    "deletable": {
+                        "type": "boolean"
+                    },
+                    "permanently_undeletable": {
+                        "type": "boolean"
+                    },
+                    "refusal_reason": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "subscribers",
+                    "invoices",
+                    "prices",
+                    "limits",
+                    "promotions",
+                    "deletable",
+                    "permanently_undeletable"
+                ]
+            },
+            "PlanUsageResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/PlanUsage"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
             },
             "PlatformLatestReleaseResponse": {
                 "type": "object",
