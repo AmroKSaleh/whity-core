@@ -3470,6 +3470,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/plans/entitlement-catalogue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The catalogue of sellable limits (operator)
+         * @description Every entitlement a tier can set: its kind (bool flag or int cap), its baseline grant, a human description, the calendar period it resets on when it is a metered allowance, and the plugin that declared it (null for core). Distinct from GET /api/v1/tenants/{id}/entitlements, which answers what one workspace receives; this answers what can be priced at all, and needs no tenant.
+         */
+        get: operations["get_api_v1_plans_entitlement_catalogue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/plans/{id}": {
         parameters: {
             query?: never;
@@ -5871,6 +5891,19 @@ export interface components {
             type: "bool" | "int";
             default: string;
             description: string;
+        };
+        EntitlementCatalogueResponse: {
+            data: {
+                [key: string]: components["schemas"]["EntitlementDefinitionSchema"];
+            };
+        };
+        EntitlementDefinitionSchema: {
+            type: string;
+            default: string;
+            description: string;
+            /** @enum {string|null} */
+            period?: "day" | "week" | "month" | null;
+            owner?: string | null;
         };
         EntityTagAssociation: {
             entity_type: string;
@@ -27379,6 +27412,71 @@ export interface operations {
             };
             /** @description Validation failed */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_plans_entitlement_catalogue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The sellable-limit catalogue */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntitlementCatalogueResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };
