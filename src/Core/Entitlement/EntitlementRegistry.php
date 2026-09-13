@@ -74,9 +74,21 @@ final class EntitlementRegistry
     public const DOCUMENTS_RENDER_PER_MONTH = 'documents.render.per_month';
 
     // -- Platform surfaces ----------------------------------------------------
-    /** May the tenant install plugins from the store? */
-    public const PLUGINS_STORE = 'plugins.store';
-    /** May the tenant reach the MCP / AI endpoints? */
+    /**
+     * May the tenant reach the MCP / AI endpoints?
+     *
+     * Enforced by {@see \Whity\Core\Feature\FeatureService}, which joins it to
+     * the operator's instance-wide `mcp.enabled` switch: a tenant needs BOTH.
+     *
+     * NOTE ON WHAT IS NOT HERE. A `plugins.store` entitlement was drafted
+     * beside this one and removed before it shipped, because it could not be
+     * enforced: installing from the store is an OPERATOR action against the
+     * whole instance, with no tenant in scope at all. A per-tenant flag would
+     * have meant tenant A's purchase installing a plugin every other tenant
+     * then runs — so it was a line on a pricing screen that gated nothing,
+     * which is the one thing this whole area exists to prevent. Selling
+     * plugin access per tenant needs per-tenant plugin enablement first.
+     */
     public const MCP_ACCESS = 'mcp.access';
 
     /**
@@ -114,7 +126,6 @@ final class EntitlementRegistry
         // operator does on purpose.
         self::DOCUMENTS_RENDER_PER_DAY   => '-1',
         self::DOCUMENTS_RENDER_PER_MONTH => '-1',
-        self::PLUGINS_STORE          => 'true',
         self::MCP_ACCESS             => 'true',
     ];
 
@@ -133,7 +144,6 @@ final class EntitlementRegistry
         self::DEVICES_MAX            => 'int',
         self::DOCUMENTS_RENDER_PER_DAY   => 'int',
         self::DOCUMENTS_RENDER_PER_MONTH => 'int',
-        self::PLUGINS_STORE          => 'bool',
         self::MCP_ACCESS             => 'bool',
     ];
 
@@ -151,7 +161,6 @@ final class EntitlementRegistry
         self::DEVICES_MAX            => 'Maximum devices this workspace may have in service at once (-1 for unlimited).',
         self::DOCUMENTS_RENDER_PER_DAY   => 'Documents this workspace may render each day. Resets at midnight (-1 for unlimited).',
         self::DOCUMENTS_RENDER_PER_MONTH => 'Documents this workspace may render each calendar month. Resets on the 1st (-1 for unlimited).',
-        self::PLUGINS_STORE          => 'Allow this workspace to install plugins from the store.',
         self::MCP_ACCESS             => 'Allow this workspace to use the MCP and AI endpoints.',
     ];
 

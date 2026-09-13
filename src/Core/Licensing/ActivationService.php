@@ -45,6 +45,15 @@ final class ActivationService
         private readonly PDO $pdo,
         /** Injected so tests can place expiry and activation against a fixed today. */
         private readonly ?\Closure $clock = null,
+        /**
+         * The tier's device cap, or null on a deployment that caps nobody.
+         *
+         * Nullable rather than required because this service predates tiers and
+         * is constructed in places that have no entitlement layer to hand — and
+         * because a self-hosted install genuinely has no cap. Null means "do not
+         * check", which is the same answer the unlimited baseline gives.
+         */
+        private readonly ?DeviceAllowance $allowance = null,
     ) {
     }
 
@@ -191,10 +200,92 @@ final class ActivationService
             throw LicensingException::of(LicensingException::REASON_DEVICE_REQUIRED, 'Unbound code redeemed without a device.');
         }
 
+        // THE TIER'S DEVICE CAP, checked only once the tenant is known — which
+        // is not until the code has been claimed, because a code is resolved
+        // from itself and the caller has no session.
+        //
+        // SO THE CLAIM IS RELEASED IF THERE IS NO ROOM. The UPDATE above has
+        // already spent one of this code's redemptions; throwing without undoing
+        // it would burn a customer's activation code because their workspace was
+        // full — they would fix the cap, come back, and find the code dead. The
+        // release is an exact inverse of the claim, which is why the claim only
+        // increments a counter.
+        //
+        // A unit that is ALREADY in service is not re-counted: re-redeeming
+        // against hardware the tenant already holds does not add one, so it is
+        // allowed even at the cap. Otherwise a customer at their limit could
+        // never re-activate a device they already own.
+        if (
+            $this->allowance !== null
+            && !$this->isAlreadyInService($tenantId, $deviceId)
+            && $this->allowance->isExhausted($tenantId, $now)
+        ) {
+            $this->releaseClaim($codeId, $tenantId);
+
+            throw LicensingException::of(
+                LicensingException::REASON_LIMIT_REACHED,
+                sprintf(
+                    'Tenant %d is at its devices.max cap of %d.',
+                    $tenantId,
+                    $this->allowance->capFor($tenantId)
+                )
+            );
+        }
+
         $this->activate($tenantId, $deviceId, $now);
         $this->recordRedemption($tenantId, $codeId, $deviceId, $redeemedByUserId, $fromIp, $now);
 
         return ['licensed_device_id' => $deviceId, 'tenant_id' => $tenantId];
+    }
+
+    /**
+     * Undo one redemption of a code, exactly.
+     *
+     * The inverse of the atomic claim: that increments `redemption_count`, so
+     * this decrements it. Floored at zero so a double release — which should not
+     * happen, but would be invisible if it did — cannot mint extra redemptions
+     * out of a code that had none left.
+     *
+     * @param int $tenantId The tenant the code resolved to, bound so this write
+     *                      is scoped like every other one in this class.
+     */
+    private function releaseClaim(int $codeId, int $tenantId): void
+    {
+        // BOUND TO THE TENANT AS WELL AS THE ID, even though the id came from
+        // the claim's own RETURNING a few lines ago and could not name another
+        // tenant's row. The predicate costs nothing and the alternative is a
+        // reasoned exemption — and a reason is only as good as the next person
+        // who moves this method somewhere the id is less trustworthy.
+        $statement = $this->pdo->prepare('
+            UPDATE device_activation_codes
+               SET redemption_count = CASE WHEN redemption_count > 0 THEN redemption_count - 1 ELSE 0 END
+             WHERE id = :id AND tenant_id = :tenant
+        ');
+        $statement->bindValue(':id', $codeId, PDO::PARAM_INT);
+        $statement->bindValue(':tenant', $tenantId, PDO::PARAM_INT);
+        $statement->execute();
+    }
+
+    /**
+     * Whether this unit is already counted against the tenant's allowance.
+     *
+     * Tenant-scoped, like every read here: the device id came from the code's
+     * own tenant a moment ago, and binding it again is what keeps that true.
+     */
+    private function isAlreadyInService(int $tenantId, int $deviceId): bool
+    {
+        $statement = $this->pdo->prepare('
+            SELECT 1 FROM licensed_devices
+             WHERE tenant_id = :tenant
+               AND id = :id
+               AND activated_at IS NOT NULL
+               AND retired_at IS NULL
+        ');
+        $statement->bindValue(':tenant', $tenantId, PDO::PARAM_INT);
+        $statement->bindValue(':id', $deviceId, PDO::PARAM_INT);
+        $statement->execute();
+
+        return $statement->fetchColumn() !== false;
     }
 
     /** Resolve a serial WITHIN a tenant. There is no unscoped variant, on purpose. */

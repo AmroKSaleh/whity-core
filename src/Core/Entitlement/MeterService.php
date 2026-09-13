@@ -172,6 +172,41 @@ final class MeterService
     }
 
     /**
+     * Return units to a metered limit because the action did not happen.
+     *
+     * THE OTHER HALF OF SPENDING BEFORE THE WORK. A quota has to be taken
+     * BEFORE the expensive thing starts — a render that has already spun up a
+     * headless browser and then gets refused has cost the half-gigabyte anyway
+     * — but that means a render which then FAILS would silently eat one of the
+     * five documents somebody is allowed today. The render container being down
+     * is not the customer spending their allowance.
+     *
+     * Safe when nothing was taken: an unlimited limit was never counted, and
+     * decrementing a counter that does not exist is a no-op in the store.
+     *
+     * @param list<string> $keys The same keys the action consumed.
+     */
+    public function refund(int $tenantId, array $keys, int $units = 1, ?DateTimeImmutable $now = null): void
+    {
+        $now ??= new DateTimeImmutable();
+        $effective = $this->entitlements->effective($tenantId);
+
+        foreach ($keys as $key) {
+            // Only limits that were actually counted are given back. Refunding
+            // an unlimited one would drive its counter negative and, if the tier
+            // later gained a cap, hand that tenant a free allowance.
+            if ($this->limitFor($effective, $key) === EntitlementRegistry::UNLIMITED) {
+                continue;
+            }
+
+            $counter = $this->counterKey($tenantId, $key, $now);
+            for ($i = 0; $i < $units; $i++) {
+                $this->store->decrement($counter);
+            }
+        }
+    }
+
+    /**
      * Hand back everything already taken for this action.
      *
      * @param list<array{key: string, counter: string, units?: int}> $taken

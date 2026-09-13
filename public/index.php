@@ -2537,10 +2537,22 @@ $router->register('POST', '/api/billing/invoices/{id:\d+}/pay', [$billingHandler
 // Three capabilities, because they are three jobs: reading what is billable,
 // SELLING (minting a code), and provisioning or destroying stock. See
 // migration 147 for why they anchor on the capabilities they do.
+// THE TIER'S DEVICE CAP, shared by both paths that put a unit into service.
+// Passed to the activation service AND the handler because they are reached by
+// different callers — an operator importing serials, and a customer redeeming a
+// code with no session at all — and a cap enforced in one and not the other is
+// not a cap.
+$deviceAllowance = new \Whity\Core\Licensing\DeviceAllowance(
+    $entitlementService,
+    new \Whity\Core\Billing\LicensedDeviceCount($db->getPdo(), $settingsService)
+);
+
 $licensingHandler = new \Whity\Api\LicensingApiHandler(
     $db->getPdo(),
-    new \Whity\Core\Licensing\ActivationService($db->getPdo()),
-    $roleChecker
+    new \Whity\Core\Licensing\ActivationService($db->getPdo(), null, $deviceAllowance),
+    $roleChecker,
+    null,
+    $deviceAllowance
 );
 $router->register('GET',  '/api/licensing/devices',                 [$licensingHandler, 'devices'],    null, null, CorePermissions::LICENSING_VIEW);
 $router->register('POST', '/api/licensing/devices',                 [$licensingHandler, 'provision'],  null, null, CorePermissions::LICENSING_MANAGE);
@@ -2846,6 +2858,15 @@ $documentIssuer = new \Whity\Core\Document\DocumentIssuer(
     $documentArtifactRepository,
     $documentArtifactStore
 );
+// The meters the render endpoint spends. Built beside the handler rather than
+// early with the other services because this is its only consumer, and a
+// service with one caller reads better next to it.
+$documentRenderMeters = new \Whity\Core\Entitlement\MeterService(
+    new DatabaseSharedStore($db->getPdo()),
+    $entitlementService,
+    $settingsService
+);
+
 $documentRenderHandler = new \Whity\Api\DocumentRenderApiHandler(
     $documentTemplateRepository,
     $documentAccessPolicy,
@@ -2857,7 +2878,13 @@ $documentRenderHandler = new \Whity\Api\DocumentRenderApiHandler(
     // template HERE too is what stops this path being a way around the
     // designer's own list: a 404 in one place and a render in another would
     // be the client hiding what the server hands out.
-    $ouReachResolver
+    $ouReachResolver,
+    // WHAT THE TENANT'S TIER ALLOWS THEM TO RENDER. Passed here rather than
+    // left null because this deployment DOES sell tiers, and a meter that is
+    // wired everywhere except the one endpoint that spends it is the failure
+    // this whole area exists to avoid: a limit priced on a screen, agreed by a
+    // customer, and enforced by nothing.
+    $documentRenderMeters
 );
 $router->register('POST', '/api/document-templates/{id:\d+}/render', [$documentRenderHandler, 'render'], null, null, CorePermissions::DOCUMENTS_RENDER);
 
@@ -4296,9 +4323,13 @@ $mcpRateLimiter = new McpRateLimiter(
 );
 // WC-149b2fc9: per-tenant MCP opt-in — read mcp.enabled from settings. Default
 // off so new tenants must explicitly enable the endpoint.
-$tenantMcpEnabled = static function (int $tenantId) use ($settingsService): bool {
-    $settings = $settingsService->effective($tenantId);
-    return ($settings[SettingsRegistry::MCP_ENABLED] ?? 'false') === 'true';
+// ASKS FeatureService, NOT THE SETTING DIRECTLY. Two things decide whether a
+// tenant may reach MCP — the operator's instance-wide switch, and whether their
+// tier includes it — and FeatureService is where those two are joined. Reading
+// the flag alone here would have made the tier's `mcp.access` a number on a
+// pricing screen that gated nothing.
+$tenantMcpEnabled = static function (int $tenantId) use ($featureService): bool {
+    return $featureService->isEnabled(SettingsRegistry::MCP_ENABLED, $tenantId);
 };
 // #952: MCP clients cache the discovery lists at connection time, so a client
 // that connected before a plugin rebuild kept its stale tool definitions

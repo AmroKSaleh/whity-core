@@ -35,7 +35,7 @@ use Whity\Database\Database;
  *
  *   Plus          a small team. Enough to work; not enough to run a company on.
  *   Pro           a growing team, and the first tier with an outside surface:
- *                 the plugin store and the AI/MCP endpoints.
+ *                 the AI/MCP endpoints.
  *   Professional  an organisation. Its own identity provider, its own storage,
  *                 and no counting.
  *
@@ -61,7 +61,6 @@ class SeedTierEntitlements
             'documents.render.per_month'      => '50',
             'storage.quota_bytes'             => '2147483648',    // 2 GiB
             'ratelimit.rpm'                   => '120',
-            'plugins.store'                   => 'false',
             'mcp.access'                      => 'false',
             'sso.tenant_idp'                  => 'false',
             'storage.custom_backend'          => 'false',
@@ -73,7 +72,6 @@ class SeedTierEntitlements
             'documents.render.per_month'      => '1000',
             'storage.quota_bytes'             => '21474836480',   // 20 GiB
             'ratelimit.rpm'                   => '600',
-            'plugins.store'                   => 'true',
             'mcp.access'                      => 'true',
             'sso.tenant_idp'                  => 'false',
             'storage.custom_backend'          => 'false',
@@ -85,7 +83,6 @@ class SeedTierEntitlements
             'documents.render.per_month'      => '-1',
             'storage.quota_bytes'             => '536870912000',  // 500 GiB
             'ratelimit.rpm'                   => '3000',
-            'plugins.store'                   => 'true',
             'mcp.access'                      => 'true',
             'sso.tenant_idp'                  => 'true',
             'storage.custom_backend'          => 'true',

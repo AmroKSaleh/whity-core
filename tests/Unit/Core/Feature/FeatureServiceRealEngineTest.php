@@ -209,9 +209,29 @@ final class FeatureServiceRealEngineTest extends TestCase
         self::assertSame(EntitlementRegistry::SSO_TENANT_IDP, $row['entitlement']);
     }
 
+    /**
+     * A flag with no commercial gate reads as entitled.
+     *
+     * THE FLAG IS FOUND, NOT NAMED. This test used to point at `mcp.enabled`,
+     * and broke the day MCP was sold by tier — not because the property stopped
+     * holding, but because the example stopped being an example. Most flags are
+     * pure operator policy and always will be, so the test asks the registry for
+     * one rather than hard-coding a choice that any pricing decision can
+     * invalidate.
+     */
     public function testAFeatureWithNoCommercialGateIsAlwaysEntitled(): void
     {
-        $row = $this->rowFor($this->features->all(self::TENANT), SettingsRegistry::MCP_ENABLED);
+        $ungated = null;
+        foreach (FeatureRegistry::keys() as $flag) {
+            if (FeatureRegistry::entitlementFor($flag) === null) {
+                $ungated = $flag;
+                break;
+            }
+        }
+
+        self::assertNotNull($ungated, 'Every feature flag now has a commercial gate; this property has no subject.');
+
+        $row = $this->rowFor($this->features->all(self::TENANT), $ungated);
 
         self::assertNull($row['entitlement']);
         self::assertTrue($row['entitled'], 'a feature with no entitlement must not read as unentitled');
