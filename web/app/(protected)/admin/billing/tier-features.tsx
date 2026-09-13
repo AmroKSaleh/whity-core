@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
+import { useFetch } from '@/hooks/useFetch';
 import { useTranslation } from '@amroksaleh/features/i18n';
 import { Button } from '@amroksaleh/ui/button';
 import { Badge } from '@amroksaleh/ui/badge';
@@ -70,82 +71,78 @@ interface Tier {
 /** key => value, exactly as the tier stores it. A missing key is inherited. */
 type Bundle = Record<string, string>;
 
+interface LoadedTiers {
+  catalogue: Record<string, CatalogueEntry>;
+  tiers: Tier[];
+  bundles: Record<number, Bundle>;
+}
+
 export function TierFeatures() {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
   const t = useTranslation('admin');
 
-  const [catalogue, setCatalogue] = useState<Record<string, CatalogueEntry>>({});
-  const [tiers, setTiers] = useState<Tier[]>([]);
-  const [bundles, setBundles] = useState<Record<number, Bundle>>({});
   const [edits, setEdits] = useState<Record<number, Bundle>>({});
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<number | null>(null);
   const [reduction, setReduction] = useState<{ tierId: number; reason: string } | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [catRes, plansRes] = await Promise.all([
-        apiClient('/api/v1/plans/entitlement-catalogue'),
-        apiClient('/api/v1/plans'),
-      ]);
+  // ONE FETCH FOR THE WHOLE SCREEN, through the shared hook rather than a
+  // hand-rolled effect. The first draft called setState inside useEffect and
+  // the lint rule caught it: that pattern cascades renders, and the hook exists
+  // so every screen does not re-derive the cancellation and refetch logic.
+  const { data, loading, refetch } = useFetch(async () => {
+    const [catRes, plansRes] = await Promise.all([
+      apiClient('/api/v1/plans/entitlement-catalogue'),
+      apiClient('/api/v1/plans'),
+    ]);
 
-      if (!catRes.ok || !plansRes.ok) {
-        // Not shouted about with a red banner: the commonest reason to land
-        // here without permission is being an ordinary admin rather than
-        // whoever owns pricing, and that is not an error state.
-        setCatalogue({});
-        setTiers([]);
-        return;
-      }
-
-      const cat = ((await catRes.json()).data ?? {}) as Record<string, CatalogueEntry>;
-      const all = ((await plansRes.json()).data ?? []) as Tier[];
-
-      // ADD-ONS ARE NOT TIERS and are left off. `devices` is bought beside a
-      // subscription; giving it a column would invite somebody to price the
-      // whole product into it.
-      const sellable = all.filter((p) => !p.is_addon);
-
-      const loaded: Record<number, Bundle> = {};
-      await Promise.all(
-        sellable.map(async (tier) => {
-          const res = await apiClient(`/api/v1/plans/${tier.id}`);
-          if (!res.ok) {
-            loaded[tier.id] = {};
-            return;
-          }
-
-          // The API returns each value already CAST — booleans as booleans,
-          // limits as numbers. The editor works in the text form the API takes
-          // back, so it is converted here rather than asking the server for a
-          // second representation of the same rows.
-          const typed = ((await res.json()).data?.entitlements ?? {}) as Record<
-            string,
-            boolean | number
-          >;
-          loaded[tier.id] = Object.fromEntries(
-            Object.entries(typed).map(([k, v]) => [
-              k,
-              typeof v === 'boolean' ? (v ? 'true' : 'false') : String(v),
-            ])
-          );
-        })
-      );
-
-      setCatalogue(cat);
-      setTiers(sellable);
-      setBundles(loaded);
-      setEdits({});
-    } finally {
-      setLoading(false);
+    // Not shouted about with a red banner: the commonest reason to land here
+    // without permission is being an ordinary admin rather than whoever owns
+    // pricing, and that is not an error state.
+    if (!catRes.ok || !plansRes.ok) {
+      return { catalogue: {}, tiers: [], bundles: {} } as LoadedTiers;
     }
+
+    const catalogue = ((await catRes.json()).data ?? {}) as Record<string, CatalogueEntry>;
+    const all = ((await plansRes.json()).data ?? []) as Tier[];
+
+    // ADD-ONS ARE NOT TIERS and are left off. `devices` is bought beside a
+    // subscription; giving it a column would invite somebody to price the whole
+    // product into it.
+    const tiers = all.filter((p) => !p.is_addon);
+
+    const bundles: Record<number, Bundle> = {};
+    await Promise.all(
+      tiers.map(async (tier) => {
+        const res = await apiClient(`/api/v1/plans/${tier.id}`);
+        if (!res.ok) {
+          bundles[tier.id] = {};
+          return;
+        }
+
+        // The API returns each value already CAST — booleans as booleans,
+        // limits as numbers. The editor works in the text form the API takes
+        // back, so it is converted here rather than asking the server for a
+        // second representation of the same rows.
+        const typed = ((await res.json()).data?.entitlements ?? {}) as Record<
+          string,
+          boolean | number
+        >;
+        bundles[tier.id] = Object.fromEntries(
+          Object.entries(typed).map(([k, v]) => [
+            k,
+            typeof v === 'boolean' ? (v ? 'true' : 'false') : String(v),
+          ])
+        );
+      })
+    );
+
+    return { catalogue, tiers, bundles };
   }, [apiClient]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const catalogue = data?.catalogue ?? {};
+  const tiers = data?.tiers ?? [];
+  const bundles = data?.bundles ?? {};
 
   /** The value showing in a cell: an unsaved edit, else what is stored. */
   const valueOf = (tierId: number, key: string): string | undefined =>
@@ -198,7 +195,15 @@ export function TierFeatures() {
 
       addToast(t('tiers.saved', 'Tier updated. Everyone on it sees this now.'), 'success');
       setReduction(null);
-      await load();
+      // The saved edits are now the stored values, so they stop being edits —
+      // cleared before the refetch rather than after, so a slow reload cannot
+      // leave the Save button live against changes that already landed.
+      setEdits((prev) => {
+        const next = { ...prev };
+        delete next[tierId];
+        return next;
+      });
+      refetch();
     } finally {
       setSaving(null);
     }
@@ -209,12 +214,15 @@ export function TierFeatures() {
   // through the platform's.
   const grouped = useMemo(() => {
     const groups = new Map<string, string[]>();
-    for (const [key, entry] of Object.entries(catalogue)) {
+    for (const [key, entry] of Object.entries(data?.catalogue ?? {})) {
       const owner = entry.owner ?? '';
       groups.set(owner, [...(groups.get(owner) ?? []), key]);
     }
     return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [catalogue]);
+    // Keyed on the fetch result itself, not on the derived `catalogue`: the
+    // derivation is a fresh object literal every render, so depending on it
+    // would rebuild these groups on every keystroke in the matrix.
+  }, [data]);
 
   if (loading) {
     return null;
