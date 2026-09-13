@@ -7142,6 +7142,7 @@ export interface components {
             name: string;
             description?: string | null;
             is_active: boolean;
+            provider?: string | null;
             sort_order: number;
             created_at: string;
             updated_at: string;
@@ -7208,6 +7209,7 @@ export interface components {
             name: string;
             description?: string | null;
             is_active: boolean;
+            provider?: string | null;
             sort_order: number;
             created_at: string;
             updated_at: string;

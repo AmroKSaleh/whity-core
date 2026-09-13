@@ -66,6 +66,12 @@ interface Tier {
   name: string;
   is_active: boolean;
   is_addon: boolean;
+  /**
+   * The plugin that shipped this tier, or null for one the platform or the
+   * operator owns. Shown so nobody wonders where a tier they never created came
+   * from — a vertical product can replace the default catalogue with its own.
+   */
+  provider: string | null;
 }
 
 /** key => value, exactly as the tier stores it. A missing key is inherited. */
@@ -265,6 +271,11 @@ export function TierFeatures() {
                     {tier.name}
                     {!tier.is_active && (
                       <Badge variant="secondary">{t('tiers.inactive', 'Not on sale')}</Badge>
+                    )}
+                    {tier.provider !== null && (
+                      <Badge variant="outline" title={tier.provider}>
+                        {tier.provider}
+                      </Badge>
                     )}
                   </span>
                 </th>

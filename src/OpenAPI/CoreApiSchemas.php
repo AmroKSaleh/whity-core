@@ -4156,6 +4156,10 @@ final class CoreApiSchemas
                 'name' => self::str(),
                 'description' => self::str(true),
                 'is_active' => self::bool(),
+                // Null for a tier the operator or the platform owns; the
+                // plugin's name for one a plugin shipped. The pricing screen
+                // groups by it so nobody wonders where a tier came from.
+                'provider' => self::str(true),
                 'sort_order' => self::int(),
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
@@ -4168,6 +4172,10 @@ final class CoreApiSchemas
                 'name' => self::str(),
                 'description' => self::str(true),
                 'is_active' => self::bool(),
+                // Null for a tier the operator or the platform owns; the
+                // plugin's name for one a plugin shipped. The pricing screen
+                // groups by it so nobody wonders where a tier came from.
+                'provider' => self::str(true),
                 'sort_order' => self::int(),
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
