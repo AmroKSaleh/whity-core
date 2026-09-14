@@ -70,12 +70,39 @@ custom_domain = true
 # would have silently reverted pay to the weaker probe. `[vars]` here REPLACES
 # the deployed vars on every deploy — it is the source of truth, not a copy of
 # it. Change it here, deploy, and verify; do not leave the two disagreeing.
+# COMPONENTS, READ FROM THE APPLICATION rather than probed from here.
+#
+# The edge can only reach what has a public hostname, which is exactly the
+# wrong set: the queue worker, the scheduler and the render service have no
+# hostname at all (render is http://render:8130 on the compose network), so
+# none of them was watched. Core already measures them — `health:watch` writes
+# the readings and /api/v1/status publishes them — and these targets read that
+# verdict so each one alerts by name like any other.
+#
+# THIS IS NOT HYPOTHETICAL. On 2026-09-14 /api/v1/status reported
+# `queue: down` at 0.2% uptime, with no queue:work or events:relay process
+# running at all, while this page said "All systems operational" — because the
+# only thing watched on that host was /api/health, which checks the database
+# and nothing else. Per #1063 that also means event_outbox grows unbounded.
+#
+# `api` and `web` are deliberately NOT imported. Both are already probed above
+# from outside, which is a genuinely different signal from core's opinion of
+# itself — the 2026-09-09 outage was three hours of the web tier answering 200
+# while everything behind it failed. Importing them would also collide with the
+# state keys those probes already own.
+COMPONENTS_URL = "https://app.whity.dev/api/v1/status"
+
 PROBE_TARGETS = '''[
   {"name":"api",  "url":"https://app.whity.dev/api/health"},
   {"name":"web",  "url":"https://app.whity.dev/"},
   {"name":"site", "url":"https://whity.dev/"},
   {"name":"docs", "url":"https://docs.whity.dev/"},
-  {"name":"pay",  "url":"https://pay.whity.dev/health"}
+  {"name":"pay",  "url":"https://pay.whity.dev/health"},
+
+  {"name":"database",  "component":"database"},
+  {"name":"queue",     "component":"queue"},
+  {"name":"scheduler", "component":"scheduler"},
+  {"name":"render",    "component":"render"}
 ]'''
 
 # Consecutive failures before an alert is sent. 1 would alert on a single

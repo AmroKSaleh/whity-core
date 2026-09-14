@@ -108,8 +108,28 @@ function config(env) {
     targets = [];
   }
 
+  // WHERE CORE REPORTS ON ITSELF. The edge can only probe what has a public
+  // hostname, which leaves out everything interesting inside the deployment:
+  // the queue worker, the scheduler, the render service. Core already measures
+  // those (`health:watch` writes them, /api/v1/status publishes them) — this
+  // reads that verdict so those components alert like any other target.
+  //
+  // Without it the blind spot is real rather than theoretical: on 2026-09-14
+  // /api/v1/status reported `queue: down` at 0.2% uptime while this page said
+  // "All systems operational", because the only thing watched on that host was
+  // /api/health, which checks the database and nothing else.
+  const componentsUrl = (env.COMPONENTS_URL || '').trim();
+
+  const normalised = (Array.isArray(targets) ? targets : [])
+    .filter((t) => t && t.name && (t.url || t.component))
+    // A component target has no URL of its own; it is one field of the feed.
+    // Give it the feed's URL so an alert still says where to look.
+    .map((t) => (t.component && !t.url ? { ...t, url: componentsUrl } : t))
+    .filter((t) => t.url);
+
   return {
-    targets: Array.isArray(targets) ? targets.filter((t) => t && t.name && t.url) : [],
+    targets: normalised,
+    componentsUrl,
     failuresBeforeAlert: num('FAILURES_BEFORE_ALERT', DEFAULTS.failuresBeforeAlert),
     probeTimeoutMs: num('PROBE_TIMEOUT_MS', DEFAULTS.probeTimeoutMs),
     backupMaxAgeHours: num('BACKUP_MAX_AGE_HOURS', DEFAULTS.backupMaxAgeHours),
@@ -129,9 +149,16 @@ async function runChecks(env) {
     console.error('watchdog: PROBE_TARGETS is empty or unparseable — nothing is being watched');
   }
 
+  // ONE fetch for every component target, not one each: they are all fields of
+  // the same document, and polling it four times would be four chances to get
+  // four different answers about the same instant.
+  const wantsComponents = cfg.targets.some((t) => t.component);
+  const feed = wantsComponents ? await fetchComponents(cfg.componentsUrl, cfg.probeTimeoutMs) : null;
+
   const results = [];
   for (const target of cfg.targets) {
-    results.push(await checkTarget(env, cfg, target));
+    const probe = target.component ? componentProbe(feed, target.component) : null;
+    results.push(await checkTarget(env, cfg, target, probe));
   }
 
   await recordHistory(env, cfg, results);
@@ -148,7 +175,7 @@ async function runChecks(env) {
 /**
  * Probe one target and alert only when its state CHANGES.
  */
-async function checkTarget(env, cfg, target) {
+async function checkTarget(env, cfg, target, precomputed) {
   const key = `state:${target.name}`;
   // `stored` is kept separate from the defaults below because "nothing has ever
   // been recorded for this target" and "recorded, and healthy" are different
@@ -160,7 +187,11 @@ async function checkTarget(env, cfg, target) {
     downSince: null,
   };
 
-  const probe = await probeOnce(target.url, cfg.probeTimeoutMs, target.expectStatus);
+  // A component target's verdict was read out of the aggregated feed already;
+  // everything below — the change detection, the write-skip, the alert text —
+  // is identical either way, which is the point of passing the result in
+  // rather than teaching this function a second way to ask.
+  const probe = precomputed || (await probeOnce(target.url, cfg.probeTimeoutMs, target.expectStatus));
 
   if (probe.ok) {
     if (state.alertedStatus === 'down') {
@@ -271,6 +302,77 @@ async function probeOnce(url, timeoutMs, expectStatus) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Read core's own component report once per run.
+ *
+ * Returns either the parsed component map or the reason it could not be had —
+ * never a partial answer, because "the feed said nothing about the queue" and
+ * "the feed was unreachable" send an operator somewhere different.
+ */
+async function fetchComponents(url, timeoutMs) {
+  if (!url) return { ok: false, detail: 'COMPONENTS_URL is not set' };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'user-agent': 'whity-watchdog/1', accept: 'application/json' },
+      cf: { cacheTtl: 0, cacheEverything: false },
+    });
+    if (response.status !== 200) {
+      return { ok: false, detail: `component feed returned HTTP ${response.status}` };
+    }
+
+    const body = await response.json();
+    const list = Array.isArray(body?.components) ? body.components : null;
+    if (!list) {
+      return { ok: false, detail: 'component feed had no components array' };
+    }
+
+    const byKey = {};
+    for (const c of list) {
+      if (c && typeof c.key === 'string') byKey[c.key] = c;
+    }
+    return { ok: true, byKey };
+  } catch (error) {
+    const reason = error?.name === 'AbortError' ? `no response in ${timeoutMs}ms` : String(error?.message || error);
+    return { ok: false, detail: `component feed unreachable: ${reason}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Turn one field of that report into the same shape probeOnce returns.
+ *
+ * An unreadable feed fails EVERY component that depends on it rather than
+ * leaving them silently unobserved. It costs a few extra lines in an alert
+ * during a host-level outage — where api and web are already failing and the
+ * operator is already looking — and it buys the case that matters: the feed
+ * alone breaking, which would otherwise freeze four components on their last
+ * known verdict with nobody told the readings had stopped.
+ */
+function componentProbe(feed, key) {
+  if (!feed || !feed.ok) {
+    return { ok: false, detail: feed?.detail || 'component feed unavailable' };
+  }
+
+  const component = feed.byKey[key];
+  if (!component) {
+    // Core stopped reporting this component. Absence is not health.
+    return { ok: false, detail: `component "${key}" is not in the feed` };
+  }
+
+  const status = String(component.status || 'unknown');
+  if (status === 'operational') return { ok: true };
+
+  // `degraded` counts as a failure here deliberately: this page has two states
+  // and the honest place to put "working, but not properly" is the failing one.
+  const name = component.name ? `${component.name} ` : '';
+  return { ok: false, detail: `${name}reported "${status}" by the application` };
 }
 
 // ── history ─────────────────────────────────────────────────────────────────
@@ -557,6 +659,10 @@ function escapeHtml(s) {
 /** Human-facing labels, so the page never shows an internal key name. */
 const LABELS = {
   api: 'API',
+  database: 'Database',
+  queue: 'Background jobs',
+  scheduler: 'Scheduled tasks',
+  render: 'Document rendering',
   web: 'Application',
   site: 'Website',
   docs: 'Documentation',
@@ -571,6 +677,10 @@ const LABELS = {
  */
 const DESCRIPTIONS = {
   api: 'app.whity.dev/api',
+  database: 'reported by the application',
+  queue: 'reported by the application',
+  scheduler: 'reported by the application',
+  render: 'reported by the application',
   web: 'app.whity.dev',
   site: 'whity.dev',
   docs: 'docs.whity.dev',
@@ -991,4 +1101,4 @@ async function notify(env, text) {
 
 // Exported for the unit tests, which exercise the state machine directly
 // rather than through a live Worker.
-export const __test__ = { humanDuration, timingSafeEqual, config, probeOnce, checkTarget, checkHeartbeats, handleRequest, renderStatusPage, recordHistory, dayKey };
+export const __test__ = { humanDuration, timingSafeEqual, config, probeOnce, checkTarget, runChecks, fetchComponents, componentProbe, checkHeartbeats, handleRequest, renderStatusPage, recordHistory, dayKey };

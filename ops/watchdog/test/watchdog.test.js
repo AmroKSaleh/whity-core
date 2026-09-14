@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 
 import { __test__ } from '../src/index.js';
 
-const { humanDuration, timingSafeEqual, config, checkTarget, checkHeartbeats, handleRequest, renderStatusPage, recordHistory, dayKey } = __test__;
+const { humanDuration, timingSafeEqual, config, checkTarget, checkHeartbeats, handleRequest, renderStatusPage, recordHistory, dayKey, runChecks } = __test__;
 
 // ── a KV stand-in ───────────────────────────────────────────────────────────
 
@@ -502,11 +502,14 @@ test('an unlabelled target still renders, under its key', async () => {
   // is still a component somebody needs to see the status of.
   const { env, store } = makeEnv();
   store.set('meta:last-run', JSON.stringify({ at: Date.now() }));
-  store.set('state:queue', JSON.stringify({ alertedStatus: 'up' }));
+  store.set('state:tileserver', JSON.stringify({ alertedStatus: 'up' }));
 
-  const cfg = { ...CFG, targets: [{ name: 'queue', url: 'https://q.test/' }] };
+  // Deliberately a key LABELS does not know. It used to be `queue`, which
+  // stopped being unlabelled the moment core's components were imported — the
+  // assertion was right and its example had simply been adopted.
+  const cfg = { ...CFG, targets: [{ name: 'tileserver', url: 'https://t.test/' }] };
   const html = await (await renderStatusPage(env, cfg)).text();
-  assert.match(html, />queue</);
+  assert.match(html, />tileserver</);
 });
 
 test('STALE DATA IS NEVER REPORTED AS OPERATIONAL', async () => {
@@ -657,6 +660,143 @@ test('with no history at all the bar says so rather than showing green', async (
   const html = await (await renderStatusPage(env, HIST_CFG)).text();
   assert.equal((html.match(/class="seg ok"/g) || []).length, 0);
   assert.match(html, /No history yet/);
+});
+
+// ── core's component feed ───────────────────────────────────────────────────
+
+// The edge can only probe what has a public hostname, which leaves the queue,
+// the scheduler and the render service unwatched. Core measures those already
+// and publishes them at /api/v1/status; these targets read that verdict.
+
+const FEED_URL = 'https://app.test/api/v1/status';
+
+/** Serve the component feed (and still capture Telegram sends). */
+function stubFeed(sent, components, { status = 200, throws = false, body = null } = {}) {
+  globalThis.fetch = async (url, init) => {
+    if (isTelegram(url)) {
+      sent.push(JSON.parse(init.body).text);
+      return new Response('{"ok":true}', { status: 200 });
+    }
+    if (throws) throw new Error('connection refused');
+    const payload = body !== null ? body : JSON.stringify({ status: 'ok', components });
+    return new Response(payload, { status, headers: { 'content-type': 'application/json' } });
+  };
+}
+
+const feedEnv = (env, targets, extra = {}) => ({
+  ...env,
+  COMPONENTS_URL: FEED_URL,
+  PROBE_TARGETS: JSON.stringify(targets),
+  ...extra,
+});
+
+const TWO_COMPONENTS = [
+  { name: 'queue', component: 'queue' },
+  { name: 'render', component: 'render' },
+];
+
+test('a component the application reports as down alerts by name', async () => {
+  const { env, store, sent } = makeEnv();
+  stubFeed(sent, [
+    { key: 'queue', name: 'Background jobs', status: 'down' },
+    { key: 'render', name: 'Document rendering', status: 'operational' },
+  ]);
+
+  // Twice: FAILURES_BEFORE_ALERT is 2, so one bad reading must not page.
+  await runChecks(feedEnv(env, TWO_COMPONENTS, { FAILURES_BEFORE_ALERT: '2' }));
+  await runChecks(feedEnv(env, TWO_COMPONENTS, { FAILURES_BEFORE_ALERT: '2' }));
+
+  assert.equal(JSON.parse(store.get('state:queue')).alertedStatus, 'down');
+  assert.equal(JSON.parse(store.get('state:render')).alertedStatus, 'up', 'a healthy neighbour is untouched');
+  assert.ok(
+    sent.some((m) => /queue is DOWN/i.test(m) && /Background jobs/.test(m)),
+    "the alert carries the name the application uses for the component, not just a URL"
+  );
+});
+
+test('degraded is a failure, not a shrug', async () => {
+  const { env, store, sent } = makeEnv();
+  stubFeed(sent, [{ key: 'queue', name: 'Background jobs', status: 'degraded' }]);
+
+  await runChecks(feedEnv(env, [{ name: 'queue', component: 'queue' }], { FAILURES_BEFORE_ALERT: '1' }));
+
+  assert.equal(
+    JSON.parse(store.get('state:queue')).alertedStatus,
+    'down',
+    'this page has two states and "working, but not properly" belongs in the failing one'
+  );
+});
+
+test('an unreachable feed fails every component that depends on it', async () => {
+  const { env, store, sent } = makeEnv();
+  stubFeed(sent, [], { throws: true });
+
+  await runChecks(feedEnv(env, TWO_COMPONENTS, { FAILURES_BEFORE_ALERT: '1' }));
+
+  // Freezing them on their last good verdict with nobody told is the failure
+  // this whole component exists to prevent.
+  assert.equal(JSON.parse(store.get('state:queue')).alertedStatus, 'down');
+  assert.equal(JSON.parse(store.get('state:render')).alertedStatus, 'down');
+  assert.ok(sent.some((m) => /feed unreachable/i.test(m)), 'the alert says the feed broke, not that the queue did');
+});
+
+test('a feed that answers with the wrong shape is a failure, not an empty pass', async () => {
+  const { env, store, sent } = makeEnv();
+  stubFeed(sent, null, { body: JSON.stringify({ status: 'ok' }) });
+
+  await runChecks(feedEnv(env, [{ name: 'queue', component: 'queue' }], { FAILURES_BEFORE_ALERT: '1' }));
+
+  assert.equal(JSON.parse(store.get('state:queue')).alertedStatus, 'down');
+});
+
+test('a component that vanishes from the feed is not treated as healthy', async () => {
+  const { env, store, sent } = makeEnv();
+  stubFeed(sent, [{ key: 'render', name: 'Document rendering', status: 'operational' }]);
+
+  await runChecks(feedEnv(env, TWO_COMPONENTS, { FAILURES_BEFORE_ALERT: '1' }));
+
+  assert.equal(
+    JSON.parse(store.get('state:queue')).alertedStatus,
+    'down',
+    'absence of evidence is not evidence of health'
+  );
+  assert.equal(JSON.parse(store.get('state:render')).alertedStatus, 'up');
+});
+
+test('the feed is fetched ONCE however many components read it', async () => {
+  const { env, sent } = makeEnv();
+  let feedCalls = 0;
+  globalThis.fetch = async (url, init) => {
+    if (isTelegram(url)) {
+      sent.push(JSON.parse(init.body).text);
+      return new Response('{"ok":true}', { status: 200 });
+    }
+    feedCalls++;
+    return new Response(
+      JSON.stringify({ components: [{ key: 'queue', status: 'operational' }, { key: 'render', status: 'operational' }] }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    );
+  };
+
+  await runChecks(feedEnv(env, TWO_COMPONENTS));
+
+  assert.equal(feedCalls, 1, 'four polls of one document are four chances to disagree about one instant');
+});
+
+test("the imported components appear on the page under core's own names", async () => {
+  const { env, store } = makeEnv();
+  store.set('meta:last-run', JSON.stringify({ at: Date.now() }));
+  store.set('state:queue', JSON.stringify({ alertedStatus: 'up' }));
+  store.set('state:render', JSON.stringify({ alertedStatus: 'up' }));
+
+  const cfg = { ...CFG, componentsUrl: FEED_URL, targets: [
+    { name: 'queue', component: 'queue', url: FEED_URL },
+    { name: 'render', component: 'render', url: FEED_URL },
+  ] };
+  const html = await (await renderStatusPage(env, cfg)).text();
+
+  assert.match(html, />Background jobs</, 'the same wording the application uses');
+  assert.match(html, />Document rendering</);
 });
 
 // ── the narrow (phone) layout ───────────────────────────────────────────────
