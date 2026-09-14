@@ -139,7 +139,7 @@ final class HealthProbe
     {
         $definition = $this->registry?->definitionFor($component);
         if ($definition === null) {
-            return [HealthStatus::Operational, null, null];
+            return [HealthStatus::Unknown, null, 'no probe is defined for this component'];
         }
 
         $result = $definition->run();
@@ -179,7 +179,7 @@ final class HealthProbe
     private function probeQueue(): array
     {
         if (!$this->tableExists('jobs')) {
-            return [HealthStatus::Operational, null, null];
+            return [HealthStatus::Unknown, null, 'the jobs table does not exist — migrations may not have run'];
         }
 
         // @tenant-guard-ignore: queue health is a property of the DEPLOYMENT, not of any one tenant — a stuck worker starves every tenant's jobs, so this reads the backlog across all of them (as the scheduler tick does). No tenant data is returned: the result is a single timestamp.
@@ -216,7 +216,7 @@ final class HealthProbe
     private function probeScheduler(): array
     {
         if (!$this->tableExists('scheduled_jobs')) {
-            return [HealthStatus::Operational, null, null];
+            return [HealthStatus::Unknown, null, 'the scheduled_jobs table does not exist — migrations may not have run'];
         }
 
         // @tenant-guard-ignore: the cron tick is deployment-wide infrastructure that runs ACROSS tenants, so its liveness is measured the same way — the newest last_run_at of any enabled schedule. Returns one timestamp, no tenant data.
@@ -225,7 +225,10 @@ final class HealthProbe
         );
         $last = $stmt ? ($stmt->fetch(PDO::FETCH_ASSOC)['last'] ?? null) : null;
         if ($last === null) {
-            return [HealthStatus::Operational, null, null];
+            // No enabled schedule has EVER run. Reporting that as operational
+            // is what let this component show 100% uptime while nothing was
+            // scheduling anything at all.
+            return [HealthStatus::Unknown, null, 'no enabled schedule has ever run'];
         }
 
         $ageSeconds = max(0, time() - (int) strtotime((string) $last));
@@ -251,7 +254,7 @@ final class HealthProbe
     private function probeRender(): array
     {
         if ($this->renderUrl === null || $this->renderUrl === '') {
-            return [HealthStatus::Operational, null, null];
+            return [HealthStatus::Unknown, null, 'no render service is configured'];
         }
 
         $start = microtime(true);
