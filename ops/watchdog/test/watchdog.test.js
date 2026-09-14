@@ -763,6 +763,42 @@ test('a component that vanishes from the feed is not treated as healthy', async 
   assert.equal(JSON.parse(store.get('state:render')).alertedStatus, 'up');
 });
 
+test('a component the application cannot measure is neither alerted nor recorded', async () => {
+  const { env, store, sent } = makeEnv();
+  stubFeed(sent, [
+    { key: 'queue', name: 'Background jobs', status: 'unknown' },
+    { key: 'render', name: 'Document rendering', status: 'operational' },
+  ]);
+
+  await runChecks(feedEnv(env, TWO_COMPONENTS, { FAILURES_BEFORE_ALERT: '1' }));
+  await runChecks(feedEnv(env, TWO_COMPONENTS, { FAILURES_BEFORE_ALERT: '1' }));
+
+  // Paging someone because a component was never measured is how a monitor
+  // gets muted — but it must not be filed as healthy either.
+  // Scoped to queue deliberately: this fixture has no backup heartbeat, so the
+  // dead-man's switch fires its own unrelated alert, and asserting total
+  // silence would be asserting something this test does not control.
+  assert.ok(
+    !sent.some((m) => /queue/i.test(m)),
+    'unknown is not a fault and must not alert'
+  );
+  assert.equal(store.get('state:queue'), undefined, 'nothing observed, so nothing recorded');
+  assert.equal(JSON.parse(store.get('state:render')).alertedStatus, 'up', 'its neighbour still reports');
+});
+
+test('an unknown component leaves a GAP in history rather than a green day', async () => {
+  const { env, store, sent } = makeEnv();
+  stubFeed(sent, [{ key: 'queue', name: 'Background jobs', status: 'unknown' }]);
+
+  await runChecks(feedEnv(env, [{ name: 'queue', component: 'queue' }]));
+
+  assert.equal(
+    store.get('history:queue'),
+    undefined,
+    'the same thing the bar draws for a day nobody looked at'
+  );
+});
+
 test('the feed is fetched ONCE however many components read it', async () => {
   const { env, sent } = makeEnv();
   let feedCalls = 0;

@@ -158,6 +158,11 @@ async function runChecks(env) {
   const results = [];
   for (const target of cfg.targets) {
     const probe = target.component ? componentProbe(feed, target.component) : null;
+    if (probe?.skip) {
+      // Neither observed nor failed. No alert, no state write, no history row.
+      console.log(`watchdog: skipping ${target.name} — ${probe.detail}`);
+      continue;
+    }
     results.push(await checkTarget(env, cfg, target, probe));
   }
 
@@ -368,6 +373,16 @@ function componentProbe(feed, key) {
 
   const status = String(component.status || 'unknown');
   if (status === 'operational') return { ok: true };
+
+  // UNKNOWN is not a fault. The application reports it when a probe could not
+  // measure something — an unconfigured render tier, a schedule that has never
+  // run — and paging someone because a component was never measured is how a
+  // monitor gets muted. It is not recorded as healthy either: the target is
+  // skipped for this pass entirely, which leaves the history bar a GAP, the
+  // same thing it draws for a day nobody looked at.
+  if (status === 'unknown') {
+    return { skip: true, detail: 'the application reports this component as not measured' };
+  }
 
   // `degraded` counts as a failure here deliberately: this page has two states
   // and the honest place to put "working, but not properly" is the failing one.
