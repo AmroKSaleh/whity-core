@@ -659,6 +659,71 @@ test('with no history at all the bar says so rather than showing green', async (
   assert.match(html, /No history yet/);
 });
 
+// ── the narrow (phone) layout ───────────────────────────────────────────────
+
+// 90 segments need ~358px; on a 320-414px phone the bar gets 227-321px, so the
+// oldest month was being clipped by the list's overflow:hidden and the bar
+// looked complete while hiding a third of the record.
+
+const WIDE_CFG = { ...CFG, historyDays: 90, targets: [{ name: 'api', url: 'https://x.test/a' }] };
+
+/** Every day in the window recorded as `up`, so the two windows differ only in size. */
+function fullHistory(days) {
+  const out = {};
+  for (let i = 0; i < days; i++) out[dayKey(Date.now() - i * 86400 * 1000)] = 'up';
+  return out;
+}
+
+test('the narrow layout hides the oldest days and captions the window it actually draws', async () => {
+  const { env, store } = makeEnv();
+  store.set('meta:last-run', JSON.stringify({ at: Date.now() }));
+  store.set('state:api', JSON.stringify({ alertedStatus: 'up' }));
+  store.set('history:api', JSON.stringify({ days: fullHistory(90) }));
+
+  const html = await (await renderStatusPage(env, WIDE_CFG)).text();
+
+  // Every segment is still in the DOM — the narrow layout hides, it does not drop.
+  assert.equal((html.match(/class="seg ok"/g) || []).length, 90);
+  // 90 - 30: the rule that hides the oldest sixty on a phone.
+  assert.ok(html.includes('.seg:nth-child(-n+60){display:none}'), 'oldest 60 hidden below 560px');
+
+  // Both captions are present, and each describes its own window.
+  assert.ok(html.includes('>90</span><span class="narrow">30</span> days ago'), 'both ranges captioned');
+  assert.ok(html.includes('90 days observed'), 'wide caption counts the full record');
+  assert.ok(html.includes('30 days observed'), 'narrow caption counts only what it shows');
+});
+
+test('the narrow caption counts failures inside its own window, not the whole record', async () => {
+  const { env, store } = makeEnv();
+  store.set('meta:last-run', JSON.stringify({ at: Date.now() }));
+  store.set('state:api', JSON.stringify({ alertedStatus: 'up' }));
+  const days = fullHistory(90);
+  // One failure 60 days ago: inside the 90-day record, outside the 30-day window.
+  days[dayKey(Date.now() - 60 * 86400 * 1000)] = 'down';
+  store.set('history:api', JSON.stringify({ days }));
+
+  const html = await (await renderStatusPage(env, WIDE_CFG)).text();
+
+  assert.ok(html.includes('1 with failures'), 'the full record still reports the outage');
+  assert.ok(
+    html.includes('30 days observed · no failures'),
+    'the phone caption must not claim an outage it is not drawing, nor hide one it is'
+  );
+});
+
+test('a history window no larger than the narrow one emits no hiding rule', async () => {
+  const { env, store } = makeEnv();
+  store.set('meta:last-run', JSON.stringify({ at: Date.now() }));
+  store.set('state:api', JSON.stringify({ alertedStatus: 'up' }));
+  store.set('history:api', JSON.stringify({ days: fullHistory(5) }));
+
+  // HIST_CFG is 5 days — fewer than the 30 the narrow layout would show.
+  const html = await (await renderStatusPage(env, HIST_CFG)).text();
+
+  assert.ok(!html.includes('nth-child(-n+'), 'nothing to hide, so no rule that could hide everything');
+  assert.ok(html.includes('>5</span><span class="narrow">5</span> days ago'), 'both captions agree');
+});
+
 // ── formatting ──────────────────────────────────────────────────────────────
 
 test('durations read the way a person would say them', () => {

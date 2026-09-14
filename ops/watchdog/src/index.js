@@ -618,6 +618,12 @@ async function renderStatusPage(env, cfg) {
   const kindOf = (s) => (s === 'up' ? 'ok' : s === 'down' ? 'down' : 'stale');
   const wordOf = (s) => (s === 'up' ? 'Operational' : s === 'down' ? 'Down' : 'Unknown');
 
+  // How much of the record the narrow (phone) layout shows. Paired with the
+  // `max-width: 560px` rule below — change both together or the caption stops
+  // matching the bar.
+  const narrowDays = Math.min(30, cfg.historyDays);
+  const hiddenSegs = cfg.historyDays - narrowDays;
+
   /**
    * The history bar: one segment per day, oldest on the left.
    *
@@ -632,6 +638,13 @@ async function renderStatusPage(env, cfg) {
     const segs = [];
     let observed = 0;
     let bad = 0;
+    // A phone cannot show 90 days: 90 segments need ~358px and the bar gets
+    // roughly 230-300px there, so a third of the record was being clipped away
+    // silently — a bar that LOOKED complete while hiding the oldest month.
+    // The narrow layout shows the most recent NARROW_DAYS instead, and counts
+    // them separately so the caption under it describes what is actually drawn.
+    let narrowObserved = 0;
+    let narrowBad = 0;
 
     for (let i = cfg.historyDays - 1; i >= 0; i--) {
       const d = dayKey(Date.now() - i * 86400 * 1000);
@@ -639,17 +652,31 @@ async function renderStatusPage(env, cfg) {
       const cls = v === 'up' ? 'ok' : v === 'down' ? 'down' : 'gap';
       if (v) observed++;
       if (v === 'down') bad++;
+      if (i < narrowDays) {
+        if (v) narrowObserved++;
+        if (v === 'down') narrowBad++;
+      }
       const label = v === 'up' ? 'no failures' : v === 'down' ? 'failure recorded' : 'not observed';
       segs.push(`<i class="seg ${cls}" title="${d} — ${label}"></i>`);
     }
 
-    const summary =
-      observed === 0
+    const phrase = (o, b) =>
+      o === 0
         ? 'No history yet'
-        : `${observed} day${observed === 1 ? '' : 's'} observed · ${bad === 0 ? 'no failures' : `${bad} with failures`}`;
+        : `${o} day${o === 1 ? '' : 's'} observed · ${b === 0 ? 'no failures' : `${b} with failures`}`;
 
+    const summary = phrase(observed, bad);
+    const narrowSummary = phrase(narrowObserved, narrowBad);
+
+    // The aria-label deliberately describes the FULL record rather than the
+    // narrow window: every segment is in the DOM at every width, only hidden
+    // visually, so a screen-reader user gets the whole picture either way.
     return `<div class="bar" role="img" aria-label="${escapeHtml(summary)} over the last ${cfg.historyDays} days">${segs.join('')}</div>
-            <div class="barfoot"><span>${cfg.historyDays} days ago</span><span>${escapeHtml(summary)}</span><span>today</span></div>`;
+            <div class="barfoot">
+              <span><span class="wide">${cfg.historyDays}</span><span class="narrow">${narrowDays}</span> days ago</span>
+              <span class="sum"><span class="wide">${escapeHtml(summary)}</span><span class="narrow">${escapeHtml(narrowSummary)}</span></span>
+              <span>today</span>
+            </div>`;
   };
 
   const rows = components
@@ -781,7 +808,10 @@ async function renderStatusPage(env, cfg) {
   .barfoot{display:flex;justify-content:space-between;gap:1rem;margin-top:.5rem;
            font-size:.72rem;color:var(--soft);
            font-family:"Geist Mono",ui-monospace,Menlo,Consolas,monospace}
-  .barfoot span:nth-child(2){text-align:center}
+  .barfoot .sum{text-align:center}
+  /* Both captions are rendered; the media query picks which one is true for
+     the bar actually on screen. */
+  .barfoot .narrow{display:none}
 
   .note{margin-top:1rem;padding:1rem 1.25rem;background:var(--card);
         border:1px solid var(--line);border-radius:.75rem;font-size:.88rem;color:var(--soft)}
@@ -793,6 +823,39 @@ async function renderStatusPage(env, cfg) {
   footer a{color:var(--soft)}
   footer a:hover{color:var(--ink)}
   a{color:var(--accent)}
+
+  /* ── Narrow screens ──────────────────────────────────────────────────────
+     Measured, not guessed: at 320-414px the 90-segment bar wants 358px while
+     its container gets 227-321px, so the oldest ~25-33 days were being clipped
+     by the list's overflow:hidden — invisible, and indistinguishable from a full
+     record. Below 560px the page shows the most recent ${narrowDays} days and
+     says so, and the rows give back the horizontal padding the bar needs. */
+  @media (max-width:560px){
+    .wrap{padding-inline:.9rem}
+    .row{padding:1rem 1.05rem 1.1rem}
+    .banner{padding:1.2rem 1.05rem;gap:.7rem}
+    .banner strong{font-size:1.2rem}
+    .banner .dot{width:11px;height:11px}
+    .head{margin-bottom:1.25rem}
+${hiddenSegs > 0 ? `    .seg:nth-child(-n+${hiddenSegs}){display:none}
+    .barfoot .wide{display:none}
+    .barfoot .narrow{display:inline}
+` : ''}    /* Fewer days over the same width means each one can be a real target
+       rather than a hairline. */
+    .bar{height:30px;gap:3px}
+    .seg{min-width:4px;border-radius:3px}
+    .barfoot{gap:.6rem;font-size:.68rem}
+    .note{padding:.9rem 1.05rem;font-size:.85rem}
+    footer{gap:1rem;margin-top:1.5rem}
+    footer a{padding-block:.35rem}
+  }
+
+  /* Very narrow: the three-part caption stops fitting on one line, so the
+     summary moves under the range rather than squeezing it. */
+  @media (max-width:380px){
+    .barfoot{flex-wrap:wrap}
+    .barfoot .sum{order:3;flex-basis:100%;text-align:start}
+  }
 </style>
 </head>
 <body>
