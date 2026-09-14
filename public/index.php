@@ -2425,7 +2425,12 @@ $router->register('DELETE', '/api/2fa-policies/{id:\d+}', [$twoFactorPoliciesHan
 $planService = new \Whity\Core\Plan\PlanService(
     new \Whity\Core\Plan\PlanRepository($db->getPdo()),
     $entitlementService,
-    $db->getPdo()
+    $db->getPdo(),
+    // Where a tier MOVE is recorded. `tenant_plan` holds only current state, so
+    // moving a workspace overwrites which tier it was on — and moving people
+    // rather than deleting a tier exists precisely so that is not lost. Without
+    // this the move is refused rather than performed unrecorded.
+    $auditLogger
 );
 $plansHandler = new \Whity\Api\PlansApiHandler($planService, $roleChecker, $db->getPdo());
 $router->register('GET',    '/api/plans',                       [$plansHandler, 'list'],            null, null, CorePermissions::PLANS_MANAGE);

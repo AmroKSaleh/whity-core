@@ -7,6 +7,7 @@ namespace Tests\Integration;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
+use Whity\Core\Audit\AuditLogger;
 use Whity\Core\Entitlement\EntitlementService;
 use Whity\Core\Entitlement\TenantEntitlementRepository;
 use Whity\Core\Plan\PlanRepository;
@@ -55,6 +56,7 @@ final class PlanLifecycleRealEngineTest extends TestCase
             $this->plans,
             new EntitlementService(new TenantEntitlementRepository($this->pdo)),
             $this->pdo,
+            new AuditLogger($this->pdo),
         );
     }
 
@@ -216,6 +218,69 @@ final class PlanLifecycleRealEngineTest extends TestCase
         $this->service->deletePlan($old);
     }
 
+    /**
+     * THE MOVE IS RECORDED, PER WORKSPACE.
+     *
+     * `tenant_plan` holds current state only: a move overwrites which tier a
+     * workspace was on and stamps `assigned_at` over the top, so without this
+     * entry the database can no longer say they were ever on the old tier —
+     * destroying the exact history that moving them (rather than deleting the
+     * tier) exists to protect.
+     *
+     * Found the hard way: the first version shipped without it, and three real
+     * workspaces were moved before anybody checked whether the move had been
+     * written down. It had not.
+     */
+    public function testEachMovedWorkspaceIsRecordedWithBothTiers(): void
+    {
+        $old = $this->service->createPlan('starter', 'Starter');
+        $new = $this->service->createPlan('pro', 'Pro');
+        $this->service->applyToTenant($old, 1);
+        $this->service->applyToTenant($old, 2);
+
+        $this->service->moveSubscribers($old, $new);
+
+        $rows = $this->auditRows('plan.subscriber.moved');
+        self::assertCount(2, $rows, 'One entry per workspace, not one for the batch.');
+
+        $tenants = array_map(static fn (array $r): int => (int) $r['tenant_id'], $rows);
+        sort($tenants);
+        self::assertSame([1, 2], $tenants);
+
+        // The entry has to name the tier they CAME FROM — that is the fact the
+        // move destroys, and the only reason to record anything.
+        $metadata = (string) $rows[0]['metadata'];
+        self::assertStringContainsString('starter', $metadata);
+        self::assertStringContainsString('pro', $metadata);
+    }
+
+    /**
+     * WITH NOWHERE TO RECORD IT, THE MOVE IS REFUSED rather than performed
+     * unrecorded. A silent move is worse than no move: the tier still has its
+     * subscribers and can be tried again, whereas an unrecorded one has already
+     * thrown the history away.
+     */
+    public function testAMoveWithNoAuditLogIsRefusedAndChangesNothing(): void
+    {
+        $unaudited = new PlanService(
+            $this->plans,
+            new EntitlementService(new TenantEntitlementRepository($this->pdo)),
+            $this->pdo,
+        );
+        $old = $this->service->createPlan('starter', 'Starter');
+        $new = $this->service->createPlan('pro', 'Pro');
+        $this->service->applyToTenant($old, 1);
+
+        try {
+            $unaudited->moveSubscribers($old, $new);
+            self::fail('A move with nowhere to record it must be refused.');
+        } catch (PlanValidationException $e) {
+            self::assertStringContainsString('audit', $e->reason());
+        }
+
+        self::assertSame($old, $this->planIdOf(1), 'The workspace must not have moved.');
+    }
+
     public function testMovingOntoTheSameTierIsRefused(): void
     {
         $id = $this->service->createPlan('starter', 'Starter');
@@ -267,6 +332,20 @@ final class PlanLifecycleRealEngineTest extends TestCase
     }
 
     // ── Fixtures ────────────────────────────────────────────────────────────
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function auditRows(string $action): array
+    {
+        $statement = $this->pdo->prepare('SELECT * FROM audit_log WHERE action = :a ORDER BY id ASC');
+        $statement->execute([':a' => $action]);
+
+        /** @var list<array<string, mixed>> $rows */
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+
+        return $rows;
+    }
 
     private function planIdOf(int $tenantId): ?int
     {
