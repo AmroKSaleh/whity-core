@@ -33,7 +33,39 @@ final class Receipt
         public readonly string $currency,
         public readonly ?string $paidAt,
         public readonly ?string $issuedAt,
+        /**
+         * The invoice before any discount, and what came off it.
+         *
+         * CARRIED FOR COMMISSION, not for display. An affiliate earns on what
+         * the customer actually paid for the product — after discounts, and not
+         * on tax, which is not income and is not ours to share. `totalMinor`
+         * alone cannot express that: it is the amount charged, discount already
+         * applied and tax already added.
+         *
+         * The billing service's invoice carries `subtotal` and `discount` and no
+         * tax field at all, so `subtotal - discount` is the whole answer on that
+         * side; a locally raised invoice has `tax_minor` to leave out as well.
+         */
+        public readonly int $subtotalMinor = 0,
+        public readonly int $discountMinor = 0,
     ) {
+    }
+
+    /**
+     * What an affiliate commission is calculated on.
+     *
+     * Falls back to the total when the service sent no breakdown — a receipt
+     * from an older payload shape earns on its face value rather than on zero,
+     * because an accrual of nothing is a silent underpayment and somebody would
+     * find it in their own statement before we did.
+     */
+    public function commissionBaseMinor(): int
+    {
+        if ($this->subtotalMinor === 0) {
+            return $this->totalMinor;
+        }
+
+        return max(0, $this->subtotalMinor - $this->discountMinor);
     }
 
     /**
@@ -51,6 +83,8 @@ final class Receipt
             self::str($payload['currency'] ?? null) ?? '',
             self::str($payload['paid_at'] ?? null),
             self::str($payload['due_at'] ?? null),
+            self::intOrZero($payload['subtotal'] ?? null),
+            self::intOrZero($payload['discount'] ?? null),
         );
     }
 
@@ -65,6 +99,11 @@ final class Receipt
             'paid_at' => $this->paidAt,
             'issued_at' => $this->issuedAt,
         ];
+    }
+
+    private static function intOrZero(mixed $value): int
+    {
+        return is_int($value) ? $value : (is_numeric($value) ? (int) $value : 0);
     }
 
     private static function str(mixed $value): ?string
