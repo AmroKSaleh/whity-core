@@ -181,7 +181,12 @@ class CreateAffiliates
                 -- 'external' for one the billing service did. Together with
                 -- source_ref this is what makes the accrual sweep idempotent:
                 -- re-running it cannot pay for the same payment twice.
-                source VARCHAR(16) NOT NULL,
+                -- WIDE ENOUGH FOR THE REVERSAL MARKER. At VARCHAR(16) the value
+                -- 'external:reversal' (17 characters) was rejected by PostgreSQL
+                -- and silently accepted by SQLite, so every clawback failed in
+                -- production and passed in the local suite. Caught by the
+                -- dual-engine gate, not by reading.
+                source VARCHAR(32) NOT NULL,
                 source_ref VARCHAR(128) NOT NULL,
 
                 -- What the rate was applied to: the invoice AFTER discounts and

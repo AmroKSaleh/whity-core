@@ -336,7 +336,7 @@ final class CommissionAccrualRealEngineTest extends TestCase
         $this->payments->add(1, $this->payment('INV-1', 15000, '2026-03-01'));
         $this->sweep();
 
-        $this->pdo->exec('UPDATE affiliates SET is_active = 0');
+        $this->pdo->exec('UPDATE affiliates SET is_active = false');
         $this->payments->add(1, $this->payment('INV-2', 15000, '2026-04-01'));
         $result = $this->sweep();
 

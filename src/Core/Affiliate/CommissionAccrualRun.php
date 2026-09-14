@@ -145,6 +145,10 @@ final class CommissionAccrualRun
             ]);
             $result['accrued']++;
         } catch (\PDOException $e) {
+            if (!self::isDuplicate($e)) {
+                throw $e;
+            }
+
             // The unique index did its job: this payment is already accrued.
             // Counted, not raised — a second sweep over the same history is the
             // normal case, not an error.
@@ -204,9 +208,43 @@ final class CommissionAccrualRun
                 ':occurred' => $payment->paidAt->format('Y-m-d H:i:s'),
             ]);
             $result['reversed']++;
-        } catch (\PDOException) {
+        } catch (\PDOException $e) {
+            if (!self::isDuplicate($e)) {
+                throw $e;
+            }
+
             $result['already']++;
         }
+    }
+
+    /**
+     * Whether a write failed because the row is already there.
+     *
+     * ── The bug this exists to stop, which shipped once ────────────────────
+     *
+     * Both writes above used to catch EVERY PDOException and count it as
+     * "already accrued". That reads as tidy idempotency and is a trap: any
+     * database error at all — a column too narrow, a type mismatch, a lost
+     * connection — became a silent no-op that the run reported as normal.
+     *
+     * It was not hypothetical. `source` was VARCHAR(16) and the reversal marker
+     * `external:reversal` is seventeen characters: PostgreSQL rejected every
+     * clawback, SQLite accepted them, and the blanket catch turned a hard schema
+     * error into a quiet nothing. Refunds would never have reversed in
+     * production while the local suite stayed green, and affiliates would have
+     * been overpaid indefinitely.
+     *
+     * So only a UNIQUE violation is idempotency. Everything else is a fault and
+     * has to be heard.
+     */
+    private static function isDuplicate(\PDOException $e): bool
+    {
+        // 23505 is PostgreSQL's unique_violation; SQLite reports the broader
+        // 23000 integrity-constraint class for the same collision. Both engines
+        // run this suite, so both are recognised.
+        $sqlState = $e->getCode();
+
+        return $sqlState === '23505' || $sqlState === '23000';
     }
 
     /**
