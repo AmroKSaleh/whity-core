@@ -139,6 +139,30 @@ if ($isCli && isset($argv[1])) {
         ))->execute($limit));
     }
 
+    // The sweep that turns what referred customers paid into what affiliates
+    // earned. Without something calling it the whole programme is a schema:
+    // codes attach to workspaces, workspaces pay, and the commission ledger
+    // stays empty — which looks exactly like a programme nobody has used yet.
+    //
+    // Reads BOTH the local invoice table and the billing service, because a
+    // workspace that moved from one to the other earned its referrer money in
+    // both places.
+    if ($command === 'affiliate:accrue-commissions') {
+        $db = \Whity\Database\Database::connect();
+
+        $limit = null;
+        foreach ($argv as $arg) {
+            if (is_string($arg) && str_starts_with($arg, '--limit=')) {
+                $limit = max(1, (int) substr($arg, 8));
+            }
+        }
+
+        exit((new \Whity\Commands\AffiliateAccrueCommissionsCommand(
+            $db->getPdo(),
+            \Whity\Core\Billing\External\BillingPortalFactory::fromEnvironment(),
+        ))->execute($limit));
+    }
+
     // The retention sweep for form attachments nobody ever submitted (migration
     // 134). A `file` answer's bytes are written BEFORE the submission exists —
     // they have to be — so every abandoned form leaves an object no row will
@@ -225,6 +249,7 @@ if ($isCli && isset($argv[1])) {
     echo "  form-uploads:sweep         Delete form attachments nobody ever submitted\n";
     echo "  billing:reconcile-access   Re-ask the billing service who may use paid features\n";
     echo "  billing:sync-device-quantity  Bill per-device subscriptions for the devices in service\n";
+    echo "  affiliate:accrue-commissions  Turn referred customers' payments into affiliate commissions\n";
     echo "  update:check               Compare the core version against the latest GitHub release\n";
     echo "  queue:work                 Run the durable async job worker loop\n";
     echo "  schedule:run               Run the cron-tick scheduler (exactly-once per minute)\n";
@@ -2673,6 +2698,30 @@ $promotionsHandler = new \Whity\Api\PromotionsApiHandler(
 $router->register('GET',    '/api/promotions',            [$promotionsHandler, 'list'],   null, null, CorePermissions::PLANS_MANAGE);
 $router->register('POST',   '/api/promotions',            [$promotionsHandler, 'create'], null, null, CorePermissions::PLANS_MANAGE);
 $router->register('DELETE', '/api/promotions/{id:\d+}',   [$promotionsHandler, 'retire'], null, null, CorePermissions::PLANS_MANAGE);
+
+// 13a-ter-bis. AFFILIATES (#affiliate). Who sends us customers, at what rate,
+// for how long — and what they are owed.
+//
+// WITHOUT THIS THE WHOLE PROGRAMME IS UNREACHABLE. The codes, the attribution
+// on signup, the commission ledger and the nightly accrual all exist and all
+// depend on a row in `affiliates` that nothing else could create. A feature
+// that looks complete and produces nothing.
+//
+// Same gate as the catalogue and promotions, and for a sharper reason: a rate
+// here is an instruction to pay somebody real money out of the platform's own
+// revenue, so a tenant admin holding `plans:manage` through the global admin
+// role must not reach it — they could mint themselves a code and refer their
+// own workspaces.
+//
+// There is no DELETE. Deactivating stops future earning; the row is kept
+// because the commissions owed to somebody point at it.
+$affiliatesHandler = new \Whity\Api\AffiliatesApiHandler(
+    new \Whity\Core\Affiliate\AffiliateRepository($db->getPdo()),
+    $roleChecker
+);
+$router->register('GET',   '/api/affiliates',          [$affiliatesHandler, 'list'],   null, null, CorePermissions::PLANS_MANAGE);
+$router->register('POST',  '/api/affiliates',          [$affiliatesHandler, 'create'], null, null, CorePermissions::PLANS_MANAGE);
+$router->register('PATCH', '/api/affiliates/{id:\d+}', [$affiliatesHandler, 'update'], null, null, CorePermissions::PLANS_MANAGE);
 $router->register('POST',   '/api/tenants/{id:\d+}/plan',       [$plansHandler, 'applyToTenant'],   null, null, CorePermissions::PLANS_MANAGE);
 $router->register('GET',    '/api/tenants/{id:\d+}/plan',       [$plansHandler, 'getTenantPlan'],   null, null, CorePermissions::PLANS_MANAGE);
 

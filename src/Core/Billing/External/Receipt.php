@@ -48,7 +48,37 @@ final class Receipt
          */
         public readonly int $subtotalMinor = 0,
         public readonly int $discountMinor = 0,
+        /**
+         * What is still settled against this invoice after any refunds.
+         *
+         * A FULL refund sets the status to `refunded`; a PARTIAL one leaves the
+         * status alone and reduces this. Without it the two are
+         * indistinguishable, and a partly refunded invoice reads as fully paid.
+         */
+        public readonly int $amountPaidMinor = 0,
     ) {
+    }
+
+    /** Fully reversed — the billing service says so outright. */
+    public function isRefunded(): bool
+    {
+        return $this->status === 'refunded';
+    }
+
+    /**
+     * Some of the money has gone back, but not all of it.
+     *
+     * Reported rather than acted on: the commission ledger holds one entry per
+     * payment and reverses it whole, so it cannot express "give back a third".
+     * Silently ignoring it would quietly overpay; silently reversing it whole
+     * would underpay. Naming it lets a person settle the difference until the
+     * ledger learns to.
+     */
+    public function isPartiallyRefunded(): bool
+    {
+        return !$this->isRefunded()
+            && $this->amountPaidMinor > 0
+            && $this->amountPaidMinor < $this->commissionBaseMinor();
     }
 
     /**
@@ -85,6 +115,7 @@ final class Receipt
             self::str($payload['due_at'] ?? null),
             self::intOrZero($payload['subtotal'] ?? null),
             self::intOrZero($payload['discount'] ?? null),
+            self::intOrZero($payload['amount_paid'] ?? null),
         );
     }
 

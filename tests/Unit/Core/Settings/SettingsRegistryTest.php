@@ -61,6 +61,9 @@ final class SettingsRegistryTest extends TestCase
              // deployment chases its enterprise customers differently from its
              // self-service ones.
              'payments.mock_enabled',
+             // Affiliate clawback is global-only for the same reason: the money
+             // goes to somebody outside the company, so no tenant decides it.
+             'affiliate.clawback_on_refund',
              'dunning.retry_schedule_days', 'dunning.lock_after_days',
              'plugins.store_allowed_hosts', 'plugins.store_enabled',
              'documents.render_enabled', 'documents.render_max_rows',
@@ -398,7 +401,10 @@ final class SettingsRegistryTest extends TestCase
         // decides WHICH devices a per-device price counts. Migration 146 keeps
         // provisioned_at, activated_at and last_seen_at as separate facts so
         // that choice can be a setting rather than a schema decision.
-        self::assertCount(83, $describe);
+        // 84 since the affiliate programme added affiliate.clawback_on_refund,
+        // which decides whether a refunded payment takes its commission back.
+        // A commercial choice rather than a technical one, so it is a setting.
+        self::assertCount(84, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

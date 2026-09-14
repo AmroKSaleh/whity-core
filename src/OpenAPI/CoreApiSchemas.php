@@ -4311,6 +4311,52 @@ final class CoreApiSchemas
                 'received' => self::int(),
                 'settled' => self::int(),
             ], ['received', 'settled'])),
+            // #affiliate — somebody who sends us customers, and what they are
+            // owed for it.
+            //
+            // `balances` IS A LIST, NOT A NUMBER, and that is the whole point:
+            // commissions are recorded in whatever currency the customer paid
+            // in, and one total across dinars and dollars is wrong in a way
+            // nobody can see on a screen. A payout is made in one currency at a
+            // time anyway.
+            'Affiliate' => self::object([
+                'id' => self::int(),
+                'code' => self::str(),
+                'name' => self::str(),
+                'email' => self::str(true),
+                'profile_id' => self::int(true),
+                // BASIS POINTS. 2000 is twenty per cent. Named in the
+                // description too, because a client reading `commission_bp: 20`
+                // as a percentage builds a screen that is wrong by a hundred.
+                'commission_bp' => self::int(),
+                'window_months' => self::int(),
+                'promotion_id' => self::int(true),
+                'is_active' => self::bool(),
+                'referral_count' => self::int(),
+                'converted_count' => self::int(),
+                'balances' => ['type' => 'array', 'items' => SchemaBuilder::ref('AffiliateBalance')],
+            ], ['id', 'code', 'name', 'commission_bp', 'window_months', 'is_active', 'referral_count', 'converted_count', 'balances']),
+            'AffiliateBalance' => self::object([
+                'currency' => self::str(),
+                'amount_minor' => self::int(),
+            ], ['currency', 'amount_minor']),
+            'AffiliateListResponse' => self::listEnvelope('Affiliate'),
+            'AffiliateResponse' => self::dataEnvelope(SchemaBuilder::ref('Affiliate')),
+            'AffiliateCreateRequest' => self::object([
+                'code' => self::str(),
+                'name' => self::str(),
+                'commission_bp' => self::int(),
+                'window_months' => self::int(true),
+                'email' => self::str(true),
+                'profile_id' => self::int(true),
+                'promotion_id' => self::int(true),
+            ], ['code', 'name', 'commission_bp']),
+            'AffiliateUpdateRequest' => self::object([
+                'commission_bp' => self::int(true),
+                'window_months' => self::int(true),
+                'promotion_id' => self::int(true),
+                'is_active' => self::bool(true),
+            ], []),
             'PromotionListResponse' => self::listEnvelope('Promotion'),
             'PromotionResponse' => self::dataEnvelope(SchemaBuilder::ref('Promotion')),
             'PromotionCreateRequest' => self::object([
@@ -9432,6 +9478,68 @@ final class CoreApiSchemas
                     201 => self::jsonResponse('The new promotion', 'PromotionResponse'),
                     409 => self::errorResponse('Another live promotion already uses that code'),
                     422 => self::errorResponse('The promotion cannot be created as described'),
+                ] + self::authErrors(),
+            ]),
+            // #affiliate — the people who send us customers.
+            //
+            // THERE IS NO DELETE HERE, deliberately. Deactivating stops future
+            // earning; the row is kept because the commissions owed to somebody
+            // point at it, and an affiliate whose record vanished would take
+            // the evidence of their own payouts with them.
+            self::permissionRoute('GET', '/api/affiliates', 'plans:manage', [
+                'summary' => 'Who sends us customers, and what they are owed (operator)',
+                'description' =>
+                    'Every affiliate, active and retired, each carrying what they have earned and not '
+                    . 'yet been paid. `balances` is a LIST because commissions are recorded in whatever '
+                    . 'currency the customer paid in, and a single total across currencies is wrong in a '
+                    . 'way nobody can see. Amounts are minor units, and already net of clawbacks — a '
+                    . 'refund writes a negative row rather than editing the original, so the balance is a '
+                    . 'SUM. Commissions already settled by a payout are excluded: a balance that '
+                    . 'included them would be read as money still owed and paid twice. '
+                    . '`commission_bp` is BASIS POINTS — 2000 is twenty per cent.',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('Every affiliate, with what they are owed', 'AffiliateListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/affiliates', 'plans:manage', [
+                'summary' => 'Create an affiliate (operator)',
+                'description' =>
+                    '`code` is what goes in the link, so it is restricted to letters, digits, dots, '
+                    . 'dashes and underscores — anything needing escaping produces a link that breaks in '
+                    . "somebody's email client, and the affiliate is the last to find out. Codes are "
+                    . 'unique without regard to case, matching how attribution looks them up: somebody '
+                    . 'writes the code on a slide and somebody else types it back. `commission_bp` is '
+                    . 'BASIS POINTS, 1 to 5000 — sending 20 for "twenty per cent" would create a 0.2% '
+                    . 'affiliate, so the units are enforced rather than guessed. `window_months` is how '
+                    . "long after a referred customer's FIRST PAYMENT they keep earning, defaulting to "
+                    . '12. `promotion_id` attaches a discount the code also grants, which is how most '
+                    . 'affiliates persuade anybody to use theirs.',
+                'tags' => ['plans'],
+                'request' => 'AffiliateCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The new affiliate', 'AffiliateResponse'),
+                    409 => self::errorResponse('Another affiliate already uses that code'),
+                    422 => self::errorResponse('The affiliate cannot be created as described'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/affiliates/{id:\d+}', 'plans:manage', [
+                'summary' => 'Renegotiate terms, or end the arrangement (operator)',
+                'description' =>
+                    'NOTHING HERE IS RETROACTIVE. Every commission already accrued copied the rate it '
+                    . 'was earned at onto its own row, so a new `commission_bp` moves only what has not '
+                    . 'been earned yet; and the window end of a referral is frozen when its first payment '
+                    . 'arrives, so a new `window_months` applies to referrals that have not converted. '
+                    . 'Sending `promotion_id: null` DETACHES the discount the code carried — omitting '
+                    . 'the field leaves it alone. `is_active: false` stops future earning and touches '
+                    . 'nothing earned: money already owed is owed whatever happens to the arrangement, '
+                    . 'which is why there is no way to delete an affiliate at all.',
+                'tags' => ['plans'],
+                'request' => 'AffiliateUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The affiliate as it now stands', 'AffiliateResponse'),
+                    404 => self::errorResponse('No such affiliate'),
+                    422 => self::errorResponse('The terms cannot be set as described'),
                 ] + self::authErrors(),
             ]),
             self::permissionRoute('DELETE', '/api/promotions/{id:\d+}', 'plans:manage', [
