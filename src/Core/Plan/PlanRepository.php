@@ -125,6 +125,34 @@ final class PlanRepository
     }
 
     /**
+     * Which workspaces on a tier are billed by an external service.
+     *
+     * Those cannot be moved by changing our own row: the billing service is
+     * authoritative for what they are paying for, and the reconciliation sweep
+     * will put them back.
+     *
+     * @return list<int>
+     */
+    public function externallyBilledSubscribers(int $planId): array
+    {
+        // @tenant-guard-ignore: the same cross-tenant question as usageFor() — who is on this tier — asked by an operator screen; it returns ids and reads no tenant data.
+        $stmt = $this->db->prepare(
+            'SELECT tenant_id FROM tenant_plan
+              WHERE plan_id = :plan_id AND external_ref IS NOT NULL AND external_ref <> :empty'
+        );
+        $stmt->bindValue(':plan_id', $planId, PDO::PARAM_INT);
+        $stmt->bindValue(':empty', '');
+        $stmt->execute();
+
+        $ids = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) {
+            $ids[] = (int) $id;
+        }
+
+        return $ids;
+    }
+
+    /**
      * Move every workspace on one tier to another.
      *
      * A PLAIN UPDATE, not a loop of applyToTenant(). The bundle is read live
