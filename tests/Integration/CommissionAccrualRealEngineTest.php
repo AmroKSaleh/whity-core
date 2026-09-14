@@ -11,6 +11,7 @@ use Tests\Support\SchemaFromMigrations;
 use Whity\Core\Affiliate\CommissionAccrualRun;
 use Whity\Core\Affiliate\ReferredPayment;
 use Whity\Core\Affiliate\ReferredPaymentSource;
+use Whity\Core\Affiliate\ReferredPaymentSourceException;
 
 /**
  * The ledger of money owed to people outside the company.
@@ -311,6 +312,180 @@ final class CommissionAccrualRealEngineTest extends TestCase
         self::assertSame(3000, $this->totalOwed());
     }
 
+    /**
+     * A REFUND CLAWS BACK EVEN WHEN ITS DATE FALLS OUTSIDE THE WINDOW, and this
+     * is the test that stops a bug that was live for an afternoon.
+     *
+     * The billing service CLEARS an invoice's payment date when it is refunded
+     * to zero. This side has to date the reversal from something, falls back to
+     * the issue date, and that date can land the wrong side of a window
+     * boundary — at which point a window check that ran BEFORE the refund check
+     * would count the whole thing as "past the window" and leave the commission
+     * standing on money that went back. Forever, and quietly: the sweep re-reads
+     * the same history every run and reaches the same wrong conclusion.
+     *
+     * Reversing first is safe because a clawback finds its original by reference
+     * rather than by date, so a refund of something never accrued is already a
+     * no-op — as the test below this one pins.
+     */
+    public function testARefundIsClawedBackEvenWhenItsDateFallsOutsideTheWindow(): void
+    {
+        $this->referral(tenantId: 1, rateBp: 2000, windowMonths: 12);
+        $this->payments->add(1, $this->payment('INV-1', 15000, '2026-03-01'));
+        $this->sweep();
+        self::assertSame(3000, $this->totalOwed(), 'Earned inside the window.');
+
+        // The same invoice comes back refunded, carrying a date past the window
+        // because the payment date is gone and only the issue date remains.
+        $this->payments->replace(1, [$this->payment('INV-1', 15000, '2027-09-01', refunded: true)]);
+        $result = $this->sweep();
+
+        self::assertSame(1, $result['reversed'], 'What was earned inside is taken back.');
+        self::assertSame(0, $result['outside_window'], 'A refund is never merely "past the window".');
+        self::assertSame(0, $this->totalOwed());
+    }
+
+    // ── A partial refund: the case the ledger cannot express ────────────────
+
+    /**
+     * A PARTLY REFUNDED PAYMENT IS REPORTED AND LEFT ALONE.
+     *
+     * Both available answers are wrong. Reversing the whole commission takes
+     * back everything over a customer who kept most of what they bought;
+     * ignoring it pays on money that was returned. The ledger holds one entry
+     * per payment and reverses it whole, so it cannot split the difference.
+     *
+     * What it must not do is decide silently. The commission stands — the
+     * smaller error in the common case of a small refund — and the count says a
+     * person has to settle it.
+     */
+    public function testAPartlyRefundedPaymentIsCountedAndLeftForAPerson(): void
+    {
+        $this->referral(tenantId: 1, rateBp: 2000);
+        $this->payments->add(1, $this->payment('INV-1', 15000, '2026-03-01'));
+        $this->sweep();
+
+        $this->payments->replace(1, [$this->payment('INV-1', 15000, '2026-03-01', partlyRefunded: true)]);
+        $result = $this->sweep();
+
+        self::assertSame(1, $result['partial_refunds'], 'Reported, so somebody can act on it.');
+        self::assertSame(0, $result['reversed'], 'Not clawed back whole: most of the sale stands.');
+        self::assertSame(3000, $this->totalOwed());
+    }
+
+    /**
+     * A PARTIAL REFUND ON THE FIRST-EVER SWEEP STILL ACCRUES. Found by writing
+     * the reporting branch with a `continue` in it: a payment partly refunded
+     * before any sweep saw it would have been counted and then never paid at
+     * all, which is the opposite of the intended erring-towards-the-affiliate.
+     */
+    public function testAPaymentPartlyRefundedBeforeTheFirstSweepStillEarns(): void
+    {
+        $this->referral(tenantId: 1, rateBp: 2000);
+        $this->payments->add(1, $this->payment('INV-1', 15000, '2026-03-01', partlyRefunded: true));
+
+        $result = $this->sweep();
+
+        self::assertSame(1, $result['partial_refunds']);
+        self::assertSame(1, $result['accrued'], 'The commission is written, then flagged.');
+        self::assertSame(3000, $this->totalOwed());
+    }
+
+    /** A full refund is a clawback, not a partial one — the two never both fire. */
+    public function testAFullRefundIsNotAlsoReportedAsPartial(): void
+    {
+        $this->referral(tenantId: 1, rateBp: 2000);
+        $this->payments->add(1, $this->payment('INV-1', 15000, '2026-03-01'));
+        $this->sweep();
+
+        $this->payments->replace(1, [$this->payment('INV-1', 15000, '2026-03-01', refunded: true)]);
+        $result = $this->sweep();
+
+        self::assertSame(1, $result['reversed']);
+        self::assertSame(0, $result['partial_refunds']);
+    }
+
+    // ── When a payment history cannot be read ───────────────────────────────
+
+    /**
+     * AN UNREADABLE HISTORY IS COUNTED, NOT MISTAKEN FOR "NEVER PAID".
+     *
+     * The two look identical from here — both produce no payments — and they
+     * need opposite responses. A sweep that reported success while the billing
+     * service was down would under-accrue every night, and the only person
+     * positioned to notice is the affiliate, months later, reading a statement
+     * that does not match what they sold.
+     */
+    public function testAWorkspaceWhosePaymentsCannotBeReadIsCounted(): void
+    {
+        $this->referral(tenantId: 1, rateBp: 2000);
+        $this->payments->fail(1);
+
+        $result = $this->sweep();
+
+        self::assertSame(1, $result['unreachable']);
+        self::assertSame(0, $result['accrued']);
+        self::assertSame(0, $this->commissionCount());
+    }
+
+    /** One unreachable workspace must not cost every workspace after it. */
+    public function testOneUnreadableWorkspaceDoesNotStopTheSweep(): void
+    {
+        $this->referral(tenantId: 1, rateBp: 2000);
+        $this->referral(tenantId: 2, rateBp: 2000, code: 'B');
+        $this->payments->fail(1);
+        $this->payments->add(2, $this->payment('INV-1', 15000, '2026-03-01'));
+
+        $result = $this->sweep();
+
+        self::assertSame(1, $result['unreachable']);
+        self::assertSame(1, $result['accrued'], 'The reachable workspace still earns.');
+        self::assertSame(3000, $this->totalOwed());
+    }
+
+    /**
+     * AN UNREADABLE PASS MUST NOT FREEZE THE EARNING WINDOW. The window is
+     * written once, from the oldest payment the sweep is handed — so a pass that
+     * saw a truncated history, or none, would set a start date that no later
+     * healthy sweep can correct.
+     */
+    public function testAnUnreadablePassLeavesTheWindowUnopened(): void
+    {
+        $this->referral(tenantId: 1, rateBp: 2000, windowMonths: 12);
+        $this->payments->fail(1);
+        $this->sweep();
+
+        self::assertNull($this->referralRow(1)['first_paid_at'], 'Nothing was learned, so nothing was decided.');
+
+        // The service comes back, carrying the history that was there all along.
+        $this->payments->recover(1);
+        $this->payments->add(1, $this->payment('INV-1', 15000, '2026-03-01'));
+        $result = $this->sweep();
+
+        self::assertSame(1, $result['accrued']);
+        self::assertStringStartsWith(
+            '2026-03-01',
+            (string) $this->referralRow(1)['first_paid_at'],
+            'The window opens on the real first payment, not on when we could next reach it.'
+        );
+    }
+
+    /** And the accrual converges: nothing is lost by a pass that could not read. */
+    public function testEverythingOwedIsPaidOnceTheSourceRecovers(): void
+    {
+        $this->referral(tenantId: 1, rateBp: 2000);
+        $this->payments->fail(1);
+        $this->sweep();
+        $this->sweep();
+
+        $this->payments->recover(1);
+        $this->payments->add(1, $this->payment('INV-1', 15000, '2026-03-01'));
+        $this->payments->add(1, $this->payment('INV-2', 15000, '2026-04-01'));
+        $this->sweep();
+
+        self::assertSame(6000, $this->totalOwed(), 'Both payments, in full, on the first pass that could see them.');
+    }
+
     // ── What earns nothing ──────────────────────────────────────────────────
 
     /** A fully discounted invoice earns nothing, and leaves no puzzling zero row. */
@@ -373,7 +548,8 @@ final class CommissionAccrualRealEngineTest extends TestCase
      * Named `sweep` rather than `run`: PHPUnit's TestCase::run() is final, and
      * a helper called run() here is a fatal error rather than a warning.
      *
-     * @return array{accrued: int, reversed: int, skipped: int, already: int, outside_window: int}
+     * @return array{accrued: int, reversed: int, skipped: int, already: int,
+     *               outside_window: int, partial_refunds: int, unreachable: int}
      */
     private function sweep(bool $clawback = true): array
     {
@@ -386,6 +562,7 @@ final class CommissionAccrualRealEngineTest extends TestCase
         string $paidAt,
         bool $refunded = false,
         string $currency = 'JOD',
+        bool $partlyRefunded = false,
     ): ReferredPayment {
         return new ReferredPayment(
             ReferredPayment::SOURCE_EXTERNAL,
@@ -394,6 +571,7 @@ final class CommissionAccrualRealEngineTest extends TestCase
             $currency,
             new DateTimeImmutable($paidAt),
             $refunded,
+            $partlyRefunded,
         );
     }
 
@@ -467,6 +645,9 @@ final class FakePayments implements ReferredPaymentSource
     /** @var array<int, list<ReferredPayment>> */
     private array $byTenant = [];
 
+    /** @var array<int, true> */
+    private array $unreadable = [];
+
     public function add(int $tenantId, ReferredPayment $payment): void
     {
         $this->byTenant[$tenantId][] = $payment;
@@ -478,9 +659,30 @@ final class FakePayments implements ReferredPaymentSource
         $this->byTenant[$tenantId] = $payments;
     }
 
+    /**
+     * This workspace's history cannot be read — the billing service is down.
+     *
+     * DELIBERATELY NOT THE SAME AS AN EMPTY LIST, which is the whole point of
+     * the tests that use it.
+     */
+    public function fail(int $tenantId): void
+    {
+        $this->unreadable[$tenantId] = true;
+    }
+
+    /** The service comes back. */
+    public function recover(int $tenantId): void
+    {
+        unset($this->unreadable[$tenantId]);
+    }
+
     /** @return list<ReferredPayment> */
     public function paymentsFor(int $tenantId): array
     {
+        if (isset($this->unreadable[$tenantId])) {
+            throw new ReferredPaymentSourceException('The test made this workspace unreadable.');
+        }
+
         return $this->byTenant[$tenantId] ?? [];
     }
 }

@@ -59,15 +59,41 @@ final class CommissionAccrualRun
     }
 
     /**
-     * @return array{accrued: int, reversed: int, skipped: int, already: int, outside_window: int}
+     * @return array{accrued: int, reversed: int, skipped: int, already: int,
+     *               outside_window: int, partial_refunds: int, unreachable: int}
      */
     public function run(?DateTimeImmutable $now = null, int $limit = self::DEFAULT_BATCH): array
     {
         $now ??= new DateTimeImmutable();
-        $result = ['accrued' => 0, 'reversed' => 0, 'skipped' => 0, 'already' => 0, 'outside_window' => 0];
+        $result = [
+            'accrued' => 0,
+            'reversed' => 0,
+            'skipped' => 0,
+            'already' => 0,
+            'outside_window' => 0,
+            'partial_refunds' => 0,
+            'unreachable' => 0,
+        ];
 
         foreach ($this->referrals($limit) as $referral) {
-            $payments = $this->payments->paymentsFor((int) $referral['tenant_id']);
+            try {
+                $payments = $this->payments->paymentsFor((int) $referral['tenant_id']);
+            } catch (ReferredPaymentSourceException $e) {
+                // COUNTED, NOT FATAL, AND NOT SILENT. One workspace whose
+                // history could not be read must not stop the sweep reaching the
+                // rest — but it must also not read as a workspace that has never
+                // paid, which is what an empty list would have looked like. The
+                // count reaches the caller and the cron's exit code.
+                $result['unreachable']++;
+                $this->logger->warning('A referred workspace payment history could not be read this pass', [
+                    'referral_id' => (int) $referral['id'],
+                    'tenant_id' => (int) $referral['tenant_id'],
+                    'reason' => $e->getMessage(),
+                ]);
+
+                continue;
+            }
+
             if ($payments === []) {
                 continue;
             }
@@ -84,16 +110,40 @@ final class CommissionAccrualRun
                 : new DateTimeImmutable((string) $referral['window_ends_at']);
 
             foreach ($payments as $payment) {
+                if ($payment->partiallyRefunded) {
+                    // SURFACED, NEVER ACTED ON. Both available answers are
+                    // wrong — see ReferredPayment::$partiallyRefunded — so the
+                    // commission stands as accrued and a person is told which
+                    // one to settle by hand. Not `continue`: the accrual below
+                    // still has to happen, or a first-ever partial refund would
+                    // mean the commission was never written at all.
+                    $result['partial_refunds']++;
+                    $this->logger->warning('A referred payment was partly refunded; its commission needs a human', [
+                        'referral_id' => (int) $referral['id'],
+                        'source' => $payment->source,
+                        'reference' => $payment->reference,
+                    ]);
+                }
+
+                // THE REFUND CHECK COMES FIRST, BEFORE THE WINDOW. A clawback
+                // must not depend on a date: it finds its original by reference
+                // and reverses exactly what was accrued, so running it on a
+                // payment outside the window is already a no-op. Checking the
+                // window first looked equivalent and was not — the billing
+                // service CLEARS the payment date on a full refund, so a
+                // refunded payment arrives carrying a fallback date that can
+                // fall the wrong side of a boundary, and the commission would
+                // have stood forever on money that went back.
+                if ($payment->refunded) {
+                    $this->reverse($referral, $payment, $result);
+                    continue;
+                }
+
                 if ($windowEnd !== null && !CommissionCalculator::isWithinWindow($payment->paidAt, $windowEnd)) {
                     // Past the window. Counted rather than silent: a referral
                     // whose window closed is the ordinary end of an arrangement,
                     // and the number is how somebody sees it happening.
                     $result['outside_window']++;
-                    continue;
-                }
-
-                if ($payment->refunded) {
-                    $this->reverse($referral, $payment, $result);
                     continue;
                 }
 
@@ -106,7 +156,8 @@ final class CommissionAccrualRun
 
     /**
      * @param array<string, mixed> $referral
-     * @param array{accrued: int, reversed: int, skipped: int, already: int, outside_window: int} $result
+     * @param array{accrued: int, reversed: int, skipped: int, already: int,
+     *              outside_window: int, partial_refunds: int, unreachable: int} $result
      */
     private function accrue(array $referral, ReferredPayment $payment, array &$result): void
     {
@@ -165,7 +216,8 @@ final class CommissionAccrualRun
      * its own source reference so it, too, can only happen once.
      *
      * @param array<string, mixed> $referral
-     * @param array{accrued: int, reversed: int, skipped: int, already: int, outside_window: int} $result
+     * @param array{accrued: int, reversed: int, skipped: int, already: int,
+     *              outside_window: int, partial_refunds: int, unreachable: int} $result
      */
     private function reverse(array $referral, ReferredPayment $payment, array &$result): void
     {

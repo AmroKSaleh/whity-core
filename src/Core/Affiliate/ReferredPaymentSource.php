@@ -27,6 +27,11 @@ interface ReferredPaymentSource
      * run, or a refund that happened while nobody was looking.
      *
      * @return list<ReferredPayment>
+     *
+     * @throws ReferredPaymentSourceException When the history could not be read
+     *         at all. NOT an empty list: a source that cannot answer and a
+     *         customer who has never paid look identical from here and need
+     *         opposite responses.
      */
     public function paymentsFor(int $tenantId): array;
 }

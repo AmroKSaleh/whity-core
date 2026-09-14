@@ -210,6 +210,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/affiliates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Who sends us customers, and what they are owed (operator)
+         * @description Every affiliate, active and retired, each carrying what they have earned and not yet been paid. `balances` is a LIST because commissions are recorded in whatever currency the customer paid in, and a single total across currencies is wrong in a way nobody can see. Amounts are minor units, and already net of clawbacks — a refund writes a negative row rather than editing the original, so the balance is a SUM. Commissions already settled by a payout are excluded: a balance that included them would be read as money still owed and paid twice. `commission_bp` is BASIS POINTS — 2000 is twenty per cent.
+         */
+        get: operations["get_api_v1_affiliates"];
+        put?: never;
+        /**
+         * Create an affiliate (operator)
+         * @description `code` is what goes in the link, so it is restricted to letters, digits, dots, dashes and underscores — anything needing escaping produces a link that breaks in somebody's email client, and the affiliate is the last to find out. Codes are unique without regard to case, matching how attribution looks them up: somebody writes the code on a slide and somebody else types it back. `commission_bp` is BASIS POINTS, 1 to 5000 — sending 20 for "twenty per cent" would create a 0.2% affiliate, so the units are enforced rather than guessed. `window_months` is how long after a referred customer's FIRST PAYMENT they keep earning, defaulting to 12. `promotion_id` attaches a discount the code also grants, which is how most affiliates persuade anybody to use theirs.
+         */
+        post: operations["post_api_v1_affiliates"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/affiliates/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Renegotiate terms, or end the arrangement (operator)
+         * @description NOTHING HERE IS RETROACTIVE. Every commission already accrued copied the rate it was earned at onto its own row, so a new `commission_bp` moves only what has not been earned yet; and the window end of a referral is frozen when its first payment arrives, so a new `window_months` applies to referrals that have not converted. Sending `promotion_id: null` DETACHES the discount the code carried — omitting the field leaves it alone. `is_active: false` stops future earning and touches nothing earned: money already owed is owed whatever happens to the arrangement, which is why there is no way to delete an affiliate at all.
+         */
+        patch: operations["patch_api_v1_affiliates_id"];
+        trace?: never;
+    };
     "/api/v1/agenda-items": {
         parameters: {
             query?: never;
@@ -5180,6 +5224,45 @@ export interface components {
                 };
             };
         };
+        Affiliate: {
+            id: number;
+            code: string;
+            name: string;
+            email?: string | null;
+            profile_id?: number | null;
+            commission_bp: number;
+            window_months: number;
+            promotion_id?: number | null;
+            is_active: boolean;
+            referral_count: number;
+            converted_count: number;
+            balances: components["schemas"]["AffiliateBalance"][];
+        };
+        AffiliateBalance: {
+            currency: string;
+            amount_minor: number;
+        };
+        AffiliateCreateRequest: {
+            code: string;
+            name: string;
+            commission_bp: number;
+            window_months?: number | null;
+            email?: string | null;
+            profile_id?: number | null;
+            promotion_id?: number | null;
+        };
+        AffiliateListResponse: {
+            data: components["schemas"]["Affiliate"][];
+        };
+        AffiliateResponse: {
+            data: components["schemas"]["Affiliate"];
+        };
+        AffiliateUpdateRequest: {
+            commission_bp?: number | null;
+            window_months?: number | null;
+            promotion_id?: number | null;
+            is_active?: boolean | null;
+        };
         ApprovalStatusResponse: {
             data: {
                 id: number;
@@ -9452,6 +9535,256 @@ export interface operations {
                 };
             };
             /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_affiliates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every affiliate, with what they are owed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AffiliateListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_affiliates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AffiliateCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The new affiliate */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AffiliateResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Another affiliate already uses that code */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The affiliate cannot be created as described */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patch_api_v1_affiliates_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AffiliateUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description The affiliate as it now stands */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AffiliateResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such affiliate */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The terms cannot be set as described */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
             500: {
                 headers: {
                     [name: string]: unknown;

@@ -54,6 +54,20 @@ final class ReferredPayment
          * same pass that would otherwise have left the commission standing.
          */
         public readonly bool $refunded = false,
+        /**
+         * Some of the money went back, but not all of it.
+         *
+         * SEPARATE FROM `refunded` BECAUSE IT CANNOT BE ACTED ON. The ledger
+         * holds one commission per payment and reverses it whole; it has no way
+         * to express "give back a third". Folding a partial refund into
+         * `refunded` would claw back the whole commission on a customer who kept
+         * most of what they bought, and ignoring it would pay on money that was
+         * returned.
+         *
+         * So it is carried, counted, and left for a person — the only honest
+         * option until the ledger learns to reverse in part.
+         */
+        public readonly bool $partiallyRefunded = false,
     ) {
     }
 }

@@ -39,6 +39,10 @@ final class FakeBillingPortal implements BillingPortal
     public string $checkoutStatus = 'completed';
     /** @var list<Receipt> */
     public array $receipts = [];
+    /** Every subject whose receipts were asked for, in order. */
+    /** @var list<string> */
+    public array $receiptSubjects = [];
+    public bool $configured = true;
     /** @var list<SubscriptionLine> */
     public array $subscriptions = [];
     public ?int $lastQuantity = null;
@@ -51,9 +55,17 @@ final class FakeBillingPortal implements BillingPortal
         $this->access = AccessSnapshot::none('unset');
     }
 
+    /**
+     * Whether this deployment has a billing service at all.
+     *
+     * SETTABLE, because "no billing service" is a real deployment rather than a
+     * broken one — a self-hosted install that invoices locally — and several
+     * behaviours here are specifically about answering with nothing instead of
+     * failing.
+     */
     public function isConfigured(): bool
     {
-        return true;
+        return $this->configured;
     }
 
     public function startCheckout(
@@ -100,6 +112,12 @@ final class FakeBillingPortal implements BillingPortal
     /** @return list<Receipt> */
     public function receiptsFor(string $subjectRef): array
     {
+        // RECORDED BEFORE THE FAILURE CHECK, unlike the reads below it. A test
+        // asserting which subject was asked about wants to know even when the
+        // answer was an outage.
+        $this->lastSubject = $subjectRef;
+        $this->receiptSubjects[] = $subjectRef;
+
         if ($this->failWith !== null) {
             throw $this->failWith;
         }

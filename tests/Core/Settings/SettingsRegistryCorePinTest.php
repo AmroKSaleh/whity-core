@@ -108,6 +108,11 @@ final class SettingsRegistryCorePinTest extends TestCase
             // for them to configure. A deployment that had set them keeps the
             // rows in `app_settings`; nothing reads them, and nothing will.
             'payments.mock_enabled',
+            // Whether a refunded payment claws its affiliate commission back.
+            // GLOBAL-ONLY: the payer is the platform, not the tenant, so a
+            // referred customer's own settings must not decide what their
+            // referrer is paid.
+            'affiliate.clawback_on_refund',
             'dunning.retry_schedule_days',
             'dunning.lock_after_days',
             'plugins.store_allowed_hosts',
@@ -260,6 +265,10 @@ final class SettingsRegistryCorePinTest extends TestCase
             // that is on by default can take money before anybody decided it
             // should.
             'payments.mock_enabled' => 'false',
+            // Claws back by default. Absorbing a refund means paying commission
+            // out of money nobody collected, which is a decision to make
+            // deliberately rather than one to inherit.
+            'affiliate.clawback_on_refund' => 'true',
             'dunning.retry_schedule_days' => '1,3,7',
             'dunning.lock_after_days' => '14',
             'plugins.store_allowed_hosts' => '',
