@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Plan;
 
 use PDO;
+use Whity\Core\Audit\AuditLogger;
 use Whity\Core\Entitlement\EntitlementRegistry;
 use Whity\Core\Entitlement\EntitlementService;
 
@@ -36,12 +37,27 @@ final class PlanService
 
     private PlanRepository $plans;
     private EntitlementService $entitlements;
+    private ?AuditLogger $audit;
     private PDO $db;
 
-    public function __construct(PlanRepository $plans, EntitlementService $entitlements, PDO $db)
-    {
+    public function __construct(
+        PlanRepository $plans,
+        EntitlementService $entitlements,
+        PDO $db,
+        /**
+         * Where a tier MOVE is recorded.
+         *
+         * Optional so the many places that construct this for reads keep
+         * working — but see moveSubscribers(): when it is absent the move is
+         * refused rather than performed unrecorded, because the whole point of
+         * moving people instead of deleting a tier is not to lose what they
+         * were on.
+         */
+        ?AuditLogger $audit = null,
+    ) {
         $this->plans = $plans;
         $this->entitlements = $entitlements;
+        $this->audit = $audit;
         $this->db = $db;
     }
 
@@ -164,7 +180,53 @@ final class PlanService
             throw new PlanValidationException('to_plan_id', "Plan {$toPlanId} not found");
         }
 
-        return $this->plans->moveSubscribers($fromPlanId, $toPlanId, $movedBy);
+        // REFUSED WITHOUT SOMEWHERE TO RECORD IT, and that is the whole point of
+        // this method. `tenant_plan` holds CURRENT state — one row per tenant —
+        // so a move overwrites which tier a workspace was on and updates
+        // `assigned_at` over the top. Nothing else in the schema remembers.
+        //
+        // Moving people instead of deleting a tier exists so their history
+        // survives; performing the move with nowhere to write that history
+        // destroys the very thing it was meant to protect, quietly. Found the
+        // hard way: the first version of this shipped without an audit logger,
+        // and after moving three real workspaces the database could no longer
+        // say they had ever been on the old tier.
+        if ($this->audit === null) {
+            throw new PlanValidationException(
+                'audit',
+                'Moving workspaces between tiers needs an audit log to record it — otherwise '
+                . 'which tier they were on is lost, which is the one thing moving them is meant '
+                . 'to avoid.'
+            );
+        }
+
+        // Read BEFORE the write: afterwards, the old tier is gone from every row.
+        $tenantIds = $this->plans->subscriberTenantIds($fromPlanId);
+        $from = $this->plans->findById($fromPlanId);
+        $to = $this->plans->findById($toPlanId);
+
+        $moved = $this->plans->moveSubscribers($fromPlanId, $toPlanId, $movedBy);
+
+        // ONE ENTRY PER WORKSPACE, not one for the batch. The question somebody
+        // asks later is "what was THIS customer on in March", and an entry that
+        // says "3 workspaces moved" cannot answer it. AuditLogger is fail-soft,
+        // so a logging problem cannot undo a move that already happened.
+        foreach ($tenantIds as $tenantId) {
+            $this->audit->record('plan.subscriber.moved', [
+                'tenant_id' => $tenantId,
+                'actor_user_id' => $movedBy,
+                'target_type' => 'plan',
+                'target_id' => $toPlanId,
+                'metadata' => [
+                    'from_plan_id' => $fromPlanId,
+                    'from_plan_key' => $from['plan_key'] ?? null,
+                    'to_plan_id' => $toPlanId,
+                    'to_plan_key' => $to['plan_key'] ?? null,
+                ],
+            ]);
+        }
+
+        return $moved;
     }
 
     /**
