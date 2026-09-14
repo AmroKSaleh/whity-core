@@ -200,6 +200,31 @@ final class PlanService
             );
         }
 
+        // REFUSED FOR A WORKSPACE SOMEBODY IS BILLING, because this method
+        // cannot make that move stick. The billing service is authoritative for
+        // what a paying customer is buying — AccessRecorder writes its `plan`
+        // straight into `tenant_plan`, and the reconciliation sweep re-asks
+        // every few minutes — so a local change is reverted within a sweep
+        // interval. Proved on staging: three workspaces moved here were back on
+        // the old tier fifteen minutes later, and the sweep was right.
+        //
+        // Refusing beats moving-then-being-undone for the same reason the audit
+        // guard above refuses: a refusal can be retried by the right route,
+        // while a silent revert looks like it worked and is found much later.
+        // The right route is {@see \Whity\Core\Billing\External\TierMigration}.
+        $externallyBilled = $this->plans->externallyBilledSubscribers($fromPlanId);
+        if ($externallyBilled !== []) {
+            throw new PlanValidationException(
+                'plan_id',
+                sprintf(
+                    '%d workspace(s) on this tier are billed externally, and moving them here '
+                    . 'would be undone by the next billing reconciliation. Move them through the '
+                    . 'billing service instead.',
+                    count($externallyBilled)
+                )
+            );
+        }
+
         // Read BEFORE the write: afterwards, the old tier is gone from every row.
         $tenantIds = $this->plans->subscriberTenantIds($fromPlanId);
         $from = $this->plans->findById($fromPlanId);
