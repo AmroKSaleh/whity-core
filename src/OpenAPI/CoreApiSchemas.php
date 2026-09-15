@@ -4340,6 +4340,46 @@ final class CoreApiSchemas
                 'currency' => self::str(),
                 'amount_minor' => self::int(),
             ], ['currency', 'amount_minor']),
+            // A payout has THREE amounts and they are all different facts: what
+            // the affiliate earned, what is kept back and remitted on their
+            // behalf, and what actually leaves the bank. Recording one and
+            // calling it another is how a payout register stops reconciling
+            // with a bank statement.
+            'AffiliatePayout' => self::object([
+                'id' => self::int(),
+                'affiliate_id' => self::int(),
+                'total_minor' => self::int(),
+                'withholding_bp' => self::int(),
+                'withholding_minor' => self::int(),
+                'net_minor' => self::int(),
+                'currency' => self::str(),
+                'status' => self::str(),
+                'reference' => self::str(true),
+                'paid_at' => self::str(true),
+                'created_at' => self::str(true),
+                'commission_count' => self::int(),
+            ], ['id', 'affiliate_id', 'total_minor', 'withholding_bp', 'withholding_minor',
+                'net_minor', 'currency', 'status', 'commission_count']),
+            'AffiliatePayoutListResponse' => self::listEnvelope('AffiliatePayout'),
+            'AffiliatePayoutAssembleRequest' => self::object([
+                'currency' => self::str(),
+            ], ['currency']),
+            'AffiliatePayoutAssembledResponse' => self::dataEnvelope(self::object([
+                'payout_id' => self::int(),
+                'commissions' => self::int(),
+                'total_minor' => self::int(),
+                'withholding_minor' => self::int(),
+                'net_minor' => self::int(),
+            ], ['payout_id', 'commissions', 'total_minor', 'withholding_minor', 'net_minor'])),
+            'AffiliatePayoutSettleRequest' => self::object([
+                'reference' => self::str(),
+            ], ['reference']),
+            'AffiliatePayoutSettledResponse' => self::dataEnvelope(self::object([
+                'settled' => self::bool(),
+            ], ['settled'])),
+            'AffiliatePayoutDiscardedResponse' => self::dataEnvelope(self::object([
+                'discarded' => self::bool(),
+            ], ['discarded'])),
             'AffiliateListResponse' => self::listEnvelope('Affiliate'),
             'AffiliateResponse' => self::dataEnvelope(SchemaBuilder::ref('Affiliate')),
             'AffiliateCreateRequest' => self::object([
@@ -9540,6 +9580,72 @@ final class CoreApiSchemas
                     200 => self::jsonResponse('The affiliate as it now stands', 'AffiliateResponse'),
                     404 => self::errorResponse('No such affiliate'),
                     422 => self::errorResponse('The terms cannot be set as described'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/affiliates/{id:\d+}/payouts', 'plans:manage', [
+                'summary' => 'What has been paid to an affiliate, and what is drafted (operator)',
+                'description' =>
+                    'Every payout, draft and paid, newest first. Three amounts per row and they are '
+                    . 'different facts: `total_minor` is what the affiliate earned, `withholding_minor` '
+                    . 'is what is kept back and remitted on their behalf, and `net_minor` is what '
+                    . 'actually leaves the bank. `withholding_bp` is the rate it was assembled at, '
+                    . 'snapshot onto the row so changing the setting cannot restate a payout already '
+                    . 'made.',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('Every payout for this affiliate', 'AffiliatePayoutListResponse'),
+                    404 => self::errorResponse('No such affiliate'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/affiliates/{id:\d+}/payouts', 'plans:manage', [
+                'summary' => 'Gather what is owed into a draft payout (operator)',
+                'description' =>
+                    'ONE CURRENCY PER CALL, because a payment is one: commissions are recorded in '
+                    . 'whatever the customer paid in, and a payout spanning currencies would need a '
+                    . 'conversion rate nobody stored. Assembling CLAIMS the commissions it covers, so '
+                    . 'what is owed and what is being paid can never overlap and a balance cannot be '
+                    . 'paid twice. NOTHING HERE MOVES MONEY — it produces a net figure for a person to '
+                    . 'transfer, who then records the reference via PATCH. '
+                    . 'Refused with 422 when nothing is payable, which includes a balance that refunds '
+                    . 'have taken to zero or below: that carries forward to net against later earnings '
+                    . 'rather than becoming a payment. Refused with 409 when another payout claimed '
+                    . 'some of these commissions mid-assembly — ask again, the balance really moved.',
+                'tags' => ['plans'],
+                'request' => 'AffiliatePayoutAssembleRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The draft payout', 'AffiliatePayoutAssembledResponse'),
+                    404 => self::errorResponse('No such affiliate'),
+                    409 => self::errorResponse('Another payout claimed these commissions first'),
+                    422 => self::errorResponse('There is nothing payable in that currency'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/affiliate-payouts/{id:\d+}', 'plans:manage', [
+                'summary' => 'Record that the transfer happened (operator)',
+                'description' =>
+                    'A `reference` is REQUIRED: it is the only thing connecting this row to a real bank '
+                    . 'movement, and it is what gets quoted back when an affiliate asks where their '
+                    . 'money went. Refused with 409 if the payout is already paid — re-marking would '
+                    . 'overwrite the reference of a transfer that really happened, destroying the only '
+                    . 'record of which payment settled it.',
+                'tags' => ['plans'],
+                'request' => 'AffiliatePayoutSettleRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The payout is settled', 'AffiliatePayoutSettledResponse'),
+                    409 => self::errorResponse('This payout is already marked paid'),
+                    422 => self::errorResponse('A payment reference is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/affiliate-payouts/{id:\d+}', 'plans:manage', [
+                'summary' => 'Abandon a draft payout (operator)',
+                'description' =>
+                    'Releases the commissions it claimed back onto the balance, so a draft assembled by '
+                    . 'mistake does not strand the money. A PAID payout is refused with 409: the money '
+                    . 'has gone, and releasing its commissions would put an amount already transferred '
+                    . 'back on the balance to be paid a second time.',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('The draft is discarded', 'AffiliatePayoutDiscardedResponse'),
+                    409 => self::errorResponse('A payout that has been paid cannot be discarded'),
                 ] + self::authErrors(),
             ]),
             self::permissionRoute('DELETE', '/api/promotions/{id:\d+}', 'plans:manage', [

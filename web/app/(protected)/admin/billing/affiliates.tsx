@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { useFetch } from '@/hooks/useFetch';
@@ -17,7 +17,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { IconPlus } from '@tabler/icons-react';
+import { IconPlus, IconChevronDown, IconChevronRight } from '@tabler/icons-react';
+import { AffiliatePayouts } from './affiliate-payouts';
 
 /**
  * WHO SENDS US CUSTOMERS, AND WHAT WE OWE THEM.
@@ -83,6 +84,10 @@ export function Affiliates() {
   const t = useTranslation('admin');
 
   const [creating, setCreating] = useState(false);
+  // WHOSE PAYOUTS ARE OPEN. Loaded on demand rather than with the list: most
+  // rows are not being paid today, and one request per affiliate on every
+  // render would make a long list slow for a screen nobody is using that way.
+  const [expanded, setExpanded] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
@@ -228,7 +233,8 @@ export function Affiliates() {
             </thead>
             <tbody>
               {affiliates.map((a) => (
-                <tr key={a.id} className="border-b last:border-0">
+                <Fragment key={a.id}>
+                <tr className="border-b last:border-0">
                   <td className="py-2 pe-3 font-mono">{a.code}</td>
                   <td className="py-2 pe-3">
                     <div>{a.name}</div>
@@ -268,6 +274,20 @@ export function Affiliates() {
                         variant="ghost"
                         size="sm"
                         disabled={busy}
+                        onClick={() => setExpanded(expanded === a.id ? null : a.id)}
+                        aria-expanded={expanded === a.id}
+                      >
+                        {expanded === a.id ? (
+                          <IconChevronDown className="size-4" aria-hidden="true" />
+                        ) : (
+                          <IconChevronRight className="size-4" aria-hidden="true" />
+                        )}
+                        {t('affiliate.payouts', 'Payouts')}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={busy}
                         onClick={() => setActive(a, !a.is_active)}
                       >
                         {a.is_active
@@ -277,6 +297,18 @@ export function Affiliates() {
                     </div>
                   </td>
                 </tr>
+                {expanded === a.id && (
+                  <tr>
+                    <td colSpan={7} className="p-0">
+                      <AffiliatePayouts
+                        affiliateId={a.id}
+                        balances={a.balances}
+                        onChanged={refetch}
+                      />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>

@@ -210,6 +210,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/affiliate-payouts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Abandon a draft payout (operator)
+         * @description Releases the commissions it claimed back onto the balance, so a draft assembled by mistake does not strand the money. A PAID payout is refused with 409: the money has gone, and releasing its commissions would put an amount already transferred back on the balance to be paid a second time.
+         */
+        delete: operations["delete_api_v1_affiliate_payouts_id"];
+        options?: never;
+        head?: never;
+        /**
+         * Record that the transfer happened (operator)
+         * @description A `reference` is REQUIRED: it is the only thing connecting this row to a real bank movement, and it is what gets quoted back when an affiliate asks where their money went. Refused with 409 if the payout is already paid — re-marking would overwrite the reference of a transfer that really happened, destroying the only record of which payment settled it.
+         */
+        patch: operations["patch_api_v1_affiliate_payouts_id"];
+        trace?: never;
+    };
     "/api/v1/affiliates": {
         parameters: {
             query?: never;
@@ -252,6 +276,30 @@ export interface paths {
          * @description NOTHING HERE IS RETROACTIVE. Every commission already accrued copied the rate it was earned at onto its own row, so a new `commission_bp` moves only what has not been earned yet; and the window end of a referral is frozen when its first payment arrives, so a new `window_months` applies to referrals that have not converted. Sending `promotion_id: null` DETACHES the discount the code carried — omitting the field leaves it alone. `is_active: false` stops future earning and touches nothing earned: money already owed is owed whatever happens to the arrangement, which is why there is no way to delete an affiliate at all.
          */
         patch: operations["patch_api_v1_affiliates_id"];
+        trace?: never;
+    };
+    "/api/v1/affiliates/{id}/payouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What has been paid to an affiliate, and what is drafted (operator)
+         * @description Every payout, draft and paid, newest first. Three amounts per row and they are different facts: `total_minor` is what the affiliate earned, `withholding_minor` is what is kept back and remitted on their behalf, and `net_minor` is what actually leaves the bank. `withholding_bp` is the rate it was assembled at, snapshot onto the row so changing the setting cannot restate a payout already made.
+         */
+        get: operations["get_api_v1_affiliates_id_payouts"];
+        put?: never;
+        /**
+         * Gather what is owed into a draft payout (operator)
+         * @description ONE CURRENCY PER CALL, because a payment is one: commissions are recorded in whatever the customer paid in, and a payout spanning currencies would need a conversion rate nobody stored. Assembling CLAIMS the commissions it covers, so what is owed and what is being paid can never overlap and a balance cannot be paid twice. NOTHING HERE MOVES MONEY — it produces a net figure for a person to transfer, who then records the reference via PATCH. Refused with 422 when nothing is payable, which includes a balance that refunds have taken to zero or below: that carries forward to net against later earnings rather than becoming a payment. Refused with 409 when another payout claimed some of these commissions mid-assembly — ask again, the balance really moved.
+         */
+        post: operations["post_api_v1_affiliates_id_payouts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/agenda-items": {
@@ -5254,6 +5302,48 @@ export interface components {
         AffiliateListResponse: {
             data: components["schemas"]["Affiliate"][];
         };
+        AffiliatePayout: {
+            id: number;
+            affiliate_id: number;
+            total_minor: number;
+            withholding_bp: number;
+            withholding_minor: number;
+            net_minor: number;
+            currency: string;
+            status: string;
+            reference?: string | null;
+            paid_at?: string | null;
+            created_at?: string | null;
+            commission_count: number;
+        };
+        AffiliatePayoutAssembleRequest: {
+            currency: string;
+        };
+        AffiliatePayoutAssembledResponse: {
+            data: {
+                payout_id: number;
+                commissions: number;
+                total_minor: number;
+                withholding_minor: number;
+                net_minor: number;
+            };
+        };
+        AffiliatePayoutDiscardedResponse: {
+            data: {
+                discarded: boolean;
+            };
+        };
+        AffiliatePayoutListResponse: {
+            data: components["schemas"]["AffiliatePayout"][];
+        };
+        AffiliatePayoutSettleRequest: {
+            reference: string;
+        };
+        AffiliatePayoutSettledResponse: {
+            data: {
+                settled: boolean;
+            };
+        };
         AffiliateResponse: {
             data: components["schemas"]["Affiliate"];
         };
@@ -9545,6 +9635,180 @@ export interface operations {
             };
         };
     };
+    delete_api_v1_affiliate_payouts_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft is discarded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AffiliatePayoutDiscardedResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A payout that has been paid cannot be discarded */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patch_api_v1_affiliate_payouts_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AffiliatePayoutSettleRequest"];
+            };
+        };
+        responses: {
+            /** @description The payout is settled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AffiliatePayoutSettledResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description This payout is already marked paid */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A payment reference is required */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_affiliates: {
         parameters: {
             query?: never;
@@ -9776,6 +10040,171 @@ export interface operations {
                 };
             };
             /** @description The terms cannot be set as described */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_affiliates_id_payouts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every payout for this affiliate */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AffiliatePayoutListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such affiliate */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_affiliates_id_payouts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AffiliatePayoutAssembleRequest"];
+            };
+        };
+        responses: {
+            /** @description The draft payout */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AffiliatePayoutAssembledResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such affiliate */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Another payout claimed these commissions first */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description There is nothing payable in that currency */
             422: {
                 headers: {
                     [name: string]: unknown;

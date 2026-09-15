@@ -1170,6 +1170,228 @@
                 ]
             }
         },
+        "/api/v1/affiliate-payouts/{id}": {
+            "delete": {
+                "operationId": "delete_api_v1_affiliate_payouts_id",
+                "summary": "Abandon a draft payout (operator)",
+                "tags": [
+                    "plans"
+                ],
+                "description": "Releases the commissions it claimed back onto the balance, so a draft assembled by mistake does not strand the money. A PAID payout is refused with 409: the money has gone, and releasing its commissions would put an amount already transferred back on the balance to be paid a second time.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The draft is discarded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AffiliatePayoutDiscardedResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "A payout that has been paid cannot be discarded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "operationId": "patch_api_v1_affiliate_payouts_id",
+                "summary": "Record that the transfer happened (operator)",
+                "tags": [
+                    "plans"
+                ],
+                "description": "A `reference` is REQUIRED: it is the only thing connecting this row to a real bank movement, and it is what gets quoted back when an affiliate asks where their money went. Refused with 409 if the payout is already paid \u2014 re-marking would overwrite the reference of a transfer that really happened, destroying the only record of which payment settled it.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AffiliatePayoutSettleRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The payout is settled",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AffiliatePayoutSettledResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "This payout is already marked paid",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "A payment reference is required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/affiliates": {
             "get": {
                 "operationId": "get_api_v1_affiliates",
@@ -1453,6 +1675,218 @@
                     },
                     "422": {
                         "description": "The terms cannot be set as described",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/affiliates/{id}/payouts": {
+            "get": {
+                "operationId": "get_api_v1_affiliates_id_payouts",
+                "summary": "What has been paid to an affiliate, and what is drafted (operator)",
+                "tags": [
+                    "plans"
+                ],
+                "description": "Every payout, draft and paid, newest first. Three amounts per row and they are different facts: `total_minor` is what the affiliate earned, `withholding_minor` is what is kept back and remitted on their behalf, and `net_minor` is what actually leaves the bank. `withholding_bp` is the rate it was assembled at, snapshot onto the row so changing the setting cannot restate a payout already made.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Every payout for this affiliate",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AffiliatePayoutListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such affiliate",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_v1_affiliates_id_payouts",
+                "summary": "Gather what is owed into a draft payout (operator)",
+                "tags": [
+                    "plans"
+                ],
+                "description": "ONE CURRENCY PER CALL, because a payment is one: commissions are recorded in whatever the customer paid in, and a payout spanning currencies would need a conversion rate nobody stored. Assembling CLAIMS the commissions it covers, so what is owed and what is being paid can never overlap and a balance cannot be paid twice. NOTHING HERE MOVES MONEY \u2014 it produces a net figure for a person to transfer, who then records the reference via PATCH. Refused with 422 when nothing is payable, which includes a balance that refunds have taken to zero or below: that carries forward to net against later earnings rather than becoming a payment. Refused with 409 when another payout claimed some of these commissions mid-assembly \u2014 ask again, the balance really moved.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AffiliatePayoutAssembleRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The draft payout",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AffiliatePayoutAssembledResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such affiliate",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Another payout claimed these commissions first",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "There is nothing payable in that currency",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -37244,6 +37678,170 @@
                         "items": {
                             "$ref": "#/components/schemas/Affiliate"
                         }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "AffiliatePayout": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "affiliate_id": {
+                        "type": "integer"
+                    },
+                    "total_minor": {
+                        "type": "integer"
+                    },
+                    "withholding_bp": {
+                        "type": "integer"
+                    },
+                    "withholding_minor": {
+                        "type": "integer"
+                    },
+                    "net_minor": {
+                        "type": "integer"
+                    },
+                    "currency": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "reference": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "paid_at": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "commission_count": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "id",
+                    "affiliate_id",
+                    "total_minor",
+                    "withholding_bp",
+                    "withholding_minor",
+                    "net_minor",
+                    "currency",
+                    "status",
+                    "commission_count"
+                ]
+            },
+            "AffiliatePayoutAssembleRequest": {
+                "type": "object",
+                "properties": {
+                    "currency": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "currency"
+                ]
+            },
+            "AffiliatePayoutAssembledResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "payout_id": {
+                                "type": "integer"
+                            },
+                            "commissions": {
+                                "type": "integer"
+                            },
+                            "total_minor": {
+                                "type": "integer"
+                            },
+                            "withholding_minor": {
+                                "type": "integer"
+                            },
+                            "net_minor": {
+                                "type": "integer"
+                            }
+                        },
+                        "required": [
+                            "payout_id",
+                            "commissions",
+                            "total_minor",
+                            "withholding_minor",
+                            "net_minor"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "AffiliatePayoutDiscardedResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "discarded": {
+                                "type": "boolean"
+                            }
+                        },
+                        "required": [
+                            "discarded"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "AffiliatePayoutListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AffiliatePayout"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "AffiliatePayoutSettleRequest": {
+                "type": "object",
+                "properties": {
+                    "reference": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "reference"
+                ]
+            },
+            "AffiliatePayoutSettledResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "settled": {
+                                "type": "boolean"
+                            }
+                        },
+                        "required": [
+                            "settled"
+                        ]
                     }
                 },
                 "required": [

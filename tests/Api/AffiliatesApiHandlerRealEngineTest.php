@@ -10,6 +10,7 @@ use Tests\Support\SchemaFromMigrations;
 use Whity\Api\AffiliatesApiHandler;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Affiliate\AffiliateRepository;
+use Whity\Core\Affiliate\PayoutAssembler;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Request;
 use Whity\Core\Tenant\TenantContext;
@@ -53,6 +54,7 @@ final class AffiliatesApiHandlerRealEngineTest extends TestCase
     private PDO $pdo;
     private AffiliatesApiHandler $handler;
     private AffiliateRepository $affiliates;
+    private PayoutAssembler $assembler;
 
     /**
      * ONE REFERRER PER WORKSPACE IS A UNIQUE CONSTRAINT, so a fixture that
@@ -82,9 +84,11 @@ final class AffiliatesApiHandlerRealEngineTest extends TestCase
         ");
 
         $this->affiliates = new AffiliateRepository($this->pdo);
+        $this->assembler = new PayoutAssembler($this->pdo);
         $this->handler = new AffiliatesApiHandler(
             $this->affiliates,
-            new RoleChecker($this->wrapSqlite($this->pdo), new PermissionRegistry())
+            new RoleChecker($this->wrapSqlite($this->pdo), new PermissionRegistry()),
+            $this->assembler
         );
     }
 
@@ -484,6 +488,169 @@ final class AffiliatesApiHandlerRealEngineTest extends TestCase
         self::assertSame([], $this->affiliate($id)['balances']);
     }
 
+    // ── Payouts ─────────────────────────────────────────────────────────────
+
+    public function testAPayoutGathersWhatIsOwed(): void
+    {
+        $id = $this->dataOf($this->create(['code' => 'A', 'name' => 'A', 'commission_bp' => 2000]))['id'];
+        $this->earn($id, amountMinor: 3000, rateBp: 2000, ref: 'INV-1');
+        $this->earn($id, amountMinor: 2000, rateBp: 2000, ref: 'INV-2');
+
+        $res = $this->assemble($id, 'JOD');
+
+        self::assertSame(201, $res->getStatusCode());
+        $data = $this->dataOf($res);
+        self::assertSame(5000, $data['total_minor']);
+        self::assertSame(2, $data['commissions']);
+    }
+
+    /** And the balance is then zero, because a payout claims what it covers. */
+    public function testAssemblingClearsTheBalance(): void
+    {
+        $id = $this->dataOf($this->create(['code' => 'A', 'name' => 'A', 'commission_bp' => 2000]))['id'];
+        $this->earn($id, amountMinor: 3000, rateBp: 2000, ref: 'INV-1');
+        $this->assemble($id, 'JOD');
+
+        self::assertSame([], $this->affiliate($id)['balances'], 'Nothing is owed once it is in a payout.');
+    }
+
+    /**
+     * NOTHING PAYABLE IS A 422 THAT SAYS WHY, not an empty success. A balance
+     * that refunds took to zero or below carries forward, and an operator who
+     * saw a 201 with no money in it would reasonably think a payout had been
+     * made.
+     */
+    public function testAnEmptyBalanceIsRefusedWithAReason(): void
+    {
+        $id = $this->dataOf($this->create(['code' => 'A', 'name' => 'A', 'commission_bp' => 2000]))['id'];
+
+        $res = $this->assemble($id, 'JOD');
+
+        self::assertSame(422, $res->getStatusCode());
+        self::assertStringContainsString('carries forward', (string) $res->getBody());
+    }
+
+    /** A currency that is not a currency code is refused before anything is claimed. */
+    public function testAPayoutNeedsAThreeLetterCurrency(): void
+    {
+        $id = $this->dataOf($this->create(['code' => 'A', 'name' => 'A', 'commission_bp' => 2000]))['id'];
+        $this->earn($id, amountMinor: 3000, rateBp: 2000, ref: 'INV-1');
+
+        foreach ([null, '', 'JODX', 'J0D', 'dinars'] as $bad) {
+            $res = $this->assemble($id, $bad);
+            self::assertSame(422, $res->getStatusCode(), sprintf('%s should be refused', var_export($bad, true)));
+        }
+
+        self::assertSame(
+            [['currency' => 'JOD', 'amount_minor' => 3000]],
+            $this->affiliate($id)['balances'],
+            'and nothing was claimed by a refused request'
+        );
+    }
+
+    public function testAssemblingForSomebodyWhoDoesNotExistIs404(): void
+    {
+        self::assertSame(404, $this->assemble(9999, 'JOD')->getStatusCode());
+    }
+
+    // ── Settling ────────────────────────────────────────────────────────────
+
+    public function testRecordingTheTransferSettlesThePayout(): void
+    {
+        $id = $this->dataOf($this->create(['code' => 'A', 'name' => 'A', 'commission_bp' => 2000]))['id'];
+        $this->earn($id, amountMinor: 3000, rateBp: 2000, ref: 'INV-1');
+        $payoutId = $this->dataOf($this->assemble($id, 'JOD'))['payout_id'];
+
+        $res = $this->settle($payoutId, ['reference' => 'BANK-REF-991']);
+
+        self::assertSame(200, $res->getStatusCode());
+        self::assertSame('paid', $this->assembler->listFor($id)[0]['status']);
+    }
+
+    /**
+     * A REFERENCE IS REQUIRED. It is the only thing connecting the row to a real
+     * bank movement, and it is what gets quoted back when an affiliate asks
+     * where their money went.
+     */
+    public function testSettlingWithoutAReferenceIsRefused(): void
+    {
+        $id = $this->dataOf($this->create(['code' => 'A', 'name' => 'A', 'commission_bp' => 2000]))['id'];
+        $this->earn($id, amountMinor: 3000, rateBp: 2000, ref: 'INV-1');
+        $payoutId = $this->dataOf($this->assemble($id, 'JOD'))['payout_id'];
+
+        foreach ([[], ['reference' => ''], ['reference' => '   ']] as $body) {
+            self::assertSame(422, $this->settle($payoutId, $body)->getStatusCode());
+        }
+
+        self::assertSame('draft', $this->assembler->listFor($id)[0]['status'], 'still unpaid');
+    }
+
+    public function testSettlingTwiceIsRefused(): void
+    {
+        $id = $this->dataOf($this->create(['code' => 'A', 'name' => 'A', 'commission_bp' => 2000]))['id'];
+        $this->earn($id, amountMinor: 3000, rateBp: 2000, ref: 'INV-1');
+        $payoutId = $this->dataOf($this->assemble($id, 'JOD'))['payout_id'];
+        $this->settle($payoutId, ['reference' => 'BANK-REF-991']);
+
+        $res = $this->settle($payoutId, ['reference' => 'BANK-REF-DIFFERENT']);
+
+        self::assertSame(409, $res->getStatusCode());
+        self::assertSame('BANK-REF-991', $this->assembler->listFor($id)[0]['reference'], 'the real one survives');
+    }
+
+    // ── Discarding ──────────────────────────────────────────────────────────
+
+    public function testDiscardingADraftPutsTheMoneyBackOnTheBalance(): void
+    {
+        $id = $this->dataOf($this->create(['code' => 'A', 'name' => 'A', 'commission_bp' => 2000]))['id'];
+        $this->earn($id, amountMinor: 3000, rateBp: 2000, ref: 'INV-1');
+        $payoutId = $this->dataOf($this->assemble($id, 'JOD'))['payout_id'];
+
+        $res = $this->handler->discardPayout(
+            $this->actAs(self::OPERATOR, self::SYSTEM_TENANT),
+            ['id' => (string) $payoutId]
+        );
+
+        self::assertSame(200, $res->getStatusCode());
+        self::assertSame([['currency' => 'JOD', 'amount_minor' => 3000]], $this->affiliate($id)['balances']);
+    }
+
+    public function testDiscardingAPaidPayoutIsRefused(): void
+    {
+        $id = $this->dataOf($this->create(['code' => 'A', 'name' => 'A', 'commission_bp' => 2000]))['id'];
+        $this->earn($id, amountMinor: 3000, rateBp: 2000, ref: 'INV-1');
+        $payoutId = $this->dataOf($this->assemble($id, 'JOD'))['payout_id'];
+        $this->settle($payoutId, ['reference' => 'BANK-REF-991']);
+
+        $res = $this->handler->discardPayout(
+            $this->actAs(self::OPERATOR, self::SYSTEM_TENANT),
+            ['id' => (string) $payoutId]
+        );
+
+        self::assertSame(409, $res->getStatusCode());
+        self::assertSame([], $this->affiliate($id)['balances'], 'the money stays settled');
+    }
+
+    // ── The gate, again — this one moves money ──────────────────────────────
+
+    public function testATenantAdminCannotAssembleAPayout(): void
+    {
+        $id = $this->dataOf($this->create(['code' => 'A', 'name' => 'A', 'commission_bp' => 2000]))['id'];
+        $this->earn($id, amountMinor: 3000, rateBp: 2000, ref: 'INV-1');
+
+        $res = $this->handler->assemblePayout(
+            $this->actAs(self::TENANT_ADMIN, self::OTHER_TENANT, ['currency' => 'JOD']),
+            ['id' => (string) $id]
+        );
+
+        self::assertSame(403, $res->getStatusCode());
+        self::assertSame(
+            [['currency' => 'JOD', 'amount_minor' => 3000]],
+            $this->affiliate($id)['balances'],
+            'and nothing was claimed'
+        );
+    }
+
     // ── Fixtures ────────────────────────────────────────────────────────────
 
     /**
@@ -515,6 +682,25 @@ final class AffiliatesApiHandlerRealEngineTest extends TestCase
         return $this->handler->update(
             $this->actAs(self::OPERATOR, self::SYSTEM_TENANT, $body),
             ['id' => (string) $id]
+        );
+    }
+
+    private function assemble(int $affiliateId, mixed $currency): \Whity\Core\Response
+    {
+        $body = $currency === null ? [] : ['currency' => $currency];
+
+        return $this->handler->assemblePayout(
+            $this->actAs(self::OPERATOR, self::SYSTEM_TENANT, $body),
+            ['id' => (string) $affiliateId]
+        );
+    }
+
+    /** @param array<string, mixed> $body */
+    private function settle(int $payoutId, array $body): \Whity\Core\Response
+    {
+        return $this->handler->settlePayout(
+            $this->actAs(self::OPERATOR, self::SYSTEM_TENANT, $body),
+            ['id' => (string) $payoutId]
         );
     }
 
@@ -591,9 +777,16 @@ final class AffiliatesApiHandlerRealEngineTest extends TestCase
     /** @param list<string> $refs Which commissions the payout settles. */
     private function payOut(int $affiliateId, array $refs): void
     {
+        // `net_minor` IS SET, not left to its default. Migration 155 adds a
+        // CHECK that a payout adds up (`net = total - withholding`), and a
+        // fixture that skipped it was rejected by PostgreSQL while SQLite —
+        // which cannot express the constraint — accepted it happily. The
+        // constraint was right: a payout claiming 3000 and transferring nothing
+        // is not a payout.
         $statement = $this->pdo->prepare(
-            'INSERT INTO affiliate_payouts (affiliate_id, total_minor, currency, status, created_at)
-             VALUES (:a, :amount, :currency, :status, CURRENT_TIMESTAMP)'
+            'INSERT INTO affiliate_payouts
+                (affiliate_id, total_minor, withholding_minor, net_minor, currency, status, created_at)
+             VALUES (:a, :amount, 0, :amount, :currency, :status, CURRENT_TIMESTAMP)'
         );
         $statement->bindValue(':a', $affiliateId, PDO::PARAM_INT);
         $statement->bindValue(':amount', 3000, PDO::PARAM_INT);
