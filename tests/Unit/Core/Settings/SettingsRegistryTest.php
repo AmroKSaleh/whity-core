@@ -63,7 +63,7 @@ final class SettingsRegistryTest extends TestCase
              'payments.mock_enabled',
              // Affiliate clawback is global-only for the same reason: the money
              // goes to somebody outside the company, so no tenant decides it.
-             'affiliate.clawback_on_refund',
+             'affiliate.clawback_on_refund', 'affiliate.withholding_bp',
              'dunning.retry_schedule_days', 'dunning.lock_after_days',
              'plugins.store_allowed_hosts', 'plugins.store_enabled',
              'documents.render_enabled', 'documents.render_max_rows',
@@ -404,7 +404,10 @@ final class SettingsRegistryTest extends TestCase
         // 84 since the affiliate programme added affiliate.clawback_on_refund,
         // which decides whether a refunded payment takes its commission back.
         // A commercial choice rather than a technical one, so it is a setting.
-        self::assertCount(84, $describe);
+        // 85 since affiliate payouts added affiliate.withholding_bp, which is
+        // snapshot onto each payout so changing it cannot restate one already
+        // made.
+        self::assertCount(85, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

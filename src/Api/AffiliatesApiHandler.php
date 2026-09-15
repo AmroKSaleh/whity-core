@@ -6,8 +6,13 @@ namespace Whity\Api;
 
 use Whity\Auth\RoleChecker;
 use Whity\Core\Affiliate\AffiliateRepository;
+use Whity\Core\Affiliate\PayoutAssembler;
+use Whity\Core\Affiliate\PayoutRaceException;
+use Whity\Core\Affiliate\PayoutStateException;
 use Whity\Core\Plan\PlanService;
 use Whity\Core\RBAC\CorePermissions;
+use Whity\Core\Settings\SettingsRegistry;
+use Whity\Core\Settings\SettingsService;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Tenant\TenantContext;
@@ -16,9 +21,13 @@ use Whity\Http\JsonBody;
 /**
  * The people who send us customers — the operator surface.
  *
- *   GET    /api/affiliates        → list()
- *   POST   /api/affiliates        → create()
- *   PATCH  /api/affiliates/{id}   → update()
+ *   GET    /api/affiliates                 → list()
+ *   POST   /api/affiliates                 → create()
+ *   PATCH  /api/affiliates/{id}            → update()
+ *   GET    /api/affiliates/{id}/payouts    → payouts()
+ *   POST   /api/affiliates/{id}/payouts    → assemblePayout()
+ *   PATCH  /api/affiliate-payouts/{id}     → settlePayout()
+ *   DELETE /api/affiliate-payouts/{id}     → discardPayout()
  *
  * ── Why this exists at all ─────────────────────────────────────────────────
  *
@@ -63,6 +72,8 @@ final class AffiliatesApiHandler
     public function __construct(
         private readonly AffiliateRepository $affiliates,
         private readonly RoleChecker $roleChecker,
+        private readonly ?PayoutAssembler $payouts = null,
+        private readonly ?SettingsService $settings = null,
     ) {
     }
 
@@ -236,6 +247,219 @@ final class AffiliatesApiHandler
         }
 
         return Response::json(['data' => $this->affiliates->findById($id)]);
+    }
+
+    // ── Payouts ─────────────────────────────────────────────────────────────
+
+    /**
+     * Every payout for one affiliate, paid and draft.
+     *
+     * @param array<string, string> $params
+     */
+    public function payouts(Request $request, array $params): Response
+    {
+        $denied = $this->authorize($request);
+        if ($denied instanceof Response) {
+            return $denied;
+        }
+
+        if ($this->payouts === null) {
+            return Response::error('Payouts are not available on this deployment', 501);
+        }
+
+        $id = (int) ($params['id'] ?? 0);
+        if ($this->affiliates->findById($id) === null) {
+            return Response::error('Affiliate not found', 404);
+        }
+
+        return Response::json(['data' => $this->payouts->listFor($id)]);
+    }
+
+    /**
+     * Gather everything unpaid in one currency into a draft payout.
+     *
+     * ONE CURRENCY PER CALL, because a payment is. Commissions are recorded in
+     * whatever the customer paid in, and a payout spanning currencies would have
+     * to invent a conversion rate nobody stored.
+     *
+     * NOTHING HERE MOVES MONEY. It produces a draft with a net figure for a
+     * person to transfer; they come back and say so afterwards.
+     *
+     * @param array<string, string> $params
+     */
+    public function assemblePayout(Request $request, array $params): Response
+    {
+        $denied = $this->authorize($request);
+        if ($denied instanceof Response) {
+            return $denied;
+        }
+
+        if ($this->payouts === null) {
+            return Response::error('Payouts are not available on this deployment', 501);
+        }
+
+        $id = (int) ($params['id'] ?? 0);
+        if ($this->affiliates->findById($id) === null) {
+            return Response::error('Affiliate not found', 404);
+        }
+
+        $body = JsonBody::parsed($request);
+        $currency = self::text($body['currency'] ?? null);
+
+        if ($currency === null || preg_match('/^[A-Za-z]{3}$/', $currency) !== 1) {
+            return Response::error('Validation failed', 422, [
+                'currency' => 'A three-letter currency code is required — a payout covers one currency.',
+            ]);
+        }
+
+        try {
+            $result = $this->payouts->assemble(
+                $id,
+                $currency,
+                $this->withholdingBp(),
+                $this->actorProfileId($request),
+            );
+        } catch (PayoutRaceException) {
+            // SOMEBODY ELSE TOOK THESE ROWS. Recoverable by asking again, and the
+            // sentence says so — the balance really has moved, which is the truth
+            // rather than a transient fault to retry blindly.
+            //
+            // THE HANDLER OWNS THIS TEXT, never `$e->getMessage()`. This class is
+            // not the only thing that can reach a catch block, and the next one
+            // along carries a SQLSTATE and a fragment of SQL — which is why
+            // ExceptionLeakageTest refuses the shortcut.
+            return Response::error(
+                'Another payout claimed some of these commissions while this one was being assembled. '
+                . 'Nothing was created — ask again to see the balance as it now stands.',
+                409
+            );
+        }
+
+        if ($result === null) {
+            // NOT AN ERROR, and worth being precise about: either nothing is
+            // owed, or clawbacks have taken the balance to zero or below, which
+            // carries forward rather than being paid. A 422 naming the reason
+            // beats an empty 201 that looks like a payout was made.
+            return Response::error(
+                'There is nothing payable in that currency. A balance reduced to zero or below by refunds carries forward to the next payout.',
+                422
+            );
+        }
+
+        return Response::json(['data' => $result], 201);
+    }
+
+    /**
+     * Record that the transfer actually happened.
+     *
+     * @param array<string, string> $params
+     */
+    public function settlePayout(Request $request, array $params): Response
+    {
+        $denied = $this->authorize($request);
+        if ($denied instanceof Response) {
+            return $denied;
+        }
+
+        if ($this->payouts === null) {
+            return Response::error('Payouts are not available on this deployment', 501);
+        }
+
+        $body = JsonBody::parsed($request);
+        $reference = self::text($body['reference'] ?? null);
+
+        if ($reference === null) {
+            // A REFERENCE IS REQUIRED, unlike most free text here. It is the only
+            // thing that connects this row to a real bank movement, and it is
+            // what gets quoted back when an affiliate asks where their money is.
+            return Response::error('Validation failed', 422, [
+                'reference' => 'A payment reference is required — it is what answers "where did my money go?".',
+            ]);
+        }
+
+        try {
+            $this->payouts->markPaid(
+                (int) ($params['id'] ?? 0),
+                $reference,
+                null,
+                $this->actorProfileId($request),
+            );
+        } catch (PayoutStateException $e) {
+            // THE EXCEPTION'S STRUCTURED REASON, never its message. The sentence
+            // a client sees is written here; the exception only says which case
+            // it is.
+            return $e->reason === PayoutStateException::NOT_FOUND
+                ? Response::error('Payout not found', 404)
+                : Response::error(
+                    'This payout is already marked paid. Re-recording it would overwrite the reference '
+                    . 'of a transfer that really happened.',
+                    409
+                );
+        }
+
+        return Response::json(['data' => ['settled' => true]]);
+    }
+
+    /**
+     * Abandon a draft, putting its commissions back on the balance.
+     *
+     * @param array<string, string> $params
+     */
+    public function discardPayout(Request $request, array $params): Response
+    {
+        $denied = $this->authorize($request);
+        if ($denied instanceof Response) {
+            return $denied;
+        }
+
+        if ($this->payouts === null) {
+            return Response::error('Payouts are not available on this deployment', 501);
+        }
+
+        try {
+            $this->payouts->discardDraft((int) ($params['id'] ?? 0));
+        } catch (PayoutStateException $e) {
+            return $e->reason === PayoutStateException::NOT_FOUND
+                ? Response::error('Payout not found', 404)
+                : Response::error(
+                    'A payout that has been paid cannot be discarded. The money has gone, and releasing '
+                    . 'its commissions would put an amount already transferred back on the balance.',
+                    409
+                );
+        }
+
+        return Response::json(['data' => ['discarded' => true]]);
+    }
+
+    /**
+     * What is kept back and remitted on the affiliate's behalf.
+     *
+     * READ AT ASSEMBLY AND COPIED ONTO THE ROW, never joined for later: a payout
+     * is evidence of what was paid and what was kept, and evidence that restates
+     * itself when somebody changes a setting is not evidence.
+     *
+     * Zero when no settings service was wired, which is the same answer as an
+     * operator who has not set a rate — and the honest one, because withholding
+     * money nobody instructed us to withhold is worse than not withholding.
+     */
+    private function withholdingBp(): int
+    {
+        if ($this->settings === null) {
+            return 0;
+        }
+
+        $raw = $this->settings->getGlobal()[SettingsRegistry::AFFILIATE_WITHHOLDING_BP] ?? '0';
+
+        return max(0, (int) $raw);
+    }
+
+    private function actorProfileId(Request $request): ?int
+    {
+        $actor = $request->user;
+
+        return is_object($actor) && isset($actor->profile_id) && is_int($actor->profile_id)
+            ? $actor->profile_id
+            : null;
     }
 
     /** Trimmed, or null when there was nothing there. */

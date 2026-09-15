@@ -243,6 +243,22 @@ company that can afford to absorb refunds may choose to. Absorbing means paying
 out of money nobody collected, which is a decision to make deliberately rather
 than inherit.
 
+**Nothing pays anybody automatically, and that is where this schedule stops.**
+The sweep accrues; a person assembles a payout on the affiliates screen, makes
+the transfer, and records the bank reference. There is deliberately no cron for
+that step: no schedule should be able to move money out of the company without
+somebody deciding to. What the sweep guarantees is that the number they are
+looking at is current.
+
+**`affiliate.withholding_bp` is what gets kept back** from each payout and
+remitted on the affiliate's behalf — basis points, global, **default 0**, capped
+at 5000. It is snapshot onto every payout row, so changing it never restates one
+already made. The zero default is the honest starting point (withholding money
+nobody instructed us to withhold takes cash from a person who must then reclaim
+it) and it is also the risky one, so it is stated on every payout row rather than
+left implicit. **Set it before the first payout if a withholding obligation
+applies** — a payout already made cannot be re-rated.
+
 ## How it is scheduled
 
 The cleanup is **genuinely wired into the running stack**, not just documented:

@@ -2717,11 +2717,33 @@ $router->register('DELETE', '/api/promotions/{id:\d+}',   [$promotionsHandler, '
 // because the commissions owed to somebody point at it.
 $affiliatesHandler = new \Whity\Api\AffiliatesApiHandler(
     new \Whity\Core\Affiliate\AffiliateRepository($db->getPdo()),
-    $roleChecker
+    $roleChecker,
+    // `$logger` rather than `$logger ?? null`: the parameter is a
+    // LoggerInterface with a NullLogger default, so an explicit null is a
+    // TypeError at BOOT — which 500s every request while lint and unit tests
+    // stay green.
+    new \Whity\Core\Affiliate\PayoutAssembler($db->getPdo(), $logger),
+    $settingsService
 );
 $router->register('GET',   '/api/affiliates',          [$affiliatesHandler, 'list'],   null, null, CorePermissions::PLANS_MANAGE);
 $router->register('POST',  '/api/affiliates',          [$affiliatesHandler, 'create'], null, null, CorePermissions::PLANS_MANAGE);
 $router->register('PATCH', '/api/affiliates/{id:\d+}', [$affiliatesHandler, 'update'], null, null, CorePermissions::PLANS_MANAGE);
+
+// PAYOUTS — the other half, and the one that moves money.
+//
+// Assembling CLAIMS the commissions it covers, so what is "owed" and what is
+// "being paid" can never overlap and a balance cannot be paid twice. Nothing
+// here transfers anything: it produces a net figure for a person to pay, and
+// they come back and record the bank reference afterwards.
+//
+// The settle/discard routes are keyed on the PAYOUT id rather than nested under
+// the affiliate, because a payout id is already unique and nesting would invite
+// a caller to pass a mismatched pair — which the handler would then have to
+// refuse for reasons nobody would find obvious.
+$router->register('GET',    '/api/affiliates/{id:\d+}/payouts', [$affiliatesHandler, 'payouts'],        null, null, CorePermissions::PLANS_MANAGE);
+$router->register('POST',   '/api/affiliates/{id:\d+}/payouts', [$affiliatesHandler, 'assemblePayout'], null, null, CorePermissions::PLANS_MANAGE);
+$router->register('PATCH',  '/api/affiliate-payouts/{id:\d+}',  [$affiliatesHandler, 'settlePayout'],   null, null, CorePermissions::PLANS_MANAGE);
+$router->register('DELETE', '/api/affiliate-payouts/{id:\d+}',  [$affiliatesHandler, 'discardPayout'],  null, null, CorePermissions::PLANS_MANAGE);
 $router->register('POST',   '/api/tenants/{id:\d+}/plan',       [$plansHandler, 'applyToTenant'],   null, null, CorePermissions::PLANS_MANAGE);
 $router->register('GET',    '/api/tenants/{id:\d+}/plan',       [$plansHandler, 'getTenantPlan'],   null, null, CorePermissions::PLANS_MANAGE);
 
