@@ -861,7 +861,7 @@ async function renderStatusPage(env, cfg) {
     --ok:#2f7d4a;              --ok:oklch(48% 0.14 150);
     --down:#b3261e;            --down:oklch(50% 0.19 27);
     --stale:#7a5d12;           --stale:oklch(52% 0.11 75);
-    --grid:#dfe4ef;            --grid:color-mix(in oklch, var(--accent) 14%, transparent);
+    --grid:#e9ecf3;            --grid:color-mix(in oklch, var(--accent) 6%, transparent);
     color-scheme:light;
   }
   @media (prefers-color-scheme: dark){
@@ -875,7 +875,7 @@ async function renderStatusPage(env, cfg) {
       --ok:#6fc28c;            --ok:oklch(72% 0.16 150);
       --down:#e08a7a;          --down:oklch(70% 0.18 25);
       --stale:#d8b45f;         --stale:oklch(80% 0.14 80);
-      --grid:#1c2432;            --grid:color-mix(in oklch, var(--accent) 14%, transparent);
+      --grid:#151a22;            --grid:color-mix(in oklch, var(--accent) 6%, transparent);
       color-scheme:dark;
     }
   }
