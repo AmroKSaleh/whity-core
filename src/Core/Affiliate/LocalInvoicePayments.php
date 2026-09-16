@@ -112,6 +112,16 @@ final class LocalInvoicePayments implements ReferredPaymentSource
                 // Some of it went back. Counted and left alone; see
                 // ReferredPayment::$partiallyRefunded for why neither available
                 // answer is right.
+                //
+                // ARITHMETIC IS SOUND HERE, AND IS NOT ON THE EXTERNAL SIDE —
+                // worth knowing before anybody makes the two match. This query
+                // selects only `paid` invoices, and an invoice reaches `paid`
+                // only when settled covers the total (a partial payment leaves
+                // it OPEN, see PaymentReconciler). So a later shortfall can only
+                // be money going back out. The billing service leaves an invoice
+                // `paid` through a partial refund, so over there the same
+                // comparison cannot tell a refund from an underpayment — which
+                // is why that source reads their `refunded_at` instead.
                 partiallyRefunded: $settled > 0 && $settled < $total,
             );
         }

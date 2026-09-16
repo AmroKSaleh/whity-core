@@ -30,6 +30,13 @@ use Whity\Core\Billing\External\Receipt;
  *    is a trap — the obvious reading of a missing payment date is "never paid",
  *    which would skip the receipt and leave a commission standing on money that
  *    was handed back, silently and for good.
+ *
+ * 3. `refunded_at` IS SET ON EVERY REFUND, partial ones included, and is what
+ *    both of those are now read from. It exists because of (2): the billing
+ *    service added it rather than leave a consumer inferring a reversal from a
+ *    hole. It also removes a false positive we had — an underpaid invoice and a
+ *    partly refunded one both leave less settled than the invoice is for, and
+ *    the arithmetic could not tell them apart.
  */
 final class ExternalReceiptPaymentsTest extends TestCase
 {
@@ -118,29 +125,41 @@ final class ExternalReceiptPaymentsTest extends TestCase
      * A FULLY REFUNDED RECEIPT IS STILL A PAYMENT, even though its payment date
      * is gone.
      *
-     * The billing service clears `paid_at` when an invoice is refunded to zero.
-     * Reading that as "never paid" skips the receipt, so the clawback never
-     * happens and the affiliate keeps commission on a sale that was reversed.
-     * Nothing anywhere reports it: the sweep re-reads the same history every
-     * night and reaches the same wrong conclusion, forever.
+     * The billing service clears `paid_at` when an invoice is refunded to zero —
+     * `amount_paid` is then zero and the two must agree. Reading that absence as
+     * "never paid" skips the receipt, so the clawback never happens and the
+     * affiliate keeps commission on a sale that was reversed. Nothing anywhere
+     * reports it: the sweep re-reads the same history every night and reaches
+     * the same wrong conclusion, forever.
+     *
+     * `refunded_at` is what it is dated from now. We used to guess at `due_at`,
+     * which was a number nobody had recorded.
      */
     public function testAFullyRefundedReceiptSurvivesItsClearedPaymentDate(): void
     {
         $payments = $this->read([
-            $this->receipt('INV-1', status: 'refunded', total: 15000, paid: 0, paidAt: null, dueAt: '2026-03-01T10:00:00+03:00'),
+            $this->receipt(
+                'INV-1',
+                status: 'refunded',
+                total: 15000,
+                paid: 0,
+                paidAt: null,
+                refundedAt: '2026-04-20T10:00:00+03:00'
+            ),
         ]);
 
         self::assertCount(1, $payments, 'A refund that vanishes is a commission that is never taken back.');
         self::assertTrue($payments[0]->refunded);
-        self::assertSame('2026-03-01', $payments[0]->paidAt->format('Y-m-d'), 'Dated from the issue date instead.');
+        self::assertSame('2026-04-20', $payments[0]->paidAt->format('Y-m-d'), 'Dated from when it was refunded.');
     }
 
     /**
-     * THE FALLBACK IS FOR REFUNDS ONLY. An open invoice also has no `paid_at`,
-     * and dating one from its due date would invent a payment nobody made — and
-     * then pay commission on it.
+     * AN UNPAID INVOICE IS NOT A PAYMENT, and never becomes one. It has no
+     * `paid_at` for the same reason a refunded one does not, and no
+     * `refunded_at` at all — which is exactly the distinction that field exists
+     * to draw.
      */
-    public function testAnUnpaidReceiptIsNotDatedFromItsDueDate(): void
+    public function testAnUnpaidReceiptIsNotAPayment(): void
     {
         $payments = $this->read([
             $this->receipt('INV-1', status: 'open', total: 15000, paid: 0, paidAt: null, dueAt: '2026-03-01T10:00:00+03:00'),
@@ -149,24 +168,33 @@ final class ExternalReceiptPaymentsTest extends TestCase
         self::assertSame([], $payments, 'An unpaid invoice must not become a payment.');
     }
 
-    /** A refunded receipt that kept its date uses it, rather than the fallback. */
-    public function testARefundedReceiptPrefersItsOwnPaymentDate(): void
+    /**
+     * A PARTLY REFUNDED RECEIPT KEEPS ITS PAYMENT DATE, and that is the date to
+     * use. It carries BOTH `paid_at` and `refunded_at`; dating the payment from
+     * the refund would move a sale to when part of it came back, which is a
+     * different month and possibly a different earning window.
+     */
+    public function testAPartlyRefundedReceiptIsStillDatedFromWhenItWasPaid(): void
     {
         $payments = $this->read([
             $this->receipt(
                 'INV-1',
-                status: 'refunded',
+                status: 'paid',
                 total: 15000,
-                paid: 0,
-                paidAt: '2026-04-20T10:00:00+03:00',
-                dueAt: '2026-03-01T10:00:00+03:00'
+                paid: 10000,
+                paidAt: '2026-03-01T10:00:00+03:00',
+                refundedAt: '2026-04-20T10:00:00+03:00'
             ),
         ]);
 
-        self::assertSame('2026-04-20', $payments[0]->paidAt->format('Y-m-d'));
+        self::assertSame('2026-03-01', $payments[0]->paidAt->format('Y-m-d'));
     }
 
-    /** With no date of any kind there is nothing to stamp a reversal with. */
+    /**
+     * With no date of any kind there is nothing to stamp a reversal with. The
+     * expected cause is an invoice reversed before the billing service had a
+     * `refunded_at` column — it is set going forward, not backfilled.
+     */
     public function testARefundedReceiptWithNoDateAtAllIsSkipped(): void
     {
         $payments = $this->read([
@@ -179,19 +207,54 @@ final class ExternalReceiptPaymentsTest extends TestCase
     // ── Partial refunds ─────────────────────────────────────────────────────
 
     /**
-     * A PARTIAL REFUND LOOKS EXACTLY LIKE A PAID INVOICE except for one number.
-     * The status stays `paid` and the payment date stays put; only `amount_paid`
-     * moves. A source that did not compare it against the total would go on
+     * A PARTIAL REFUND LOOKS EXACTLY LIKE A PAID INVOICE except for two things:
+     * `amount_paid` drops, and `refunded_at` is set. The status stays `paid` and
+     * the payment date stays put, so without that date a source would go on
      * paying full commission on a partly reversed sale.
      */
     public function testAPartlyRefundedReceiptIsFlagged(): void
     {
         $payments = $this->read([
-            $this->receipt('INV-1', status: 'paid', subtotal: 15000, total: 15000, paid: 10000),
+            $this->receipt(
+                'INV-1',
+                status: 'paid',
+                subtotal: 15000,
+                total: 15000,
+                paid: 10000,
+                refundedAt: '2026-04-20T10:00:00+03:00'
+            ),
         ]);
 
         self::assertFalse($payments[0]->refunded, 'Most of the sale stands.');
         self::assertTrue($payments[0]->partiallyRefunded, 'But some of it does not.');
+    }
+
+    /**
+     * AN UNDERPAID INVOICE IS NOT A REFUNDED ONE, and this is the false positive
+     * that reading `refunded_at` removes.
+     *
+     * Both leave less settled than the invoice is for, so the arithmetic this
+     * used to do — "amount paid is below the total, therefore money came back" —
+     * cannot tell them apart. Somebody paying half of what they owe would have
+     * been reported as a partial refund, and an operator would have gone looking
+     * for a clawback nobody made. A date that is only ever set when money moves
+     * OUTWARD says exactly one thing.
+     */
+    public function testAnUnderpaidReceiptIsNotMistakenForARefund(): void
+    {
+        $payments = $this->read([
+            $this->receipt(
+                'INV-1',
+                status: 'paid',
+                subtotal: 15000,
+                total: 15000,
+                paid: 9000,
+                refundedAt: null
+            ),
+        ]);
+
+        self::assertFalse($payments[0]->partiallyRefunded, 'Underpaid is not refunded.');
+        self::assertFalse($payments[0]->refunded);
     }
 
     public function testAFullyPaidReceiptIsNeitherKindOfRefund(): void
@@ -214,11 +277,22 @@ final class ExternalReceiptPaymentsTest extends TestCase
         self::assertFalse($payments[0]->partiallyRefunded);
     }
 
-    /** A full refund is a clawback, never also a partial one. */
+    /**
+     * A full refund is a clawback, never also a partial one — even though a full
+     * reversal sets `refunded_at` just as a partial one does. The status is what
+     * separates them.
+     */
     public function testAFullRefundIsNotAlsoAPartialOne(): void
     {
         $payments = $this->read([
-            $this->receipt('INV-1', status: 'refunded', total: 15000, paid: 0, paidAt: null, dueAt: '2026-03-01T10:00:00+03:00'),
+            $this->receipt(
+                'INV-1',
+                status: 'refunded',
+                total: 15000,
+                paid: 0,
+                paidAt: null,
+                refundedAt: '2026-04-20T10:00:00+03:00'
+            ),
         ]);
 
         self::assertTrue($payments[0]->refunded);
@@ -316,6 +390,7 @@ final class ExternalReceiptPaymentsTest extends TestCase
         string $currency = 'JOD',
         ?string $paidAt = '2026-03-01T10:00:00+03:00',
         ?string $dueAt = '2026-02-25T10:00:00+03:00',
+        ?string $refundedAt = null,
     ): Receipt {
         // BUILT THROUGH fromPayload, not through the constructor, so the field
         // names the billing service actually sends are part of what is pinned
@@ -331,6 +406,7 @@ final class ExternalReceiptPaymentsTest extends TestCase
             'currency' => $currency,
             'paid_at' => $paidAt,
             'due_at' => $dueAt,
+            'refunded_at' => $refundedAt,
         ]);
     }
 }
