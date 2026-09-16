@@ -888,8 +888,11 @@ async function renderStatusPage(env, cfg) {
   .head{display:flex;align-items:center;gap:.6rem;margin:0 0 1.75rem}
   .brand{display:inline-flex;align-items:center;gap:.55rem;font-weight:600;
          font-size:1.05rem;letter-spacing:-.01em;color:var(--ink);text-decoration:none}
-  .mark{width:1.6rem;height:1.6rem;border-radius:.4rem;background:var(--ink);color:var(--bg);
-        display:inline-grid;place-items:center;font-size:.8rem;font-weight:600;flex:none}
+  /* The mark is INLINE SVG, not a link to an icon file: this page loads no
+     asset from anywhere, which is the whole reason it can still be read during
+     the outage it is describing. It follows the page's own palette. */
+  .mark{width:1.6rem;height:1.6rem;flex:none;display:block;color:var(--ink)}
+  .mark svg{width:100%;height:100%;display:block}
   .eyebrow{font-size:.72rem;font-weight:500;letter-spacing:.08em;text-transform:uppercase;
            color:var(--soft);border:1px solid var(--line);border-radius:999px;padding:.1rem .55rem}
 
@@ -987,7 +990,11 @@ ${hiddenSegs > 0 ? `    .seg:nth-child(-n+${hiddenSegs}){display:none}
 <div class="wrap">
   <div class="head">
     <a class="brand" href="https://whity.dev/">
-      <span class="mark mono" aria-hidden="true">W</span>Whity
+      <span class="mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none">
+        <rect x="3.5" y="10.5" width="18" height="18" rx="4.25" fill="var(--accent)"/>
+        <rect x="11.25" y="3.25" width="17.5" height="17.5" rx="4.25" fill="var(--card)"
+              stroke="currentColor" stroke-width="2.5"/>
+      </svg></span>Whity
     </a>
     <span class="eyebrow mono">Status</span>
   </div>
