@@ -861,6 +861,7 @@ async function renderStatusPage(env, cfg) {
     --ok:#2f7d4a;              --ok:oklch(48% 0.14 150);
     --down:#b3261e;            --down:oklch(50% 0.19 27);
     --stale:#7a5d12;           --stale:oklch(52% 0.11 75);
+    --grid:#dfe4ef;            --grid:color-mix(in oklch, var(--accent) 14%, transparent);
     color-scheme:light;
   }
   @media (prefers-color-scheme: dark){
@@ -874,11 +875,19 @@ async function renderStatusPage(env, cfg) {
       --ok:#6fc28c;            --ok:oklch(72% 0.16 150);
       --down:#e08a7a;          --down:oklch(70% 0.18 25);
       --stale:#d8b45f;         --stale:oklch(80% 0.14 80);
+      --grid:#1c2432;            --grid:color-mix(in oklch, var(--accent) 14%, transparent);
       color-scheme:dark;
     }
   }
   *{box-sizing:border-box}
+  /* The ground is the drawing and the cards are sheets resting on it — the same
+     relationship as the mark, at the lowest intensity the idea still reads at.
+     It is a background-image, so it costs no request: this page has to render
+     during the outage it is describing. */
   body{margin:0;background:var(--bg);color:var(--ink);
+       background-image:linear-gradient(var(--grid) 1px,transparent 1px),
+                        linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+       background-size:28px 28px;
        font:16px/1.6 "Noto Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
        -webkit-font-smoothing:antialiased}
   .mono{font-family:"Geist Mono",ui-monospace,"Cascadia Code",Menlo,Consolas,monospace}
