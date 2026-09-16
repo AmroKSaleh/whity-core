@@ -94,24 +94,19 @@ final class ExternalReceiptPayments implements ReferredPaymentSource
     /**
      * When the money moved, or null if it never did.
      *
-     * ── A FULL REFUND ERASES THE PAYMENT DATE, and that is a trap ──────────
+     * ── A FULL REFUND ERASES THE PAYMENT DATE ──────────────────────────────
      *
      * The billing service clears `paid_at` when an invoice is refunded to zero
-     * — reasonably, from its side: nothing is paid any more. From this side the
-     * obvious reading is "never paid", which would skip the receipt, never
-     * reverse the commission, and leave an affiliate holding money for a sale
-     * that was given back. Silently, for good, with a green suite: the refund
-     * simply stops existing on the only pass that would have caught it.
+     * — reasonably, from its side: nothing is paid any more, and `amount_paid`
+     * and the date have to agree. From this side the obvious reading of that
+     * absence is "never paid", which would skip the receipt, never reverse the
+     * commission, and leave an affiliate holding money for a sale that was given
+     * back. Silently, for good, with a green suite.
      *
-     * So a refunded receipt falls back to its issue date, the closest thing left
-     * to when this happened. The fallback is deliberately NOT general: for an
-     * open or draft invoice a missing `paid_at` means exactly what it says, and
-     * dating it from `due_at` would invent a payment nobody made.
-     *
-     * The date is near-cosmetic for a reversal in any case — a clawback finds
-     * its original by invoice number, not by calendar — but it is what the
-     * ledger row is stamped with, and a reversal dated years off is one somebody
-     * has to explain.
+     * We used to date those from `due_at`, which was a guess at a number nobody
+     * had recorded. `refunded_at` now carries it properly: set on every refund,
+     * partial ones included, precisely so a reversal is read from a value rather
+     * than inferred from a hole.
      *
      * PARSED DEFENSIVELY BECAUSE IT CROSSES A WIRE. A timestamp we cannot read
      * throws from DateTimeImmutable's constructor, which would abort the whole
@@ -119,13 +114,20 @@ final class ExternalReceiptPayments implements ReferredPaymentSource
      */
     private function occurredAt(Receipt $receipt): ?DateTimeImmutable
     {
-        $raw = $receipt->paidAt ?? ($receipt->isRefunded() ? $receipt->issuedAt : null);
+        // `paid_at` FIRST, because for everything except a full reversal it is
+        // the real date the money arrived — a partly refunded invoice keeps it,
+        // and dating that from the refund would move the payment to when part of
+        // it came back.
+        $raw = $receipt->paidAt ?? ($receipt->isRefunded() ? $receipt->refundedAt : null);
 
         if ($raw === null) {
             if ($receipt->isRefunded()) {
-                // Refunded, and no date of any kind survived. Named rather than
-                // dropped quietly: it is a commission that will not be clawed
-                // back, and somebody has to know which one.
+                // Refunded, no `paid_at` (cleared) and no `refunded_at` either.
+                // The expected cause is an invoice reversed BEFORE the billing
+                // service had that column — the field is set going forward, not
+                // backfilled onto history. Named rather than dropped quietly: it
+                // is a commission that will not be clawed back, and somebody has
+                // to know which one.
                 $this->logger->warning('A refunded receipt carried no date; its commission cannot be reversed', [
                     'receipt' => $receipt->number,
                 ]);

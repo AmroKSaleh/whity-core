@@ -52,10 +52,24 @@ final class Receipt
          * What is still settled against this invoice after any refunds.
          *
          * A FULL refund sets the status to `refunded`; a PARTIAL one leaves the
-         * status alone and reduces this. Without it the two are
-         * indistinguishable, and a partly refunded invoice reads as fully paid.
+         * status alone and reduces this. Kept because it is what distinguishes
+         * how MUCH came back, now that {@see $refundedAt} says whether any did.
          */
         public readonly int $amountPaidMinor = 0,
+        /**
+         * When money was given back, or null if none ever was.
+         *
+         * SET ON EVERY REFUND, partial ones included — which is what makes it
+         * the signal to read rather than an amount comparison.
+         *
+         * It exists because the billing service clears `paid_at` on a full
+         * reversal (`amount_paid` is then zero and the two must agree), and an
+         * ABSENCE is a terrible thing to infer a refund from: read as "never
+         * paid", every reversal becomes invisible and commission keeps being
+         * paid on money that went back. That reading was ours, and they added
+         * this field rather than leave us guessing at a hole.
+         */
+        public readonly ?string $refundedAt = null,
     ) {
     }
 
@@ -68,6 +82,13 @@ final class Receipt
     /**
      * Some of the money has gone back, but not all of it.
      *
+     * READ FROM `refunded_at`, NOT FROM THE ARITHMETIC. Comparing what is still
+     * settled against the invoice total cannot tell a partial REFUND from a
+     * partial PAYMENT — both leave less settled than the invoice is for — so the
+     * old inference would eventually have called an underpaid invoice a refund
+     * and reported a clawback nobody made. A date that is only ever set when
+     * money moves outward says exactly one thing.
+     *
      * Reported rather than acted on: the commission ledger holds one entry per
      * payment and reverses it whole, so it cannot express "give back a third".
      * Silently ignoring it would quietly overpay; silently reversing it whole
@@ -76,9 +97,7 @@ final class Receipt
      */
     public function isPartiallyRefunded(): bool
     {
-        return !$this->isRefunded()
-            && $this->amountPaidMinor > 0
-            && $this->amountPaidMinor < $this->commissionBaseMinor();
+        return !$this->isRefunded() && $this->refundedAt !== null;
     }
 
     /**
@@ -116,6 +135,7 @@ final class Receipt
             self::intOrZero($payload['subtotal'] ?? null),
             self::intOrZero($payload['discount'] ?? null),
             self::intOrZero($payload['amount_paid'] ?? null),
+            self::str($payload['refunded_at'] ?? null),
         );
     }
 
