@@ -55,6 +55,8 @@ use Whity\Sdk\PluginJobsInterface;
 use Whity\Sdk\PluginMcpInterface;
 use Whity\Sdk\PluginMcpToolsInterface;
 use Whity\Sdk\PluginRequirementsInterface;
+use Whity\Core\Entitlement\PluginEntitlements;
+use Whity\Sdk\PluginEntitlementsInterface;
 use Whity\Sdk\PluginRolesInterface;
 use Whity\Sdk\PluginThemeInterface;
 use Whity\Sdk\Sdk;
@@ -614,6 +616,21 @@ class PluginLoader
      */
     private function loadDiscovered(array $discovered): void
     {
+        // THE SELLABLE-LIMIT CATALOGUE IS REBUILT, NOT APPENDED TO — here rather
+        // than in load(), because reload() reaches this method directly and
+        // would otherwise be registering into a sealed catalogue and having
+        // every declaration refused.
+        //
+        // Both halves matter. Emptying makes a second pass — a dev reload, a
+        // test, a reinstall — produce the same catalogue rather than a growing
+        // one. Closing it is the real guarantee: a production host runs several
+        // worker processes, and a limit registered after boot would exist in one
+        // of them and not the others, so a workspace's access would depend on
+        // which worker answered. That reads as flakiness and gets chased for
+        // days; refusing the late registration turns it into an error naming the
+        // plugin.
+        PluginEntitlements::reset();
+
         $candidates = [];
         foreach ($discovered as $fqcn => $filePath) {
             $candidate = $this->instantiatePlugin($fqcn, $filePath);
@@ -650,6 +667,10 @@ class PluginLoader
         foreach ($this->disabledDirectoryPlugins as $fqcn => $entryFile) {
             $this->registerDisabledPlaceholder($fqcn, $entryFile);
         }
+
+        // Every plugin that is going to declare a limit has now done so. See the
+        // note at the top of this method for why the catalogue closes.
+        PluginEntitlements::seal();
     }
 
     /**
@@ -2011,6 +2032,24 @@ class PluginLoader
             $this->roleSeeder->removeGrants($info['plugin'], $tenantId);
         }
 
+        // THE PLUGIN'S DECLARED LIMITS STAY IN THE CATALOGUE, and that is a
+        // decision rather than an omission.
+        //
+        // Withdrawing them here looked right — a disabled plugin enforces
+        // nothing, so why keep its limits priced — and it is wrong for a
+        // specific reason: re-enabling re-registers a plugin's CAPABILITIES
+        // (above) but reaches this class's activation path not at all, and the
+        // catalogue is sealed after boot. So a disable followed by an enable
+        // would leave an ACTIVE plugin whose limits had silently vanished, with
+        // its gates reading "unlimited" until the next restart. That is the
+        // harmful direction: a running feature with no limits beats a stopped
+        // feature with stale ones.
+        //
+        // They are withdrawn on UNINSTALL instead, where the plugin is actually
+        // going away — see uninstallPlugin(). A disabled plugin that is never
+        // re-enabled loses them at the next restart anyway, because it will not
+        // be there to declare them.
+
         $lifecycle->disable();
 
         return true;
@@ -2090,6 +2129,23 @@ class PluginLoader
                 $this->removeRecursive($directory);
                 $directoryRemoved = true;
             }
+        }
+
+        // WITHDRAW THE LIMITS THIS PLUGIN SOLD, now that it is actually gone.
+        // Leaving them would keep a priced feature in the tier editor with
+        // nothing left to enforce it — worse than never selling it, because
+        // somebody is paying for it.
+        //
+        // Only after the removal has actually been committed, so a uninstall
+        // that stopped at an error leaves the catalogue as it found it.
+        //
+        // The VALUES tiers hold against those keys are deliberately NOT deleted.
+        // Resolution ignores a value whose key is not declared, so they gate
+        // nothing; and an operator who reinstalls the plugin gets their pricing
+        // back rather than having to rebuild it. Removing pricing is a
+        // deliberate act on the tier screen, not a side effect of an uninstall.
+        if ($directoryRemoved) {
+            PluginEntitlements::forget($pluginName);
         }
 
         return [
@@ -2857,6 +2913,26 @@ class PluginLoader
                         . 'PluginRoleSeeder is wired into this PluginLoader — its declared '
                         . 'roles will NOT be seeded.',
                     ['event' => 'plugin.role_seeder.missing', 'plugin' => $plugin->getName()]
+                );
+            }
+        }
+
+        // Add the limits this plugin SELLS to the platform's catalogue, so they
+        // appear in the tier editor beside storage and seats and are resolved by
+        // the same three layers.
+        //
+        // NO SEEDER TO INJECT, unlike roles: the catalogue is process-level and
+        // needs no database, so there is no configuration to forget and no
+        // silent no-op of the #527 shape. A refused DECLARATION still says so —
+        // see PluginEntitlementRegistrar.
+        if ($plugin instanceof PluginEntitlementsInterface) {
+            $added = (new PluginEntitlementRegistrar($this->logger))
+                ->register($plugin, $plugin->getName());
+
+            if ($added > 0) {
+                $this->logger?->debug(
+                    "Plugin '{$plugin->getName()}' declared {$added} sellable limit(s).",
+                    ['event' => 'plugin.entitlements.registered', 'plugin' => $plugin->getName()]
                 );
             }
         }

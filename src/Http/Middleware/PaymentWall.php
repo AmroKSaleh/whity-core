@@ -38,6 +38,39 @@ final class PaymentWall
 {
     private const WRITE_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
 
+    /**
+     * The paths a LOCKED tenant must still reach, or the wall is a deadlock.
+     *
+     * Named here rather than written inline at the composition root because
+     * every entry is a deliberate hole in an access control, and a list nobody
+     * can point at is a list nobody reviews. The test that pins it is the only
+     * thing standing between this and a fourth entry added in passing.
+     *
+     * Each one exists because WITHOUT IT THE TENANT CAN NEVER STOP BEING
+     * LOCKED:
+     *
+     *  - `/api/v1/subscription`, `/api/v1/billing` — where paying happens. Wall
+     *    these and the payment that would lift the wall can never be made.
+     *  - `/api/v1/payments` — where a provider tells us they were paid. Wall it
+     *    and a tenant who HAS paid stays locked, having paid.
+     *  - `/api/v1/me/capabilities` — what the caller may do. This one is subtler
+     *    and it is the one that actually shipped broken: the billing screen asks
+     *    it to decide whether to show a "pay" button, so walling it produced a
+     *    reachable billing page telling the workspace owner they did not have
+     *    permission to pay. Read-only, and about the caller themselves.
+     *
+     * NARROW ON PURPOSE. These are matched as PREFIXES, so `/api/v1/me` would
+     * unwall notifications, emails, inbox and preferences in one stroke.
+     *
+     * @var list<string>
+     */
+    public const DEADLOCK_EXEMPT_PREFIXES = [
+        '/api/v1/subscription',
+        '/api/v1/billing',
+        '/api/v1/payments',
+        '/api/v1/me/capabilities',
+    ];
+
     private SubscriptionService $subscriptions;
     private bool $enabled;
     /** @var list<string> Path prefixes (full versioned, e.g. /api/v1/subscription) never walled. */

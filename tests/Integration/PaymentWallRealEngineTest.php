@@ -81,6 +81,97 @@ final class PaymentWallRealEngineTest extends TestCase
         ]);
     }
 
+    // ── the deadlock list, as the app actually wires it ─────────────────────
+
+    /**
+     * EVERY EXEMPT PATH IS A PATH A LOCKED TENANT MUST REACH.
+     *
+     * The tests below build a wall with their own exempt list, which means none
+     * of them can see the list the APPLICATION uses. That gap shipped a bug: the
+     * billing page was exempt and reachable, and the endpoint it asks "may this
+     * caller pay?" was not — so the owner of a locked workspace was told they
+     * did not have permission to pay.
+     *
+     * So this exercises the real constant, through the wall, on the harshest
+     * enforcement mode there is.
+     */
+    public function testEveryDeadlockExemptPathSurvivesTheStrictestWall(): void
+    {
+        $this->lapse(SubscriptionService::MODE_BLOCK_ALL);
+
+        foreach (PaymentWall::DEADLOCK_EXEMPT_PREFIXES as $prefix) {
+            TenantContext::reset();
+            TenantContext::setTenantId(self::TENANT);
+            $this->nextCalled = false;
+
+            $wall = new PaymentWall(
+                $this->subscriptions,
+                enabled: true,
+                exemptPrefixes: PaymentWall::DEADLOCK_EXEMPT_PREFIXES,
+                billingUrl: self::BILLING_URL,
+            );
+            $res = $wall->handle(new Request('GET', $prefix), $this->next);
+
+            self::assertSame(
+                200,
+                $res->getStatusCode(),
+                "a locked tenant must still reach {$prefix}, or the wall is a deadlock"
+            );
+        }
+    }
+
+    /**
+     * AND THE ONE THAT SHIPPED BROKEN, NAMED. A regression here is not a failing
+     * request — it is a billing page that loads, lists prices, and refuses to
+     * let the workspace owner buy any of them.
+     */
+    public function testALockedTenantCanStillLearnWhatItMayDo(): void
+    {
+        $this->lapse(SubscriptionService::MODE_BLOCK_ALL);
+
+        TenantContext::reset();
+        TenantContext::setTenantId(self::TENANT);
+        $this->nextCalled = false;
+
+        $wall = new PaymentWall(
+            $this->subscriptions,
+            enabled: true,
+            exemptPrefixes: PaymentWall::DEADLOCK_EXEMPT_PREFIXES,
+            billingUrl: self::BILLING_URL,
+        );
+        $res = $wall->handle(new Request('GET', '/api/v1/me/capabilities'), $this->next);
+
+        self::assertSame(200, $res->getStatusCode());
+        self::assertTrue($this->nextCalled, 'the request must actually reach the handler');
+    }
+
+    /**
+     * THE LIST STAYS NARROW. These are matched as PREFIXES, so an entry of
+     * `/api/v1/me` would unwall notifications, emails, inbox and preferences in
+     * one stroke — a slice of the product nobody reviewed, opened by a string
+     * that looks like a typo fix.
+     */
+    public function testTheExemptListDoesNotUnwallTheRestOfTheProduct(): void
+    {
+        $this->lapse(SubscriptionService::MODE_BLOCK_ALL);
+
+        foreach (['/api/v1/me/notifications', '/api/v1/me/emails', '/api/v1/me', '/api/v1/documents'] as $path) {
+            TenantContext::reset();
+            TenantContext::setTenantId(self::TENANT);
+            $this->nextCalled = false;
+
+            $wall = new PaymentWall(
+                $this->subscriptions,
+                enabled: true,
+                exemptPrefixes: PaymentWall::DEADLOCK_EXEMPT_PREFIXES,
+                billingUrl: self::BILLING_URL,
+            );
+            $res = $wall->handle(new Request('GET', $path), $this->next);
+
+            self::assertSame(402, $res->getStatusCode(), "{$path} must stay behind the wall");
+        }
+    }
+
     // ── never-block invariants ──────────────────────────────────────────────
 
     public function testSystemTenantIsNeverWalled(): void

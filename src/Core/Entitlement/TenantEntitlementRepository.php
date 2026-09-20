@@ -37,6 +37,51 @@ final class TenantEntitlementRepository
     }
 
     /**
+     * What this tenant's TIER grants, as a key => value map.
+     *
+     * THE LAYER THAT MAKES A PRICE LIST MEAN SOMETHING. Without it a tier is a
+     * row with a name and an amount: every plan granted identical access,
+     * because nothing ever read the bundle at the moment access was decided.
+     *
+     * READ LIVE, NOT COPIED. The bundle used to be materialised into
+     * `tenant_entitlements` when a plan was applied, which made a tier's
+     * definition a snapshot taken at subscribe time — so marketing could change
+     * what "Pro" includes and every existing Pro customer would keep the old
+     * deal until somebody re-applied their plan by hand. Reading it here means
+     * an edit reaches the people it is for. The write side is where a REDUCTION
+     * is stopped, not here (see PlanService::setEntitlement).
+     *
+     * Empty for a tenant with no plan, which is the ordinary state of a tenant
+     * on a deployment that sells nothing — they fall through to the registry
+     * defaults, exactly as before.
+     *
+     * @return array<string, string>
+     */
+    public function planBundleFor(int $tenantId): array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT pe.entitlement_key, pe.value
+               FROM tenant_plan tp
+               JOIN plan_entitlements pe ON pe.plan_id = tp.plan_id
+              WHERE tp.tenant_id = :tenant_id'
+        );
+        $stmt->execute([':tenant_id' => $tenantId]);
+
+        /** @var array<int, array<string, mixed>> $rows */
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $out = [];
+        foreach ($rows as $row) {
+            $key = (string) ($row['entitlement_key'] ?? '');
+            if ($key !== '') {
+                $out[$key] = (string) ($row['value'] ?? '');
+            }
+        }
+
+        return $out;
+    }
+
+    /**
      * All stored entitlement overrides for one tenant as a key => value map.
      * Keys absent here fall back to the registry default at the service layer.
      *

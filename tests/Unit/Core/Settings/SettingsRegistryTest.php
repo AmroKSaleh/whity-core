@@ -23,6 +23,7 @@ final class SettingsRegistryTest extends TestCase
              'branding_logo_wide', 'branding_logo_square', 'branding_favicon',
              'mcp.enabled',
              'auth.self_registration_enabled', 'auth.registration_approval_required',
+             'auth.registration_payment_required',
              'auth.self_password_reset_enabled', 'auth.password_reset_approval_required',
              'auth.self_2fa_recovery_enabled',
              'auth.sso_enabled', 'auth.desktop_login_max_hours',
@@ -35,6 +36,7 @@ final class SettingsRegistryTest extends TestCase
              'mail.events.deletion_enabled', 'mail.events.password_reset_enabled',
              'mail.brand_color', 'mail.footer_text',
              'billing.enforcement_default', 'billing.grace_days',
+             'licensing.billing_basis',
              'seats.enforcement', 'seats.count_invited',
              // #billing: invoicing. Every one differs per deployment, which is
              // why none is a constant in the invoicing code. Tax defaults to
@@ -58,9 +60,10 @@ final class SettingsRegistryTest extends TestCase
              // escalation. The dunning policy is per-tenant, because a
              // deployment chases its enterprise customers differently from its
              // self-service ones.
-             'payments.cliq_enabled', 'payments.cliq_alias',
-             'payments.cliq_bank_name', 'payments.cliq_reference_prefix',
              'payments.mock_enabled',
+             // Affiliate clawback is global-only for the same reason: the money
+             // goes to somebody outside the company, so no tenant decides it.
+             'affiliate.clawback_on_refund', 'affiliate.withholding_bp',
              'dunning.retry_schedule_days', 'dunning.lock_after_days',
              'plugins.store_allowed_hosts', 'plugins.store_enabled',
              'documents.render_enabled', 'documents.render_max_rows',
@@ -388,6 +391,22 @@ final class SettingsRegistryTest extends TestCase
         // 62 since #1068 added ui.hide_dates.
         // 65 since #1072 added the three documents.flow_max_* ceilings.
         // 67 since seats added seats.enforcement + seats.count_invited.
+        // 81 since the CliQ rail was removed, taking payments.cliq_enabled,
+        // _alias, _bank_name and _reference_prefix with it — Whity no longer
+        // processes payments against a bank, so there is nothing here for them
+        // to configure. The count going DOWN is the notable direction: this
+        // assertion exists so a key cannot vanish unnoticed, and a removal has
+        // to be argued for rather than absorbed.
+        // 82 since per-device pricing added licensing.billing_basis, which
+        // decides WHICH devices a per-device price counts. Migration 146 keeps
+        // provisioned_at, activated_at and last_seen_at as separate facts so
+        // that choice can be a setting rather than a schema decision.
+        // 84 since the affiliate programme added affiliate.clawback_on_refund,
+        // which decides whether a refunded payment takes its commission back.
+        // A commercial choice rather than a technical one, so it is a setting.
+        // 85 since affiliate payouts added affiliate.withholding_bp, which is
+        // snapshot onto each payout so changing it cannot restate one already
+        // made.
         self::assertCount(85, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],

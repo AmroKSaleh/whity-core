@@ -92,6 +92,42 @@ final class BillingRunRealEngineTest extends TestCase
 
     // ═══ the billing run ═════════════════════════════════════════════════════
 
+    /**
+     * A TENANT BILLED BY SOMEONE ELSE IS NOT BILLED AGAIN HERE.
+     *
+     * `external_ref` marks a tenant whose subscription is held by the external
+     * billing service: that service charges them, renews them, and owns their
+     * period. Reconciliation copies the period end down into the same column
+     * this run reads, so without the exclusion this run would see a period that
+     * had ended, decide the month was due, and raise a SECOND bill for a month
+     * already paid — charged once by them, invoiced again by us, on a document
+     * that looks exactly like every other invoice.
+     *
+     * The assertion is on `invoiced` being zero AND on no invoice existing,
+     * because a run that skipped for the wrong reason would satisfy only the
+     * first.
+     */
+    public function testATenantBilledExternallyIsNotInvoicedByThisRun(): void
+    {
+        $this->priceThePlan(5000, 'JOD', 'month');
+        $this->subscribe(self::TENANT, '2026-10-01 00:00:00');
+        $this->subscriptions->setSubscription(self::TENANT, ['external_ref' => 'sub_held_elsewhere']);
+
+        $result = $this->billing->run($this->now);
+
+        self::assertSame(0, $result['invoiced'], 'the external service bills this tenant, not us');
+        self::assertSame([], $this->invoices->listForTenant(self::TENANT));
+    }
+
+    /** And a tenant with no external subscription is still billed here as before. */
+    public function testATenantWithNoExternalSubscriptionIsStillBilledLocally(): void
+    {
+        $this->priceThePlan(5000, 'JOD', 'month');
+        $this->subscribe(self::TENANT, '2026-10-01 00:00:00');
+
+        self::assertSame(1, $this->billing->run($this->now)['invoiced']);
+    }
+
     public function testASubscriptionWhosePeriodEndedIsInvoiced(): void
     {
         $this->priceThePlan(5000, 'JOD', 'month');

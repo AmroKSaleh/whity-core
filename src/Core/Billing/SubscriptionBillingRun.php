@@ -68,13 +68,21 @@ final class SubscriptionBillingRun
     /**
      * Bill every subscription whose period has ended.
      *
-     * @return array{invoiced: int, skipped: int, unpriced: int}
+     * `nothing_to_bill` is COUNTED SEPARATELY from `skipped`, because they mean
+     * different things to whoever reads the tally: skipped is "not due yet",
+     * while nothing_to_bill is "due, and the bill came to nothing" — a
+     * per-device plan with no devices in service. A run reporting forty of the
+     * latter is telling an operator something real about their customers;
+     * folding it into skipped would hide it.
+     *
+     * @return array{invoiced: int, skipped: int, unpriced: int, nothing_to_bill: int}
      */
     public function run(DateTimeImmutable $now): array
     {
         $invoiced = 0;
         $skipped = 0;
         $unpriced = 0;
+        $nothingToBill = 0;
 
         foreach ($this->dueSubscriptions($now) as $subscription) {
             $tenantId = (int) $subscription['tenant_id'];
@@ -104,11 +112,17 @@ final class SubscriptionBillingRun
             match ($outcome) {
                 'invoiced' => $invoiced++,
                 'unpriced' => $unpriced++,
+                'nothing_to_bill' => $nothingToBill++,
                 default => $skipped++,
             };
         }
 
-        return ['invoiced' => $invoiced, 'skipped' => $skipped, 'unpriced' => $unpriced];
+        return [
+            'invoiced' => $invoiced,
+            'skipped' => $skipped,
+            'unpriced' => $unpriced,
+            'nothing_to_bill' => $nothingToBill,
+        ];
     }
 
     /**
@@ -116,7 +130,7 @@ final class SubscriptionBillingRun
      *
      * @param array<string, mixed> $subscription
      *
-     * @return 'invoiced'|'unpriced'|'skipped'
+     * @return 'invoiced'|'unpriced'|'skipped'|'nothing_to_bill'
      */
     private function billOne(array $subscription, DateTimeImmutable $now): string
     {
@@ -148,6 +162,32 @@ final class SubscriptionBillingRun
         $periodStart = $this->previousPeriodStart($periodEnd, $period);
         $nextPeriodEnd = $this->advance($periodEnd, $period);
 
+        $quantity = $this->quantityFor($tenantId, $price, $periodStart, $periodEnd);
+
+        // NOTHING TO BILL IS NOT AN ERROR, and it is not an invoice either. A
+        // per-device price with no devices in service means the tenant owes
+        // nothing this period — so the period is ADVANCED and no invoice is
+        // raised. The alternatives are both worse: a zero-quantity line is
+        // refused by the schema, and inventing a phantom unit to avoid that
+        // would charge for hardware nobody is using.
+        //
+        // The period still advances, because not advancing would retry the
+        // same empty period forever and the tenant would never be billed for
+        // the month they finally activate something.
+        if ($quantity < 1) {
+            $this->subscriptions->setSubscription($tenantId, [
+                'current_period_end' => $nextPeriodEnd->format('Y-m-d H:i:s'),
+            ]);
+
+            $this->logger->info('Nothing to bill this period; advancing without an invoice.', [
+                'tenant_id' => $tenantId,
+                'plan_id' => $planId,
+                'period_end' => $periodEnd->format('Y-m-d'),
+            ]);
+
+            return 'nothing_to_bill';
+        }
+
         // ONE TRANSACTION. Invoicing without advancing would re-bill the same
         // period next tick; advancing without invoicing would skip a month
         // silently, which is the worse of the two.
@@ -166,7 +206,7 @@ final class SubscriptionBillingRun
                 $tenantId,
                 $draft,
                 $this->lineDescription($subscription, $periodStart, $periodEnd),
-                $this->quantityFor($tenantId, $price),
+                $quantity,
                 (int) $price['unit_amount'],
                 $this->taxRateFor($tenantId),
             );
@@ -218,6 +258,19 @@ final class SubscriptionBillingRun
      * month still owes this month; stopping the meter because they are behind
      * would quietly forgive the debt the dunning machine is chasing them for.
      *
+     * A TENANT BILLED BY SOMEONE ELSE IS EXCLUDED ENTIRELY. `external_ref` marks
+     * a tenant whose subscription is held by the external billing service: that
+     * service charges them, renews them, and owns their period. This run would
+     * otherwise see the period end that reconciliation copied down, decide the
+     * month was due, and raise a SECOND bill for a month already paid — charged
+     * once by them and invoiced again by us, in a way that looks exactly like
+     * every other invoice.
+     *
+     * The predicate is the whole mechanism, deliberately: which engine bills a
+     * tenant is decided by whether that tenant has an external subscription,
+     * rather than by a deployment-wide switch that would be wrong for any
+     * installation running both — a self-hosted customer alongside a paying one.
+     *
      * @return list<array<string, mixed>>
      *
      * @tenant-guard-ignore: the billing run has no tenant context by design —
@@ -233,6 +286,7 @@ final class SubscriptionBillingRun
                 AND current_period_end IS NOT NULL
                 AND current_period_end <= :now
                 AND tenant_id <> :system
+                AND external_ref IS NULL
               ORDER BY current_period_end ASC, tenant_id ASC
               LIMIT :limit'
         );
@@ -259,6 +313,21 @@ final class SubscriptionBillingRun
      * figure labelled JOD would be wrong by roughly a factor of one and a half
      * — an error that looks like a price rise rather than a bug.
      *
+     * ONE SUBSCRIPTION BILLS ONE PRICE. The active-price index permits a plan
+     * to carry a flat, a per-seat and a per-device price side by side, because
+     * those are ALTERNATIVES a plan may offer — not lines that add up on one
+     * invoice. A subscription records the plan, not which of its prices it is
+     * on, so when several are active the choice below is the whole decision,
+     * and it is made explicitly rather than left to insertion order.
+     *
+     * THE TIE-BREAK PREFERS THE PRICE THAT MULTIPLIES BY THE LEAST: flat, then
+     * per-device, then per-seat. Not because that ordering is meaningful in
+     * itself, but because the alternative — whichever row happened to be
+     * created first — makes an invoice depend on the order somebody typed
+     * things into an admin screen. Carrying more than one active price is an
+     * ambiguity the operator has to resolve, so it is logged rather than
+     * silently decided.
+     *
      * @return array<string, mixed>|null
      */
     private function activePriceFor(int $tenantId, int $planId): ?array
@@ -268,17 +337,34 @@ final class SubscriptionBillingRun
         $statement = $this->pdo->prepare(
             'SELECT * FROM plan_prices
               WHERE plan_id = :plan_id AND currency = :currency AND is_active = :on
-              ORDER BY is_per_seat ASC, id ASC
-              LIMIT 1'
+              ORDER BY is_per_seat ASC, is_per_device ASC, id ASC'
         );
         $statement->bindValue(':plan_id', $planId, PDO::PARAM_INT);
         $statement->bindValue(':currency', $currency);
         $statement->bindValue(':on', true, PDO::PARAM_BOOL);
         $statement->execute();
 
-        $row = $statement->fetch(PDO::FETCH_ASSOC);
+        /** @var list<array<string, mixed>> $rows */
+        $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
 
-        return $row === false ? null : $row;
+        if ($rows === []) {
+            return null;
+        }
+
+        if (count($rows) > 1) {
+            $this->logger->warning(
+                'Plan has more than one active price in this currency; billing the first by tie-break.',
+                [
+                    'tenant_id' => $tenantId,
+                    'plan_id' => $planId,
+                    'currency' => $currency,
+                    'price_ids' => array_map(static fn (array $r): int => (int) $r['id'], $rows),
+                    'billed_price_id' => (int) $rows[0]['id'],
+                ]
+            );
+        }
+
+        return $rows[0];
     }
 
     /**
@@ -291,8 +377,22 @@ final class SubscriptionBillingRun
      *
      * @param array<string, mixed> $price
      */
-    private function quantityFor(int $tenantId, array $price): int
-    {
+    private function quantityFor(
+        int $tenantId,
+        array $price,
+        DateTimeImmutable $periodStart,
+        DateTimeImmutable $periodEnd,
+    ): int {
+        if ($this->isTrue($price['is_per_device'] ?? false)) {
+            // SHARED WITH THE DEVICE-QUANTITY SWEEP, deliberately. Both have to
+            // apply the same `licensing.billing_basis` rules or a customer's
+            // invoice and their external subscription would disagree about how
+            // many devices they have — invisibly, until somebody added up a
+            // year of statements.
+            return (new LicensedDeviceCount($this->pdo, $this->settings))
+                ->between($tenantId, $periodStart, $periodEnd);
+        }
+
         if (!$this->isTrue($price['is_per_seat'] ?? false)) {
             return 1;
         }

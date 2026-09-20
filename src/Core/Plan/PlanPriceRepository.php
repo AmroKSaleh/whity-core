@@ -51,13 +51,15 @@ final class PlanPriceRepository
         int $unitAmount,
         string $billingPeriod,
         bool $isPerSeat = false,
+        bool $isPerDevice = false,
     ): int {
         $currency = self::normalizeCurrency($currency);
         self::assertValid($currency, $unitAmount, $billingPeriod);
+        self::assertOneMultiplier($isPerSeat, $isPerDevice);
 
         $stmt = $this->db->prepare(
-            'INSERT INTO plan_prices (plan_id, currency, unit_amount, billing_period, is_per_seat, is_active, created_at, updated_at)
-             VALUES (:plan_id, :currency, :unit_amount, :billing_period, :is_per_seat, :is_active, NOW(), NOW())'
+            'INSERT INTO plan_prices (plan_id, currency, unit_amount, billing_period, is_per_seat, is_per_device, is_active, created_at, updated_at)
+             VALUES (:plan_id, :currency, :unit_amount, :billing_period, :is_per_seat, :is_per_device, :is_active, NOW(), NOW())'
         );
         $stmt->execute([
             ':plan_id'        => $planId,
@@ -65,6 +67,7 @@ final class PlanPriceRepository
             ':unit_amount'    => $unitAmount,
             ':billing_period' => $billingPeriod,
             ':is_per_seat'    => $isPerSeat ? 1 : 0,
+            ':is_per_device'  => $isPerDevice ? 1 : 0,
             ':is_active'      => 1,
         ]);
 
@@ -150,9 +153,17 @@ final class PlanPriceRepository
      * The one live price for a plan on these terms, or null.
      *
      * Single by construction: the partial unique index allows at most one active
-     * row per (plan, currency, period, per-seat-ness), so this cannot silently
-     * pick between two — which is how a customer ends up charged an amount no
-     * screen displayed.
+     * row per (plan, currency, period, per-seat-ness, per-device-ness), so this
+     * cannot silently pick between two — which is how a customer ends up charged
+     * an amount no screen displayed.
+     *
+     * THE DEVICE BASIS IS PART OF "THESE TERMS", not an optional refinement.
+     * Migration 148 widened that index, so a flat price and a per-device price
+     * can both be live for the same plan, currency and period — and they share
+     * `is_per_seat = false`. Matching on seat-ness alone would make two rows
+     * satisfy this query and hand back whichever the engine returned first,
+     * which is precisely the ambiguity the sentence above promises callers is
+     * impossible.
      *
      * @return array<string, mixed>|null
      */
@@ -161,11 +172,13 @@ final class PlanPriceRepository
         string $currency,
         string $billingPeriod,
         bool $isPerSeat = false,
+        bool $isPerDevice = false,
     ): ?array {
         $stmt = $this->db->prepare(
             'SELECT * FROM plan_prices
               WHERE plan_id = :plan_id AND currency = :currency
                 AND billing_period = :billing_period AND is_per_seat = :is_per_seat
+                AND is_per_device = :is_per_device
                 AND is_active = :on'
         );
         $stmt->execute([
@@ -173,6 +186,7 @@ final class PlanPriceRepository
             ':currency'       => self::normalizeCurrency($currency),
             ':billing_period' => $billingPeriod,
             ':is_per_seat'    => $isPerSeat ? 1 : 0,
+            ':is_per_device'  => $isPerDevice ? 1 : 0,
             ':on'             => 1,
         ]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -214,6 +228,29 @@ final class PlanPriceRepository
     }
 
     /**
+     * A price multiplies by ONE thing, or by nothing.
+     *
+     * The database refuses this pairing too — migration 148 added a CHECK — but
+     * a constraint violation arrives as a PDOException carrying a constraint
+     * name, and the handler above turns those into a 409 about a duplicate
+     * price. That is the wrong answer to this mistake: nothing is duplicated,
+     * the price is incoherent. Refusing it here gives the caller the field and
+     * the reason, and leaves the CHECK as the guarantee for writers that never
+     * come through this repository.
+     *
+     * @throws PlanValidationException
+     */
+    private static function assertOneMultiplier(bool $isPerSeat, bool $isPerDevice): void
+    {
+        if ($isPerSeat && $isPerDevice) {
+            throw new PlanValidationException(
+                'is_per_device',
+                'a price multiplies by seats or by devices, not both'
+            );
+        }
+    }
+
+    /**
      * Give the row PHP types.
      *
      * `unit_amount` is cast to int rather than left as the string PDO returns —
@@ -237,6 +274,12 @@ final class PlanPriceRepository
             // on the real engine and as retired on SQLite, so every test would
             // pass and every production row would lie.
             'is_per_seat'    => DbBool::of($row['is_per_seat']),
+            // Dropping this would be silent: the billing run reads the column
+            // straight from its own SELECT and bills per device, while every
+            // caller reading a price THROUGH this repository would see a row
+            // that looks flat — the price list, the quote and the invoice each
+            // describing a different product.
+            'is_per_device'  => DbBool::of($row['is_per_device'] ?? false),
             'is_active'      => DbBool::of($row['is_active']),
             'created_at'     => (string) $row['created_at'],
             'updated_at'     => (string) $row['updated_at'],

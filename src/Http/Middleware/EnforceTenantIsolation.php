@@ -266,6 +266,27 @@ class EnforceTenantIsolation
         // GET to this path is a 404 from the router rather than an
         // unauthenticated read that got this far.
         '#^/api/v1/payments/webhook/[^/]+$#',
+        // Migration 149: the EXTERNAL billing service's notification endpoint.
+        // Same reasoning as the callback above and the same non-negotiable
+        // consequence: without this entry the route 401s before it is routed, so
+        // no notification is ever delivered, no subscription change is ever
+        // heard, and a tenant who paid waits for the reconciliation sweep to let
+        // them in. That is a latency bug rather than a lockout — the sweep is
+        // the real mechanism — but it silently throws away the thing that makes
+        // access appear in a second instead of an hour.
+        //
+        // WHAT MAKES IT SAFE IS THE SIGNATURE, verified over the RAW bytes with
+        // hash_equals before the payload is decoded, and refused outright when
+        // no secret is configured. And the payload is not a write path at all:
+        // the only thing taken from it is WHICH subject to go and ask about, so
+        // even a correctly signed forgery can do no more than make this
+        // deployment re-read its own state from the billing service.
+        //
+        // EXACTLY ONE SEGMENT AND NO PARAMETER, following the lesson
+        // `/api/v1/translations/` records above. There is one sender and one
+        // path; a parametrised form would make the next route added under
+        // `/billing/` public by default, on the surface where that is worst.
+        '#^/api/v1/billing/webhook$#',
         // Migration 132: an OPT-IN public form. The person filling in an
         // external application has no account and, in the case this exists for,
         // never will — so there is nothing here for this middleware to resolve.
@@ -299,6 +320,23 @@ class EnforceTenantIsolation
         '#^/api/v1/public/forms/[^/]+$#',
         '#^/api/v1/public/forms/[^/]+/uploads$#',
         '#^/api/v1/public/forms/[^/]+/submissions$#',
+
+        // Per-device licensing: redeeming an activation code. The person doing
+        // it may be an end user or a student with NO account, so there is no
+        // session to carry a tenant — the code itself resolves which tenant,
+        // which unit and whether the grant is live, and nothing supplied by the
+        // caller is trusted.
+        //
+        // THE SECOND OF THE TWO EDITS a public route needs. The route is
+        // registered in public/index.php; without this line the middleware
+        // refuses the request before routing and the endpoint 401s while
+        // appearing correctly registered. That exact mistake shipped once
+        // already (#1214), and was only caught by probing the deployed
+        // instance — the whole suite was green.
+        //
+        // Fully anchored, so no future route under /public/licensing/ becomes
+        // public by inheriting a prefix.
+        '#^/api/v1/public/licensing/redeem$#',
     ];
 
     /**

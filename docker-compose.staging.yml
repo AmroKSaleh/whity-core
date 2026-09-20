@@ -134,6 +134,23 @@ services:
       # invalid_request. Set to the externally-reachable origin (e.g. the tunnel/
       # proxy host), not the in-container bind.
       APP_URL: ${APP_URL:-}
+      # External billing service (migration 149). whity-core does not take money;
+      # a separate service does, and these name it and authenticate to it.
+      #
+      # EMPTY IS A SUPPORTED STATE, not a misconfiguration: with no base URL and
+      # no key the deployment sells nothing and walls nobody, which is correct
+      # for a self-hosted installation that bills its users some other way.
+      #
+      # PAY_WEBHOOK_SECRET is the ONLY thing authenticating the notification
+      # endpoint — there is no session behind it — so an empty value makes every
+      # delivery be refused rather than trusted. Listed here because compose
+      # passes environment EXPLICITLY: a variable absent from this block never
+      # reaches the container, however carefully it was set in the env file.
+      PAY_BASE_URL: ${PAY_BASE_URL:-}
+      PAY_API_KEY: ${PAY_API_KEY:-}
+      PAY_WEBHOOK_SECRET: ${PAY_WEBHOOK_SECRET:-}
+      PAY_TIMEOUT_SECONDS: ${PAY_TIMEOUT_SECONDS:-10}
+      PAY_WEBHOOK_TOLERANCE_SECONDS: ${PAY_WEBHOOK_TOLERANCE_SECONDS:-300}
     volumes:
       # Serve the committed tree (mirrors the dev compose bind mount). The app
       # writes a plugin-manifest cache + sqlite scratch file under /app at runtime,

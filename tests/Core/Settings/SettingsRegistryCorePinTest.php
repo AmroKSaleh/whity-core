@@ -53,6 +53,7 @@ final class SettingsRegistryCorePinTest extends TestCase
             'mcp.enabled',
             'auth.self_registration_enabled',
             'auth.registration_approval_required',
+            'auth.registration_payment_required',
             'auth.self_password_reset_enabled',
             'auth.password_reset_approval_required',
             'auth.self_2fa_recovery_enabled',
@@ -82,6 +83,7 @@ final class SettingsRegistryCorePinTest extends TestCase
             'mail.footer_text',
             'billing.enforcement_default',
             'billing.grace_days',
+            'licensing.billing_basis',
             'seats.enforcement',
             'seats.count_invited',
             // #billing — invoicing. Eight tenant-overridable (tax treatment
@@ -101,11 +103,20 @@ final class SettingsRegistryCorePinTest extends TestCase
             'billing.invoice_number_scope',
             'billing.invoice_number_reset',
             // #billing — payment rails (global-only) and dunning (per-tenant).
-            'payments.cliq_enabled',
-            'payments.cliq_alias',
-            'payments.cliq_bank_name',
-            'payments.cliq_reference_prefix',
+            // The four payments.cliq_* keys were REMOVED, not renamed: Whity no
+            // longer processes payments against a bank, so there is no rail here
+            // for them to configure. A deployment that had set them keeps the
+            // rows in `app_settings`; nothing reads them, and nothing will.
             'payments.mock_enabled',
+            // Whether a refunded payment claws its affiliate commission back.
+            // GLOBAL-ONLY: the payer is the platform, not the tenant, so a
+            // referred customer's own settings must not decide what their
+            // referrer is paid.
+            'affiliate.clawback_on_refund',
+            // What is kept back from a payout and remitted on the affiliate's
+            // behalf. GLOBAL-ONLY: an obligation of the paying company, not a
+            // fact about any tenant.
+            'affiliate.withholding_bp',
             'dunning.retry_schedule_days',
             'dunning.lock_after_days',
             'plugins.store_allowed_hosts',
@@ -206,6 +217,7 @@ final class SettingsRegistryCorePinTest extends TestCase
             'mcp.enabled' => 'false',
             'auth.self_registration_enabled' => 'false',
             'auth.registration_approval_required' => 'true',
+            'auth.registration_payment_required' => 'false',
             'auth.self_password_reset_enabled' => 'true',
             'auth.password_reset_approval_required' => 'false',
             'auth.self_2fa_recovery_enabled' => 'true',
@@ -235,6 +247,7 @@ final class SettingsRegistryCorePinTest extends TestCase
             'mail.footer_text' => '',
             'billing.enforcement_default' => 'warn',
             'billing.grace_days' => '7',
+            'licensing.billing_basis' => 'activated',
             'seats.enforcement' => 'warn',
             'seats.count_invited' => 'true',
             // Tax defaults to ZERO, not to any country's rate: charging tax
@@ -255,11 +268,15 @@ final class SettingsRegistryCorePinTest extends TestCase
             // Every rail OFF until an operator configures one: a payment rail
             // that is on by default can take money before anybody decided it
             // should.
-            'payments.cliq_enabled' => 'false',
-            'payments.cliq_alias' => '',
-            'payments.cliq_bank_name' => '',
-            'payments.cliq_reference_prefix' => 'WHT-',
             'payments.mock_enabled' => 'false',
+            // Claws back by default. Absorbing a refund means paying commission
+            // out of money nobody collected, which is a decision to make
+            // deliberately rather than one to inherit.
+            'affiliate.clawback_on_refund' => 'true',
+            // Nothing withheld until somebody establishes what is owed. Zero is
+            // the honest default: withholding money nobody asked us to withhold
+            // takes cash from a person who then has to reclaim it.
+            'affiliate.withholding_bp' => '0',
             'dunning.retry_schedule_days' => '1,3,7',
             'dunning.lock_after_days' => '14',
             'plugins.store_allowed_hosts' => '',

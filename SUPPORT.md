@@ -25,9 +25,12 @@ if enabled on the repository, or open an issue tagged `question` if not.
 
 ## Documentation
 
-Start with [`docs/wiki/`](docs/wiki/) — architecture, deployment, and
-developer guides live there. The rendered wiki mirrors this directory (see
-`.github/workflows/sync-wiki.yml`).
+Browse it at **<https://docs.whity.dev>**, which is compiled from
+[`docs/wiki/`](docs/wiki/) and [`docs/adr/`](docs/adr/) in this repository and
+rebuilt whenever they change (see `.github/workflows/notify-docs-site.yml`).
+Read the markdown directly if you prefer — architecture, deployment, and
+developer guides all live there. The GitHub wiki mirrors `docs/wiki/` as well
+(see `.github/workflows/sync-wiki.yml`).
 
 ## Commercial support
 

@@ -158,14 +158,22 @@ final class BillingDemoSeeder
 
     private function upsertPrice(int $planId, int $amount, string $period, bool $perSeat): void
     {
-        // The schema already permits one live price per (plan, currency, period,
-        // per-seat-ness), so this asks the same question before writing rather
-        // than relying on an error.
+        // The schema permits one live price per (plan, currency, period,
+        // per-seat-ness, per-device-ness), so this asks the same question before
+        // writing rather than relying on an error.
+        //
+        // `is_per_device` HAS TO BE IN THE QUESTION even though this seeder only
+        // ever writes false: migration 148 made it part of what "the same terms"
+        // means, and a per-device price for this plan shares `is_per_seat =
+        // false` with the flat one. Without the predicate that row answers this
+        // question, and the demo stack comes up silently missing a price.
         $existing = $this->pdo->prepare(
             'SELECT id FROM plan_prices
               WHERE plan_id = :plan AND currency = :currency
-                AND billing_period = :period AND is_per_seat = :per_seat'
+                AND billing_period = :period AND is_per_seat = :per_seat
+                AND is_per_device = :per_device'
         );
+        $existing->bindValue(':per_device', false, PDO::PARAM_BOOL);
         $existing->bindValue(':plan', $planId, PDO::PARAM_INT);
         $existing->bindValue(':currency', self::CURRENCY);
         $existing->bindValue(':period', $period);

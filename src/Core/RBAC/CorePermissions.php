@@ -172,6 +172,26 @@ final class CorePermissions
     public const BILLING_VIEW = 'billing:view';
     public const BILLING_PAY = 'billing:pay';
 
+    // Per-device licensing. THREE SLUGS, because issuing is not the same job as
+    // reading and neither is the same as provisioning stock.
+    //
+    //   licensing:view    — see this tenant's units and their state. A finance
+    //     viewer auditing what is billable needs this and nothing else.
+    //   licensing:issue   — mint an activation code. This is the COMMERCIAL
+    //     act: a code is what a salesperson hands over when something is sold,
+    //     and redeeming one starts a bill. Separated from `manage` so a
+    //     salesperson can sell without also being able to retire a customer's
+    //     hardware.
+    //   licensing:manage  — provision serials, revoke codes, retire units.
+    //     Destructive and inventory-shaped rather than commercial.
+    //
+    // Redemption is deliberately absent. It is authorised by POSSESSION of the
+    // code, by someone who may have no account at all, so there is no
+    // capability to hold — see the public redemption route.
+    public const LICENSING_VIEW = 'licensing:view';
+    public const LICENSING_ISSUE = 'licensing:issue';
+    public const LICENSING_MANAGE = 'licensing:manage';
+
     // Document/label designer (WC-docdesigner). Tenant-scoped. read = view/list
     // templates & blocks (list/get are ADDITIONALLY row-filtered server-side by
     // scope + a row's required_permission, so a technician never receives a gated
@@ -429,6 +449,9 @@ final class CorePermissions
             self::SUBSCRIPTIONS_MANAGE,
             self::BILLING_VIEW,
             self::BILLING_PAY,
+            self::LICENSING_VIEW,
+            self::LICENSING_ISSUE,
+            self::LICENSING_MANAGE,
             self::DOCUMENTS_READ,
             self::DOCUMENTS_WRITE,
             self::DOCUMENTS_PUBLISH,

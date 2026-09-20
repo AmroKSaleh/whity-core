@@ -1,0 +1,75 @@
+# A SECOND, INDEPENDENT SCHEDULER for the external watchdog.
+#
+# WHY THIS EXISTS. The watchdog Worker carries its own Cloudflare cron trigger
+# (*/2), and that is the primary schedule. On 2026-09-11 that trigger was
+# registered successfully and then did not fire for 25 minutes — verified, not
+# guessed: the KV namespace stayed empty across four expected ticks, while a
+# forced `POST /run` probed all three targets and recorded them on the first
+# attempt. The checks were fine; the scheduler was not.
+#
+# A monitor with no working schedule is decorative. It looks deployed, it
+# answers /status, and it watches nothing — which is a worse failure than
+# having no monitor, because it removes the impulse to check.
+#
+# So this is belt and braces, and deliberately on someone else's infrastructure.
+# If Cloudflare's cron is silent, GitHub's still fires; if GitHub Actions is
+# degraded, Cloudflare's still fires. Both running at once is harmless: alerts
+# fire on state TRANSITIONS, so a target that is already known-down produces
+# nothing on the second run.
+#
+# HONEST ABOUT THE TRADE. GitHub's scheduled workflows are best-effort and can
+# be delayed by several minutes under load, so this is a weaker guarantee than
+# a working Cloudflare cron — five minutes nominal, sometimes fifteen in
+# practice. It is a floor, not a replacement. If the Cloudflare trigger starts
+# firing reliably, this can be dropped to a much longer interval or removed.
+#
+# Free because whity-core is a public repository. On a private repo this cadence
+# would consume roughly 1,400 Actions minutes a month and would not be worth it.
+name: Watchdog fallback scheduler
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never let two runs overlap, and never queue a backlog: a check is only
+# interesting NOW, so a delayed run should be dropped rather than piled up.
+concurrency:
+  group: watchdog-fallback
+  cancel-in-progress: true
+
+jobs:
+  run:
+    name: Force a watchdog check cycle
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /run
+        env:
+          WATCHDOG_URL: ${{ secrets.WATCHDOG_URL }}
+          WATCHDOG_SECRET: ${{ secrets.WATCHDOG_SECRET }}
+        run: |
+          if [ -z "$WATCHDOG_URL" ] || [ -z "$WATCHDOG_SECRET" ]; then
+            echo "::warning::WATCHDOG_URL/WATCHDOG_SECRET are not set — the watchdog is not being driven from here."
+            exit 0
+          fi
+
+          # --fail-with-body so a non-2xx is a failure AND we can see why.
+          # The response is the Worker's own verdict, not a guess from here.
+          code=$(curl -s -o /tmp/out.json -w '%{http_code}' --max-time 60 \
+                   -X POST "${WATCHDOG_URL%/}/run" \
+                   -H "authorization: Bearer ${WATCHDOG_SECRET}")
+
+          echo "HTTP $code"
+          cat /tmp/out.json || true
+          echo
+
+          # A watchdog that cannot be reached is itself an outage worth failing
+          # over. This job going red is the last line of defence — the one
+          # signal that survives when the thing meant to alert you is down.
+          if [ "$code" != "200" ]; then
+            echo "::error::The watchdog did not accept a forced run (HTTP $code). Nothing is watching the deployment."
+            exit 1
+          fi

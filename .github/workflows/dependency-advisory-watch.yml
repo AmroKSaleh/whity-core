@@ -1,0 +1,99 @@
+# Re-check known advisories against code that has not changed.
+#
+# WHY THIS EXISTS. On 2026-09-10 two CRITICAL unauthenticated remote-code-
+# execution advisories were found live on the public deployment:
+#
+#   GHSA-p293-qw3h-jr36  RCE on windows-hosted Next.js servers
+#   GHSA-2xp9-vwfh-vxw4  RCE in the Image Optimization API via AVIF
+#
+# Nothing detected them, and nothing could have. The dependency version had not
+# changed, so no build ran and no test failed. A liveness probe cannot see it
+# either — a vulnerable server answers 200 exactly like a patched one. They
+# surfaced only because an unrelated pull request happened to run `npm audit`.
+#
+# That is the gap: every existing check is triggered by OUR code changing,
+# while this class of risk arrives when THEIR advisory database changes and our
+# code sits still. The only thing that catches it is a clock.
+#
+# It deliberately runs on a schedule rather than on push, and it alerts through
+# the external watchdog rather than relying on somebody noticing a red run in
+# the Actions tab — the whole lesson of that week being that a signal nobody
+# receives is not a signal.
+name: Dependency advisory watch
+
+on:
+  schedule:
+    # 06:00 UTC daily — a few hours after the nightly backup, early enough that
+    # a critical advisory is in front of a human before the working day.
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Known advisories against the current lockfile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # No `npm ci`. This reads the committed lockfile against the live advisory
+      # database, which is the whole point: the question is not "does it build"
+      # but "has the world's opinion of these exact versions changed".
+      - name: npm audit (critical)
+        id: audit
+        run: |
+          set +e
+          npm audit --audit-level=critical > audit.txt 2>&1
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+          cat audit.txt
+          set -e
+
+      - name: PHP advisories (composer)
+        id: composer
+        run: |
+          set +e
+          docker run --rm -v "$PWD":/app -w /app composer:2 audit --no-interaction > composer-audit.txt 2>&1
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+          cat composer-audit.txt
+          set -e
+
+      # Alerting goes through the external watchdog so every alarm in this
+      # project arrives on one channel. A missing secret must not silently
+      # swallow the alert — the step says so out loud and the job still fails.
+      - name: Raise the alarm
+        if: steps.audit.outputs.exit != '0' || steps.composer.outputs.exit != '0'
+        env:
+          WATCHDOG_URL: ${{ secrets.WATCHDOG_URL }}
+          WATCHDOG_SECRET: ${{ secrets.WATCHDOG_SECRET }}
+        run: |
+          SUMMARY="npm exit=${{ steps.audit.outputs.exit }}, composer exit=${{ steps.composer.outputs.exit }}"
+          DETAIL=$(head -c 1500 audit.txt; echo; head -c 800 composer-audit.txt)
+
+          if [ -z "$WATCHDOG_URL" ] || [ -z "$WATCHDOG_SECRET" ]; then
+            echo "::warning::WATCHDOG_URL/WATCHDOG_SECRET are not set — nobody is being told about this."
+          else
+            printf '%s' "$DETAIL" | python3 -c "
+          import json,os,sys,urllib.request
+          body = json.dumps({
+              'source': 'dependency advisory watch',
+              'text': 'A critical advisory now affects the committed lockfile.\n\n$SUMMARY\n\n' + sys.stdin.read()[:2500],
+          }).encode()
+          req = urllib.request.Request(
+              os.environ['WATCHDOG_URL'].rstrip('/') + '/alert',
+              data=body,
+              headers={'content-type': 'application/json',
+                       'authorization': 'Bearer ' + os.environ['WATCHDOG_SECRET']},
+          )
+          print(urllib.request.urlopen(req, timeout=20).status)
+          " || echo "::warning::could not reach the watchdog; the job failure below is the only signal"
+          fi
+
+          echo "::error::A critical advisory affects the committed lockfile. $SUMMARY"
+          exit 1

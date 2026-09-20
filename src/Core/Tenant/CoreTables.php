@@ -47,6 +47,14 @@ final class CoreTables
      * @var array<string, string>
      */
     private const TABLES = [
+        // WC-affiliates (migration 154). Listed here so no plugin can CLAIM
+        // these and declare a referential guard over money we owe people.
+        // Only `affiliate_referrals` is tenant-owned; the other three are about
+        // a party outside any tenant, like `plans` and `promotions`.
+        'affiliate_commissions' => '154_create_affiliates.php',
+        'affiliate_payouts' => '154_create_affiliates.php',
+        'affiliate_referrals' => '154_create_affiliates.php',
+        'affiliates' => '154_create_affiliates.php',
         'app_settings' => '024_create_app_settings.php',
         'audit_log' => '016_create_audit_log.php',
         'backup_codes' => '007_add_two_factor_support.php',
@@ -107,6 +115,9 @@ final class CoreTables
         'organizational_units' => '005_create_organizational_units.php',
         'ou_role_assignments' => '008_create_ou_role_assignments.php',
         'ou_types' => '102_create_ou_types.php',
+        'device_activation_codes' => '146_create_licensed_devices.php',
+        'device_activation_redemptions' => '146_create_licensed_devices.php',
+        'licensed_devices' => '146_create_licensed_devices.php',
         'password_resets' => '076_create_password_resets.php',
         'permission_delegations' => '014_create_permission_delegations.php',
         'payment_methods' => '143_create_payment_transactions.php',

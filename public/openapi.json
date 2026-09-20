@@ -1170,6 +1170,749 @@
                 ]
             }
         },
+        "/api/v1/affiliate-payouts/{id}": {
+            "delete": {
+                "operationId": "delete_api_v1_affiliate_payouts_id",
+                "summary": "Abandon a draft payout (operator)",
+                "tags": [
+                    "plans"
+                ],
+                "description": "Releases the commissions it claimed back onto the balance, so a draft assembled by mistake does not strand the money. A PAID payout is refused with 409: the money has gone, and releasing its commissions would put an amount already transferred back on the balance to be paid a second time.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The draft is discarded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AffiliatePayoutDiscardedResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "A payout that has been paid cannot be discarded",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "operationId": "patch_api_v1_affiliate_payouts_id",
+                "summary": "Record that the transfer happened (operator)",
+                "tags": [
+                    "plans"
+                ],
+                "description": "A `reference` is REQUIRED: it is the only thing connecting this row to a real bank movement, and it is what gets quoted back when an affiliate asks where their money went. Refused with 409 if the payout is already paid \u2014 re-marking would overwrite the reference of a transfer that really happened, destroying the only record of which payment settled it.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AffiliatePayoutSettleRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The payout is settled",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AffiliatePayoutSettledResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "This payout is already marked paid",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "A payment reference is required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/affiliates": {
+            "get": {
+                "operationId": "get_api_v1_affiliates",
+                "summary": "Who sends us customers, and what they are owed (operator)",
+                "tags": [
+                    "plans"
+                ],
+                "description": "Every affiliate, active and retired, each carrying what they have earned and not yet been paid. `balances` is a LIST because commissions are recorded in whatever currency the customer paid in, and a single total across currencies is wrong in a way nobody can see. Amounts are minor units, and already net of clawbacks \u2014 a refund writes a negative row rather than editing the original, so the balance is a SUM. Commissions already settled by a payout are excluded: a balance that included them would be read as money still owed and paid twice. `commission_bp` is BASIS POINTS \u2014 2000 is twenty per cent.",
+                "responses": {
+                    "200": {
+                        "description": "Every affiliate, with what they are owed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AffiliateListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_v1_affiliates",
+                "summary": "Create an affiliate (operator)",
+                "tags": [
+                    "plans"
+                ],
+                "description": "`code` is what goes in the link, so it is restricted to letters, digits, dots, dashes and underscores \u2014 anything needing escaping produces a link that breaks in somebody's email client, and the affiliate is the last to find out. Codes are unique without regard to case, matching how attribution looks them up: somebody writes the code on a slide and somebody else types it back. `commission_bp` is BASIS POINTS, 1 to 5000 \u2014 sending 20 for \"twenty per cent\" would create a 0.2% affiliate, so the units are enforced rather than guessed. `window_months` is how long after a referred customer's FIRST PAYMENT they keep earning, defaulting to 12. `promotion_id` attaches a discount the code also grants, which is how most affiliates persuade anybody to use theirs.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AffiliateCreateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The new affiliate",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AffiliateResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Another affiliate already uses that code",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "The affiliate cannot be created as described",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/affiliates/{id}": {
+            "patch": {
+                "operationId": "patch_api_v1_affiliates_id",
+                "summary": "Renegotiate terms, or end the arrangement (operator)",
+                "tags": [
+                    "plans"
+                ],
+                "description": "NOTHING HERE IS RETROACTIVE. Every commission already accrued copied the rate it was earned at onto its own row, so a new `commission_bp` moves only what has not been earned yet; and the window end of a referral is frozen when its first payment arrives, so a new `window_months` applies to referrals that have not converted. Sending `promotion_id: null` DETACHES the discount the code carried \u2014 omitting the field leaves it alone. `is_active: false` stops future earning and touches nothing earned: money already owed is owed whatever happens to the arrangement, which is why there is no way to delete an affiliate at all.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AffiliateUpdateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The affiliate as it now stands",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AffiliateResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such affiliate",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "The terms cannot be set as described",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/affiliates/{id}/payouts": {
+            "get": {
+                "operationId": "get_api_v1_affiliates_id_payouts",
+                "summary": "What has been paid to an affiliate, and what is drafted (operator)",
+                "tags": [
+                    "plans"
+                ],
+                "description": "Every payout, draft and paid, newest first. Three amounts per row and they are different facts: `total_minor` is what the affiliate earned, `withholding_minor` is what is kept back and remitted on their behalf, and `net_minor` is what actually leaves the bank. `withholding_bp` is the rate it was assembled at, snapshot onto the row so changing the setting cannot restate a payout already made.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Every payout for this affiliate",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AffiliatePayoutListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such affiliate",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_v1_affiliates_id_payouts",
+                "summary": "Gather what is owed into a draft payout (operator)",
+                "tags": [
+                    "plans"
+                ],
+                "description": "ONE CURRENCY PER CALL, because a payment is one: commissions are recorded in whatever the customer paid in, and a payout spanning currencies would need a conversion rate nobody stored. Assembling CLAIMS the commissions it covers, so what is owed and what is being paid can never overlap and a balance cannot be paid twice. NOTHING HERE MOVES MONEY \u2014 it produces a net figure for a person to transfer, who then records the reference via PATCH. Refused with 422 when nothing is payable, which includes a balance that refunds have taken to zero or below: that carries forward to net against later earnings rather than becoming a payment. Refused with 409 when another payout claimed some of these commissions mid-assembly \u2014 ask again, the balance really moved.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AffiliatePayoutAssembleRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The draft payout",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AffiliatePayoutAssembledResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such affiliate",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Another payout claimed these commissions first",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "There is nothing payable in that currency",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/agenda-items": {
             "get": {
                 "operationId": "get_api_v1_agenda_items",
@@ -2452,6 +3195,143 @@
                 }
             }
         },
+        "/api/v1/billing/checkout": {
+            "post": {
+                "operationId": "post_api_v1_billing_checkout",
+                "summary": "Somewhere to send this tenant to pay",
+                "tags": [
+                    "billing"
+                ],
+                "description": "Names a PLAN, never a price on the billing service \u2014 letting a caller pass the other side's price identifier through would make \"which plan am I buying\" a decision taken in the browser, and a tenant could name the cheapest price for the most expensive plan. Answers a single `url` to redirect to. WHAT IS BEHIND THAT URL IS NOT KNOWABLE HERE and must not become knowable: a card page, transfer instructions, or a method that does not exist yet. Requires the plan to be priced on these terms AND to carry the handle the billing service knows it by; without one, 422.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/CheckoutStartRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Where to send the payer",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/CheckoutStartResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "This deployment does not sell subscriptions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "This workspace already has an active subscription",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "That plan cannot be bought on these terms",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "The billing service refused the request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "The billing service is temporarily unreachable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/billing/invoices": {
             "get": {
                 "operationId": "get_api_v1_billing_invoices",
@@ -2828,6 +3708,494 @@
                         "bearerAuth": []
                     }
                 ]
+            }
+        },
+        "/api/v1/billing/plans": {
+            "get": {
+                "operationId": "get_api_v1_billing_plans",
+                "summary": "What this tenant can buy",
+                "tags": [
+                    "billing"
+                ],
+                "description": "The operator's plan catalogue is gated on `plans:manage`, which a paying customer never holds \u2014 so without this a tenant could be told to pay and had no way to discover what for, since checkout names a `plan_key`. ONLY GENUINELY PURCHASABLE PLANS: active, priced in this tenant's currency, and carrying the handle the billing service knows the price by. A plan missing any of those would produce a button that 422s. Amounts are MINOR UNITS \u2014 15000 is 15.000 in a three-decimal currency like the dinar \u2014 so format from the integer and the code, and never divide by 100. `is_per_seat` and `is_per_device` say what the amount multiplies by, so a price can be shown as \"per seat\" rather than as a total nobody is charged. An empty list is the ordinary answer on a deployment that sells nothing.",
+                "responses": {
+                    "200": {
+                        "description": "Plans this tenant can buy",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PurchasablePlanListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/billing/quantity": {
+            "post": {
+                "operationId": "post_api_v1_billing_quantity",
+                "summary": "Buy more seats, or fewer",
+                "tags": [
+                    "billing"
+                ],
+                "description": "THE ONLY CHANGE THE BILLING SERVICE SUPPORTS IN PLACE. There is no way to move a subscription to a different PLAN: doing so would mean cancelling and buying again, which either charges twice or leaves a gap in cover, so it is refused rather than faked. THE SUBSCRIPTION IS TAKEN FROM THIS DEPLOYMENT'S OWN RECORD, never from the request \u2014 a caller naming a subscription identifier would be naming somebody else's the moment they guessed one. PRORATION IS NOT DESCRIBED HERE BECAUSE IT IS NOT OURS: an increase is charged immediately for the unused part of the period, and a decrease is never charged or refunded and applies at the next renewal. Quoting a figure of our own would put a number on screen that the invoice then contradicts. A quantity below 1 is refused \u2014 that is a cancellation by another name.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/BillingQuantityRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The change was applied",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BillingQuantityResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "This workspace has no subscription to change",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "quantity must be a whole number of at least 1",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "The billing service refused the request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "The billing service is temporarily unreachable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/billing/receipts": {
+            "get": {
+                "operationId": "get_api_v1_billing_receipts",
+                "summary": "What this tenant has paid",
+                "tags": [
+                    "billing"
+                ],
+                "description": "RECEIPTS, NOT INVOICES THIS DEPLOYMENT ISSUED. A tenant billed by the external service has no local invoice at all \u2014 the local billing run stands down for them precisely so nobody is charged twice \u2014 so the invoice list on the billing screen was empty for customers who had just paid. Accurate about our records, and a lie about their money. These are read back from whoever took the payment and are NEVER used to decide access: whether a tenant may use paid features is a separate question with a separate answer, and reconstructing it from payments would mean keeping a copy of a status table this side does not maintain. Amounts are MINOR UNITS with a currency code. Newest first. An empty list is the ordinary answer for a tenant who has never paid, and for a deployment that sells nothing.",
+                "responses": {
+                    "200": {
+                        "description": "What this tenant has paid",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BillingReceiptListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "The billing service refused the request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "The billing service is temporarily unreachable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/billing/return": {
+            "get": {
+                "operationId": "get_api_v1_billing_return",
+                "summary": "The payer is back \u2014 what actually happened?",
+                "tags": [
+                    "billing"
+                ],
+                "description": "THE QUERY STRING IS EVIDENCE OF NOTHING. The payer arrives at `?checkout=<ref>&status=<s>` in a browser they control, and anyone can type `status=completed` into an address bar. Nothing in it is signed and nothing about it proves a payment ever happened. This route ignores it as an answer and re-reads access from the billing service, which is the authority. `checkout_status` in the reply is read server-to-server for WORDING only \u2014 so \"your card was declined\" can be shown instead of a silent redirect \u2014 and is null when the billing service could not be asked. Access is decided by `has_access` alone.",
+                "responses": {
+                    "200": {
+                        "description": "What the billing service says about this tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/BillingAccessResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "502": {
+                        "description": "The billing service refused the request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "The billing service is temporarily unreachable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/billing/webhook": {
+            "post": {
+                "operationId": "post_api_v1_billing_webhook",
+                "summary": "Subscription-change notifications (signed, not user-authenticated)",
+                "tags": [
+                    "billing"
+                ],
+                "description": "UNAUTHENTICATED BY NECESSITY: the sender is a server, holds no session, and never will. THE SIGNATURE IS THE CREDENTIAL \u2014 `X-Pay-Signature` is `sha256=` plus the HMAC-SHA256 of `X-Pay-Timestamp . \".\" . rawBody`, verified with a constant-time comparison over the RAW bytes before the payload is decoded, and refused outright when no secret is configured. Deliveries repeat by design, so `X-Pay-Event-Id` is recorded and a replay is acknowledged without being acted on twice. THE BODY IS NOT A WRITE PATH: the only thing taken from it is which subject to go and ask about, so even a correctly signed forgery can do no more than make this deployment re-read its own state. Events other than subscription changes are acknowledged and ignored \u2014 a non-2xx would just burn the sender's retry budget on something that will never become interesting.",
+                "responses": {
+                    "200": {
+                        "description": "Received, or deliberately ignored",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object",
+                                    "properties": {
+                                        "received": {
+                                            "type": "boolean"
+                                        }
+                                    },
+                                    "required": [
+                                        "received"
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "The signature did not verify, or the delivery was stale",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Temporarily could not be acted on \u2014 retry",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
             }
         },
         "/api/v1/branding": {
@@ -15848,6 +17216,392 @@
                 ]
             }
         },
+        "/api/v1/licensing/codes": {
+            "post": {
+                "operationId": "post_api_v1_licensing_codes",
+                "summary": "Mint an activation code",
+                "tags": [
+                    "licensing"
+                ],
+                "description": "The commercial act: something was sold, so a code exists to redeem. THE CODE IS RETURNED ONCE AND IS NEVER RETRIEVABLE IN FULL AGAIN \u2014 stored canonically, the same contract as a generated API token. Bind it to a unit with `licensed_device_id` (which must belong to the caller's tenant, or 404), or omit it and let the redeemer name the serial. `max_redemptions` defaults to 1; higher values exist for a classroom set redeemed from one printed card. `expires_at` is YYYY-MM-DD or YYYY-MM-DD HH:MM:SS.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ActivationCodeIssueRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The code, shown for the only time",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ActivationCodeIssuedResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such device in this tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "The redemption limit or expiry cannot be used",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/licensing/codes/{id}/revoke": {
+            "post": {
+                "operationId": "post_api_v1_licensing_codes_id_revoke",
+                "summary": "Kill a code that leaked",
+                "tags": [
+                    "licensing"
+                ],
+                "description": "Irreversible, and scoped to the caller's tenant. Redemptions already made STAND \u2014 revoking cancels what the code can still do, not what it did, because the units it activated are in service and de-licensing them would strand a classroom mid-lesson. A code that does not exist, belongs to another tenant, or was already revoked answers 404 alike.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The code is dead",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ActivationCodeRevokedResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such code, or it was already revoked",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/licensing/devices": {
+            "get": {
+                "operationId": "get_api_v1_licensing_devices",
+                "summary": "The units this tenant is licensed for",
+                "tags": [
+                    "licensing"
+                ],
+                "description": "Newest first, capped at 500. Carries the three timestamps separately \u2014 `provisioned_at` (the serial was imported), `activated_at` (a code was redeemed against it) and `last_seen_at` (it last checked in) \u2014 because which one a per-device price bills on is configuration, not a property of the row. A unit with `activated_at` set has been put into service; one without is stock.",
+                "responses": {
+                    "200": {
+                        "description": "This tenant's licensed units",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/LicensedDeviceListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_v1_licensing_devices",
+                "summary": "Provision serials in bulk",
+                "tags": [
+                    "licensing"
+                ],
+                "description": "BULK BECAUSE STOCK ARRIVES IN BOXES \u2014 up to 500 per request. Each entry is a serial string, or an object with `serial_number` and an optional `label`. A serial this tenant already has is SKIPPED, not rejected: re-uploading a spreadsheet is the normal way this goes wrong, and failing the whole batch on row 400 would leave the caller with no idea which 399 landed. The response counts what was created and what was already there; answers 207 when some entries were refused, with a reason for each. Serials are unique WITHIN a tenant \u2014 two customers may hold hardware carrying the same manufacturer serial.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DeviceProvisionRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Every serial was accepted or already present",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DeviceProvisionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "207": {
+                        "description": "Imported, with some entries refused",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DeviceProvisionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "serial_numbers missing, empty, or over the 500 limit",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/login": {
             "post": {
                 "operationId": "post_api_v1_login",
@@ -22910,6 +24664,83 @@
                 ]
             }
         },
+        "/api/v1/plans/entitlement-catalogue": {
+            "get": {
+                "operationId": "get_api_v1_plans_entitlement_catalogue",
+                "summary": "The catalogue of sellable limits (operator)",
+                "tags": [
+                    "plans"
+                ],
+                "description": "Every entitlement a tier can set: its kind (bool flag or int cap), its baseline grant, a human description, the calendar period it resets on when it is a metered allowance, and the plugin that declared it (null for core). Distinct from GET /api/v1/tenants/{id}/entitlements, which answers what one workspace receives; this answers what can be priced at all, and needs no tenant.",
+                "responses": {
+                    "200": {
+                        "description": "The sellable-limit catalogue",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/EntitlementCatalogueResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/plans/{id}": {
             "delete": {
                 "operationId": "delete_api_v1_plans_id",
@@ -23303,6 +25134,123 @@
                 ]
             }
         },
+        "/api/v1/plans/{id}/move-subscribers": {
+            "post": {
+                "operationId": "post_api_v1_plans_id_move_subscribers",
+                "summary": "Move every workspace on a tier to another one (operator)",
+                "tags": [
+                    "plans"
+                ],
+                "description": "The remedy for a tier that cannot be deleted because people are on it. Each workspace resolves to the limits of the destination tier immediately.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PlanMoveSubscribersRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "How many workspaces moved",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PlanMoveSubscribersResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/plans/{id}/prices": {
             "get": {
                 "operationId": "get_api_v1_plans_id_prices",
@@ -23395,7 +25343,7 @@
                 "tags": [
                     "plans"
                 ],
-                "description": "A plan may carry many prices \u2014 one per currency, billing period and seat basis \u2014 but only ONE LIVE price per combination of those. A second live price for the same terms is refused with 409 rather than accepted, because two of them would make the checkout, the invoice and the price list each pick differently and somebody be charged an amount no screen displayed. Retire the existing one first. `unit_amount` must be an integer of minor units; a decimal is refused with 422, since 49.9 truncating to 49 is a hundredfold error that looks like a real price.",
+                "description": "A plan may carry many prices \u2014 one per currency, billing period and unit basis \u2014 but only ONE LIVE price per combination of those. A second live price for the same terms is refused with 409 rather than accepted, because two of them would make the checkout, the invoice and the price list each pick differently and somebody be charged an amount no screen displayed. Retire the existing one first. `unit_amount` must be an integer of minor units; a decimal is refused with 422, since 49.9 truncating to 49 is a hundredfold error that looks like a real price. THE UNIT BASIS IS WHAT `unit_amount` MULTIPLIES BY: neither flag set prices the plan flat, `is_per_seat` multiplies by the seats the tenant holds, and `is_per_device` by its licensed devices. Both at once is refused with 422 \u2014 a price multiplies by one thing, or by nothing. Which devices count on a per-device price is the `licensing.billing_basis` setting, resolved per tenant.",
                 "parameters": [
                     {
                         "name": "id",
@@ -23574,6 +25522,93 @@
                     },
                     "404": {
                         "description": "No such price on this plan",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/plans/{id}/usage": {
+            "get": {
+                "operationId": "get_api_v1_plans_id_usage",
+                "summary": "What still points at a tier (operator)",
+                "tags": [
+                    "plans"
+                ],
+                "description": "Subscribers, invoices, prices, limits and promotion links, plus whether the tier may be deleted. A tier with live subscribers or invoices is RETIRED rather than removed: tenant_plan.plan_id and invoices.plan_id are both ON DELETE SET NULL, so deleting one would silently detach its customers and blank it out of invoices that have already been paid.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "What the tier still holds",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PlanUsageResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Plan not found",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -25453,6 +27488,98 @@
                     },
                     "503": {
                         "description": "Temporarily unavailable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/public/licensing/redeem": {
+            "post": {
+                "operationId": "post_api_v1_public_licensing_redeem",
+                "summary": "Activate a device with a code (public, unauthenticated)",
+                "tags": [
+                    "licensing"
+                ],
+                "description": "UNAUTHENTICATED BY DESIGN. The person typing the code may be an end user or a student with no account and no session, so they are authorised by POSSESSION: the code's own entropy and check characters, the pre-auth IP rate limiter, and the fact that every fact used to resolve the activation comes from the code rather than the caller. Nothing the caller sends is trusted, including any tenant they name. Send `serial_number` \u2014 the number printed on the unit \u2014 when the code is not already bound to one; never an internal id, which a person cannot know and which would let a caller enumerate rows by number. ERRORS NEVER DISTINGUISH AN UNKNOWN CODE FROM A MISTYPED ONE, because doing so would let an anonymous caller learn which well-formed codes exist.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ActivationRedeemRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The unit is activated",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ActivationRedeemResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "The code cannot be redeemed \u2014 invalid, expired, revoked, spent, or needing a serial",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many redemption attempts from this address",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -35259,6 +37386,86 @@
     },
     "components": {
         "schemas": {
+            "ActivationCodeIssueRequest": {
+                "type": "object",
+                "properties": {
+                    "licensed_device_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "max_redemptions": {
+                        "type": "integer"
+                    },
+                    "expires_at": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                }
+            },
+            "ActivationCodeIssuedResponse": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "code": {
+                        "type": "string"
+                    },
+                    "max_redemptions": {
+                        "type": "integer"
+                    },
+                    "expires_at": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "id",
+                    "code",
+                    "max_redemptions"
+                ]
+            },
+            "ActivationCodeRevokedResponse": {
+                "type": "object",
+                "properties": {
+                    "revoked": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "revoked"
+                ]
+            },
+            "ActivationRedeemRequest": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string"
+                    },
+                    "serial_number": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "code"
+                ]
+            },
+            "ActivationRedeemResponse": {
+                "type": "object",
+                "properties": {
+                    "activated": {
+                        "type": "boolean"
+                    },
+                    "device_id": {
+                        "type": "integer",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "activated"
+                ]
+            },
             "AdminPasswordResetSentResponse": {
                 "type": "object",
                 "properties": {
@@ -35355,6 +37562,324 @@
                     "stats"
                 ]
             },
+            "Affiliate": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "code": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "email": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "profile_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "commission_bp": {
+                        "type": "integer"
+                    },
+                    "window_months": {
+                        "type": "integer"
+                    },
+                    "promotion_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "is_active": {
+                        "type": "boolean"
+                    },
+                    "referral_count": {
+                        "type": "integer"
+                    },
+                    "converted_count": {
+                        "type": "integer"
+                    },
+                    "balances": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AffiliateBalance"
+                        }
+                    }
+                },
+                "required": [
+                    "id",
+                    "code",
+                    "name",
+                    "commission_bp",
+                    "window_months",
+                    "is_active",
+                    "referral_count",
+                    "converted_count",
+                    "balances"
+                ]
+            },
+            "AffiliateBalance": {
+                "type": "object",
+                "properties": {
+                    "currency": {
+                        "type": "string"
+                    },
+                    "amount_minor": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "currency",
+                    "amount_minor"
+                ]
+            },
+            "AffiliateCreateRequest": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "commission_bp": {
+                        "type": "integer"
+                    },
+                    "window_months": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "email": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "profile_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "promotion_id": {
+                        "type": "integer",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "code",
+                    "name",
+                    "commission_bp"
+                ]
+            },
+            "AffiliateListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/Affiliate"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "AffiliatePayout": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "affiliate_id": {
+                        "type": "integer"
+                    },
+                    "total_minor": {
+                        "type": "integer"
+                    },
+                    "withholding_bp": {
+                        "type": "integer"
+                    },
+                    "withholding_minor": {
+                        "type": "integer"
+                    },
+                    "net_minor": {
+                        "type": "integer"
+                    },
+                    "currency": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "reference": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "paid_at": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "created_at": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "commission_count": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "id",
+                    "affiliate_id",
+                    "total_minor",
+                    "withholding_bp",
+                    "withholding_minor",
+                    "net_minor",
+                    "currency",
+                    "status",
+                    "commission_count"
+                ]
+            },
+            "AffiliatePayoutAssembleRequest": {
+                "type": "object",
+                "properties": {
+                    "currency": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "currency"
+                ]
+            },
+            "AffiliatePayoutAssembledResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "payout_id": {
+                                "type": "integer"
+                            },
+                            "commissions": {
+                                "type": "integer"
+                            },
+                            "total_minor": {
+                                "type": "integer"
+                            },
+                            "withholding_minor": {
+                                "type": "integer"
+                            },
+                            "net_minor": {
+                                "type": "integer"
+                            }
+                        },
+                        "required": [
+                            "payout_id",
+                            "commissions",
+                            "total_minor",
+                            "withholding_minor",
+                            "net_minor"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "AffiliatePayoutDiscardedResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "discarded": {
+                                "type": "boolean"
+                            }
+                        },
+                        "required": [
+                            "discarded"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "AffiliatePayoutListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AffiliatePayout"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "AffiliatePayoutSettleRequest": {
+                "type": "object",
+                "properties": {
+                    "reference": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "reference"
+                ]
+            },
+            "AffiliatePayoutSettledResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "settled": {
+                                "type": "boolean"
+                            }
+                        },
+                        "required": [
+                            "settled"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "AffiliateResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/Affiliate"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "AffiliateUpdateRequest": {
+                "type": "object",
+                "properties": {
+                    "commission_bp": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "window_months": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "promotion_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "is_active": {
+                        "type": "boolean",
+                        "nullable": true
+                    }
+                }
+            },
             "ApprovalStatusResponse": {
                 "type": "object",
                 "properties": {
@@ -35446,6 +37971,119 @@
                 "required": [
                     "data",
                     "pagination"
+                ]
+            },
+            "BillingAccessResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "has_access": {
+                                "type": "boolean"
+                            },
+                            "status": {
+                                "type": "string",
+                                "nullable": true
+                            },
+                            "plan": {
+                                "type": "string",
+                                "nullable": true
+                            },
+                            "access_until": {
+                                "type": "string",
+                                "nullable": true
+                            },
+                            "cancel_at_period_end": {
+                                "type": "boolean"
+                            },
+                            "checkout_status": {
+                                "type": "string",
+                                "nullable": true
+                            }
+                        },
+                        "required": [
+                            "has_access"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "BillingQuantityRequest": {
+                "type": "object",
+                "properties": {
+                    "quantity": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "quantity"
+                ]
+            },
+            "BillingQuantityResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "has_access": {
+                                "type": "boolean"
+                            }
+                        },
+                        "required": [
+                            "has_access"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "BillingReceipt": {
+                "type": "object",
+                "properties": {
+                    "number": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string"
+                    },
+                    "total_minor": {
+                        "type": "integer"
+                    },
+                    "currency": {
+                        "type": "string"
+                    },
+                    "paid_at": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "issued_at": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "number",
+                    "status",
+                    "total_minor",
+                    "currency"
+                ]
+            },
+            "BillingReceiptListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/BillingReceipt"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "Branding": {
@@ -35595,6 +38233,44 @@
                     "code",
                     "reason",
                     "detail"
+                ]
+            },
+            "CheckoutStartRequest": {
+                "type": "object",
+                "properties": {
+                    "plan_key": {
+                        "type": "string"
+                    },
+                    "billing_period": {
+                        "type": "string",
+                        "enum": [
+                            "month",
+                            "year",
+                            "once"
+                        ]
+                    }
+                },
+                "required": [
+                    "plan_key"
+                ]
+            },
+            "CheckoutStartResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "url": {
+                                "type": "string"
+                            }
+                        },
+                        "required": [
+                            "url"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "ConveningBody": {
@@ -36617,6 +39293,74 @@
                 },
                 "required": [
                     "data"
+                ]
+            },
+            "DeviceProvisionRequest": {
+                "type": "object",
+                "properties": {
+                    "serial_numbers": {
+                        "type": "array",
+                        "maxItems": 500,
+                        "items": {
+                            "oneOf": [
+                                {
+                                    "type": "string"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "serial_number": {
+                                            "type": "string"
+                                        },
+                                        "label": {
+                                            "type": "string",
+                                            "nullable": true
+                                        }
+                                    },
+                                    "required": [
+                                        "serial_number"
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                },
+                "required": [
+                    "serial_numbers"
+                ]
+            },
+            "DeviceProvisionResponse": {
+                "type": "object",
+                "properties": {
+                    "created": {
+                        "type": "integer"
+                    },
+                    "already_present": {
+                        "type": "integer"
+                    },
+                    "rejected": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "serial_number": {
+                                    "type": "string",
+                                    "nullable": true
+                                },
+                                "reason": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "reason"
+                            ]
+                        }
+                    }
+                },
+                "required": [
+                    "created",
+                    "already_present",
+                    "rejected"
                 ]
             },
             "Document": {
@@ -38160,6 +40904,52 @@
                     },
                     "description": {
                         "type": "string"
+                    }
+                },
+                "required": [
+                    "type",
+                    "default",
+                    "description"
+                ]
+            },
+            "EntitlementCatalogueResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "$ref": "#/components/schemas/EntitlementDefinitionSchema"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "EntitlementDefinitionSchema": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string"
+                    },
+                    "default": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "period": {
+                        "type": "string",
+                        "enum": [
+                            "day",
+                            "week",
+                            "month"
+                        ],
+                        "nullable": true
+                    },
+                    "owner": {
+                        "type": "string",
+                        "nullable": true
                     }
                 },
                 "required": [
@@ -40425,6 +43215,60 @@
                         "type": "boolean"
                     }
                 }
+            },
+            "LicensedDevice": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "serial_number": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "provisioned",
+                            "active",
+                            "retired"
+                        ]
+                    },
+                    "provisioned_at": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "activated_at": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "last_seen_at": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "id",
+                    "serial_number",
+                    "status"
+                ]
+            },
+            "LicensedDeviceListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/LicensedDevice"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
             },
             "LocalizedLabel": {
                 "type": "object",
@@ -43057,6 +45901,10 @@
                     "is_active": {
                         "type": "boolean"
                     },
+                    "provider": {
+                        "type": "string",
+                        "nullable": true
+                    },
                     "sort_order": {
                         "type": "integer"
                     },
@@ -43153,6 +46001,39 @@
                     "data"
                 ]
             },
+            "PlanMoveSubscribersRequest": {
+                "type": "object",
+                "properties": {
+                    "to_plan_id": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "to_plan_id"
+                ]
+            },
+            "PlanMoveSubscribersResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/PlanMoveSubscribersResult"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "PlanMoveSubscribersResult": {
+                "type": "object",
+                "properties": {
+                    "moved": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "moved"
+                ]
+            },
             "PlanPrice": {
                 "type": "object",
                 "properties": {
@@ -43179,6 +46060,9 @@
                     "is_per_seat": {
                         "type": "boolean"
                     },
+                    "is_per_device": {
+                        "type": "boolean"
+                    },
                     "is_active": {
                         "type": "boolean"
                     },
@@ -43196,6 +46080,7 @@
                     "unit_amount",
                     "billing_period",
                     "is_per_seat",
+                    "is_per_device",
                     "is_active"
                 ]
             },
@@ -43217,6 +46102,9 @@
                         ]
                     },
                     "is_per_seat": {
+                        "type": "boolean"
+                    },
+                    "is_per_device": {
                         "type": "boolean"
                     }
                 },
@@ -43300,6 +46188,10 @@
                     "is_active": {
                         "type": "boolean"
                     },
+                    "provider": {
+                        "type": "string",
+                        "nullable": true
+                    },
                     "sort_order": {
                         "type": "integer"
                     },
@@ -43337,6 +46229,56 @@
                         "type": "integer"
                     }
                 }
+            },
+            "PlanUsage": {
+                "type": "object",
+                "properties": {
+                    "subscribers": {
+                        "type": "integer"
+                    },
+                    "invoices": {
+                        "type": "integer"
+                    },
+                    "prices": {
+                        "type": "integer"
+                    },
+                    "limits": {
+                        "type": "integer"
+                    },
+                    "promotions": {
+                        "type": "integer"
+                    },
+                    "deletable": {
+                        "type": "boolean"
+                    },
+                    "permanently_undeletable": {
+                        "type": "boolean"
+                    },
+                    "refusal_reason": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "subscribers",
+                    "invoices",
+                    "prices",
+                    "limits",
+                    "promotions",
+                    "deletable",
+                    "permanently_undeletable"
+                ]
+            },
+            "PlanUsageResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/PlanUsage"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
             },
             "PlatformLatestReleaseResponse": {
                 "type": "object",
@@ -43809,6 +46751,66 @@
                             "routed",
                             "ignored_keys"
                         ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "PurchasablePlan": {
+                "type": "object",
+                "properties": {
+                    "plan_key": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "description": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "unit_amount": {
+                        "type": "integer"
+                    },
+                    "currency": {
+                        "type": "string"
+                    },
+                    "billing_period": {
+                        "type": "string",
+                        "enum": [
+                            "month",
+                            "year",
+                            "once"
+                        ]
+                    },
+                    "is_per_seat": {
+                        "type": "boolean"
+                    },
+                    "is_per_device": {
+                        "type": "boolean"
+                    },
+                    "is_addon": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "plan_key",
+                    "name",
+                    "unit_amount",
+                    "currency",
+                    "billing_period",
+                    "is_addon"
+                ]
+            },
+            "PurchasablePlanListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/PurchasablePlan"
+                        }
                     }
                 },
                 "required": [
