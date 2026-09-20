@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 
 import { __test__ } from '../src/index.js';
 
-const { humanDuration, timingSafeEqual, config, checkTarget, checkHeartbeats, handleRequest, renderStatusPage, recordHistory, dayKey } = __test__;
+const { humanDuration, timingSafeEqual, config, checkTarget, checkHeartbeats, handleRequest, renderStatusPage, recordHistory, dayKey, runChecks } = __test__;
 
 // ── a KV stand-in ───────────────────────────────────────────────────────────
 
@@ -502,11 +502,14 @@ test('an unlabelled target still renders, under its key', async () => {
   // is still a component somebody needs to see the status of.
   const { env, store } = makeEnv();
   store.set('meta:last-run', JSON.stringify({ at: Date.now() }));
-  store.set('state:queue', JSON.stringify({ alertedStatus: 'up' }));
+  store.set('state:tileserver', JSON.stringify({ alertedStatus: 'up' }));
 
-  const cfg = { ...CFG, targets: [{ name: 'queue', url: 'https://q.test/' }] };
+  // Deliberately a key LABELS does not know. It used to be `queue`, which
+  // stopped being unlabelled the moment core's components were imported — the
+  // assertion was right and its example had simply been adopted.
+  const cfg = { ...CFG, targets: [{ name: 'tileserver', url: 'https://t.test/' }] };
   const html = await (await renderStatusPage(env, cfg)).text();
-  assert.match(html, />queue</);
+  assert.match(html, />tileserver</);
 });
 
 test('STALE DATA IS NEVER REPORTED AS OPERATIONAL', async () => {
@@ -657,6 +660,244 @@ test('with no history at all the bar says so rather than showing green', async (
   const html = await (await renderStatusPage(env, HIST_CFG)).text();
   assert.equal((html.match(/class="seg ok"/g) || []).length, 0);
   assert.match(html, /No history yet/);
+});
+
+// ── core's component feed ───────────────────────────────────────────────────
+
+// The edge can only probe what has a public hostname, which leaves the queue,
+// the scheduler and the render service unwatched. Core measures those already
+// and publishes them at /api/v1/status; these targets read that verdict.
+
+const FEED_URL = 'https://app.test/api/v1/status';
+
+/** Serve the component feed (and still capture Telegram sends). */
+function stubFeed(sent, components, { status = 200, throws = false, body = null } = {}) {
+  globalThis.fetch = async (url, init) => {
+    if (isTelegram(url)) {
+      sent.push(JSON.parse(init.body).text);
+      return new Response('{"ok":true}', { status: 200 });
+    }
+    if (throws) throw new Error('connection refused');
+    const payload = body !== null ? body : JSON.stringify({ status: 'ok', components });
+    return new Response(payload, { status, headers: { 'content-type': 'application/json' } });
+  };
+}
+
+const feedEnv = (env, targets, extra = {}) => ({
+  ...env,
+  COMPONENTS_URL: FEED_URL,
+  PROBE_TARGETS: JSON.stringify(targets),
+  ...extra,
+});
+
+const TWO_COMPONENTS = [
+  { name: 'queue', component: 'queue' },
+  { name: 'render', component: 'render' },
+];
+
+test('a component the application reports as down alerts by name', async () => {
+  const { env, store, sent } = makeEnv();
+  stubFeed(sent, [
+    { key: 'queue', name: 'Background jobs', status: 'down' },
+    { key: 'render', name: 'Document rendering', status: 'operational' },
+  ]);
+
+  // Twice: FAILURES_BEFORE_ALERT is 2, so one bad reading must not page.
+  await runChecks(feedEnv(env, TWO_COMPONENTS, { FAILURES_BEFORE_ALERT: '2' }));
+  await runChecks(feedEnv(env, TWO_COMPONENTS, { FAILURES_BEFORE_ALERT: '2' }));
+
+  assert.equal(JSON.parse(store.get('state:queue')).alertedStatus, 'down');
+  assert.equal(JSON.parse(store.get('state:render')).alertedStatus, 'up', 'a healthy neighbour is untouched');
+  assert.ok(
+    sent.some((m) => /queue is DOWN/i.test(m) && /Background jobs/.test(m)),
+    "the alert carries the name the application uses for the component, not just a URL"
+  );
+});
+
+test('degraded is a failure, not a shrug', async () => {
+  const { env, store, sent } = makeEnv();
+  stubFeed(sent, [{ key: 'queue', name: 'Background jobs', status: 'degraded' }]);
+
+  await runChecks(feedEnv(env, [{ name: 'queue', component: 'queue' }], { FAILURES_BEFORE_ALERT: '1' }));
+
+  assert.equal(
+    JSON.parse(store.get('state:queue')).alertedStatus,
+    'down',
+    'this page has two states and "working, but not properly" belongs in the failing one'
+  );
+});
+
+test('an unreachable feed fails every component that depends on it', async () => {
+  const { env, store, sent } = makeEnv();
+  stubFeed(sent, [], { throws: true });
+
+  await runChecks(feedEnv(env, TWO_COMPONENTS, { FAILURES_BEFORE_ALERT: '1' }));
+
+  // Freezing them on their last good verdict with nobody told is the failure
+  // this whole component exists to prevent.
+  assert.equal(JSON.parse(store.get('state:queue')).alertedStatus, 'down');
+  assert.equal(JSON.parse(store.get('state:render')).alertedStatus, 'down');
+  assert.ok(sent.some((m) => /feed unreachable/i.test(m)), 'the alert says the feed broke, not that the queue did');
+});
+
+test('a feed that answers with the wrong shape is a failure, not an empty pass', async () => {
+  const { env, store, sent } = makeEnv();
+  stubFeed(sent, null, { body: JSON.stringify({ status: 'ok' }) });
+
+  await runChecks(feedEnv(env, [{ name: 'queue', component: 'queue' }], { FAILURES_BEFORE_ALERT: '1' }));
+
+  assert.equal(JSON.parse(store.get('state:queue')).alertedStatus, 'down');
+});
+
+test('a component that vanishes from the feed is not treated as healthy', async () => {
+  const { env, store, sent } = makeEnv();
+  stubFeed(sent, [{ key: 'render', name: 'Document rendering', status: 'operational' }]);
+
+  await runChecks(feedEnv(env, TWO_COMPONENTS, { FAILURES_BEFORE_ALERT: '1' }));
+
+  assert.equal(
+    JSON.parse(store.get('state:queue')).alertedStatus,
+    'down',
+    'absence of evidence is not evidence of health'
+  );
+  assert.equal(JSON.parse(store.get('state:render')).alertedStatus, 'up');
+});
+
+test('a component the application cannot measure is neither alerted nor recorded', async () => {
+  const { env, store, sent } = makeEnv();
+  stubFeed(sent, [
+    { key: 'queue', name: 'Background jobs', status: 'unknown' },
+    { key: 'render', name: 'Document rendering', status: 'operational' },
+  ]);
+
+  await runChecks(feedEnv(env, TWO_COMPONENTS, { FAILURES_BEFORE_ALERT: '1' }));
+  await runChecks(feedEnv(env, TWO_COMPONENTS, { FAILURES_BEFORE_ALERT: '1' }));
+
+  // Paging someone because a component was never measured is how a monitor
+  // gets muted — but it must not be filed as healthy either.
+  // Scoped to queue deliberately: this fixture has no backup heartbeat, so the
+  // dead-man's switch fires its own unrelated alert, and asserting total
+  // silence would be asserting something this test does not control.
+  assert.ok(
+    !sent.some((m) => /queue/i.test(m)),
+    'unknown is not a fault and must not alert'
+  );
+  assert.equal(store.get('state:queue'), undefined, 'nothing observed, so nothing recorded');
+  assert.equal(JSON.parse(store.get('state:render')).alertedStatus, 'up', 'its neighbour still reports');
+});
+
+test('an unknown component leaves a GAP in history rather than a green day', async () => {
+  const { env, store, sent } = makeEnv();
+  stubFeed(sent, [{ key: 'queue', name: 'Background jobs', status: 'unknown' }]);
+
+  await runChecks(feedEnv(env, [{ name: 'queue', component: 'queue' }]));
+
+  assert.equal(
+    store.get('history:queue'),
+    undefined,
+    'the same thing the bar draws for a day nobody looked at'
+  );
+});
+
+test('the feed is fetched ONCE however many components read it', async () => {
+  const { env, sent } = makeEnv();
+  let feedCalls = 0;
+  globalThis.fetch = async (url, init) => {
+    if (isTelegram(url)) {
+      sent.push(JSON.parse(init.body).text);
+      return new Response('{"ok":true}', { status: 200 });
+    }
+    feedCalls++;
+    return new Response(
+      JSON.stringify({ components: [{ key: 'queue', status: 'operational' }, { key: 'render', status: 'operational' }] }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    );
+  };
+
+  await runChecks(feedEnv(env, TWO_COMPONENTS));
+
+  assert.equal(feedCalls, 1, 'four polls of one document are four chances to disagree about one instant');
+});
+
+test("the imported components appear on the page under core's own names", async () => {
+  const { env, store } = makeEnv();
+  store.set('meta:last-run', JSON.stringify({ at: Date.now() }));
+  store.set('state:queue', JSON.stringify({ alertedStatus: 'up' }));
+  store.set('state:render', JSON.stringify({ alertedStatus: 'up' }));
+
+  const cfg = { ...CFG, componentsUrl: FEED_URL, targets: [
+    { name: 'queue', component: 'queue', url: FEED_URL },
+    { name: 'render', component: 'render', url: FEED_URL },
+  ] };
+  const html = await (await renderStatusPage(env, cfg)).text();
+
+  assert.match(html, />Background jobs</, 'the same wording the application uses');
+  assert.match(html, />Document rendering</);
+});
+
+// ── the narrow (phone) layout ───────────────────────────────────────────────
+
+// 90 segments need ~358px; on a 320-414px phone the bar gets 227-321px, so the
+// oldest month was being clipped by the list's overflow:hidden and the bar
+// looked complete while hiding a third of the record.
+
+const WIDE_CFG = { ...CFG, historyDays: 90, targets: [{ name: 'api', url: 'https://x.test/a' }] };
+
+/** Every day in the window recorded as `up`, so the two windows differ only in size. */
+function fullHistory(days) {
+  const out = {};
+  for (let i = 0; i < days; i++) out[dayKey(Date.now() - i * 86400 * 1000)] = 'up';
+  return out;
+}
+
+test('the narrow layout hides the oldest days and captions the window it actually draws', async () => {
+  const { env, store } = makeEnv();
+  store.set('meta:last-run', JSON.stringify({ at: Date.now() }));
+  store.set('state:api', JSON.stringify({ alertedStatus: 'up' }));
+  store.set('history:api', JSON.stringify({ days: fullHistory(90) }));
+
+  const html = await (await renderStatusPage(env, WIDE_CFG)).text();
+
+  // Every segment is still in the DOM — the narrow layout hides, it does not drop.
+  assert.equal((html.match(/class="seg ok"/g) || []).length, 90);
+  // 90 - 30: the rule that hides the oldest sixty on a phone.
+  assert.ok(html.includes('.seg:nth-child(-n+60){display:none}'), 'oldest 60 hidden below 560px');
+
+  // Both captions are present, and each describes its own window.
+  assert.ok(html.includes('>90</span><span class="narrow">30</span> days ago'), 'both ranges captioned');
+  assert.ok(html.includes('90 days observed'), 'wide caption counts the full record');
+  assert.ok(html.includes('30 days observed'), 'narrow caption counts only what it shows');
+});
+
+test('the narrow caption counts failures inside its own window, not the whole record', async () => {
+  const { env, store } = makeEnv();
+  store.set('meta:last-run', JSON.stringify({ at: Date.now() }));
+  store.set('state:api', JSON.stringify({ alertedStatus: 'up' }));
+  const days = fullHistory(90);
+  // One failure 60 days ago: inside the 90-day record, outside the 30-day window.
+  days[dayKey(Date.now() - 60 * 86400 * 1000)] = 'down';
+  store.set('history:api', JSON.stringify({ days }));
+
+  const html = await (await renderStatusPage(env, WIDE_CFG)).text();
+
+  assert.ok(html.includes('1 with failures'), 'the full record still reports the outage');
+  assert.ok(
+    html.includes('30 days observed · no failures'),
+    'the phone caption must not claim an outage it is not drawing, nor hide one it is'
+  );
+});
+
+test('a history window no larger than the narrow one emits no hiding rule', async () => {
+  const { env, store } = makeEnv();
+  store.set('meta:last-run', JSON.stringify({ at: Date.now() }));
+  store.set('state:api', JSON.stringify({ alertedStatus: 'up' }));
+  store.set('history:api', JSON.stringify({ days: fullHistory(5) }));
+
+  // HIST_CFG is 5 days — fewer than the 30 the narrow layout would show.
+  const html = await (await renderStatusPage(env, HIST_CFG)).text();
+
+  assert.ok(!html.includes('nth-child(-n+'), 'nothing to hide, so no rule that could hide everything');
+  assert.ok(html.includes('>5</span><span class="narrow">5</span> days ago'), 'both captions agree');
 });
 
 // ── formatting ──────────────────────────────────────────────────────────────
