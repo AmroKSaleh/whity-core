@@ -18,18 +18,22 @@ import { remoteRequest } from "./remote-client"
  * templates in one list, both editable.
  *
  * The device runs two document stores and, before this, two screens that showed
- * them without saying so. `PLUGINS > Document Templates` is the `Documents`
+ * them without saying so. `PLUGINS > Document Templates` was the `Documents`
  * plugin's own screen, served by the bundled offline PHP host out of
  * `whity-offline.sqlite`; the designer read the SERVER over `remote_request`.
  * Same feature name, same-looking rows, disjoint data — save in one, look in
- * the other, and your work appears to have vanished. Nothing relays between
- * them either: `sync::bridge` carries only `relations/persons`, and both of its
- * legs are currently broken (the local leg omits the plugins' `/api` prefix;
- * the remote leg needs a changes feed core's document routes do not serve).
+ * the other, and your work appears to have vanished.
  *
- * Merging the two lists is the demo-scoped answer. The real fix is to make the
- * offline rows relay to the server and be edited there, which needs server-side
- * sync endpoints for documents — the "cutover" `DocumentsPlugin` defers.
+ * THAT SECOND SCREEN IS GONE. The Documents plugin has been retired: it was an
+ * offline twin of a feature core already owns, and devices reconcile their
+ * plugins to the server's catalogue, so nothing installs it any more. A device
+ * that still holds local rows keeps showing them through this adapter; a fresh
+ * one simply sees the server's list.
+ *
+ * Merging the two lists therefore stays, and stops being a demo-scoped patch
+ * over a duplicated feature — it is now just how a device shows work it made
+ * offline. Relaying those rows to the server still needs a changes feed core's
+ * document routes do not serve; `sync::bridge` carries nothing today.
  *
  * BLOCKS ARE DELIBERATELY NOT MERGED, and that is the one asymmetry here worth
  * knowing about. A block's id is persisted INSIDE a template, as

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Plan;
 
 use PDO;
+use Whity\Core\Audit\AuditLogger;
 use Whity\Core\Entitlement\EntitlementRegistry;
 use Whity\Core\Entitlement\EntitlementService;
 
@@ -36,12 +37,27 @@ final class PlanService
 
     private PlanRepository $plans;
     private EntitlementService $entitlements;
+    private ?AuditLogger $audit;
     private PDO $db;
 
-    public function __construct(PlanRepository $plans, EntitlementService $entitlements, PDO $db)
-    {
+    public function __construct(
+        PlanRepository $plans,
+        EntitlementService $entitlements,
+        PDO $db,
+        /**
+         * Where a tier MOVE is recorded.
+         *
+         * Optional so the many places that construct this for reads keep
+         * working — but see moveSubscribers(): when it is absent the move is
+         * refused rather than performed unrecorded, because the whole point of
+         * moving people instead of deleting a tier is not to lose what they
+         * were on.
+         */
+        ?AuditLogger $audit = null,
+    ) {
         $this->plans = $plans;
         $this->entitlements = $entitlements;
+        $this->audit = $audit;
         $this->db = $db;
     }
 
@@ -96,9 +112,168 @@ final class PlanService
         return $this->plans->updatePlan($id, $fields) > 0;
     }
 
+    /**
+     * Delete a tier, but only one that nothing has ever used.
+     *
+     * THIS USED TO BE AN UNCONDITIONAL `DELETE FROM plans`, and the schema made
+     * that look safe: `tenant_plan.plan_id` and `invoices.plan_id` are both
+     * `ON DELETE SET NULL`, so tidying an old tier detached its live subscribers
+     * and blanked it out of paid invoices — silently, with no cascade refusal
+     * and nothing in a log. The evidence appeared months later as a report that
+     * stopped adding up, by which time the tier's name was gone.
+     *
+     * @throws PlanValidationException When the tier is unknown, or something
+     *         still points at it. The reason names the counts and the remedy.
+     */
     public function deletePlan(int $id): bool
     {
+        if ($this->plans->findById($id) === null) {
+            return false;
+        }
+
+        $usage = $this->plans->usageFor($id);
+        $reason = $usage->refusalReason();
+        if ($reason !== null) {
+            throw new PlanValidationException('plan_id', $reason);
+        }
+
         return $this->plans->deletePlan($id) > 0;
+    }
+
+    /** What still points at a tier — for a confirmation, or to decide what to offer. */
+    public function usageFor(int $planId): PlanUsage
+    {
+        return $this->plans->usageFor($planId);
+    }
+
+    /**
+     * Move every workspace off one tier onto another.
+     *
+     * THE REMEDY THAT MAKES RETIRING A TIER POSSIBLE WITHOUT ABANDONING ANYONE.
+     * A tier with subscribers cannot be deleted and should not simply be
+     * switched off underneath them — deactivating it stops it being SOLD but
+     * leaves those workspaces on a tier nobody maintains, quietly diverging from
+     * every other customer as the catalogue moves on.
+     *
+     * REFUSES TO MOVE A TIER ONTO ITSELF, and refuses an unknown destination:
+     * both would report a cheerful "moved 0" or silently strand everyone.
+     *
+     * THE DESTINATION'S ACTIVE FLAG IS NOT CHECKED, deliberately. Consolidating
+     * two retired tiers into one retired tier is a legitimate tidy-up, and
+     * refusing it would force an operator to reactivate a tier — putting it back
+     * on sale — as a step in cleaning up.
+     *
+     * @return int How many workspaces moved.
+     *
+     * @throws PlanValidationException When either tier is unknown or they are
+     *         the same tier.
+     */
+    public function moveSubscribers(int $fromPlanId, int $toPlanId, ?int $movedBy = null): int
+    {
+        if ($fromPlanId === $toPlanId) {
+            throw new PlanValidationException('to_plan_id', 'Choose a different tier to move these workspaces to.');
+        }
+        if ($this->plans->findById($fromPlanId) === null) {
+            throw new PlanValidationException('plan_id', "Plan {$fromPlanId} not found");
+        }
+        if ($this->plans->findById($toPlanId) === null) {
+            throw new PlanValidationException('to_plan_id', "Plan {$toPlanId} not found");
+        }
+
+        // REFUSED WITHOUT SOMEWHERE TO RECORD IT, and that is the whole point of
+        // this method. `tenant_plan` holds CURRENT state — one row per tenant —
+        // so a move overwrites which tier a workspace was on and updates
+        // `assigned_at` over the top. Nothing else in the schema remembers.
+        //
+        // Moving people instead of deleting a tier exists so their history
+        // survives; performing the move with nowhere to write that history
+        // destroys the very thing it was meant to protect, quietly. Found the
+        // hard way: the first version of this shipped without an audit logger,
+        // and after moving three real workspaces the database could no longer
+        // say they had ever been on the old tier.
+        if ($this->audit === null) {
+            throw new PlanValidationException(
+                'audit',
+                'Moving workspaces between tiers needs an audit log to record it — otherwise '
+                . 'which tier they were on is lost, which is the one thing moving them is meant '
+                . 'to avoid.'
+            );
+        }
+
+        // REFUSED FOR A WORKSPACE SOMEBODY IS BILLING, because this method
+        // cannot make that move stick. The billing service is authoritative for
+        // what a paying customer is buying — AccessRecorder writes its `plan`
+        // straight into `tenant_plan`, and the reconciliation sweep re-asks
+        // every few minutes — so a local change is reverted within a sweep
+        // interval. Proved on staging: three workspaces moved here were back on
+        // the old tier fifteen minutes later, and the sweep was right.
+        //
+        // Refusing beats moving-then-being-undone for the same reason the audit
+        // guard above refuses: a refusal can be retried by the right route,
+        // while a silent revert looks like it worked and is found much later.
+        // The right route is {@see \Whity\Core\Billing\External\TierMigration}.
+        $externallyBilled = $this->plans->externallyBilledSubscribers($fromPlanId);
+        if ($externallyBilled !== []) {
+            throw new PlanValidationException(
+                'plan_id',
+                sprintf(
+                    '%d workspace(s) on this tier are billed externally, and moving them here '
+                    . 'would be undone by the next billing reconciliation. Move them through the '
+                    . 'billing service instead.',
+                    count($externallyBilled)
+                )
+            );
+        }
+
+        // Read BEFORE the write: afterwards, the old tier is gone from every row.
+        $tenantIds = $this->plans->subscriberTenantIds($fromPlanId);
+        $from = $this->plans->findById($fromPlanId);
+        $to = $this->plans->findById($toPlanId);
+
+        $moved = $this->plans->moveSubscribers($fromPlanId, $toPlanId, $movedBy);
+
+        // ONE ENTRY PER WORKSPACE, not one for the batch. The question somebody
+        // asks later is "what was THIS customer on in March", and an entry that
+        // says "3 workspaces moved" cannot answer it. AuditLogger is fail-soft,
+        // so a logging problem cannot undo a move that already happened.
+        foreach ($tenantIds as $tenantId) {
+            $this->audit->record('plan.subscriber.moved', [
+                'tenant_id' => $tenantId,
+                'actor_user_id' => $movedBy,
+                'target_type' => 'plan',
+                'target_id' => $toPlanId,
+                'metadata' => [
+                    'from_plan_id' => $fromPlanId,
+                    'from_plan_key' => $from['plan_key'] ?? null,
+                    'to_plan_id' => $toPlanId,
+                    'to_plan_key' => $to['plan_key'] ?? null,
+                ],
+            ]);
+        }
+
+        return $moved;
+    }
+
+    /**
+     * Take a tier off sale without deleting it.
+     *
+     * The honest end state for a tier that has customers or history: it stops
+     * being offered, and every row pointing at it keeps pointing at something
+     * that still has a name.
+     */
+    public function retirePlan(int $id): bool
+    {
+        return $this->updatePlan($id, ['is_active' => false]);
+    }
+
+    /**
+     * The workspaces on a tier, for recording a move tenant by tenant.
+     *
+     * @return list<int>
+     */
+    public function subscriberTenantIds(int $planId): array
+    {
+        return $this->plans->subscriberTenantIds($planId);
     }
 
     /**
@@ -117,8 +292,12 @@ final class PlanService
      * @throws PlanValidationException When the plan is unknown, or the entitlement
      *         key/value is invalid.
      */
-    public function setPlanEntitlement(int $planId, string $key, string $value): void
-    {
+    public function setPlanEntitlement(
+        int $planId,
+        string $key,
+        string $value,
+        bool $confirmReduction = false,
+    ): void {
         if ($this->plans->findById($planId) === null) {
             throw new PlanValidationException('plan_id', "Plan {$planId} not found");
         }
@@ -130,7 +309,75 @@ final class PlanService
             throw new PlanValidationException($key, $reason);
         }
 
-        $this->plans->setEntitlement($planId, $key, EntitlementRegistry::normalize($key, $value));
+        $normalized = EntitlementRegistry::normalize($key, $value);
+        $this->assertNotASilentReduction($planId, $key, $normalized, $confirmReduction);
+
+        $this->plans->setEntitlement($planId, $key, $normalized);
+    }
+
+    /**
+     * Refuse a change that takes something away from live customers, unless
+     * somebody has said they mean it.
+     *
+     * ── Why the guard is here and not at resolution ────────────────────────
+     *
+     * A tier's bundle is read LIVE now, so an edit reaches every tenant on that
+     * tier immediately. That is the entire point — a promotion should not need
+     * anybody to re-apply plans one at a time — but it makes the edit box a
+     * place where a typo silently restricts paying customers. Nothing about the
+     * resolution can tell a deliberate repricing from a slip; only the person
+     * typing knows, so this is where they are asked.
+     *
+     * It refuses rather than warns, and the message CARRIES THE COUNT. "This
+     * affects 40 workspaces" is a sentence somebody reads; "are you sure?" is
+     * one they click through.
+     *
+     * A TIER WITH NOBODY ON IT IS NOT GUARDED. Pricing a new tier means setting
+     * every value from its default, which is a reduction more often than not —
+     * and there is no customer to protect. Guarding it would train whoever
+     * builds a price list to pass the confirmation flag by reflex, which is how
+     * the guard stops working for the case it exists for.
+     *
+     * @throws PlanValidationException When the change reduces a live tier and
+     *         the reduction was not confirmed.
+     */
+    private function assertNotASilentReduction(
+        int $planId,
+        string $key,
+        string $normalized,
+        bool $confirmed,
+    ): void {
+        if ($confirmed) {
+            return;
+        }
+
+        $affected = $this->plans->countTenantsOnPlan($planId);
+        if ($affected === 0) {
+            return;
+        }
+
+        // What a tenant on this tier resolves to TODAY for this key. The
+        // comparison is against the tier's own current answer including its
+        // fallthrough to the baseline — not against "unset", which would read
+        // every first-time grant as a reduction from nothing.
+        $bundle = $this->plans->getEntitlements($planId);
+        $current = $bundle[$key] ?? EntitlementRegistry::defaultFor($key);
+
+        if (EntitlementRegistry::definition($key)->grantsAtLeast($normalized, $current)) {
+            return;
+        }
+
+        throw new PlanValidationException(
+            $key,
+            sprintf(
+                'This reduces %s from "%s" to "%s" for %d workspace(s) already on this plan, '
+                . 'and takes effect for them immediately. Confirm the reduction to apply it.',
+                $key,
+                $current,
+                $normalized,
+                $affected
+            )
+        );
     }
 
     public function removePlanEntitlement(int $planId, string $key): bool
@@ -164,10 +411,28 @@ final class PlanService
     }
 
     /**
-     * Apply a plan to a tenant: MATERIALISE its bundle into the tenant's
-     * entitlements (reset to exactly the plan) and record the assignment — all in
-     * one transaction. The tenant's effective entitlements become the plan's
-     * values, with every unset key falling back to the registry default.
+     * Put a tenant on a plan.
+     *
+     * IT NO LONGER MATERIALISES THE BUNDLE, and that is the change that makes a
+     * tier editable. It used to copy every value from the plan into
+     * `tenant_entitlements` inside a transaction, which looked tidy and had one
+     * consequence nobody wanted: those copies are PER-TENANT OVERRIDES, the
+     * most specific layer there is. Every subscriber therefore carried a frozen
+     * snapshot of their tier taken on the day they joined, outranking the tier
+     * itself — so marketing could change what "Pro" includes and not one
+     * existing Pro customer would notice. Worse, an operator's genuine
+     * per-tenant grant became indistinguishable from a copied plan value, so
+     * re-applying a plan silently erased it.
+     *
+     * Now the assignment is just that: a row saying which plan this tenant is
+     * on. {@see \Whity\Core\Entitlement\EntitlementService::effective()} reads
+     * the bundle live, so the tier stays the source of truth for everyone on it
+     * and an override means what it says again.
+     *
+     * ANY OVERRIDES LEFT BY THE OLD BEHAVIOUR ARE CLEARED as the tenant moves
+     * plans — migration 151 clears the historical ones, and this stops new ones
+     * appearing. Without that, tenants who subscribed under the old code would
+     * keep their snapshot for good and the tier would never reach them.
      *
      * @throws PlanValidationException When the plan is unknown or the tenant is the
      *         system tenant (implicitly unlimited — never assigned a plan).
@@ -181,15 +446,15 @@ final class PlanService
             throw new PlanValidationException('plan_id', "Plan {$planId} not found");
         }
 
-        $bundle = $this->plans->getEntitlements($planId);
-
         $this->db->beginTransaction();
         try {
-            // Deterministic reset: every registry key the plan sets → that value;
-            // every key it does not set → cleared (null) to the registry default.
+            // Clear any per-tenant copies a previous plan left behind, so the
+            // new tier is what this tenant resolves to. Deliberately a RESET of
+            // the override layer rather than a write of the new bundle: the
+            // bundle is read live, and writing it here is exactly the bug this
+            // method used to have.
             foreach (EntitlementRegistry::keys() as $key) {
-                $value = array_key_exists($key, $bundle) ? $bundle[$key] : null;
-                $this->entitlements->set($tenantId, $key, $value, $appliedBy);
+                $this->entitlements->set($tenantId, $key, null, $appliedBy);
             }
             $this->plans->setTenantPlan($tenantId, $planId, $appliedBy);
 

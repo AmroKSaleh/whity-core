@@ -177,13 +177,87 @@ are billed correctly by the invoice run, which counts the period after it closes
 **Read `— N paying for devices they no longer run`.** It appears only when it
 happens, and it is the line that asks a human to act: the billing service's
 minimum quantity is one, so a tenant whose fleet has gone to nothing cannot be
-resized down to match. What they need is the subscription **cancelled**, which
-this job cannot do.
+resized down to match. What they need is the subscription **cancelled**.
+
+**The sweep will not cancel it, and that is a decision rather than a gap.** The
+billing service does expose cancellation, so this could be automated — and
+should not be. A count of zero can mean a customer has retired their fleet, or
+that every device happened to be offline, or that a provisioning job failed
+overnight; only the first is a reason to end somebody's service, and the three
+are indistinguishable from here. Ending it wrongly is not recoverable by running
+the sweep again. So the number is reported, and a person decides.
 
 **It never resizes on silence, and running it twice is safe.** It compares the
 count against the quantity and acts only on the difference — which matters more
 here than for most jobs, because the thing a careless retry would repeat is
 charging somebody.
+
+### Affiliate Commission Accrual
+
+**Command**: `php /var/www/whity/public/index.php affiliate:accrue-commissions [--limit=200]`
+
+**Purpose**: Turns what referred customers have paid into what affiliates have
+earned.
+
+**Why**: without something calling it, the affiliate programme is a schema.
+Affiliates get codes, codes attach to workspaces, workspaces pay — and the
+commission ledger stays empty. That failure is unusually quiet: every screen
+works, every test passes, and a balance of zero looks exactly like a programme
+nobody has used yet.
+
+**Recommended Schedule**: `40 3 * * * php /var/www/whity/public/index.php affiliate:accrue-commissions`
+
+Nightly. Commissions are paid out on a human schedule — monthly, by somebody
+approving a payout — so there is nothing to gain from sweeping hourly, and each
+pass spends one request per referred workspace from the same billing-service
+allowance a customer's checkout is waiting on.
+
+**Expected Output**:
+`Accrued affiliate commissions: accrued=3 reversed=0 already=12 skipped=0 outside_window=1`
+
+**It reads both places the money can be**, and not one or the other: a workspace
+with locally raised invoices from before it moved to the billing service and
+receipts from after earned its referrer money in both. `already` counting most of
+the rows is the normal steady state — the sweep re-reads each workspace's whole
+payment history every night and collides on what it has already paid for, which
+is what lets it converge after a missed notification or a failed run.
+
+**Read `— N partly refunded, needing a decision`.** It appears only when it
+happens. The ledger holds one commission per payment and reverses it whole, so it
+cannot express giving back a third of one: the commission stands, and somebody
+has to settle the difference by hand. Silently reversing it whole would underpay
+an affiliate whose customer kept most of what they bought; silently ignoring it
+would pay on money that went back.
+
+**Read `— N workspaces unreadable, so these numbers are incomplete`**, and note
+that this exits **non-zero**. An unreadable history and a customer who has never
+paid produce the same empty answer and need opposite responses, so the sweep
+refuses to guess: those workspaces accrue nothing this pass and the next
+successful pass pays everything owed. A run that keeps reporting them is a
+billing service that has been unreachable long enough for affiliates to notice.
+
+**Whether a refund claws its commission back is a setting**
+(`affiliate.clawback_on_refund`, global, default on). Clawing back is correct —
+the revenue did not happen — and it is also the term affiliates like least, so a
+company that can afford to absorb refunds may choose to. Absorbing means paying
+out of money nobody collected, which is a decision to make deliberately rather
+than inherit.
+
+**Nothing pays anybody automatically, and that is where this schedule stops.**
+The sweep accrues; a person assembles a payout on the affiliates screen, makes
+the transfer, and records the bank reference. There is deliberately no cron for
+that step: no schedule should be able to move money out of the company without
+somebody deciding to. What the sweep guarantees is that the number they are
+looking at is current.
+
+**`affiliate.withholding_bp` is what gets kept back** from each payout and
+remitted on the affiliate's behalf — basis points, global, **default 0**, capped
+at 5000. It is snapshot onto every payout row, so changing it never restates one
+already made. The zero default is the honest starting point (withholding money
+nobody instructed us to withhold takes cash from a person who must then reclaim
+it) and it is also the risky one, so it is stated on every payout row rather than
+left implicit. **Set it before the first payout if a withholding obligation
+applies** — a payout already made cannot be re-rated.
 
 ## How it is scheduled
 
@@ -239,6 +313,11 @@ Add the revoked tokens cleanup job:
 
 # Bill per-device subscriptions for the devices in service, four times a day.
 17 */6 * * * php /var/www/whity/public/index.php billing:sync-device-quantity >> /var/log/whity-billing.log 2>&1
+
+# Turn referred customers' payments into affiliate commissions, nightly.
+# Only needed on a deployment running an affiliate programme — it costs one
+# request per referred workspace and does nothing at all when there are none.
+40 3 * * * php /var/www/whity/public/index.php affiliate:accrue-commissions >> /var/log/whity-billing.log 2>&1
 ```
 
 ### 3. Verify Cron Setup

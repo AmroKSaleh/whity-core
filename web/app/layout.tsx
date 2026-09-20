@@ -10,6 +10,7 @@ import { PluginFeaturesProvider } from "@/lib/plugin-features-context";
 import { CapabilitiesProvider } from "@/lib/capabilities-context";
 import { ToastContainerMount } from "@/components/ui/toast-container-mount";
 import { PluginScreenRegistrations } from "@/lib/plugin-screens";
+import { ReferralCapture } from "@/components/referral-capture";
 import { getBranding } from "@/lib/branding";
 import { BrandingProvider } from "@/lib/branding-context";
 import { getThemeOverrides } from "@/lib/theme";
@@ -122,6 +123,14 @@ export default async function RootLayout({
           what puts it in the shell's client bundle.
         */}
         <PluginScreenRegistrations />
+        {/*
+          Notices an affiliate link on ANY page, not only the one carrying the
+          registration form. An affiliate points their link wherever their case
+          is best made, and almost nobody signs up on the page they land on —
+          capturing at the form alone would credit them for exactly the
+          customers who did not stop to think. Renders nothing.
+        */}
+        <ReferralCapture />
         {/* React 19 hoists <style> into <head> regardless of nesting position. */}
         {overrideCss !== "" && <style>{`:root{${overrideCss}}`}</style>}
         <BrandingProvider initial={branding}>

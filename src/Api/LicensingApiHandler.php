@@ -9,6 +9,7 @@ use PDO;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Licensing\ActivationCode;
 use Whity\Core\Licensing\ActivationService;
+use Whity\Core\Licensing\DeviceAllowance;
 use Whity\Core\Licensing\LicensingException;
 use Whity\Core\RateLimit\ClientIp;
 use Whity\Core\RBAC\CorePermissions;
@@ -67,6 +68,13 @@ final class LicensingApiHandler
         LicensingException::REASON_ALREADY_USED => 'This code has already been used.',
         LicensingException::REASON_DEVICE_REQUIRED => 'This code is not linked to a device, so the device serial number is needed.',
         LicensingException::REASON_DEVICE_UNKNOWN => 'That code is not valid — please check it and try again.',
+        // NO NUMBER IN IT, deliberately. The person redeeming is usually
+        // standing at the device, not running the account — the cap and the
+        // upgrade are their administrator's business, and a figure they cannot
+        // act on would only invite them to retry. It also keeps this map what it
+        // is: static text, with nothing per-tenant leaking through the domain
+        // layer's message.
+        LicensingException::REASON_LIMIT_REACHED => 'This workspace has reached the number of devices its plan allows. Ask an administrator to add more.',
         LicensingException::REASON_BAD_REDEMPTION_LIMIT => 'A code must allow at least one redemption.',
         LicensingException::REASON_MINT_FAILED => 'Could not create a code. Please try again.',
     ];
@@ -76,6 +84,8 @@ final class LicensingApiHandler
         private readonly ActivationService $activations,
         private readonly RoleChecker $roleChecker,
         private readonly ?\Closure $clock = null,
+        /** The tier's device cap, or null on a deployment that caps nobody. */
+        private readonly ?DeviceAllowance $allowance = null,
     ) {
     }
 
@@ -153,6 +163,18 @@ final class LicensingApiHandler
         $existing = 0;
         $rejected = [];
 
+        // ROOM LEFT UNDER THE TIER'S CAP, or null when there is no cap.
+        //
+        // Counted ONCE before the loop and decremented as rows land, rather than
+        // re-queried per serial: a bulk import of five hundred serials would
+        // otherwise be five hundred COUNT queries to watch one number go down.
+        //
+        // On an ACTIVATED billing basis this is not what fills the allowance, so
+        // provisioning stays free and the cap bites at redemption instead. That
+        // is not a special case here — the count simply does not move, because
+        // {@see DeviceAllowance} counts whatever the tenant is billed for.
+        $room = $this->allowance?->remaining($tenantId, $this->now());
+
         $statement = $this->pdo->prepare("
             INSERT INTO licensed_devices (tenant_id, serial_number, label, status, provisioned_at, created_at, updated_at)
             VALUES (:tenant, :serial, :label, 'provisioned', :now, :now2, :now3)
@@ -177,6 +199,21 @@ final class LicensingApiHandler
                 continue;
             }
 
+            // REJECTED ONE AT A TIME, not as a whole batch. Somebody pasting
+            // fifty serials with room for eight should get eight units and a
+            // list of the forty-two that did not fit — refusing the lot would
+            // make them work out the difference by hand, and re-paste.
+            if ($room !== null && $room < 1) {
+                $rejected[] = [
+                    'serial_number' => $serial,
+                    'reason' => sprintf(
+                        'this workspace has used all %d device(s) its plan allows',
+                        $this->allowance?->capFor($tenantId) ?? 0
+                    ),
+                ];
+                continue;
+            }
+
             $statement->bindValue(':tenant', $tenantId, PDO::PARAM_INT);
             $statement->bindValue(':serial', $serial);
             $statement->bindValue(':label', is_string($label) && $label !== '' ? $label : null,
@@ -188,6 +225,13 @@ final class LicensingApiHandler
 
             if ($statement->fetchColumn() !== false) {
                 $created++;
+                // Only a NEW row spends allowance. A serial already on file is
+                // already counted, so re-importing a list does not eat into the
+                // cap — which is exactly what somebody re-running an import
+                // expects, and what would otherwise make the second run fail.
+                if ($room !== null) {
+                    $room--;
+                }
             } else {
                 $existing++;
             }

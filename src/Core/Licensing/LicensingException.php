@@ -40,6 +40,16 @@ final class LicensingException extends RuntimeException
     public const REASON_DEVICE_REQUIRED = 'device_required';
     public const REASON_DEVICE_UNKNOWN = 'device_unknown';
 
+    /**
+     * The code is fine; the workspace has no room for another device.
+     *
+     * Distinct from every reason above, all of which are about the CODE. This
+     * one is about the account, and the thing to do about it is different:
+     * nobody should be asked for a replacement code when the code was never the
+     * problem.
+     */
+    public const REASON_LIMIT_REACHED = 'limit_reached';
+
     /** Issuing-side problems. Never reached by an unauthenticated caller. */
     public const REASON_BAD_REDEMPTION_LIMIT = 'bad_redemption_limit';
     public const REASON_MINT_FAILED = 'mint_failed';

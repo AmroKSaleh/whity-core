@@ -112,6 +112,15 @@ final class TenantOwnedTables
         // unregistered like `permissions`.)
         'tenant_plan' => '055_create_plans.php',
 
+        // WC-affiliates — which workspace an affiliate referred (migration 154).
+        // The referral is the only affiliate table carrying a tenant: it says
+        // which workspace a referrer brought, which is tenant data. `affiliates`,
+        // `affiliate_commissions` and `affiliate_payouts` are about a party
+        // outside any tenant and carry no tenant_id, like `plans` and
+        // `promotions` — which workspace produced a commission is one join
+        // through here, where the predicate belongs.
+        'affiliate_referrals' => '154_create_affiliates.php',
+
         // Promotions — who took which early bird, offer or promo code, and what
         // it was worth (migration 141). The LEDGER is tenant-owned and every
         // query binds tenant_id; `promotions` and `promotion_plans` are global

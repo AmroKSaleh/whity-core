@@ -6,6 +6,14 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+### Removed
+
+- **The offline-twin plugins for Documents, Relations and Taxonomy.** Three in-tree plugins re-implemented features core already owns, as the "offline half" of a planned strangler-fig cutover: each was to become the sole provider of its resource on the desktop's PHP host, and eventually to replace core's version on the server. The premise did not survive contact with the product. Core owns `documents:*`, `relations:*` and `tags:*`, owns `/api/document-templates`, `/api/persons`, `/api/tags` and `/api/tag-groups`, and is where those features are actually being developed — so on every server the plugins were **inert by construction**: their routes collided with core's and were refused, and their screens were refused by the core-permission ownership rule before any route was even considered. Regenerating `public/openapi.json` after removing them produces a byte-identical file, which is the measurement rather than the claim: they contributed nothing to the server's API surface, and three plugins' worth of duplicated handlers, resources and migrations were being carried, reviewed and tested for a cutover that was not going to happen.
+  - **Nothing on a server changes.** Devices reconcile their plugin set to the connected backend's catalogue, so a device simply stops being offered them; a device that already holds local rows keeps showing them through the desktop's composite adapter.
+  - **Their migrations adopted core's tables rather than creating their own**, adding the sync columns (`version`, `client_uuid`, `deleted_at`, `updated_by`, `change_seq`) to `persons`, `tags`, `tag_groups`, `document_templates` and `document_blocks`. Those columns stay on databases where the migrations already ran. They are nullable or defaulted, nothing reads them now, and no rows were ever soft-deleted through them — so they are inert, not orphaned data. Dropping them is a separate decision with a separate migration, not something a plugin removal should do silently.
+  - **`SERVER_DORMANT_FEATURES` is now empty, and that is a stronger assertion than it looks.** Every entry the list ever held was one of these four screens. With none left, the `#969` gate says something unqualified about the repository: every frontend feature an in-tree plugin declares actually registers and reaches a user.
+
+
 ## [0.2.8] - 2026-09-07
 
 ### Added
