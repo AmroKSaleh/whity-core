@@ -86,6 +86,14 @@ final class HealthProbeRegistryTest extends TestCase
     public function testCoreProbesAreUnaffectedByAContribution(): void
     {
         $pdo = $this->sqlite();
+        // Give the queue and scheduler probes something real to measure. Without
+        // these tables both used to return OPERATIONAL without looking, so this
+        // test asserted a healthy queue on a database that had no jobs table —
+        // it would have passed just as happily with the probes deleted.
+        $pdo->exec('CREATE TABLE jobs (id INTEGER PRIMARY KEY, status TEXT, available_at TEXT)');
+        $pdo->exec('CREATE TABLE scheduled_jobs (id INTEGER PRIMARY KEY, enabled INTEGER, last_run_at TEXT)');
+        $pdo->exec("INSERT INTO scheduled_jobs (enabled, last_run_at) VALUES (1, datetime('now'))");
+
         $registry = new HealthProbeRegistry();
         $registry->register('Acme', [
             new HealthProbeDefinition('ldap', 'Directory service', static fn (): ProbeResult
@@ -99,9 +107,19 @@ final class HealthProbeRegistryTest extends TestCase
             array_keys($results),
             'Core components stay first and in their original order; contributions append.'
         );
-        foreach (['database', 'queue', 'scheduler', 'render'] as $core) {
+
+        $expected = [
+            'database' => HealthStatus::Operational,
+            'queue' => HealthStatus::Operational,
+            'scheduler' => HealthStatus::Operational,
+            // No render service is configured in this fixture, so UNKNOWN is the
+            // honest reading. The point being pinned is that the plugin did not
+            // change it — not that an unconfigured tier is healthy.
+            'render' => HealthStatus::Unknown,
+        ];
+        foreach ($expected as $core => $status) {
             self::assertSame(
-                HealthStatus::Operational,
+                $status,
                 $results[$core],
                 "A plugin reporting its own component DOWN must not change {$core}."
             );
