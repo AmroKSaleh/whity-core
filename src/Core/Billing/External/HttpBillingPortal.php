@@ -146,6 +146,29 @@ final class HttpBillingPortal implements BillingPortal
         );
     }
 
+    public function changePlan(
+        string $subscriptionRef,
+        string $priceRef,
+        string $proration = self::PRORATION_IMMEDIATE,
+        bool $invoice = true,
+        ?string $idempotencyKey = null,
+    ): void {
+        $this->call(
+            'POST',
+            '/v1/subscriptions/' . rawurlencode($subscriptionRef) . '/plan',
+            [
+                'price_id' => $priceRef,
+                'proration_behavior' => $proration,
+                'invoice' => $invoice,
+            ],
+            // SENT AS A HEADER, NOT IN THE BODY, because the body is what the
+            // key identifies: the service answers a replay with the first
+            // answer, and refuses the same key with a different body. A key
+            // inside the payload could never mean that.
+            $idempotencyKey === null ? [] : ['Idempotency-Key' => $idempotencyKey]
+        );
+    }
+
     /**
      * Everything the billing service holds about one payer.
      *
@@ -177,10 +200,12 @@ final class HttpBillingPortal implements BillingPortal
 
     /**
      * @param array<string, mixed>|null $body
+     * @param array<string, string>     $extraHeaders Per-call headers, e.g. an
+     *        idempotency key. Never allowed to overwrite the credential.
      *
      * @return array<string, mixed>
      */
-    private function call(string $method, string $path, ?array $body = null): array
+    private function call(string $method, string $path, ?array $body = null, array $extraHeaders = []): array
     {
         if (!$this->isConfigured()) {
             throw BillingPortalException::notConfigured();
@@ -195,6 +220,14 @@ final class HttpBillingPortal implements BillingPortal
         if ($body !== null) {
             $encoded = json_encode($body, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
             $headers['Content-Type'] = 'application/json';
+        }
+
+        // Merged last so a caller cannot accidentally replace Authorization or
+        // Content-Type by passing one of their names.
+        foreach ($extraHeaders as $name => $value) {
+            if (!array_key_exists($name, $headers)) {
+                $headers[$name] = $value;
+            }
         }
 
         $response = $this->transport->send(

@@ -15,6 +15,7 @@ use Whity\Core\PasswordPolicy;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Settings\SettingsRegistry;
+use Whity\Core\Affiliate\AffiliateAttribution;
 use Whity\Core\Settings\SettingsService;
 use Whity\Http\JsonBody;
 
@@ -56,6 +57,14 @@ final class RegisterApiHandler
         SettingsService $settings,
         ?EmailVerificationProvider $verificationProvider = null,
         ?HookManager $hooks = null,
+        /**
+         * Links a new workspace to whoever referred it.
+         *
+         * Optional because a deployment can run no affiliate programme, and
+         * because this handler is constructed in tests that have nothing to do
+         * with commissions. Null simply means no code is ever attributed.
+         */
+        private readonly ?AffiliateAttribution $affiliates = null,
     ) {
         $this->db = $db;
         // Instance-governance flags (self-registration open? approval required?)
@@ -277,6 +286,20 @@ final class RegisterApiHandler
                         ':status'    => 'expired',
                         ':mode'      => 'block_all',
                     ]);
+                }
+
+                // 6. WHO SENT THEM. Inside the transaction, because a referral
+                // pointing at a workspace whose creation rolled back would be a
+                // commission owed for a customer that does not exist.
+                //
+                // It cannot fail the signup: every refusal inside returns null.
+                // A referral code is marketing, not authentication — a typo or a
+                // retired campaign must not cost somebody their account.
+                if ($this->affiliates !== null) {
+                    $referralCode = $body['referral_code'] ?? null;
+                    if (is_string($referralCode) && trim($referralCode) !== '') {
+                        $this->affiliates->attribute($referralCode, $tenantId, $profileId);
+                    }
                 }
 
                 if ($ownTx) {

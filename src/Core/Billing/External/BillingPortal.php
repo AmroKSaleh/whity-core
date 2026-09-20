@@ -27,6 +27,33 @@ namespace Whity\Core\Billing\External;
 interface BillingPortal
 {
     /**
+     * Charge the difference now, for the unused part of the period.
+     *
+     * What an UPGRADE means: the customer asked for more and gets it today.
+     */
+    public const PRORATION_IMMEDIATE = 'immediate';
+
+    /**
+     * Take effect at renewal, charging nothing now.
+     *
+     * What a DOWNGRADE means: nobody is refunded for the part of the period
+     * they have already had, and the smaller tier starts when the current one
+     * runs out.
+     */
+    public const PRORATION_AT_PERIOD_END = 'at_period_end';
+
+    /**
+     * Change what the subscription is for, and touch no money at all.
+     *
+     * THE OPERATOR-MIGRATION CASE, and the reason it is a distinct value rather
+     * than "an immediate change that happens to cost nothing". Retiring a tier
+     * and moving its customers to the replacement is not a purchase: nobody
+     * asked for it, nobody should be charged, and nobody should receive an
+     * invoice — not even a zero-amount one, which still reads to a customer
+     * like they bought something.
+     */
+    public const PRORATION_NONE = 'none';
+    /**
      * Open a payment and return somewhere to send the payer.
      *
      * @param string      $subjectRef The id the billing service knows this payer
@@ -134,6 +161,40 @@ interface BillingPortal
      * @throws BillingPortalException
      */
     public function changeQuantity(string $subscriptionRef, int $quantity): void;
+
+    /**
+     * Move a subscription onto a different price.
+     *
+     * WHAT A TIER CHANGE ACTUALLY IS, and the reason a local one does not work.
+     * The billing service is authoritative for what somebody is paying for —
+     * {@see AccessSnapshot::$planCode} is read straight into `tenant_plan` by the
+     * reconciliation sweep — so changing a tenant's tier in our own database is
+     * reverted within a sweep interval. Proved on staging: three workspaces
+     * moved locally were back on the old tier fifteen minutes later, and the
+     * sweep was right to do it.
+     *
+     * @param string $subscriptionRef Which subscription to move. Addressed by
+     *                                id, so a customer's OTHER subscriptions —
+     *                                a per-device add-on, say — are untouched.
+     * @param string $priceRef        What it should now be for. A price, not a
+     *                                plan: only a price carries the currency and
+     *                                the interval, so a plan code alone cannot
+     *                                express "the annual one".
+     * @param string $proration       One of {@see self::PRORATION_*}.
+     * @param bool   $invoice         Whether the change may raise an invoice.
+     * @param string|null $idempotencyKey Makes a retry safe. Without one, a
+     *                                timeout leaves no way to retry that is not
+     *                                also a way to charge somebody twice.
+     *
+     * @throws BillingPortalException
+     */
+    public function changePlan(
+        string $subscriptionRef,
+        string $priceRef,
+        string $proration = self::PRORATION_IMMEDIATE,
+        bool $invoice = true,
+        ?string $idempotencyKey = null,
+    ): void;
 
     /** Whether this deployment has a billing service at all. */
     public function isConfigured(): bool;

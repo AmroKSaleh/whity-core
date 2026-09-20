@@ -1,5 +1,6 @@
 'use client';
 
+import { Affiliates } from './affiliates';
 import { TierFeatures } from './tier-features';
 import { TierLifecycle } from './tier-lifecycle';
 import { useState } from 'react';
@@ -260,6 +261,13 @@ export default function BillingPage() {
           them across two screens is how you end up selling three tiers that
           differ only in the number on the invoice. */}
       {!loading && !error && canManage && <TierFeatures />}
+
+      {/*
+        WHO SENDS US CUSTOMERS. On this page rather than its own because it is
+        the same gate (`plans:manage` on the system tenant) and the same
+        question: what this instance sells, and what it costs to sell it.
+      */}
+      {!loading && !error && canManage && <Affiliates />}
 
       {pricing && (
         <AddPriceDialog
