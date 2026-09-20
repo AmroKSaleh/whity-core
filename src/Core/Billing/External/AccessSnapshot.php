@@ -45,6 +45,21 @@ final class AccessSnapshot
         public readonly ?string $accessUntil = null,
         public readonly bool $cancelAtPeriodEnd = false,
         public readonly ?string $subscriptionRef = null,
+        /**
+         * The plan this subscription moves to at renewal, or null when nothing
+         * is pending.
+         *
+         * A SCHEDULED DOWNGRADE IS INVISIBLE WITHOUT THIS, and invisible means
+         * enforced a period early or not at all. `planCode` is always what the
+         * customer is entitled to RIGHT NOW — which is the right answer for a
+         * gate, and the wrong one for a warning. Somebody who moved down last
+         * week keeps the larger tier until their period ends; this is what lets
+         * us say so instead of surprising them on the day.
+         *
+         * Sits beside `cancelAtPeriodEnd` and means the same kind of thing: not
+         * a state, a scheduled change.
+         */
+        public readonly ?string $planCodeAtPeriodEnd = null,
     ) {
     }
 
@@ -94,6 +109,7 @@ final class AccessSnapshot
             // subscription is first created. Null is not "cancelling".
             ($payload['cancel_at_period_end'] ?? false) === true,
             self::stringOrNull($payload['subscription_id'] ?? null),
+            self::stringOrNull($payload['plan_at_period_end'] ?? null),
         );
     }
 
