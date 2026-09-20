@@ -108,8 +108,28 @@ function config(env) {
     targets = [];
   }
 
+  // WHERE CORE REPORTS ON ITSELF. The edge can only probe what has a public
+  // hostname, which leaves out everything interesting inside the deployment:
+  // the queue worker, the scheduler, the render service. Core already measures
+  // those (`health:watch` writes them, /api/v1/status publishes them) — this
+  // reads that verdict so those components alert like any other target.
+  //
+  // Without it the blind spot is real rather than theoretical: on 2026-09-14
+  // /api/v1/status reported `queue: down` at 0.2% uptime while this page said
+  // "All systems operational", because the only thing watched on that host was
+  // /api/health, which checks the database and nothing else.
+  const componentsUrl = (env.COMPONENTS_URL || '').trim();
+
+  const normalised = (Array.isArray(targets) ? targets : [])
+    .filter((t) => t && t.name && (t.url || t.component))
+    // A component target has no URL of its own; it is one field of the feed.
+    // Give it the feed's URL so an alert still says where to look.
+    .map((t) => (t.component && !t.url ? { ...t, url: componentsUrl } : t))
+    .filter((t) => t.url);
+
   return {
-    targets: Array.isArray(targets) ? targets.filter((t) => t && t.name && t.url) : [],
+    targets: normalised,
+    componentsUrl,
     failuresBeforeAlert: num('FAILURES_BEFORE_ALERT', DEFAULTS.failuresBeforeAlert),
     probeTimeoutMs: num('PROBE_TIMEOUT_MS', DEFAULTS.probeTimeoutMs),
     backupMaxAgeHours: num('BACKUP_MAX_AGE_HOURS', DEFAULTS.backupMaxAgeHours),
@@ -129,9 +149,21 @@ async function runChecks(env) {
     console.error('watchdog: PROBE_TARGETS is empty or unparseable — nothing is being watched');
   }
 
+  // ONE fetch for every component target, not one each: they are all fields of
+  // the same document, and polling it four times would be four chances to get
+  // four different answers about the same instant.
+  const wantsComponents = cfg.targets.some((t) => t.component);
+  const feed = wantsComponents ? await fetchComponents(cfg.componentsUrl, cfg.probeTimeoutMs) : null;
+
   const results = [];
   for (const target of cfg.targets) {
-    results.push(await checkTarget(env, cfg, target));
+    const probe = target.component ? componentProbe(feed, target.component) : null;
+    if (probe?.skip) {
+      // Neither observed nor failed. No alert, no state write, no history row.
+      console.log(`watchdog: skipping ${target.name} — ${probe.detail}`);
+      continue;
+    }
+    results.push(await checkTarget(env, cfg, target, probe));
   }
 
   await recordHistory(env, cfg, results);
@@ -148,7 +180,7 @@ async function runChecks(env) {
 /**
  * Probe one target and alert only when its state CHANGES.
  */
-async function checkTarget(env, cfg, target) {
+async function checkTarget(env, cfg, target, precomputed) {
   const key = `state:${target.name}`;
   // `stored` is kept separate from the defaults below because "nothing has ever
   // been recorded for this target" and "recorded, and healthy" are different
@@ -160,7 +192,11 @@ async function checkTarget(env, cfg, target) {
     downSince: null,
   };
 
-  const probe = await probeOnce(target.url, cfg.probeTimeoutMs, target.expectStatus);
+  // A component target's verdict was read out of the aggregated feed already;
+  // everything below — the change detection, the write-skip, the alert text —
+  // is identical either way, which is the point of passing the result in
+  // rather than teaching this function a second way to ask.
+  const probe = precomputed || (await probeOnce(target.url, cfg.probeTimeoutMs, target.expectStatus));
 
   if (probe.ok) {
     if (state.alertedStatus === 'down') {
@@ -271,6 +307,87 @@ async function probeOnce(url, timeoutMs, expectStatus) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Read core's own component report once per run.
+ *
+ * Returns either the parsed component map or the reason it could not be had —
+ * never a partial answer, because "the feed said nothing about the queue" and
+ * "the feed was unreachable" send an operator somewhere different.
+ */
+async function fetchComponents(url, timeoutMs) {
+  if (!url) return { ok: false, detail: 'COMPONENTS_URL is not set' };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'user-agent': 'whity-watchdog/1', accept: 'application/json' },
+      cf: { cacheTtl: 0, cacheEverything: false },
+    });
+    if (response.status !== 200) {
+      return { ok: false, detail: `component feed returned HTTP ${response.status}` };
+    }
+
+    const body = await response.json();
+    const list = Array.isArray(body?.components) ? body.components : null;
+    if (!list) {
+      return { ok: false, detail: 'component feed had no components array' };
+    }
+
+    const byKey = {};
+    for (const c of list) {
+      if (c && typeof c.key === 'string') byKey[c.key] = c;
+    }
+    return { ok: true, byKey };
+  } catch (error) {
+    const reason = error?.name === 'AbortError' ? `no response in ${timeoutMs}ms` : String(error?.message || error);
+    return { ok: false, detail: `component feed unreachable: ${reason}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Turn one field of that report into the same shape probeOnce returns.
+ *
+ * An unreadable feed fails EVERY component that depends on it rather than
+ * leaving them silently unobserved. It costs a few extra lines in an alert
+ * during a host-level outage — where api and web are already failing and the
+ * operator is already looking — and it buys the case that matters: the feed
+ * alone breaking, which would otherwise freeze four components on their last
+ * known verdict with nobody told the readings had stopped.
+ */
+function componentProbe(feed, key) {
+  if (!feed || !feed.ok) {
+    return { ok: false, detail: feed?.detail || 'component feed unavailable' };
+  }
+
+  const component = feed.byKey[key];
+  if (!component) {
+    // Core stopped reporting this component. Absence is not health.
+    return { ok: false, detail: `component "${key}" is not in the feed` };
+  }
+
+  const status = String(component.status || 'unknown');
+  if (status === 'operational') return { ok: true };
+
+  // UNKNOWN is not a fault. The application reports it when a probe could not
+  // measure something — an unconfigured render tier, a schedule that has never
+  // run — and paging someone because a component was never measured is how a
+  // monitor gets muted. It is not recorded as healthy either: the target is
+  // skipped for this pass entirely, which leaves the history bar a GAP, the
+  // same thing it draws for a day nobody looked at.
+  if (status === 'unknown') {
+    return { skip: true, detail: 'the application reports this component as not measured' };
+  }
+
+  // `degraded` counts as a failure here deliberately: this page has two states
+  // and the honest place to put "working, but not properly" is the failing one.
+  const name = component.name ? `${component.name} ` : '';
+  return { ok: false, detail: `${name}reported "${status}" by the application` };
 }
 
 // ── history ─────────────────────────────────────────────────────────────────
@@ -557,6 +674,10 @@ function escapeHtml(s) {
 /** Human-facing labels, so the page never shows an internal key name. */
 const LABELS = {
   api: 'API',
+  database: 'Database',
+  queue: 'Background jobs',
+  scheduler: 'Scheduled tasks',
+  render: 'Document rendering',
   web: 'Application',
   site: 'Website',
   docs: 'Documentation',
@@ -571,6 +692,10 @@ const LABELS = {
  */
 const DESCRIPTIONS = {
   api: 'app.whity.dev/api',
+  database: 'reported by the application',
+  queue: 'reported by the application',
+  scheduler: 'reported by the application',
+  render: 'reported by the application',
   web: 'app.whity.dev',
   site: 'whity.dev',
   docs: 'docs.whity.dev',
@@ -618,6 +743,12 @@ async function renderStatusPage(env, cfg) {
   const kindOf = (s) => (s === 'up' ? 'ok' : s === 'down' ? 'down' : 'stale');
   const wordOf = (s) => (s === 'up' ? 'Operational' : s === 'down' ? 'Down' : 'Unknown');
 
+  // How much of the record the narrow (phone) layout shows. Paired with the
+  // `max-width: 560px` rule below — change both together or the caption stops
+  // matching the bar.
+  const narrowDays = Math.min(30, cfg.historyDays);
+  const hiddenSegs = cfg.historyDays - narrowDays;
+
   /**
    * The history bar: one segment per day, oldest on the left.
    *
@@ -632,6 +763,13 @@ async function renderStatusPage(env, cfg) {
     const segs = [];
     let observed = 0;
     let bad = 0;
+    // A phone cannot show 90 days: 90 segments need ~358px and the bar gets
+    // roughly 230-300px there, so a third of the record was being clipped away
+    // silently — a bar that LOOKED complete while hiding the oldest month.
+    // The narrow layout shows the most recent NARROW_DAYS instead, and counts
+    // them separately so the caption under it describes what is actually drawn.
+    let narrowObserved = 0;
+    let narrowBad = 0;
 
     for (let i = cfg.historyDays - 1; i >= 0; i--) {
       const d = dayKey(Date.now() - i * 86400 * 1000);
@@ -639,17 +777,31 @@ async function renderStatusPage(env, cfg) {
       const cls = v === 'up' ? 'ok' : v === 'down' ? 'down' : 'gap';
       if (v) observed++;
       if (v === 'down') bad++;
+      if (i < narrowDays) {
+        if (v) narrowObserved++;
+        if (v === 'down') narrowBad++;
+      }
       const label = v === 'up' ? 'no failures' : v === 'down' ? 'failure recorded' : 'not observed';
       segs.push(`<i class="seg ${cls}" title="${d} — ${label}"></i>`);
     }
 
-    const summary =
-      observed === 0
+    const phrase = (o, b) =>
+      o === 0
         ? 'No history yet'
-        : `${observed} day${observed === 1 ? '' : 's'} observed · ${bad === 0 ? 'no failures' : `${bad} with failures`}`;
+        : `${o} day${o === 1 ? '' : 's'} observed · ${b === 0 ? 'no failures' : `${b} with failures`}`;
 
+    const summary = phrase(observed, bad);
+    const narrowSummary = phrase(narrowObserved, narrowBad);
+
+    // The aria-label deliberately describes the FULL record rather than the
+    // narrow window: every segment is in the DOM at every width, only hidden
+    // visually, so a screen-reader user gets the whole picture either way.
     return `<div class="bar" role="img" aria-label="${escapeHtml(summary)} over the last ${cfg.historyDays} days">${segs.join('')}</div>
-            <div class="barfoot"><span>${cfg.historyDays} days ago</span><span>${escapeHtml(summary)}</span><span>today</span></div>`;
+            <div class="barfoot">
+              <span><span class="wide">${cfg.historyDays}</span><span class="narrow">${narrowDays}</span> days ago</span>
+              <span class="sum"><span class="wide">${escapeHtml(summary)}</span><span class="narrow">${escapeHtml(narrowSummary)}</span></span>
+              <span>today</span>
+            </div>`;
   };
 
   const rows = components
@@ -709,6 +861,7 @@ async function renderStatusPage(env, cfg) {
     --ok:#2f7d4a;              --ok:oklch(48% 0.14 150);
     --down:#b3261e;            --down:oklch(50% 0.19 27);
     --stale:#7a5d12;           --stale:oklch(52% 0.11 75);
+    --grid:#e9ecf3;            --grid:color-mix(in oklch, var(--accent) 6%, transparent);
     color-scheme:light;
   }
   @media (prefers-color-scheme: dark){
@@ -722,11 +875,19 @@ async function renderStatusPage(env, cfg) {
       --ok:#6fc28c;            --ok:oklch(72% 0.16 150);
       --down:#e08a7a;          --down:oklch(70% 0.18 25);
       --stale:#d8b45f;         --stale:oklch(80% 0.14 80);
+      --grid:#151a22;            --grid:color-mix(in oklch, var(--accent) 6%, transparent);
       color-scheme:dark;
     }
   }
   *{box-sizing:border-box}
+  /* The ground is the drawing and the cards are sheets resting on it — the same
+     relationship as the mark, at the lowest intensity the idea still reads at.
+     It is a background-image, so it costs no request: this page has to render
+     during the outage it is describing. */
   body{margin:0;background:var(--bg);color:var(--ink);
+       background-image:linear-gradient(var(--grid) 1px,transparent 1px),
+                        linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+       background-size:28px 28px;
        font:16px/1.6 "Noto Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
        -webkit-font-smoothing:antialiased}
   .mono{font-family:"Geist Mono",ui-monospace,"Cascadia Code",Menlo,Consolas,monospace}
@@ -736,8 +897,11 @@ async function renderStatusPage(env, cfg) {
   .head{display:flex;align-items:center;gap:.6rem;margin:0 0 1.75rem}
   .brand{display:inline-flex;align-items:center;gap:.55rem;font-weight:600;
          font-size:1.05rem;letter-spacing:-.01em;color:var(--ink);text-decoration:none}
-  .mark{width:1.6rem;height:1.6rem;border-radius:.4rem;background:var(--ink);color:var(--bg);
-        display:inline-grid;place-items:center;font-size:.8rem;font-weight:600;flex:none}
+  /* The mark is INLINE SVG, not a link to an icon file: this page loads no
+     asset from anywhere, which is the whole reason it can still be read during
+     the outage it is describing. It follows the page's own palette. */
+  .mark{width:1.6rem;height:1.6rem;flex:none;display:block;color:var(--ink)}
+  .mark svg{width:100%;height:100%;display:block}
   .eyebrow{font-size:.72rem;font-weight:500;letter-spacing:.08em;text-transform:uppercase;
            color:var(--soft);border:1px solid var(--line);border-radius:999px;padding:.1rem .55rem}
 
@@ -781,7 +945,10 @@ async function renderStatusPage(env, cfg) {
   .barfoot{display:flex;justify-content:space-between;gap:1rem;margin-top:.5rem;
            font-size:.72rem;color:var(--soft);
            font-family:"Geist Mono",ui-monospace,Menlo,Consolas,monospace}
-  .barfoot span:nth-child(2){text-align:center}
+  .barfoot .sum{text-align:center}
+  /* Both captions are rendered; the media query picks which one is true for
+     the bar actually on screen. */
+  .barfoot .narrow{display:none}
 
   .note{margin-top:1rem;padding:1rem 1.25rem;background:var(--card);
         border:1px solid var(--line);border-radius:.75rem;font-size:.88rem;color:var(--soft)}
@@ -793,13 +960,50 @@ async function renderStatusPage(env, cfg) {
   footer a{color:var(--soft)}
   footer a:hover{color:var(--ink)}
   a{color:var(--accent)}
+
+  /* ── Narrow screens ──────────────────────────────────────────────────────
+     Measured, not guessed: at 320-414px the 90-segment bar wants 358px while
+     its container gets 227-321px, so the oldest ~25-33 days were being clipped
+     by the list's overflow:hidden — invisible, and indistinguishable from a full
+     record. Below 560px the page shows the most recent ${narrowDays} days and
+     says so, and the rows give back the horizontal padding the bar needs. */
+  @media (max-width:560px){
+    .wrap{padding-inline:.9rem}
+    .row{padding:1rem 1.05rem 1.1rem}
+    .banner{padding:1.2rem 1.05rem;gap:.7rem}
+    .banner strong{font-size:1.2rem}
+    .banner .dot{width:11px;height:11px}
+    .head{margin-bottom:1.25rem}
+${hiddenSegs > 0 ? `    .seg:nth-child(-n+${hiddenSegs}){display:none}
+    .barfoot .wide{display:none}
+    .barfoot .narrow{display:inline}
+` : ''}    /* Fewer days over the same width means each one can be a real target
+       rather than a hairline. */
+    .bar{height:30px;gap:3px}
+    .seg{min-width:4px;border-radius:3px}
+    .barfoot{gap:.6rem;font-size:.68rem}
+    .note{padding:.9rem 1.05rem;font-size:.85rem}
+    footer{gap:1rem;margin-top:1.5rem}
+    footer a{padding-block:.35rem}
+  }
+
+  /* Very narrow: the three-part caption stops fitting on one line, so the
+     summary moves under the range rather than squeezing it. */
+  @media (max-width:380px){
+    .barfoot{flex-wrap:wrap}
+    .barfoot .sum{order:3;flex-basis:100%;text-align:start}
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="head">
     <a class="brand" href="https://whity.dev/">
-      <span class="mark mono" aria-hidden="true">W</span>Whity
+      <span class="mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none">
+        <rect x="3.5" y="10.5" width="18" height="18" rx="4.25" fill="var(--accent)"/>
+        <rect x="11.25" y="3.25" width="17.5" height="17.5" rx="4.25" fill="var(--card)"
+              stroke="currentColor" stroke-width="2.5"/>
+      </svg></span>Whity
     </a>
     <span class="eyebrow mono">Status</span>
   </div>
@@ -928,4 +1132,4 @@ async function notify(env, text) {
 
 // Exported for the unit tests, which exercise the state machine directly
 // rather than through a live Worker.
-export const __test__ = { humanDuration, timingSafeEqual, config, probeOnce, checkTarget, checkHeartbeats, handleRequest, renderStatusPage, recordHistory, dayKey };
+export const __test__ = { humanDuration, timingSafeEqual, config, probeOnce, checkTarget, runChecks, fetchComponents, componentProbe, checkHeartbeats, handleRequest, renderStatusPage, recordHistory, dayKey };

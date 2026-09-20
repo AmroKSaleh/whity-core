@@ -31,6 +31,7 @@ final class NullBillingPortal implements BillingPortal
     }
 
     public function startCheckout(
+        BillingActor $actor,
         string $subjectRef,
         string $priceRef,
         string $returnUrl,
@@ -74,12 +75,13 @@ final class NullBillingPortal implements BillingPortal
         return [];
     }
 
-    public function changeQuantity(string $subscriptionRef, int $quantity): void
+    public function changeQuantity(BillingActor $actor, string $subscriptionRef, int $quantity): void
     {
         throw BillingPortalException::notConfigured();
     }
 
     public function changePlan(
+        BillingActor $actor,
         string $subscriptionRef,
         string $priceRef,
         string $proration = self::PRORATION_IMMEDIATE,
