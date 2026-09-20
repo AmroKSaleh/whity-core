@@ -197,6 +197,14 @@ services:
     profiles:
       - render
     restart: unless-stopped
+    # Staging had none, and it showed: whity_staging_render was the only
+    # container in the stack with no health state at all. This is the same
+    # check the dev compose already runs.
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8130/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   # Service-health collector behind the public /status page (WC-status-page).
   #
@@ -277,6 +285,139 @@ services:
       - |
         echo "[health-watch] service-health collector started";
         exec php public/index.php health:watch --interval=60
+
+  # ── The workers that actually do the deferred work ──────────────────────
+  #
+  # THESE WERE MISSING, and the cost was measurable: on 2026-09-14 this stack
+  # held 95 pending jobs whose oldest was 451 hours (≈19 days) old, and 90 rows
+  # in event_outbox whose oldest was 505 hours. Nothing had consumed either
+  # since 26 August, because no compose file on the staging side had ever
+  # defined a service to run them — the dev compose has them behind a `queue`
+  # profile with a comment saying staging "runs the same command under their
+  # orchestrator", and no orchestrator was doing so.
+  #
+  # IN THE DEFAULT STACK, not behind a profile, for the reason health-watch
+  # gives below: a worker you have to remember to enable is a worker that is
+  # off on the day it matters. That is not hypothetical here — it was off for
+  # nineteen days.
+  #
+  # Each uses `exec` so the PHP process IS the container process: its exit
+  # status becomes the container's, `restart: unless-stopped` acts on a real
+  # failure, and nothing reports a restart that never happened.
+
+  queue-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
+    container_name: whity_staging_queue_worker
+    environment:
+      APP_ENV: ${APP_ENV:-staging}
+      DB_USER: ${DB_USER:-whity}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set for staging}
+      DB_NAME: ${DB_NAME:-whity_core}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (>= 32 chars) for staging}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set for staging}
+      # Document-render jobs run HERE, not in the web tier, so this needs the
+      # same render wiring frankenphp has or those jobs fail inside the worker.
+      RENDER_SERVICE_URL: ${RENDER_SERVICE_URL:-http://render:8130}
+      RENDER_SHARED_SECRET: ${RENDER_SHARED_SECRET:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    working_dir: /app
+    restart: unless-stopped
+    # The base image inherits a HEALTHCHECK that curls the FrankenPHP admin
+    # endpoint on localhost:2019, which does not exist in a CLI container — it
+    # would report UNHEALTHY forever while working perfectly, and a red that is
+    # always red trains everyone to ignore the column. Disabled rather than
+    # faked: whether the queue is draining is measured properly by core's own
+    # health probe (oldest pending job age), published at /api/v1/status, and
+    # alerted on by the watchdog. That is the signal — not a second one here
+    # that could disagree with it.
+    healthcheck:
+      disable: true
+    command:
+      - sh
+      - -c
+      - |
+        echo "[queue-worker] durable job worker started";
+        exec php public/index.php queue:work --max-runtime=3600
+
+  events-relay:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
+    container_name: whity_staging_events_relay
+    environment:
+      APP_ENV: ${APP_ENV:-staging}
+      DB_USER: ${DB_USER:-whity}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set for staging}
+      DB_NAME: ${DB_NAME:-whity_core}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (>= 32 chars) for staging}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set for staging}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    working_dir: /app
+    restart: unless-stopped
+    healthcheck:
+      disable: true
+    # Runs ALONGSIDE queue:work, never instead of it (#1063): without this,
+    # HookManager::dispatchAsync() records events into event_outbox that are
+    # never delivered and the table grows without bound. It had reached 90 rows
+    # with the oldest 505 hours old before this service existed.
+    command:
+      - sh
+      - -c
+      - |
+        echo "[events-relay] domain-event relay started";
+        exec php public/index.php events:relay --max-runtime=3600
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
+    container_name: whity_staging_scheduler
+    environment:
+      APP_ENV: ${APP_ENV:-staging}
+      DB_USER: ${DB_USER:-whity}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set for staging}
+      DB_NAME: ${DB_NAME:-whity_core}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (>= 32 chars) for staging}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set for staging}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    working_dir: /app
+    restart: unless-stopped
+    healthcheck:
+      disable: true
+    # Exactly-once-per-minute across workers via the shared-store tick lock, so
+    # a second replica is safe rather than a double-run. Core's scheduler probe
+    # reads MAX(last_run_at) of enabled schedules — which currently passes
+    # VACUOUSLY, because nothing has ever run and the column is NULL. A probe
+    # that cannot fail until the thing has worked once is worth knowing about.
+    command:
+      - sh
+      - -c
+      - |
+        echo "[scheduler] cron-tick scheduler started";
+        exec php public/index.php schedule:run --max-runtime=3600
 
 volumes:
   # Distinct named volume so staging data never mixes with the dev demo's.
