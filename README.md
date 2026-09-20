@@ -1,3 +1,18 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/banner-dark.png">
+    <img alt="Whity — the substrate for running an organisation: identity, permissions, documents, forms and plugins, with every API route already an agent tool." src=".github/assets/banner-light.png" width="100%">
+  </picture>
+</p>
+
+<p align="center">
+  <a href="https://whity.dev">whity.dev</a> &nbsp;·&nbsp;
+  <a href="https://docs.whity.dev">docs</a> &nbsp;·&nbsp;
+  <a href="https://whity.dev/install">install</a> &nbsp;·&nbsp;
+  <a href="https://health.whity.dev">status</a> &nbsp;·&nbsp;
+  <a href="https://brand.whity.dev">brand</a>
+</p>
+
 # Whity Core
 
 **Open-source, white-labelable multi-tenant platform framework**
