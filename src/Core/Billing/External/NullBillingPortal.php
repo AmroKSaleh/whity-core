@@ -78,4 +78,14 @@ final class NullBillingPortal implements BillingPortal
     {
         throw BillingPortalException::notConfigured();
     }
+
+    public function changePlan(
+        string $subscriptionRef,
+        string $priceRef,
+        string $proration = self::PRORATION_IMMEDIATE,
+        bool $invoice = true,
+        ?string $idempotencyKey = null,
+    ): void {
+        throw BillingPortalException::notConfigured();
+    }
 }

@@ -273,6 +273,37 @@ final class SettingsRegistry
     public const DUNNING_RETRY_SCHEDULE_DAYS = 'dunning.retry_schedule_days';
     public const DUNNING_LOCK_AFTER_DAYS = 'dunning.lock_after_days';
 
+    // AFFILIATE PROGRAMME. Whether a refunded payment claws its commission
+    // back, and it is a COMMERCIAL decision rather than a technical one —
+    // which is exactly why it is a setting and not a constant.
+    //
+    // Clawing back is correct: the revenue did not happen, so the share of it
+    // did not either. It is also the term affiliates like least, and a company
+    // that can afford to absorb refunds may choose to as a selling point. The
+    // default claws back, because absorbing it is a promise to pay out of
+    // money nobody collected, and that is a decision somebody should make
+    // deliberately rather than inherit.
+    //
+    // GLOBAL-ONLY. The payer is the platform, not the tenant: a per-tenant
+    // override would mean a referred customer's own settings decided what
+    // their referrer is paid.
+    public const AFFILIATE_CLAWBACK_ON_REFUND = 'affiliate.clawback_on_refund';
+
+    // What is kept back from an affiliate payout and remitted on their behalf,
+    // in BASIS POINTS (500 = 5%). Zero means none is withheld.
+    //
+    // ZERO BY DEFAULT, AND THAT IS THE RISKY DIRECTION. Withholding money
+    // nobody instructed us to withhold is worse than not withholding — it
+    // takes cash from somebody who then has to reclaim it from a tax
+    // authority — so it starts off and an operator turns it on. The danger is
+    // the familiar one of a zero nobody notices, which is mitigated by making
+    // it VISIBLE rather than implicit: the rate is snapshot onto every payout
+    // row, returned by the API, and stated on the screen even when it is zero.
+    //
+    // GLOBAL-ONLY. It is a fact about the paying company's obligations, not
+    // about any tenant.
+    public const AFFILIATE_WITHHOLDING_BP = 'affiliate.withholding_bp';
+
     // Plugin marketplace (WC plugin-store): comma-separated allowlist of trusted
     // store HOSTS the install-from-store endpoint may fetch packages from. EMPTY
     // (default) = the feature is OFF — no store is trusted. This is the PRIMARY
@@ -677,6 +708,8 @@ final class SettingsRegistry
         self::BILLING_INVOICE_NUMBER_SCOPE,
         self::BILLING_INVOICE_NUMBER_RESET,
         self::PAYMENTS_MOCK_ENABLED,
+        self::AFFILIATE_CLAWBACK_ON_REFUND,
+        self::AFFILIATE_WITHHOLDING_BP,
         self::LICENSING_BILLING_BASIS,
         self::SEATS_ENFORCEMENT,
         self::SEATS_COUNT_INVITED,
@@ -727,6 +760,7 @@ final class SettingsRegistry
         self::UI_HIDE_DATES,
         self::BILLING_TAX_INCLUSIVE,
         self::PAYMENTS_MOCK_ENABLED,
+        self::AFFILIATE_CLAWBACK_ON_REFUND,
     ];
 
     /**
@@ -914,6 +948,11 @@ final class SettingsRegistry
         // that is on by default is one that can take money before anybody
         // decided it should.
         self::PAYMENTS_MOCK_ENABLED => 'false',
+        // Claws back by default. See the constant for why absorbing a refund
+        // is a decision rather than a default.
+        self::AFFILIATE_CLAWBACK_ON_REFUND => 'true',
+        // Nothing withheld until somebody decides what the obligation is.
+        self::AFFILIATE_WITHHOLDING_BP => '0',
         self::DUNNING_RETRY_SCHEDULE_DAYS => '1,3,7',
         self::DUNNING_LOCK_AFTER_DAYS => '14',
         // Empty = install-from-store OFF (no trusted store); operator opts in.
@@ -1301,6 +1340,8 @@ final class SettingsRegistry
             self::PAYMENTS_MOCK_ENABLED => self::validateBoolean($value, self::PAYMENTS_MOCK_ENABLED),
             self::DUNNING_RETRY_SCHEDULE_DAYS => \Whity\Core\Billing\DunningSchedule::parseProblem($value),
             self::DUNNING_LOCK_AFTER_DAYS => self::validateLockAfterDays($value),
+            self::AFFILIATE_CLAWBACK_ON_REFUND => self::validateBoolean($value, self::AFFILIATE_CLAWBACK_ON_REFUND),
+            self::AFFILIATE_WITHHOLDING_BP => self::validateWithholdingBasisPoints($value),
             self::LICENSING_BILLING_BASIS => self::validateEnum($key, $value),
             self::SEATS_COUNT_INVITED => self::validateBoolean($value, self::SEATS_COUNT_INVITED),
             self::MAIL_BRAND_COLOR => self::validateHexColor($value),
@@ -1578,6 +1619,32 @@ final class SettingsRegistry
         return (int) $value <= 10000
             ? null
             : 'must be at most 10000 basis points (100%)';
+    }
+
+    /**
+     * What is kept back from an affiliate payout, in basis points.
+     *
+     * Zero is legitimate and is the default: nothing is withheld until somebody
+     * establishes what the obligation is.
+     *
+     * CAPPED WELL BELOW 100%, unlike sales tax. A withholding rate is a slice of
+     * somebody's earnings, and a figure above half is a typo rather than a
+     * policy — most obviously a percentage typed where basis points belong (a
+     * "30" meaning thirty per cent is 30 bp and harmless, but a "3000" meaning
+     * three thousand basis points read as a percentage is not). Half is already
+     * more than any withholding regime the company is likely to meet, so the
+     * refusal costs nothing real and catches the mistake that would otherwise
+     * reach somebody's bank transfer.
+     */
+    private static function validateWithholdingBasisPoints(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', trim($value)) !== 1) {
+            return 'must be a whole number of basis points (500 = 5%), or 0 for none';
+        }
+
+        return (int) $value <= 5000
+            ? null
+            : 'must be at most 5000 basis points (50%) — a higher figure is almost always a typo';
     }
 
     /** Days from issue to due. Zero is legitimate: due on receipt. */

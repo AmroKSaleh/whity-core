@@ -39,6 +39,10 @@ final class FakeBillingPortal implements BillingPortal
     public string $checkoutStatus = 'completed';
     /** @var list<Receipt> */
     public array $receipts = [];
+    /** Every subject whose receipts were asked for, in order. */
+    /** @var list<string> */
+    public array $receiptSubjects = [];
+    public bool $configured = true;
     /** @var list<SubscriptionLine> */
     public array $subscriptions = [];
     public ?int $lastQuantity = null;
@@ -51,9 +55,17 @@ final class FakeBillingPortal implements BillingPortal
         $this->access = AccessSnapshot::none('unset');
     }
 
+    /**
+     * Whether this deployment has a billing service at all.
+     *
+     * SETTABLE, because "no billing service" is a real deployment rather than a
+     * broken one — a self-hosted install that invoices locally — and several
+     * behaviours here are specifically about answering with nothing instead of
+     * failing.
+     */
     public function isConfigured(): bool
     {
-        return true;
+        return $this->configured;
     }
 
     public function startCheckout(
@@ -100,6 +112,12 @@ final class FakeBillingPortal implements BillingPortal
     /** @return list<Receipt> */
     public function receiptsFor(string $subjectRef): array
     {
+        // RECORDED BEFORE THE FAILURE CHECK, unlike the reads below it. A test
+        // asserting which subject was asked about wants to know even when the
+        // answer was an outage.
+        $this->lastSubject = $subjectRef;
+        $this->receiptSubjects[] = $subjectRef;
+
         if ($this->failWith !== null) {
             throw $this->failWith;
         }
@@ -117,6 +135,39 @@ final class FakeBillingPortal implements BillingPortal
         $this->lastSubject = $subjectRef;
 
         return $this->subscriptions;
+    }
+
+    /** Every plan change asked for, so a test can assert one did NOT happen. */
+    /** @var list<array{subscription: string, price: string, proration: string, invoice: bool, idempotency_key: string|null}> */
+    public array $planChanges = [];
+    /** Fails ONLY the plan change, so a test can let reads succeed and the write not. */
+    public ?BillingPortalException $failPlanChangeWith = null;
+
+    public function changePlan(
+        string $subscriptionRef,
+        string $priceRef,
+        string $proration = self::PRORATION_IMMEDIATE,
+        bool $invoice = true,
+        ?string $idempotencyKey = null,
+    ): void {
+        if ($this->failPlanChangeWith !== null) {
+            throw $this->failPlanChangeWith;
+        }
+        if ($this->failWith !== null) {
+            throw $this->failWith;
+        }
+
+        $this->planChanges[] = [
+            'subscription' => $subscriptionRef,
+            'price' => $priceRef,
+            'proration' => $proration,
+            'invoice' => $invoice,
+            // Captured because the KEY is the retry safety. Without it here, a
+            // test can only see that a change happened, not that repeating the
+            // migration is safe — which is the whole reason the key is derived
+            // rather than random.
+            'idempotency_key' => $idempotencyKey,
+        ];
     }
 
     public function changeQuantity(string $subscriptionRef, int $quantity): void
