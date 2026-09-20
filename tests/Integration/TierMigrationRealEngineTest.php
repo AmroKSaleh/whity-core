@@ -124,6 +124,49 @@ final class TierMigrationRealEngineTest extends TestCase
     }
 
     /**
+     * A TIER MOVE SAYS WHO ASKED FOR IT.
+     *
+     * This is the question that was unanswerable the last time this ran for
+     * real: three workspaces changed tier and `tenant_plan` holds only current
+     * state, so the record of who had been on what had to be rebuilt from a dump
+     * taken beforehand. The billing service records the client that called it
+     * and nothing finer, so unless we name the person, nobody can.
+     */
+    public function testAMoveNamesThePersonWhoAskedForIt(): void
+    {
+        [$old, $new] = $this->twoTiers();
+        $this->price($new, 'price_pro');
+        $this->subscribe(1, $old, externalRef: 'sub_live_1');
+
+        $this->migration()->move($old, $new, movedBy: 412);
+
+        self::assertSame('profile:412', $this->portal->planChanges[0]['actor']);
+    }
+
+    /**
+     * AN UNATTRIBUTED MOVE SAYS SO, rather than borrowing a name.
+     *
+     * Labelling it as an ordinary scheduled job would be an invention in the
+     * other direction: whoever read that audit line later could not tell it from
+     * a sweep that runs every night. "Nobody was named" is a fact worth
+     * recording as itself.
+     */
+    public function testAnUnattributedMoveDoesNotBorrowAName(): void
+    {
+        [$old, $new] = $this->twoTiers();
+        $this->price($new, 'price_pro');
+        $this->subscribe(1, $old, externalRef: 'sub_live_1');
+
+        $this->migration()->move($old, $new);
+
+        self::assertSame(
+            'job:tier-migration-unattributed',
+            $this->portal->planChanges[0]['actor'],
+            'An unnamed mover must not be recorded as a person or as a routine job.'
+        );
+    }
+
+    /**
      * IT IS NOT A PURCHASE. Nobody asked to be migrated, so nothing is charged
      * and no invoice is raised — not even a zero-amount one, which still reads
      * to a customer like they bought something.
