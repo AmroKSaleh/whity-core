@@ -83,6 +83,29 @@ final class DeviceQuantitySyncRealEngineTest extends TestCase
     }
 
     /**
+     * THE SWEEP NAMES ITSELF AS A MACHINE, and the billing service writes that
+     * down beside its own record of the client.
+     *
+     * Nobody instructs this resize — it happens because a fleet grew. If it
+     * arrived attributed to a person, whoever read that audit line later would
+     * have no way to tell it from a change somebody actually made, and would
+     * eventually ask them why they made it.
+     *
+     * Asserted on the value the portal RECEIVED rather than on the sweep having
+     * run: accepting an actor and not sending it is exactly the failure this
+     * whole seam exists to prevent, and it would look identical from outside.
+     */
+    public function testTheSweepAttributesItselfToItsOwnJob(): void
+    {
+        $this->devices(1, activated: 12);
+        $this->portal->subscriptions = [$this->deviceSubscription(quantity: 3)];
+
+        $this->sweeper()->run($this->now());
+
+        self::assertSame(['job:device-quantity-sync'], $this->portal->actors);
+    }
+
+    /**
      * AND DOWNWARDS, which is the direction a customer notices. Retiring units
      * has to stop the bill for them.
      */

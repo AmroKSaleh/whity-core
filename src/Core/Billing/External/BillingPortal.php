@@ -26,6 +26,21 @@ namespace Whity\Core\Billing\External;
  */
 interface BillingPortal
 {
+    /*
+     * EVERY MUTATING CALL NAMES ITS ACTOR, and the parameter is REQUIRED rather
+     * than optional on purpose.
+     *
+     * The billing service records the client that called it and nothing finer,
+     * so "who moved this customer's tier" is a question only this side can
+     * answer. It now accepts an opaque hint and writes it beside the client —
+     * and an optional parameter here would mean attribution quietly degrading
+     * to nothing the first time somebody added a call site and did not think
+     * about it. Required, it cannot: a job must say it is a job, and a person
+     * must be named by an id their own directory resolves.
+     *
+     * FIRST, not last, so it cannot be lost among the optional arguments that
+     * follow it.
+     */
     /**
      * Charge the difference now, for the unused part of the period.
      *
@@ -70,6 +85,7 @@ interface BillingPortal
      * @throws BillingPortalException
      */
     public function startCheckout(
+        BillingActor $actor,
         string $subjectRef,
         string $priceRef,
         string $returnUrl,
@@ -160,7 +176,7 @@ interface BillingPortal
      *
      * @throws BillingPortalException
      */
-    public function changeQuantity(string $subscriptionRef, int $quantity): void;
+    public function changeQuantity(BillingActor $actor, string $subscriptionRef, int $quantity): void;
 
     /**
      * Move a subscription onto a different price.
@@ -189,6 +205,7 @@ interface BillingPortal
      * @throws BillingPortalException
      */
     public function changePlan(
+        BillingActor $actor,
         string $subscriptionRef,
         string $priceRef,
         string $proration = self::PRORATION_IMMEDIATE,

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Api;
 
 use Whity\Core\Billing\External\AccessSnapshot;
+use Whity\Core\Billing\External\BillingActor;
 use Whity\Core\Billing\External\BillingPortal;
 use Whity\Core\Billing\External\BillingPortalException;
 use Whity\Core\Billing\External\CheckoutHandoff;
@@ -49,6 +50,17 @@ final class FakeBillingPortal implements BillingPortal
     public ?string $lastResizedSubscription = null;
     /** Attempts to resize, including ones that threw — so a test can assert one did NOT happen. */
     public int $quantityCalls = 0;
+    /**
+     * Every actor named on a mutating call, in order.
+     *
+     * RECORDED SO A TEST CAN ASSERT ATTRIBUTION TRAVELLED. Accepting the
+     * parameter and dropping it would let the suite prove the calls happen while
+     * proving nothing about who they say made them — which is the same mistake
+     * as validating a header and not storing it.
+     *
+     * @var list<string>
+     */
+    public array $actors = [];
 
     public function __construct()
     {
@@ -69,6 +81,7 @@ final class FakeBillingPortal implements BillingPortal
     }
 
     public function startCheckout(
+        BillingActor $actor,
         string $subjectRef,
         string $priceRef,
         string $returnUrl,
@@ -138,18 +151,24 @@ final class FakeBillingPortal implements BillingPortal
     }
 
     /** Every plan change asked for, so a test can assert one did NOT happen. */
-    /** @var list<array{subscription: string, price: string, proration: string, invoice: bool, idempotency_key: string|null}> */
+    /** @var list<array{subscription: string, price: string, proration: string, invoice: bool, idempotency_key: string|null, actor: string}> */
     public array $planChanges = [];
     /** Fails ONLY the plan change, so a test can let reads succeed and the write not. */
     public ?BillingPortalException $failPlanChangeWith = null;
 
     public function changePlan(
+        BillingActor $actor,
         string $subscriptionRef,
         string $priceRef,
         string $proration = self::PRORATION_IMMEDIATE,
         bool $invoice = true,
         ?string $idempotencyKey = null,
     ): void {
+        // RECORDED BEFORE THE REFUSALS. "Who asked" is answerable even when the
+        // answer was no, and a test asserting attribution should not have to
+        // arrange a success to see it.
+        $this->actors[] = $actor->value;
+
         if ($this->failPlanChangeWith !== null) {
             throw $this->failPlanChangeWith;
         }
@@ -167,11 +186,13 @@ final class FakeBillingPortal implements BillingPortal
             // migration is safe — which is the whole reason the key is derived
             // rather than random.
             'idempotency_key' => $idempotencyKey,
+            'actor' => $actor->value,
         ];
     }
 
-    public function changeQuantity(string $subscriptionRef, int $quantity): void
+    public function changeQuantity(BillingActor $actor, string $subscriptionRef, int $quantity): void
     {
+        $this->actors[] = $actor->value;
         $this->quantityCalls++;
 
         if ($this->failResizeWith !== null) {

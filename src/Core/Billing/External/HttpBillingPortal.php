@@ -37,6 +37,7 @@ final class HttpBillingPortal implements BillingPortal
     }
 
     public function startCheckout(
+        BillingActor $actor,
         string $subjectRef,
         string $priceRef,
         string $returnUrl,
@@ -63,7 +64,7 @@ final class HttpBillingPortal implements BillingPortal
         }
 
         return CheckoutHandoff::fromPayload(
-            $this->call('POST', '/v1/checkout-sessions', $request)
+            $this->call('POST', '/v1/checkout-sessions', $request, $actor->header())
         );
     }
 
@@ -137,16 +138,18 @@ final class HttpBillingPortal implements BillingPortal
         return $lines;
     }
 
-    public function changeQuantity(string $subscriptionRef, int $quantity): void
+    public function changeQuantity(BillingActor $actor, string $subscriptionRef, int $quantity): void
     {
         $this->call(
             'POST',
             '/v1/subscriptions/' . rawurlencode($subscriptionRef) . '/quantity',
-            ['quantity' => $quantity]
+            ['quantity' => $quantity],
+            $actor->header()
         );
     }
 
     public function changePlan(
+        BillingActor $actor,
         string $subscriptionRef,
         string $priceRef,
         string $proration = self::PRORATION_IMMEDIATE,
@@ -165,7 +168,12 @@ final class HttpBillingPortal implements BillingPortal
             // key identifies: the service answers a replay with the first
             // answer, and refuses the same key with a different body. A key
             // inside the payload could never mean that.
-            $idempotencyKey === null ? [] : ['Idempotency-Key' => $idempotencyKey]
+            // The actor rides alongside the idempotency key, both as headers.
+            // A replay answered from the first response is attributed to
+            // whoever made the FIRST call, which is correct: the second one
+            // changed nothing.
+            $actor->header()
+                + ($idempotencyKey === null ? [] : ['Idempotency-Key' => $idempotencyKey])
         );
     }
 

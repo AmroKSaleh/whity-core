@@ -10,6 +10,7 @@ use Psr\Log\NullLogger;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Billing\External\AccessRecorder;
 use Whity\Core\Billing\External\BillingPortal;
+use Whity\Core\Billing\External\BillingActor;
 use Whity\Core\Billing\External\BillingPortalException;
 use Whity\Core\Billing\External\BillingSubject;
 use Whity\Core\Billing\External\EventLedger;
@@ -145,6 +146,7 @@ final class ExternalBillingApiHandler
 
         try {
             $handoff = $this->portal->startCheckout(
+                $this->actorFor($request),
                 BillingSubject::forTenant($tenantId),
                 $priceRef,
                 $this->appUrl . '/billing/return',
@@ -393,7 +395,7 @@ final class ExternalBillingApiHandler
         }
 
         try {
-            $this->portal->changeQuantity($subscriptionRef, $quantity);
+            $this->portal->changeQuantity($this->actorFor($request), $subscriptionRef, $quantity);
             $snapshot = $this->portal->accessFor(BillingSubject::forTenant($tenantId));
         } catch (BillingPortalException $e) {
             return $this->portalFailure($e, 'change the subscription quantity', ['tenant_id' => $tenantId]);
@@ -599,6 +601,32 @@ final class ExternalBillingApiHandler
      *
      * @return int|Response
      */
+    /**
+     * Who is making this request, for the billing service's audit trail.
+     *
+     * An OPAQUE ID, never an address: what we send is rendered on their operator
+     * dashboard, which is shared across every client they serve, so an email
+     * here would be personal data leaving this deployment for a screen we do not
+     * control. Their side refuses an `@` outright; {@see BillingActor} refuses
+     * it before the request is built.
+     *
+     * The unattributed branch is unreachable through these routes —
+     * {@see self::requireTenant()} has already refused a request carrying no
+     * profile — and it says so rather than borrowing a name, because a fallback
+     * that invents an actor is worse than one admitting it does not know.
+     */
+    private function actorFor(Request $request): BillingActor
+    {
+        $user = $request->user;
+        $profileId = is_object($user) && isset($user->profile_id) && is_int($user->profile_id)
+            ? $user->profile_id
+            : null;
+
+        return $profileId === null
+            ? BillingActor::of('job:api-unattributed')
+            : BillingActor::person($profileId);
+    }
+
     private function requireTenant(Request $request, string $permission): int|Response
     {
         $tenantId = TenantContext::getTenantId();
