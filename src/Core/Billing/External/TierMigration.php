@@ -68,6 +68,20 @@ final class TierMigration
     {
         $result = ['moved' => 0, 'local' => 0, 'failed' => 0, 'skipped' => 0, 'reasons' => []];
 
+        // WHO ASKED, in terms the billing service can write down beside its own
+        // record of the client. A tier move changes what a customer pays, and
+        // "who moved this" is exactly the question that was unanswerable the
+        // last time this ran — `tenant_plan` holds only current state, so the
+        // history had to be rebuilt from a dump.
+        //
+        // An unattributed move says so rather than borrowing a name. Labelling
+        // it as an ordinary scheduled job would be the same invention in the
+        // other direction: a person reading the log later could not tell it
+        // from a sweep that runs every night.
+        $actor = $movedBy === null
+            ? BillingActor::of('job:tier-migration-unattributed')
+            : BillingActor::person($movedBy);
+
         $from = $this->plans->findById($fromPlanId);
         $to = $this->plans->findById($toPlanId);
         if ($from === null || $to === null || $fromPlanId === $toPlanId) {
@@ -108,6 +122,7 @@ final class TierMigration
 
             try {
                 $this->portal->changePlan(
+                    $actor,
                     $subscriptionRef,
                     $toPriceRef,
                     BillingPortal::PRORATION_NONE,
