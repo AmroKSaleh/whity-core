@@ -88,11 +88,124 @@ final class HttpBillingPortal implements BillingPortal
     }
 
     /**
-     * @param array<string, mixed>|null $body
+     * @return list<Receipt>
+     */
+    public function receiptsFor(string $subjectRef): array
+    {
+        // The customer object carries the 50 most recent invoices.
+        $payload = $this->customer($subjectRef);
+
+        $invoices = $payload['invoices'] ?? [];
+        if (!is_array($invoices)) {
+            return [];
+        }
+
+        $receipts = [];
+        foreach ($invoices as $invoice) {
+            if (is_array($invoice)) {
+                /** @var array<string, mixed> $invoice */
+                $receipts[] = Receipt::fromPayload($invoice);
+            }
+        }
+
+        return $receipts;
+    }
+
+    /**
+     * @return list<SubscriptionLine>
+     */
+    public function subscriptionsFor(string $subjectRef): array
+    {
+        // The same customer object the receipts come from, which is also where
+        // the subscriptions live. One endpoint, so a caller that wants both
+        // spends two requests rather than discovering a third URL shape.
+        $payload = $this->customer($subjectRef);
+
+        $subscriptions = $payload['subscriptions'] ?? [];
+        if (!is_array($subscriptions)) {
+            return [];
+        }
+
+        $lines = [];
+        foreach ($subscriptions as $subscription) {
+            if (is_array($subscription)) {
+                /** @var array<string, mixed> $subscription */
+                $lines[] = SubscriptionLine::fromPayload($subscription);
+            }
+        }
+
+        return $lines;
+    }
+
+    public function changeQuantity(string $subscriptionRef, int $quantity): void
+    {
+        $this->call(
+            'POST',
+            '/v1/subscriptions/' . rawurlencode($subscriptionRef) . '/quantity',
+            ['quantity' => $quantity]
+        );
+    }
+
+    public function changePlan(
+        string $subscriptionRef,
+        string $priceRef,
+        string $proration = self::PRORATION_IMMEDIATE,
+        bool $invoice = true,
+        ?string $idempotencyKey = null,
+    ): void {
+        $this->call(
+            'POST',
+            '/v1/subscriptions/' . rawurlencode($subscriptionRef) . '/plan',
+            [
+                'price_id' => $priceRef,
+                'proration_behavior' => $proration,
+                'invoice' => $invoice,
+            ],
+            // SENT AS A HEADER, NOT IN THE BODY, because the body is what the
+            // key identifies: the service answers a replay with the first
+            // answer, and refuses the same key with a different body. A key
+            // inside the payload could never mean that.
+            $idempotencyKey === null ? [] : ['Idempotency-Key' => $idempotencyKey]
+        );
+    }
+
+    /**
+     * Everything the billing service holds about one payer.
+     *
+     * A SUBJECT IT HAS NEVER HEARD OF IS AN EMPTY CUSTOMER, NOT A FAILURE. That
+     * arrives as a 404, which {@see self::call()} classifies as a refusal — and
+     * it IS a refusal of that URL, correctly. But it is also the ordinary state
+     * of every tenant before their first purchase, so the callers above see an
+     * empty object rather than an exception they would all have to catch the
+     * same way and would eventually catch differently.
+     *
+     * Only a refusal is softened. A timeout or a 5xx still throws, because "we
+     * could not ask" must never be readable as "they have nothing" — a sweep
+     * that read it that way would resize a subscription during an outage.
      *
      * @return array<string, mixed>
      */
-    private function call(string $method, string $path, ?array $body = null): array
+    private function customer(string $subjectRef): array
+    {
+        try {
+            return $this->call('GET', '/v1/customers/' . rawurlencode($subjectRef));
+        } catch (BillingPortalException $e) {
+            if ($e->reason === BillingPortalException::REASON_REFUSED) {
+                return [];
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
+     * @param array<string, mixed>|null $body
+     * @param array<string, string>     $extraHeaders Per-call headers, e.g. an
+     *        idempotency key. Never allowed to overwrite the credential.
+     *
+     * @return array<string, mixed>
+     */
+    private function call(string $method, string $path, ?array $body = null, array $extraHeaders = []): array
     {
         if (!$this->isConfigured()) {
             throw BillingPortalException::notConfigured();
@@ -107,6 +220,14 @@ final class HttpBillingPortal implements BillingPortal
         if ($body !== null) {
             $encoded = json_encode($body, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
             $headers['Content-Type'] = 'application/json';
+        }
+
+        // Merged last so a caller cannot accidentally replace Authorization or
+        // Content-Type by passing one of their names.
+        foreach ($extraHeaders as $name => $value) {
+            if (!array_key_exists($name, $headers)) {
+                $headers[$name] = $value;
+            }
         }
 
         $response = $this->transport->send(

@@ -9,11 +9,24 @@ namespace Whity\Core\Entitlement;
  * capabilities/limits that gate what a tenant may configure or consume.
  *
  * Resolution for {@see effective()}, per known registry key:
- *   tenant_entitlements[key] ?? EntitlementRegistry::default(key)
+ *   tenant_entitlements[key] ?? plan_entitlements[key] ?? EntitlementRegistry::default(key)
  *
- * There is no global override layer — the registry DEFAULT is the baseline
- * (free-tier) grant, and the operator raises it per tenant to sell a higher
- * tier. The SYSTEM tenant (id 0) is implicitly UNLIMITED: every bool is granted
+ * THE MIDDLE LAYER IS WHAT MAKES A TIER MEAN ANYTHING, and it is read live. It
+ * used to be materialised into `tenant_entitlements` when a plan was applied,
+ * which turned a tier's definition into a snapshot taken at subscribe time: a
+ * change to what "Pro" includes reached nobody who was already on Pro. Reading
+ * the bundle at resolution time means marketing edits a tier and every customer
+ * on it is affected — which is the point of being able to edit it.
+ *
+ * That cuts both ways, so REDUCTIONS ARE STOPPED AT THE WRITE, not here. See
+ * {@see \Whity\Core\Plan\PlanService::setEntitlement()}: taking something away
+ * from a live tier needs an explicit confirmation naming how many tenants it
+ * restricts. Guarding it at resolution instead would mean deciding, per request,
+ * whether a customer is entitled to yesterday's deal — which is a second copy of
+ * the pricing rules and wrong the first time they diverge.
+ *
+ * The registry DEFAULT remains the baseline (free-tier) grant, and an operator
+ * can still raise or lower one tenant by hand without touching their tier. The SYSTEM tenant (id 0) is implicitly UNLIMITED: every bool is granted
  * and every int limit is UNLIMITED, and it has no stored override layer (writing
  * one is rejected, exactly like SettingsService::setTenant).
  *
@@ -51,13 +64,35 @@ final class EntitlementService
         }
 
         $overrides = $this->repo->allForTenant($tenantId);
+        $plan = $this->repo->planBundleFor($tenantId);
 
         $effective = [];
         foreach (EntitlementRegistry::keys() as $key) {
-            $raw = array_key_exists($key, $overrides)
-                ? $overrides[$key]
-                : EntitlementRegistry::defaultFor($key);
-            $effective[$key] = EntitlementRegistry::cast($key, $raw);
+            // THREE LAYERS, MOST SPECIFIC FIRST.
+            //
+            //   tenant override -- what an operator granted this one customer,
+            //                      by hand, for a reason nobody else shares.
+            //   tier bundle     -- what they are paying for. Read LIVE, so a
+            //                      change to the tier reaches every customer on
+            //                      it rather than only the next person to
+            //                      subscribe.
+            //   registry default-- the baseline a deployment that sells nothing
+            //                      still has to answer with.
+            //
+            // A key the tier does not mention falls through rather than
+            // resolving to "nothing": a tier is a list of what it CHANGES, not
+            // a complete world, so adding a limit to the registry does not
+            // silently revoke it from every existing tier.
+            $raw = $overrides[$key]
+                ?? $plan[$key]
+                ?? EntitlementRegistry::defaultFor($key);
+
+            // A stored value can be invalid if a plugin changed a key's type
+            // under data that was already written. Falling back to the default
+            // beats throwing on the path of a customer doing their work.
+            $effective[$key] = EntitlementRegistry::validate($key, $raw) === null
+                ? EntitlementRegistry::cast($key, $raw)
+                : EntitlementRegistry::cast($key, EntitlementRegistry::defaultFor($key));
         }
 
         return $effective;

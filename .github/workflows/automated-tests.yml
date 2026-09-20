@@ -302,6 +302,13 @@ jobs:
           fi
 
           echo "Shard ${{ matrix.shard }}/${shards}: ${#files[@]} of ${total} test files"
+
+          # NO `-d memory_limit=` HERE, and that is not an oversight. PHPUnit
+          # applies phpunit.xml's <ini name="memory_limit"> with ini_set() during
+          # bootstrap, so a command-line -d is silently LOWERED back to whatever
+          # the config says — a flag that looks like it is doing something and
+          # is not. The ceiling for this job lives in phpunit.xml; see the
+          # comment there for why it is a number and not -1.
           vendor/bin/phpunit \
             --coverage-php "coverage-shards/shard-${{ matrix.shard }}.cov" \
             "${files[@]}"

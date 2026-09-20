@@ -95,14 +95,12 @@ if ($isCli && isset($argv[1])) {
     // indistinguishable from working until somebody pays. So it is also a plain
     // command a cron can call, like the two sweeps below.
     //
-    // THE PORTAL IS BUILT EXACTLY AS THE HTTP PATH BUILDS IT, so "configured"
-    // means the same thing to both and a deployment cannot reconcile against a
-    // service it does not otherwise talk to.
+    // THE PORTAL IS BUILT EXACTLY AS THE HTTP PATH BUILDS IT — by the same
+    // factory, so "configured" cannot come to mean two different things and a
+    // deployment cannot reconcile against a service it does not otherwise
+    // talk to.
     if ($command === 'billing:reconcile-access') {
         $db = \Whity\Database\Database::connect();
-
-        $payBaseUrl = rtrim((string) ($_ENV['PAY_BASE_URL'] ?? getenv('PAY_BASE_URL') ?: ''), '/');
-        $payApiKey = (string) ($_ENV['PAY_API_KEY'] ?? getenv('PAY_API_KEY') ?: '');
 
         $limit = null;
         foreach ($argv as $arg) {
@@ -113,15 +111,55 @@ if ($isCli && isset($argv[1])) {
 
         exit((new \Whity\Commands\BillingReconcileAccessCommand(
             $db->getPdo(),
-            ($payBaseUrl !== '' && $payApiKey !== '')
-                ? new \Whity\Core\Billing\External\HttpBillingPortal(
-                    new \Whity\Core\Billing\External\CurlBillingTransport(
-                        max(1, (int) ($_ENV['PAY_TIMEOUT_SECONDS'] ?? getenv('PAY_TIMEOUT_SECONDS') ?: 10))
-                    ),
-                    $payBaseUrl,
-                    $payApiKey
-                )
-                : new \Whity\Core\Billing\External\NullBillingPortal(),
+            \Whity\Core\Billing\External\BillingPortalFactory::fromEnvironment(),
+        ))->execute($limit));
+    }
+
+    // The sweep that keeps a per-device subscription billing for the devices
+    // that actually exist. Without it "per device" is a label on a price: a
+    // tenant activates nine more scanners and is billed for the three they
+    // started with, every month, until somebody notices.
+    //
+    // Scheduled like the access sweep and for the same reason — it is also
+    // registered as a queue job, and a deployment running no worker would have
+    // that job registered, invocable and never invoked.
+    if ($command === 'billing:sync-device-quantity') {
+        $db = \Whity\Database\Database::connect();
+
+        $limit = null;
+        foreach ($argv as $arg) {
+            if (is_string($arg) && str_starts_with($arg, '--limit=')) {
+                $limit = max(1, (int) substr($arg, 8));
+            }
+        }
+
+        exit((new \Whity\Commands\BillingSyncDeviceQuantityCommand(
+            $db->getPdo(),
+            \Whity\Core\Billing\External\BillingPortalFactory::fromEnvironment(),
+        ))->execute($limit));
+    }
+
+    // The sweep that turns what referred customers paid into what affiliates
+    // earned. Without something calling it the whole programme is a schema:
+    // codes attach to workspaces, workspaces pay, and the commission ledger
+    // stays empty — which looks exactly like a programme nobody has used yet.
+    //
+    // Reads BOTH the local invoice table and the billing service, because a
+    // workspace that moved from one to the other earned its referrer money in
+    // both places.
+    if ($command === 'affiliate:accrue-commissions') {
+        $db = \Whity\Database\Database::connect();
+
+        $limit = null;
+        foreach ($argv as $arg) {
+            if (is_string($arg) && str_starts_with($arg, '--limit=')) {
+                $limit = max(1, (int) substr($arg, 8));
+            }
+        }
+
+        exit((new \Whity\Commands\AffiliateAccrueCommissionsCommand(
+            $db->getPdo(),
+            \Whity\Core\Billing\External\BillingPortalFactory::fromEnvironment(),
         ))->execute($limit));
     }
 
@@ -210,6 +248,8 @@ if ($isCli && isset($argv[1])) {
     echo "  revoked-tokens:cleanup     Cleanup expired revoked tokens\n";
     echo "  form-uploads:sweep         Delete form attachments nobody ever submitted\n";
     echo "  billing:reconcile-access   Re-ask the billing service who may use paid features\n";
+    echo "  billing:sync-device-quantity  Bill per-device subscriptions for the devices in service\n";
+    echo "  affiliate:accrue-commissions  Turn referred customers' payments into affiliate commissions\n";
     echo "  update:check               Compare the core version against the latest GitHub release\n";
     echo "  queue:work                 Run the durable async job worker loop\n";
     echo "  schedule:run               Run the cron-tick scheduler (exactly-once per minute)\n";
@@ -2410,14 +2450,31 @@ $router->register('DELETE', '/api/2fa-policies/{id:\d+}', [$twoFactorPoliciesHan
 $planService = new \Whity\Core\Plan\PlanService(
     new \Whity\Core\Plan\PlanRepository($db->getPdo()),
     $entitlementService,
-    $db->getPdo()
+    $db->getPdo(),
+    // Where a tier MOVE is recorded. `tenant_plan` holds only current state, so
+    // moving a workspace overwrites which tier it was on — and moving people
+    // rather than deleting a tier exists precisely so that is not lost. Without
+    // this the move is refused rather than performed unrecorded.
+    $auditLogger
 );
 $plansHandler = new \Whity\Api\PlansApiHandler($planService, $roleChecker, $db->getPdo());
 $router->register('GET',    '/api/plans',                       [$plansHandler, 'list'],            null, null, CorePermissions::PLANS_MANAGE);
 $router->register('POST',   '/api/plans',                       [$plansHandler, 'create'],          null, null, CorePermissions::PLANS_MANAGE);
+// BEFORE the {id} route, because a word is not a digit but the catalogue is the
+// more specific path and reading it that way costs nothing. Registered here so
+// whoever prices a tier can discover WHAT can be priced without first naming a
+// tenant.
+$router->register('GET',    '/api/plans/entitlement-catalogue',  [$plansHandler, 'entitlementCatalogue'], null, null, CorePermissions::PLANS_MANAGE);
 $router->register('GET',    '/api/plans/{id:\d+}',              [$plansHandler, 'show'],            null, null, CorePermissions::PLANS_MANAGE);
 $router->register('PATCH',  '/api/plans/{id:\d+}',              [$plansHandler, 'update'],          null, null, CorePermissions::PLANS_MANAGE);
 $router->register('DELETE', '/api/plans/{id:\d+}',              [$plansHandler, 'destroy'],         null, null, CorePermissions::PLANS_MANAGE);
+// What still points at a tier, and the remedy when it cannot be deleted. A
+// tier with live subscribers or paid invoices is RETIRED, never removed:
+// `tenant_plan.plan_id` and `invoices.plan_id` are both ON DELETE SET NULL, so
+// deleting one silently detaches its customers and blanks it out of invoices
+// that have already been paid.
+$router->register('GET',    '/api/plans/{id:\d+}/usage',        [$plansHandler, 'usage'],           null, null, CorePermissions::PLANS_MANAGE);
+$router->register('POST',   '/api/plans/{id:\d+}/move-subscribers', [$plansHandler, 'moveSubscribers'], null, null, CorePermissions::PLANS_MANAGE);
 $router->register('PUT',    '/api/plans/{id:\d+}/entitlements', [$plansHandler, 'setEntitlements'], null, null, CorePermissions::PLANS_MANAGE);
 
 // What each plan COSTS. Same gate as the catalogue above — `plans:manage` AND
@@ -2517,10 +2574,22 @@ $router->register('POST', '/api/billing/invoices/{id:\d+}/pay', [$billingHandler
 // Three capabilities, because they are three jobs: reading what is billable,
 // SELLING (minting a code), and provisioning or destroying stock. See
 // migration 147 for why they anchor on the capabilities they do.
+// THE TIER'S DEVICE CAP, shared by both paths that put a unit into service.
+// Passed to the activation service AND the handler because they are reached by
+// different callers — an operator importing serials, and a customer redeeming a
+// code with no session at all — and a cap enforced in one and not the other is
+// not a cap.
+$deviceAllowance = new \Whity\Core\Licensing\DeviceAllowance(
+    $entitlementService,
+    new \Whity\Core\Billing\LicensedDeviceCount($db->getPdo(), $settingsService)
+);
+
 $licensingHandler = new \Whity\Api\LicensingApiHandler(
     $db->getPdo(),
-    new \Whity\Core\Licensing\ActivationService($db->getPdo()),
-    $roleChecker
+    new \Whity\Core\Licensing\ActivationService($db->getPdo(), null, $deviceAllowance),
+    $roleChecker,
+    null,
+    $deviceAllowance
 );
 $router->register('GET',  '/api/licensing/devices',                 [$licensingHandler, 'devices'],    null, null, CorePermissions::LICENSING_VIEW);
 $router->register('POST', '/api/licensing/devices',                 [$licensingHandler, 'provision'],  null, null, CorePermissions::LICENSING_MANAGE);
@@ -2566,21 +2635,9 @@ $router->register('POST', '/api/payments/webhook/{provider}', [$paymentWebhookHa
 // An unconfigured deployment gets NullBillingPortal rather than a broken one —
 // self-hosted installations bill nobody, and that is a supported state, not a
 // misconfiguration. See NullBillingPortal for why that walls nobody.
-$payBaseUrl = rtrim((string) ($_ENV['PAY_BASE_URL'] ?? getenv('PAY_BASE_URL') ?: ''), '/');
-$payApiKey = (string) ($_ENV['PAY_API_KEY'] ?? getenv('PAY_API_KEY') ?: '');
 $payWebhookSecret = (string) ($_ENV['PAY_WEBHOOK_SECRET'] ?? getenv('PAY_WEBHOOK_SECRET') ?: '');
 
-$billingPortal = ($payBaseUrl !== '' && $payApiKey !== '')
-    ? new \Whity\Core\Billing\External\HttpBillingPortal(
-        new \Whity\Core\Billing\External\CurlBillingTransport(
-            // Bounded, because an unbounded wait on a third party is an outage
-            // of our own. Tunable per deployment rather than compiled in.
-            timeoutSeconds: max(1, (int) ($_ENV['PAY_TIMEOUT_SECONDS'] ?? getenv('PAY_TIMEOUT_SECONDS') ?: 10)),
-        ),
-        $payBaseUrl,
-        $payApiKey,
-    )
-    : new \Whity\Core\Billing\External\NullBillingPortal();
+$billingPortal = \Whity\Core\Billing\External\BillingPortalFactory::fromEnvironment();
 
 $billingAccessRecorder = new \Whity\Core\Billing\External\AccessRecorder(
     new \Whity\Core\Subscription\SubscriptionService(
@@ -2614,6 +2671,14 @@ $router->register('GET',  '/api/billing/return',   [$externalBillingHandler, 're
 // which is gated on plans:manage — a permission a paying customer never holds,
 // which left checkout naming a plan_key the tenant had no way to discover.
 $router->register('GET',  '/api/billing/plans',    [$externalBillingHandler, 'plans'],      null, null, CorePermissions::BILLING_VIEW);
+// What this tenant has PAID. A tenant billed externally has no local invoice —
+// the local run stands down so nobody is charged twice — so without this the
+// billing screen showed an empty table to somebody who had just paid.
+$router->register('GET',  '/api/billing/receipts', [$externalBillingHandler, 'receipts'], null, null, CorePermissions::BILLING_VIEW);
+// More seats, or fewer. The only change the billing service supports in place:
+// a PLAN swap would mean cancelling and buying again, which either double-charges
+// or leaves a gap, so it is refused rather than faked.
+$router->register('POST', '/api/billing/quantity', [$externalBillingHandler, 'changeQuantity'], null, null, CorePermissions::BILLING_PAY);
 
 // UNAUTHENTICATED, NECESSARILY: the sender is a server and holds no session.
 // Registering it here is only half the job — EnforceTenantIsolation must also
@@ -2633,6 +2698,52 @@ $promotionsHandler = new \Whity\Api\PromotionsApiHandler(
 $router->register('GET',    '/api/promotions',            [$promotionsHandler, 'list'],   null, null, CorePermissions::PLANS_MANAGE);
 $router->register('POST',   '/api/promotions',            [$promotionsHandler, 'create'], null, null, CorePermissions::PLANS_MANAGE);
 $router->register('DELETE', '/api/promotions/{id:\d+}',   [$promotionsHandler, 'retire'], null, null, CorePermissions::PLANS_MANAGE);
+
+// 13a-ter-bis. AFFILIATES (#affiliate). Who sends us customers, at what rate,
+// for how long — and what they are owed.
+//
+// WITHOUT THIS THE WHOLE PROGRAMME IS UNREACHABLE. The codes, the attribution
+// on signup, the commission ledger and the nightly accrual all exist and all
+// depend on a row in `affiliates` that nothing else could create. A feature
+// that looks complete and produces nothing.
+//
+// Same gate as the catalogue and promotions, and for a sharper reason: a rate
+// here is an instruction to pay somebody real money out of the platform's own
+// revenue, so a tenant admin holding `plans:manage` through the global admin
+// role must not reach it — they could mint themselves a code and refer their
+// own workspaces.
+//
+// There is no DELETE. Deactivating stops future earning; the row is kept
+// because the commissions owed to somebody point at it.
+$affiliatesHandler = new \Whity\Api\AffiliatesApiHandler(
+    new \Whity\Core\Affiliate\AffiliateRepository($db->getPdo()),
+    $roleChecker,
+    // `$logger` rather than `$logger ?? null`: the parameter is a
+    // LoggerInterface with a NullLogger default, so an explicit null is a
+    // TypeError at BOOT — which 500s every request while lint and unit tests
+    // stay green.
+    new \Whity\Core\Affiliate\PayoutAssembler($db->getPdo(), $logger),
+    $settingsService
+);
+$router->register('GET',   '/api/affiliates',          [$affiliatesHandler, 'list'],   null, null, CorePermissions::PLANS_MANAGE);
+$router->register('POST',  '/api/affiliates',          [$affiliatesHandler, 'create'], null, null, CorePermissions::PLANS_MANAGE);
+$router->register('PATCH', '/api/affiliates/{id:\d+}', [$affiliatesHandler, 'update'], null, null, CorePermissions::PLANS_MANAGE);
+
+// PAYOUTS — the other half, and the one that moves money.
+//
+// Assembling CLAIMS the commissions it covers, so what is "owed" and what is
+// "being paid" can never overlap and a balance cannot be paid twice. Nothing
+// here transfers anything: it produces a net figure for a person to pay, and
+// they come back and record the bank reference afterwards.
+//
+// The settle/discard routes are keyed on the PAYOUT id rather than nested under
+// the affiliate, because a payout id is already unique and nesting would invite
+// a caller to pass a mismatched pair — which the handler would then have to
+// refuse for reasons nobody would find obvious.
+$router->register('GET',    '/api/affiliates/{id:\d+}/payouts', [$affiliatesHandler, 'payouts'],        null, null, CorePermissions::PLANS_MANAGE);
+$router->register('POST',   '/api/affiliates/{id:\d+}/payouts', [$affiliatesHandler, 'assemblePayout'], null, null, CorePermissions::PLANS_MANAGE);
+$router->register('PATCH',  '/api/affiliate-payouts/{id:\d+}',  [$affiliatesHandler, 'settlePayout'],   null, null, CorePermissions::PLANS_MANAGE);
+$router->register('DELETE', '/api/affiliate-payouts/{id:\d+}',  [$affiliatesHandler, 'discardPayout'],  null, null, CorePermissions::PLANS_MANAGE);
 $router->register('POST',   '/api/tenants/{id:\d+}/plan',       [$plansHandler, 'applyToTenant'],   null, null, CorePermissions::PLANS_MANAGE);
 $router->register('GET',    '/api/tenants/{id:\d+}/plan',       [$plansHandler, 'getTenantPlan'],   null, null, CorePermissions::PLANS_MANAGE);
 
@@ -2830,6 +2941,15 @@ $documentIssuer = new \Whity\Core\Document\DocumentIssuer(
     $documentArtifactRepository,
     $documentArtifactStore
 );
+// The meters the render endpoint spends. Built beside the handler rather than
+// early with the other services because this is its only consumer, and a
+// service with one caller reads better next to it.
+$documentRenderMeters = new \Whity\Core\Entitlement\MeterService(
+    new DatabaseSharedStore($db->getPdo()),
+    $entitlementService,
+    $settingsService
+);
+
 $documentRenderHandler = new \Whity\Api\DocumentRenderApiHandler(
     $documentTemplateRepository,
     $documentAccessPolicy,
@@ -2841,7 +2961,13 @@ $documentRenderHandler = new \Whity\Api\DocumentRenderApiHandler(
     // template HERE too is what stops this path being a way around the
     // designer's own list: a 404 in one place and a render in another would
     // be the client hiding what the server hands out.
-    $ouReachResolver
+    $ouReachResolver,
+    // WHAT THE TENANT'S TIER ALLOWS THEM TO RENDER. Passed here rather than
+    // left null because this deployment DOES sell tiers, and a meter that is
+    // wired everywhere except the one endpoint that spends it is the failure
+    // this whole area exists to avoid: a limit priced on a screen, agreed by a
+    // customer, and enforced by nothing.
+    $documentRenderMeters
 );
 $router->register('POST', '/api/document-templates/{id:\d+}/render', [$documentRenderHandler, 'render'], null, null, CorePermissions::DOCUMENTS_RENDER);
 
@@ -4280,9 +4406,13 @@ $mcpRateLimiter = new McpRateLimiter(
 );
 // WC-149b2fc9: per-tenant MCP opt-in — read mcp.enabled from settings. Default
 // off so new tenants must explicitly enable the endpoint.
-$tenantMcpEnabled = static function (int $tenantId) use ($settingsService): bool {
-    $settings = $settingsService->effective($tenantId);
-    return ($settings[SettingsRegistry::MCP_ENABLED] ?? 'false') === 'true';
+// ASKS FeatureService, NOT THE SETTING DIRECTLY. Two things decide whether a
+// tenant may reach MCP — the operator's instance-wide switch, and whether their
+// tier includes it — and FeatureService is where those two are joined. Reading
+// the flag alone here would have made the tier's `mcp.access` a number on a
+// pricing screen that gated nothing.
+$tenantMcpEnabled = static function (int $tenantId) use ($featureService): bool {
+    return $featureService->isEnabled(SettingsRegistry::MCP_ENABLED, $tenantId);
 };
 // #952: MCP clients cache the discovery lists at connection time, so a client
 // that connected before a plugin rebuild kept its stale tool definitions

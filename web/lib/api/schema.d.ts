@@ -210,6 +210,98 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/affiliate-payouts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Abandon a draft payout (operator)
+         * @description Releases the commissions it claimed back onto the balance, so a draft assembled by mistake does not strand the money. A PAID payout is refused with 409: the money has gone, and releasing its commissions would put an amount already transferred back on the balance to be paid a second time.
+         */
+        delete: operations["delete_api_v1_affiliate_payouts_id"];
+        options?: never;
+        head?: never;
+        /**
+         * Record that the transfer happened (operator)
+         * @description A `reference` is REQUIRED: it is the only thing connecting this row to a real bank movement, and it is what gets quoted back when an affiliate asks where their money went. Refused with 409 if the payout is already paid — re-marking would overwrite the reference of a transfer that really happened, destroying the only record of which payment settled it.
+         */
+        patch: operations["patch_api_v1_affiliate_payouts_id"];
+        trace?: never;
+    };
+    "/api/v1/affiliates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Who sends us customers, and what they are owed (operator)
+         * @description Every affiliate, active and retired, each carrying what they have earned and not yet been paid. `balances` is a LIST because commissions are recorded in whatever currency the customer paid in, and a single total across currencies is wrong in a way nobody can see. Amounts are minor units, and already net of clawbacks — a refund writes a negative row rather than editing the original, so the balance is a SUM. Commissions already settled by a payout are excluded: a balance that included them would be read as money still owed and paid twice. `commission_bp` is BASIS POINTS — 2000 is twenty per cent.
+         */
+        get: operations["get_api_v1_affiliates"];
+        put?: never;
+        /**
+         * Create an affiliate (operator)
+         * @description `code` is what goes in the link, so it is restricted to letters, digits, dots, dashes and underscores — anything needing escaping produces a link that breaks in somebody's email client, and the affiliate is the last to find out. Codes are unique without regard to case, matching how attribution looks them up: somebody writes the code on a slide and somebody else types it back. `commission_bp` is BASIS POINTS, 1 to 5000 — sending 20 for "twenty per cent" would create a 0.2% affiliate, so the units are enforced rather than guessed. `window_months` is how long after a referred customer's FIRST PAYMENT they keep earning, defaulting to 12. `promotion_id` attaches a discount the code also grants, which is how most affiliates persuade anybody to use theirs.
+         */
+        post: operations["post_api_v1_affiliates"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/affiliates/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Renegotiate terms, or end the arrangement (operator)
+         * @description NOTHING HERE IS RETROACTIVE. Every commission already accrued copied the rate it was earned at onto its own row, so a new `commission_bp` moves only what has not been earned yet; and the window end of a referral is frozen when its first payment arrives, so a new `window_months` applies to referrals that have not converted. Sending `promotion_id: null` DETACHES the discount the code carried — omitting the field leaves it alone. `is_active: false` stops future earning and touches nothing earned: money already owed is owed whatever happens to the arrangement, which is why there is no way to delete an affiliate at all.
+         */
+        patch: operations["patch_api_v1_affiliates_id"];
+        trace?: never;
+    };
+    "/api/v1/affiliates/{id}/payouts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What has been paid to an affiliate, and what is drafted (operator)
+         * @description Every payout, draft and paid, newest first. Three amounts per row and they are different facts: `total_minor` is what the affiliate earned, `withholding_minor` is what is kept back and remitted on their behalf, and `net_minor` is what actually leaves the bank. `withholding_bp` is the rate it was assembled at, snapshot onto the row so changing the setting cannot restate a payout already made.
+         */
+        get: operations["get_api_v1_affiliates_id_payouts"];
+        put?: never;
+        /**
+         * Gather what is owed into a draft payout (operator)
+         * @description ONE CURRENCY PER CALL, because a payment is one: commissions are recorded in whatever the customer paid in, and a payout spanning currencies would need a conversion rate nobody stored. Assembling CLAIMS the commissions it covers, so what is owed and what is being paid can never overlap and a balance cannot be paid twice. NOTHING HERE MOVES MONEY — it produces a net figure for a person to transfer, who then records the reference via PATCH. Refused with 422 when nothing is payable, which includes a balance that refunds have taken to zero or below: that carries forward to net against later earnings rather than becoming a payment. Refused with 409 when another payout claimed some of these commissions mid-assembly — ask again, the balance really moved.
+         */
+        post: operations["post_api_v1_affiliates_id_payouts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agenda-items": {
         parameters: {
             query?: never;
@@ -597,6 +689,46 @@ export interface paths {
          * @description The operator's plan catalogue is gated on `plans:manage`, which a paying customer never holds — so without this a tenant could be told to pay and had no way to discover what for, since checkout names a `plan_key`. ONLY GENUINELY PURCHASABLE PLANS: active, priced in this tenant's currency, and carrying the handle the billing service knows the price by. A plan missing any of those would produce a button that 422s. Amounts are MINOR UNITS — 15000 is 15.000 in a three-decimal currency like the dinar — so format from the integer and the code, and never divide by 100. `is_per_seat` and `is_per_device` say what the amount multiplies by, so a price can be shown as "per seat" rather than as a total nobody is charged. An empty list is the ordinary answer on a deployment that sells nothing.
          */
         get: operations["get_api_v1_billing_plans"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/quantity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Buy more seats, or fewer
+         * @description THE ONLY CHANGE THE BILLING SERVICE SUPPORTS IN PLACE. There is no way to move a subscription to a different PLAN: doing so would mean cancelling and buying again, which either charges twice or leaves a gap in cover, so it is refused rather than faked. THE SUBSCRIPTION IS TAKEN FROM THIS DEPLOYMENT'S OWN RECORD, never from the request — a caller naming a subscription identifier would be naming somebody else's the moment they guessed one. PRORATION IS NOT DESCRIBED HERE BECAUSE IT IS NOT OURS: an increase is charged immediately for the unused part of the period, and a decrease is never charged or refunded and applies at the next renewal. Quoting a figure of our own would put a number on screen that the invoice then contradicts. A quantity below 1 is refused — that is a cancellation by another name.
+         */
+        post: operations["post_api_v1_billing_quantity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/billing/receipts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What this tenant has paid
+         * @description RECEIPTS, NOT INVOICES THIS DEPLOYMENT ISSUED. A tenant billed by the external service has no local invoice at all — the local billing run stands down for them precisely so nobody is charged twice — so the invoice list on the billing screen was empty for customers who had just paid. Accurate about our records, and a lie about their money. These are read back from whoever took the payment and are NEVER used to decide access: whether a tenant may use paid features is a separate question with a separate answer, and reconstructing it from payments would mean keeping a copy of a status table this side does not maintain. Amounts are MINOR UNITS with a currency code. Newest first. An empty list is the ordinary answer for a tenant who has never paid, and for a deployment that sells nothing.
+         */
+        get: operations["get_api_v1_billing_receipts"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3430,6 +3562,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/plans/entitlement-catalogue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The catalogue of sellable limits (operator)
+         * @description Every entitlement a tier can set: its kind (bool flag or int cap), its baseline grant, a human description, the calendar period it resets on when it is a metered allowance, and the plugin that declared it (null for core). Distinct from GET /api/v1/tenants/{id}/entitlements, which answers what one workspace receives; this answers what can be priced at all, and needs no tenant.
+         */
+        get: operations["get_api_v1_plans_entitlement_catalogue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/plans/{id}": {
         parameters: {
             query?: never;
@@ -3460,6 +3612,26 @@ export interface paths {
         /** Set a plan's entitlement bundle (operator) */
         put: operations["put_api_v1_plans_id_entitlements"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plans/{id}/move-subscribers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Move every workspace on a tier to another one (operator)
+         * @description The remedy for a tier that cannot be deleted because people are on it. Each workspace resolves to the limits of the destination tier immediately.
+         */
+        post: operations["post_api_v1_plans_id_move_subscribers"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3505,6 +3677,26 @@ export interface paths {
          * @description RETIRES rather than destroys, and returns the retired row. The price is what a past charge was made against, so deleting it would throw away the record of what somebody was charged; the partial unique index frees its slot the moment it stops being active, so a replacement can be created immediately.
          */
         delete: operations["delete_api_v1_plans_id_prices_priceid"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plans/{id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * What still points at a tier (operator)
+         * @description Subscribers, invoices, prices, limits and promotion links, plus whether the tier may be deleted. A tier with live subscribers or invoices is RETIRED rather than removed: tenant_plan.plan_id and invoices.plan_id are both ON DELETE SET NULL, so deleting one would silently detach its customers and blank it out of invoices that have already been paid.
+         */
+        get: operations["get_api_v1_plans_id_usage"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -5080,6 +5272,87 @@ export interface components {
                 };
             };
         };
+        Affiliate: {
+            id: number;
+            code: string;
+            name: string;
+            email?: string | null;
+            profile_id?: number | null;
+            commission_bp: number;
+            window_months: number;
+            promotion_id?: number | null;
+            is_active: boolean;
+            referral_count: number;
+            converted_count: number;
+            balances: components["schemas"]["AffiliateBalance"][];
+        };
+        AffiliateBalance: {
+            currency: string;
+            amount_minor: number;
+        };
+        AffiliateCreateRequest: {
+            code: string;
+            name: string;
+            commission_bp: number;
+            window_months?: number | null;
+            email?: string | null;
+            profile_id?: number | null;
+            promotion_id?: number | null;
+        };
+        AffiliateListResponse: {
+            data: components["schemas"]["Affiliate"][];
+        };
+        AffiliatePayout: {
+            id: number;
+            affiliate_id: number;
+            total_minor: number;
+            withholding_bp: number;
+            withholding_minor: number;
+            net_minor: number;
+            currency: string;
+            status: string;
+            reference?: string | null;
+            paid_at?: string | null;
+            created_at?: string | null;
+            commission_count: number;
+        };
+        AffiliatePayoutAssembleRequest: {
+            currency: string;
+        };
+        AffiliatePayoutAssembledResponse: {
+            data: {
+                payout_id: number;
+                commissions: number;
+                total_minor: number;
+                withholding_minor: number;
+                net_minor: number;
+            };
+        };
+        AffiliatePayoutDiscardedResponse: {
+            data: {
+                discarded: boolean;
+            };
+        };
+        AffiliatePayoutListResponse: {
+            data: components["schemas"]["AffiliatePayout"][];
+        };
+        AffiliatePayoutSettleRequest: {
+            reference: string;
+        };
+        AffiliatePayoutSettledResponse: {
+            data: {
+                settled: boolean;
+            };
+        };
+        AffiliateResponse: {
+            data: components["schemas"]["Affiliate"];
+        };
+        AffiliateUpdateRequest: {
+            commission_bp?: number | null;
+            window_months?: number | null;
+            promotion_id?: number | null;
+            is_active?: boolean | null;
+        };
         ApprovalStatusResponse: {
             data: {
                 id: number;
@@ -5111,6 +5384,25 @@ export interface components {
                 cancel_at_period_end?: boolean;
                 checkout_status?: string | null;
             };
+        };
+        BillingQuantityRequest: {
+            quantity: number;
+        };
+        BillingQuantityResponse: {
+            data: {
+                has_access: boolean;
+            };
+        };
+        BillingReceipt: {
+            number: string;
+            status: string;
+            total_minor: number;
+            currency: string;
+            paid_at?: string | null;
+            issued_at?: string | null;
+        };
+        BillingReceiptListResponse: {
+            data: components["schemas"]["BillingReceipt"][];
         };
         Branding: {
             siteName: string;
@@ -5812,6 +6104,19 @@ export interface components {
             type: "bool" | "int";
             default: string;
             description: string;
+        };
+        EntitlementCatalogueResponse: {
+            data: {
+                [key: string]: components["schemas"]["EntitlementDefinitionSchema"];
+            };
+        };
+        EntitlementDefinitionSchema: {
+            type: string;
+            default: string;
+            description: string;
+            /** @enum {string|null} */
+            period?: "day" | "week" | "month" | null;
+            owner?: string | null;
         };
         EntityTagAssociation: {
             entity_type: string;
@@ -7050,6 +7355,7 @@ export interface components {
             name: string;
             description?: string | null;
             is_active: boolean;
+            provider?: string | null;
             sort_order: number;
             created_at: string;
             updated_at: string;
@@ -7074,6 +7380,15 @@ export interface components {
         };
         PlanListResponse: {
             data: components["schemas"]["PlanSummary"][];
+        };
+        PlanMoveSubscribersRequest: {
+            to_plan_id: number;
+        };
+        PlanMoveSubscribersResponse: {
+            data: components["schemas"]["PlanMoveSubscribersResult"];
+        };
+        PlanMoveSubscribersResult: {
+            moved: number;
         };
         PlanPrice: {
             id: number;
@@ -7116,6 +7431,7 @@ export interface components {
             name: string;
             description?: string | null;
             is_active: boolean;
+            provider?: string | null;
             sort_order: number;
             created_at: string;
             updated_at: string;
@@ -7125,6 +7441,19 @@ export interface components {
             description?: string | null;
             is_active?: boolean;
             sort_order?: number;
+        };
+        PlanUsage: {
+            subscribers: number;
+            invoices: number;
+            prices: number;
+            limits: number;
+            promotions: number;
+            deletable: boolean;
+            permanently_undeletable: boolean;
+            refusal_reason?: string | null;
+        };
+        PlanUsageResponse: {
+            data: components["schemas"]["PlanUsage"];
         };
         PlatformLatestReleaseResponse: {
             /** @enum {string} */
@@ -7257,6 +7586,7 @@ export interface components {
             billing_period: "month" | "year" | "once";
             is_per_seat?: boolean;
             is_per_device?: boolean;
+            is_addon: boolean;
         };
         PurchasablePlanListResponse: {
             data: components["schemas"]["PurchasablePlan"][];
@@ -9305,6 +9635,595 @@ export interface operations {
             };
         };
     };
+    delete_api_v1_affiliate_payouts_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The draft is discarded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AffiliatePayoutDiscardedResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A payout that has been paid cannot be discarded */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patch_api_v1_affiliate_payouts_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AffiliatePayoutSettleRequest"];
+            };
+        };
+        responses: {
+            /** @description The payout is settled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AffiliatePayoutSettledResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description This payout is already marked paid */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A payment reference is required */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_affiliates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every affiliate, with what they are owed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AffiliateListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_affiliates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AffiliateCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The new affiliate */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AffiliateResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Another affiliate already uses that code */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The affiliate cannot be created as described */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patch_api_v1_affiliates_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AffiliateUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description The affiliate as it now stands */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AffiliateResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such affiliate */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The terms cannot be set as described */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_affiliates_id_payouts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every payout for this affiliate */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AffiliatePayoutListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such affiliate */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_affiliates_id_payouts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AffiliatePayoutAssembleRequest"];
+            };
+        };
+        responses: {
+            /** @description The draft payout */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AffiliatePayoutAssembledResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such affiliate */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Another payout claimed these commissions first */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description There is nothing payable in that currency */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_agenda_items: {
         parameters: {
             query: {
@@ -10442,6 +11361,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            /** @description This workspace already has an active subscription */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description That plan cannot be bought on these terms */
             422: {
                 headers: {
@@ -10840,6 +11768,203 @@ export interface operations {
             };
             /** @description Internal server error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_billing_quantity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BillingQuantityRequest"];
+            };
+        };
+        responses: {
+            /** @description The change was applied */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillingQuantityResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description This workspace has no subscription to change */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description quantity must be a whole number of at least 1 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The billing service refused the request */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The billing service is temporarily unreachable */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_billing_receipts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What this tenant has paid */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillingReceiptListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The billing service refused the request */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The billing service is temporarily unreachable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -27131,6 +28256,71 @@ export interface operations {
             };
         };
     };
+    get_api_v1_plans_entitlement_catalogue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The sellable-limit catalogue */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EntitlementCatalogueResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_plans_id: {
         parameters: {
             query?: never;
@@ -27441,6 +28631,95 @@ export interface operations {
             };
         };
     };
+    post_api_v1_plans_id_move_subscribers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanMoveSubscribersRequest"];
+            };
+        };
+        responses: {
+            /** @description How many workspaces moved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanMoveSubscribersResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_plans_id_prices: {
         parameters: {
             query?: never;
@@ -27646,6 +28925,73 @@ export interface operations {
                 };
             };
             /** @description No such price on this plan */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_plans_id_usage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description What the tier still holds */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlanUsageResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Plan not found */
             404: {
                 headers: {
                     [name: string]: unknown;

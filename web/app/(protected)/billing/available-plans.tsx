@@ -33,6 +33,7 @@ import { navigateExternal } from '@/lib/external-navigate';
 
 interface PurchasablePlan {
   plan_key: string;
+  is_addon: boolean;
   name: string;
   description: string | null;
   unit_amount: number;
@@ -42,7 +43,17 @@ interface PurchasablePlan {
   is_per_device: boolean;
 }
 
-export function AvailablePlans() {
+/**
+ * Which half of the catalogue to show.
+ *
+ * TIERS AND ADD-ONS HAVE OPPOSITE PRECONDITIONS: a tier is refused to a tenant
+ * that already has one, an add-on to a tenant that does not. Listing them
+ * together would show every tenant at least one button that answers 409, so the
+ * caller says which half applies and the server enforces it regardless.
+ */
+export type PlanKind = 'tier' | 'addon';
+
+export function AvailablePlans({ kind }: { kind: PlanKind }) {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
   const { hasPermission } = useCapabilities();
@@ -62,7 +73,8 @@ export function AvailablePlans() {
     return ((await res.json()).data ?? []) as PurchasablePlan[];
   }, [apiClient]);
 
-  const plans = data ?? [];
+  const wanted = kind === 'addon';
+  const plans = (data ?? []).filter((p) => p.is_addon === wanted);
 
   // Nothing to sell, or still finding out. Rendering an empty "choose a plan"
   // heading would be worse than rendering nothing at all.
@@ -123,13 +135,20 @@ export function AvailablePlans() {
     <section className="space-y-3" data-testid="available-plans">
       <div>
         <h2 className="text-base font-medium">
-          {t('billing.plans.title', 'Activate your workspace')}
+          {kind === 'addon'
+            ? t('billing.plans.addons.title', 'Add-ons')
+            : t('billing.plans.title', 'Activate your workspace')}
         </h2>
         <p className="text-sm text-muted-foreground">
-          {t(
-            'billing.plans.description',
-            'Choose a plan to activate this workspace. Everything else stays locked until then.'
-          )}
+          {kind === 'addon'
+            ? t(
+                'billing.plans.addons.description',
+                'Bought alongside your plan. Devices are billed for each unit in service.'
+              )
+            : t(
+                'billing.plans.description',
+                'Choose a plan to activate this workspace. Everything else stays locked until then.'
+              )}
         </p>
       </div>
 

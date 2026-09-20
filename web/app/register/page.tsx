@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
 import { useRichTranslation, useTranslation } from '@amroksaleh/features/i18n';
+import { clearReferral, readReferralCode } from '@/lib/referral';
 
 /**
  * Self-service registration (WC-235). Provisions a NEW workspace (tenant) with
@@ -51,14 +52,28 @@ export default function RegisterPage() {
   // chaining a login into the dashboard with an unverified address.
   const [pendingVerification, setPendingVerification] = useState(false);
   const emailInputRef = useRef<HTMLInputElement>(null);
+  // WHO SENT THEM, captured on arrival by <ReferralCapture /> in the root
+  // layout — possibly on a different page, possibly weeks ago. Read once on
+  // mount rather than at submit time so the panel below can say so: somebody
+  // arriving through a colleague's link should be able to see that it took,
+  // and a code that carries a discount is a promise they were made.
+  const [referralCode, setReferralCode] = useState<string | null>(null);
 
   // Match the login page's SSR-safe "enabled until mounted" timing so the
   // server markup matches hydration; focus the first field on mount. The flag
   // flip is scheduled off the synchronous effect tick (a microtask) to stay
   // clear of React's set-state-in-effect rule while preserving the timing.
+  //
+  // The referral is read here too, and for a related reason: localStorage does
+  // not exist on the server, so reading it during render would make the server
+  // markup and the first client render disagree about whether the referral line
+  // is on the page.
   useEffect(() => {
     emailInputRef.current?.focus();
-    void Promise.resolve().then(() => setIsMounted(true));
+    void Promise.resolve().then(() => {
+      setIsMounted(true);
+      setReferralCode(readReferralCode());
+    });
   }, []);
 
   // Already signed in → no need to register.
@@ -115,11 +130,23 @@ export default function RegisterPage() {
           password,
           tenant_name: tenantName,
           ...(displayName.trim() ? { display_name: displayName } : {}),
+          // Marketing, not authentication. The server treats an unknown or
+          // retired code as no referral at all and creates the account anyway,
+          // so sending one can never cost somebody their signup.
+          ...(referralCode ? { referral_code: referralCode } : {}),
         }),
         credentials: 'include',
       });
 
       if (response.status === 201) {
+        // THE WORKSPACE EXISTS, so the referral has been recorded — permanently,
+        // and a workspace keeps its first referrer for good. Forgotten here
+        // rather than in any one of the three branches below, all of which mean
+        // the same thing: a code left behind would attach this affiliate to the
+        // NEXT workspace this person creates, on a link they never clicked
+        // again.
+        clearReferral();
+
         // WC-235: when admin approval is enforced the owner membership is
         // 'invited' (pending), so a login would be refused. Show a pending
         // confirmation instead of chaining login.
@@ -306,6 +333,32 @@ export default function RegisterPage() {
               <Alert variant="destructive">
                 <AlertDescription>{registerError}</AlertDescription>
               </Alert>
+            )}
+
+            {/*
+              WHO SENT THEM, SHOWN RATHER THAN HIDDEN. The code is attached
+              either way, so this is not how the referral works — it is how the
+              person finds out one is attached. That matters in both directions:
+              most affiliate codes also carry a discount, so somebody was made a
+              promise and should be able to see it took; and somebody who does
+              NOT recognise the code deserves to notice before they sign up.
+
+              One key for the whole sentence, with the code as a hole — `<0>`
+              goes wherever the translator's grammar needs it, which in Arabic
+              is not where English puts it.
+            */}
+            {referralCode && (
+              <p
+                className="text-sm text-muted-foreground"
+                data-testid="registration-referral"
+              >
+                {rt(
+                  'register.referral.attached',
+                  'Referred by <0>{code}</0>',
+                  { code: referralCode },
+                  [<span key="code" className="font-medium text-foreground" />]
+                )}
+              </p>
             )}
 
             {/* Workspace name */}

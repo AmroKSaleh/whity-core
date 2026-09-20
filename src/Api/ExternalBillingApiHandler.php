@@ -13,6 +13,7 @@ use Whity\Core\Billing\External\BillingPortal;
 use Whity\Core\Billing\External\BillingPortalException;
 use Whity\Core\Billing\External\BillingSubject;
 use Whity\Core\Billing\External\EventLedger;
+use Whity\Core\Billing\External\Receipt;
 use Whity\Core\Billing\External\WebhookVerifier;
 use Whity\Core\Db\DbBool;
 use Whity\Core\RBAC\CorePermissions;
@@ -92,6 +93,48 @@ final class ExternalBillingApiHandler
             return Response::error('Name the plan to buy with plan_key.', 422);
         }
 
+        // ── WHICH KIND IS THIS, AND MAY THEY BUY IT ────────────────────────
+        //
+        // A TIER and an ADD-ON have opposite preconditions, and getting either
+        // backwards sells the wrong thing.
+        //
+        // Buying a SECOND TIER opens a second subscription beside the first —
+        // the billing service has no notion this customer already has one — so
+        // it charges again, renews both, and the customer pays twice a month
+        // until somebody notices.
+        //
+        // Buying an ADD-ON with NO tier is the mirror image: devices are sold
+        // beside a subscription, not instead of one, and a tenant who bought
+        // them alone would be let into the product by an add-on nobody sold
+        // them a tier for.
+        //
+        // Enforced HERE rather than by which buttons a screen draws. Anyone can
+        // POST this, and the screen is the one thing certain to be stale the
+        // moment a payment lands.
+        //
+        // A FAILURE TO ASK IS NOT A LICENCE TO CHARGE: if the billing service
+        // cannot be reached this refuses, because the cost of a wrong "they have
+        // not paid" is a double charge and the cost of a wrong "they have" is a
+        // retry.
+        $isAddon = $this->planIsAddon($planKey);
+
+        try {
+            $hasAccess = $this->portal->accessFor(BillingSubject::forTenant($tenantId))->hasAccess;
+        } catch (BillingPortalException $e) {
+            return $this->portalFailure($e, 'check an existing subscription', ['tenant_id' => $tenantId]);
+        }
+
+        if (!$isAddon && $hasAccess) {
+            return Response::error('This workspace already has an active subscription.', 409);
+        }
+
+        if ($isAddon && !$hasAccess) {
+            return Response::error(
+                'This workspace needs an active subscription before it can buy add-ons.',
+                409
+            );
+        }
+
         $interval = $body['billing_period'] ?? 'month';
         $interval = is_string($interval) && $interval !== '' ? $interval : 'month';
 
@@ -105,7 +148,10 @@ final class ExternalBillingApiHandler
                 BillingSubject::forTenant($tenantId),
                 $priceRef,
                 $this->appUrl . '/billing/return',
-                $this->appUrl . '/billing/plans',
+                // `/billing`, not `/billing/plans`: the latter does not exist
+                // and 404'd every payer who abandoned the hosted page — the same
+                // dead end the return URL had, found the same way.
+                $this->appUrl . '/billing',
             );
         } catch (BillingPortalException $e) {
             return $this->portalFailure($e, 'start a checkout', ['tenant_id' => $tenantId]);
@@ -277,6 +323,88 @@ final class ExternalBillingApiHandler
     // ── helpers ─────────────────────────────────────────────────────────────
 
     /**
+     * GET /api/v1/billing/receipts — what this tenant has paid.
+     *
+     * A TENANT BILLED EXTERNALLY HAS NO LOCAL INVOICE, by design: the local
+     * billing run stands down for them so nobody is charged twice. Which meant
+     * the billing screen showed an empty invoice table to a customer who had
+     * just paid — accurate about our records, and a lie about their money.
+     *
+     * These are receipts, not invoices we issued. They are never read to decide
+     * anything; access is a separate question with a separate answer.
+     */
+    public function receipts(Request $request): Response
+    {
+        $tenantId = $this->requireTenant($request, CorePermissions::BILLING_VIEW);
+        if ($tenantId instanceof Response) {
+            return $tenantId;
+        }
+
+        if (!$this->portal->isConfigured()) {
+            // Nothing was ever paid through a service this deployment does not
+            // have. An empty list, not an error.
+            return Response::json(['data' => []]);
+        }
+
+        try {
+            $receipts = $this->portal->receiptsFor(BillingSubject::forTenant($tenantId));
+        } catch (BillingPortalException $e) {
+            return $this->portalFailure($e, 'read payment history', ['tenant_id' => $tenantId]);
+        }
+
+        return Response::json([
+            'data' => array_map(static fn (Receipt $r): array => $r->toArray(), $receipts),
+        ]);
+    }
+
+    /**
+     * POST /api/v1/billing/quantity — buy more seats, or fewer.
+     *
+     * THE ONLY CHANGE THE BILLING SERVICE SUPPORTS. There is no way to move a
+     * subscription to a different PLAN in place; that would mean cancelling and
+     * buying again, which either double-charges or leaves a gap in cover, so it
+     * is refused rather than faked.
+     *
+     * PRORATION IS NOT DESCRIBED HERE, because it is not ours. An increase is
+     * charged immediately for the unused part of the period; a decrease is never
+     * charged or refunded and applies at renewal. Quoting a figure of our own
+     * would put a number on screen that the invoice then contradicts.
+     */
+    public function changeQuantity(Request $request): Response
+    {
+        $tenantId = $this->requireTenant($request, CorePermissions::BILLING_PAY);
+        if ($tenantId instanceof Response) {
+            return $tenantId;
+        }
+
+        $body = JsonBody::parsed($request);
+        $quantity = $body['quantity'] ?? null;
+        if (!is_int($quantity) || $quantity < 1) {
+            return Response::error('quantity must be a whole number of at least 1.', 422);
+        }
+
+        // THE SUBSCRIPTION REFERENCE COMES FROM OUR OWN RECORD, never from the
+        // request. A caller naming a subscription id would be naming somebody
+        // else's the moment they guessed one, and the billing service has no way
+        // to know the caller is not entitled to it.
+        $subscriptionRef = $this->subscriptionRefFor($tenantId);
+        if ($subscriptionRef === null) {
+            return Response::error('This workspace has no subscription to change.', 409);
+        }
+
+        try {
+            $this->portal->changeQuantity($subscriptionRef, $quantity);
+            $snapshot = $this->portal->accessFor(BillingSubject::forTenant($tenantId));
+        } catch (BillingPortalException $e) {
+            return $this->portalFailure($e, 'change the subscription quantity', ['tenant_id' => $tenantId]);
+        }
+
+        $this->recorder->record($tenantId, $snapshot);
+
+        return Response::json(['data' => ['has_access' => $snapshot->hasAccess]]);
+    }
+
+    /**
      * GET /api/v1/billing/plans — what this tenant can actually buy.
      *
      * WITHOUT THIS, CHECKOUT IS UNREACHABLE FROM THE PRODUCT. Buying names a
@@ -307,7 +435,7 @@ final class ExternalBillingApiHandler
         ));
 
         $statement = $this->pdo->prepare(
-            'SELECT p.plan_key, p.name, p.description,
+            'SELECT p.plan_key, p.name, p.description, p.is_addon,
                     pp.unit_amount, pp.currency, pp.billing_period,
                     pp.is_per_seat, pp.is_per_device
                FROM plan_prices pp
@@ -316,7 +444,7 @@ final class ExternalBillingApiHandler
                 AND pp.is_active = :price_on
                 AND pp.currency = :currency
                 AND pp.external_ref IS NOT NULL
-              ORDER BY pp.unit_amount ASC, p.plan_key ASC'
+              ORDER BY p.is_addon ASC, pp.unit_amount ASC, p.plan_key ASC'
         );
         $statement->bindValue(':plan_on', true, PDO::PARAM_BOOL);
         $statement->bindValue(':price_on', true, PDO::PARAM_BOOL);
@@ -336,6 +464,12 @@ final class ExternalBillingApiHandler
                 // "per seat" rather than as a total nobody will be charged.
                 'is_per_seat' => DbBool::of($row['is_per_seat']),
                 'is_per_device' => DbBool::of($row['is_per_device'] ?? false),
+                // A TIER OR AN ADD-ON, and the caller needs to know which: they
+                // have opposite preconditions. A tier is refused to a tenant
+                // that already has one; an add-on is refused to a tenant that
+                // does not. Offering them in one undifferentiated list would
+                // show every tenant at least one button that answers 409.
+                'is_addon' => DbBool::of($row['is_addon'] ?? false),
             ];
         }
 
@@ -372,6 +506,39 @@ final class ExternalBillingApiHandler
         $statement->bindValue(':on', true, PDO::PARAM_BOOL);
         $statement->execute();
 
+        $ref = $statement->fetchColumn();
+
+        return is_string($ref) && $ref !== '' ? $ref : null;
+    }
+
+    /**
+     * Whether this plan is bought BESIDE a subscription rather than as one.
+     *
+     * Unknown plans answer false — a plan that does not exist is refused a
+     * moment later by the price lookup, and guessing "add-on" here would give
+     * the caller a different error about a plan that is not there.
+     */
+    private function planIsAddon(string $planKey): bool
+    {
+        $statement = $this->pdo->prepare('SELECT is_addon FROM plans WHERE plan_key = :plan_key');
+        $statement->bindValue(':plan_key', $planKey);
+        $statement->execute();
+        $value = $statement->fetchColumn();
+
+        return $value !== false && DbBool::of($value);
+    }
+
+    /**
+     * The billing service's handle for this tenant's subscription, from our own
+     * record of it. Null when this tenant has never had one.
+     */
+    private function subscriptionRefFor(int $tenantId): ?string
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT external_ref FROM tenant_plan WHERE tenant_id = :tenant_id'
+        );
+        $statement->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+        $statement->execute();
         $ref = $statement->fetchColumn();
 
         return is_string($ref) && $ref !== '' ? $ref : null;

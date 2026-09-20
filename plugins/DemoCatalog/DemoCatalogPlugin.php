@@ -14,6 +14,7 @@ use DemoCatalog\Migrations\RetireDemoCatalogChangeSeqTable;
 use Whity\Sdk\DataType\PluginDataTypesInterface;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
+use Whity\Sdk\PluginEntitlementsInterface;
 use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginRequirementsInterface;
@@ -58,7 +59,8 @@ final class DemoCatalogPlugin implements
     PluginResourceTypesInterface,
     PluginTablesInterface,
     PluginDataTypesInterface,
-    PluginSettingsInterface
+    PluginSettingsInterface,
+    PluginEntitlementsInterface
 {
     /**
      * @inheritDoc
@@ -66,6 +68,47 @@ final class DemoCatalogPlugin implements
     public function getName(): string
     {
         return 'DemoCatalog';
+    }
+
+    /**
+     * What this plugin would SELL, if it sold anything.
+     *
+     * THE REFERENCE PLUGIN IS WHERE A CONTRACT STOPS BEING THEORETICAL. An
+     * interface nothing in the tree implements is one whose first real
+     * implementor discovers the parts that do not work — the namespacing rule,
+     * the validated default, how a meter differs from a cap — at the worst
+     * moment, in somebody else's repository. Declaring here means the loader
+     * path, the tier editor and the three-layer resolution are exercised by the
+     * suite on every run.
+     *
+     * BOTH KINDS, on purpose: a standing CAP (how many may exist) and a METER
+     * (how many may be used in a window that resets). They are the two shapes a
+     * vertical product asks for — "max students" and "exams per month" — and a
+     * reference that showed only one would leave the other's first user guessing.
+     *
+     * Unlimited by default, like every core limit: a deployment that sells
+     * nothing must ration nobody, and a tier that means something sets these
+     * DOWN, which is a deliberate act by whoever prices it.
+     *
+     * @inheritDoc
+     */
+    public function getEntitlements(): array
+    {
+        return [
+            [
+                'key' => 'democatalog.items.max',
+                'type' => 'int',
+                'default' => '-1',
+                'description' => 'Maximum catalogue items this workspace may hold.',
+            ],
+            [
+                'key' => 'democatalog.exports.per_month',
+                'type' => 'int',
+                'default' => '-1',
+                'description' => 'Catalogue exports this workspace may run each calendar month.',
+                'period' => 'month',
+            ],
+        ];
     }
 
     /**
