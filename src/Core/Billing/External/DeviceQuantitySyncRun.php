@@ -170,7 +170,16 @@ final class DeviceQuantitySyncRun
             }
 
             try {
-                $this->portal->changeQuantity($subscription->id, $count);
+                // A MACHINE NAMING ITSELF. This sweep resizes subscriptions on
+                // nobody's instruction, and attributing it to whichever person
+                // happened to be nearby would invent an actor — worse than
+                // none, because an invented one is indistinguishable from a
+                // real one and somebody would be asked why they did it.
+                $this->portal->changeQuantity(
+                    BillingActor::job('device-quantity-sync'),
+                    $subscription->id,
+                    $count
+                );
             } catch (BillingPortalException $e) {
                 if ($this->stopOrCount($e, $tenantId, 'change a quantity', $result)) {
                     break;
