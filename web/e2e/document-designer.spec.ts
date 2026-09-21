@@ -141,6 +141,28 @@ function starterBlock(page: Page, name: string) {
 }
 
 /**
+ * Every server-side row this file created, for the afterEach net below.
+ *
+ * WHY A REGISTRY AND NOT JUST THE DELETE AT THE END OF EACH TEST
+ * --------------------------------------------------------------
+ * Blocks and templates are real, tenant-scoped rows written through the real
+ * API, and the tests that make one delete it on their LAST line. Playwright
+ * abandons a test body at the first failed `expect`, so every assertion
+ * between the create and that last line is a path on which the row survives
+ * the run — and a block published to `tenant` scope (the scoping test below
+ * does exactly that, then reloads and asserts three more times) is then
+ * visible to every later run and every human in the tenant.
+ *
+ * So ids are registered AT CREATION, before the first assertion that could
+ * strand them, and the afterEach removes whatever is still there. The
+ * in-body deletes stay: they assert real behaviour (the confirm dialog names
+ * the block, the row leaves the rail) and this is a net under them, not a
+ * replacement — a repeat DELETE of an already-gone id 404s and is swallowed.
+ */
+const createdBlockIds: string[] = [];
+const createdTemplateIds: string[] = [];
+
+/**
  * Save the current selection as a block and return the id the SERVER gave it.
  *
  * The id is read from the create call's OWN response — `POST
@@ -168,6 +190,9 @@ async function saveSelectionAsBlock(page: Page): Promise<string> {
   const response = await created;
   expect(response.status(), 'saving a selection should create a block').toBe(201);
   const blockId = String(((await response.json()) as { data: { id: number | string } }).data.id);
+  // Register before the two assertions below: the row exists on the server as
+  // of this line, so from here on a failure must not be able to leak it.
+  createdBlockIds.push(blockId);
 
   // The chrome confirms the save, and the rail's library now offers this block.
   await expect(page.getByRole('status').filter({ hasText: 'Saved block' })).toBeVisible();
@@ -177,6 +202,35 @@ async function saveSelectionAsBlock(page: Page): Promise<string> {
 }
 
 test.describe('Document & Label Designer', () => {
+  /**
+   * Remove whatever this test put on the server, whether or not it reached its
+   * own delete. See the registry comment above `saveSelectionAsBlock`.
+   *
+   * Through `page.request` rather than a fresh API context: it shares the
+   * page's cookie jar, so it is already the [admin] session that holds
+   * `documents:write` — and it works when the page is in whatever state the
+   * failure left it in, which a UI control does not. `X-Requested-With` is
+   * required: the backend refuses cookie-authenticated state-changing requests
+   * without it (see e2e/support/api.ts). Failures are swallowed — cleanup that
+   * throws would replace the real failure with its own.
+   */
+  test.afterEach(async ({ page }) => {
+    for (const id of createdBlockIds.splice(0)) {
+      await page.request
+        .delete(`/api/v1/document-blocks/${id}`, {
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        })
+        .catch(() => undefined);
+    }
+    for (const id of createdTemplateIds.splice(0)) {
+      await page.request
+        .delete(`/api/v1/document-templates/${id}`, {
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        })
+        .catch(() => undefined);
+    }
+  });
+
   test('mounts, and adding a barcode + QR renders bwip-js SVG', async ({ page }) => {
     await page.goto('/admin/documents');
     await expect(page.getByRole('heading', { name: 'Document & Label Designer' })).toBeVisible();
@@ -473,7 +527,22 @@ test.describe('Document & Label Designer', () => {
     await page.getByTestId('doc-tab-sheet').click();
     await page.getByTestId('doc-sheet-enable').click();
     await page.getByTestId('doc-sheet-cols').fill('4');
+    // Read the id off the create call's own response, the way
+    // saveSelectionAsBlock does, and register it before anything below can
+    // fail: from the moment this POST answers, the template is a real
+    // tenant-visible row and the delete at the end of this body is only
+    // reached on the happy path.
+    const saved = page.waitForResponse(
+      (r) => r.url().includes('/api/v1/document-templates') && r.request().method() === 'POST',
+      { timeout: 15_000 }
+    );
     await page.getByTestId('doc-save').click();
+    const savedResponse = await saved;
+    if (savedResponse.ok()) {
+      createdTemplateIds.push(
+        String(((await savedResponse.json()) as { data: { id: number | string } }).data.id)
+      );
+    }
     // Saving is a round-trip; wait for it to land rather than racing the next
     // step against it.
     //
