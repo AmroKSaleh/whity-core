@@ -107,13 +107,19 @@ Why keep the header/query at all rather than going path-only? The `X-Tenant-Id` 
 
 Every handler/repository statement that runs **after tenant resolution** and touches a tenant-owned table carries an explicit, parameterised `tenant_id` predicate bound from `TenantContext`. **This hand-written predicate IS the query-level isolation mechanism** — there is no automatic query-rewriting layer. (The `ScopesToTenant` trait that previously advertised one was removed by WC-161: a full audit found zero production call sites, its rewriter refused the JOINs most list endpoints need, and it had no concept of the system tenant's cross-tenant visibility. An advertised guarantee that does not run is worse than none.)
 
-One pre-resolution exception is known and tracked: the login path looks a user up by email *before* any tenant context exists (`AuthHandler`), while the schema's `UNIQUE(tenant_id, email)` permits the same email in different tenants — see issue #181 for the cross-tenant login-ambiguity fix.
+One pre-resolution lookup is inherent, and it is **no longer ambiguous**: the login path resolves an account by email before any tenant context exists (`AuthHandler`). That used to be issue #181, because the old schema's `UNIQUE(tenant_id, email)` allowed the same address in two tenants and a login could not say which was meant. The identity cutover closed it — `profile_emails` holds addresses under a **global** `UNIQUE(email)` (migration `029`), a profile is one person across the whole deployment, and which tenant they act in is a separate `memberships` row resolved into `active_tenant_id`. An email now identifies exactly one profile, so the pre-context lookup has a single answer by construction rather than by convention. See [ADR 0005](../adr/0005-identity-tenant-membership-model.md) for the model; migration `047` cites #181 as the resolved case its own namespacing mirrors.
 
 The conventions every query follows:
 
 ```php
-// Regular tenant: scoped read/write
-$sql = 'SELECT ... FROM users u JOIN roles r ON u.role_id = r.id WHERE u.tenant_id = ?';
+// Regular tenant: the predicate sits on the MEMBERSHIP, because that is the
+// row carrying the tenant. A profile is global; what is tenant-owned is the
+// fact of their belonging to one (ADR 0005 §3). Real shape, from AdminApiHandler:
+'SELECT r.name, COUNT(DISTINCT m.profile_id) AS count
+   FROM roles r
+   LEFT JOIN memberships m ON m.role_id = r.id AND m.tenant_id = :tid_m AND m.status = \'active\'
+  WHERE r.tenant_id = :tid_roles OR r.tenant_id IS NULL
+  GROUP BY r.name'
 
 // System tenant (id 0): sees across tenants — the platform-wide convention
 if ($tenantId === 0) { /* unscoped variant */ } else { /* scoped variant */ }
@@ -122,11 +128,18 @@ if ($tenantId === 0) { /* unscoped variant */ } else { /* scoped variant */ }
 '... WHERE r.id = ? AND (r.tenant_id = ? OR r.tenant_id IS NULL)'
 ```
 
+> The predicate belongs on a **tenant-owned** table, and since the identity
+> cutover `profiles` is not one — it sits in `SanctionedGlobalTables`. Reaching
+> for `profiles.tenant_id` is the mistake this section exists to prevent: the
+> column does not exist. Scope through `memberships`, aliased, as above.
+
 - The tenant id is **always bound**, never string-interpolated.
-- JOINed statements qualify the predicate with the owning table's alias (`u.tenant_id = ?`), so joined rows cannot under-scope it.
+- JOINed statements qualify the predicate with the owning table's alias (`m.tenant_id = :tid_m` above), so joined rows cannot under-scope it. Getting this wrong is quiet: an unqualified `tenant_id = ?` against a join whose other side also has the column is ambiguous at best and scopes the wrong table at worst.
 - `INSERT`s set `tenant_id` explicitly from the context; cross-tenant `UPDATE`/`DELETE` attempts match zero rows and surface as 404.
 
-**Because the predicates are hand-written, they are enforced by tests rather than by structure:** `tests/Integration/CrossTenantRejectionRealEngineTest.php` drives the real handlers/repositories against a real SQL engine and proves, per tenant-owned table (users, roles, organizational units, audit log, delegations — persons/relations have the same proof in their own real-engine suites): list/read scoping, cross-tenant read rejection, cross-tenant **write** rejection with the row verified untouched, and system-tenant visibility. Dropping a single predicate makes the suite fail. **When you add a tenant-owned table, extend that suite.**
+**Because the predicates are hand-written, they are enforced by tests rather than by structure:** `tests/Integration/CrossTenantRejectionRealEngineTest.php` drives the real handlers and repositories against a real SQL engine and proves, for each surface it covers: list/read scoping, cross-tenant read rejection, cross-tenant **write** rejection with the row verified untouched, and system-tenant visibility. Dropping a single predicate makes the suite fail.
+
+It covers the membership-mediated user surface — including that a system-tenant write touches only ONE membership of a profile belonging to several, and that a tenant cannot use a `tenant_id` field to grant itself membership elsewhere — plus roles, organizational units, the audit log, delegations and two-factor state; persons and relations carry the same proof in their own real-engine suites. **The authoritative list of what must be scoped is `TenantOwnedTables`, not this page**: it is re-derived from `database/migrations/` by `TenantOwnedTablesTest`, which fails when the two drift, and it is far longer than any prose list would stay accurate. **When you add a tenant-owned table, extend the suite.**
 
 ## CI tenant-predicate guard (WC-192)
 
@@ -136,19 +149,23 @@ The guard is two small core classes plus the script, over a portable scan engine
 
 - **`Whity\Sdk\Tenant\TenantPredicateScanner`** (`sdk/src/Tenant/TenantPredicateScanner.php`) — the tokenizer-based scan engine and **single source of truth** for the detection logic (WC-194). It is schema-agnostic: it is handed a `TenantTableRegistry` of tenant-owned / global tables per call. For each SQL statement it reassembles the string literals that build it (`.` concatenation, `implode()`-built `SET`/`WHERE`, the `$sql .= '...'` builder pattern, and `{$col}` interpolation), then passes the statement when it binds a `tenant_id` **predicate** (`tenant_id =`/`IN`/`IS …`, including aliased `u.tenant_id = ?` and transitive joins `p.tenant_id = r.tenant_id`), or only touches global tables, or carries an ignore annotation. A `tenant_id` that appears only in a `SELECT`/`INSERT` column list is **not** a predicate. `INSERT` (and `INSERT … ON CONFLICT … DO UPDATE` upserts) is out of scope — it sets `tenant_id` as a value, not a predicate. Living in the standalone SDK is what lets out-of-repo plugins run the very same engine in their own CI (see the conformance kit below).
 - **`TenantOwnedTables`** (`src/Core/Tenant/TenantOwnedTables.php`) — the canonical set of tables that carry a `tenant_id` column, derived from the migrations. `TenantOwnedTablesTest` re-derives the set straight from `database/migrations/` and fails if the list drifts, so the guard can never go stale against the schema.
-- **`SanctionedGlobalTables`** (`src/Core/Tenant/SanctionedGlobalTables.php`) — the allowlist of intentionally non-tenant tables (`revoked_tokens`, `core_schema_migrations`). The guard never flags these.
+- **`SanctionedGlobalTables`** (`src/Core/Tenant/SanctionedGlobalTables.php`) — the allowlist of intentionally non-tenant tables; the guard never flags these. It covers platform infrastructure (`core_schema_migrations`, `revoked_tokens`, `app_settings`, `shared_store`) and, since the identity cutover, the **identity** tables that are global by design: `profiles`, `profile_emails`, `external_identities`, `password_resets`, `email_verifications`. Read the file for the current set rather than trusting a list here — a person exists once across the deployment, and `memberships` is what says which tenants they act in.
 - **`TenantPredicateGuard`** (`src/Core/Tenant/TenantPredicateGuard.php`) — a thin core facade that builds a `TenantTableRegistry` from the two lists above (via `CoreTenantTableRegistry`) and delegates to the SDK scanner, preserving the `scanDirectory()` / `scanSource()` surface the CI script uses.
 
-> **Tables with no `tenant_id` column** — `role_permissions` (scopes via `roles`) and `backup_codes` (scopes via `users.user_id`) — are deliberately **not** in `TenantOwnedTables`. They are not directly scannable for a `tenant_id` predicate; isolation for them is enforced at the parent join / owning user id, so listing them would only produce false positives on correct `WHERE role_id = ?` / `WHERE user_id = ?` access.
+> **Tables with no `tenant_id` column** — `role_permissions` (scopes via `roles`) and `backup_codes` (scopes via `profiles`, on `profile_id`, since `038_rekey_backup_codes_to_profiles.php` re-pointed it off the dropped `users` table) — are deliberately **not** in `TenantOwnedTables`. They are not directly scannable for a `tenant_id` predicate; isolation for them is enforced at the parent join / owning profile id, so listing them would only produce false positives on correct `WHERE role_id = ?` / `WHERE profile_id = ?` access.
 
 ### The ignore annotation
 
 Some unscoped queries are legitimate and intentional: the **system tenant (id 0)** sees across tenants by design, by-PK lookups use globally-unique `SERIAL` ids, login resolves by globally-unique email, and platform-maintenance/seed paths run with no tenant context. The guard does **not** silently pass these — each must be explicitly annotated so the exception is reviewable:
 
 ```php
-// @tenant-guard-ignore: system-tenant (id 0) sees all tenants; scoped else-branch binds tenant_id
-$stmt = $this->db->prepare('SELECT * FROM users WHERE id = ?');
+// @tenant-guard-ignore: system-tenant dashboard (isSystemUser) aggregates across all tenants; scoped sibling below uses tenant_id
+$stmt = $pdo->prepare('SELECT COUNT(*) FROM memberships WHERE status = \'active\'');
 ```
+
+(Taken from `AdminApiHandler`, where the system-tenant branch of the dashboard sits directly
+above its tenant-scoped sibling — which is what makes the stated reason checkable by whoever
+reviews it.)
 
 Rules:
 
