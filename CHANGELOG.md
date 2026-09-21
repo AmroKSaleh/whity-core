@@ -6,6 +6,8 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-09-21
+
 ### Removed
 
 - **The offline-twin plugins for Documents, Relations and Taxonomy.** Three in-tree plugins re-implemented features core already owns, as the "offline half" of a planned strangler-fig cutover: each was to become the sole provider of its resource on the desktop's PHP host, and eventually to replace core's version on the server. The premise did not survive contact with the product. Core owns `documents:*`, `relations:*` and `tags:*`, owns `/api/document-templates`, `/api/persons`, `/api/tags` and `/api/tag-groups`, and is where those features are actually being developed — so on every server the plugins were **inert by construction**: their routes collided with core's and were refused, and their screens were refused by the core-permission ownership rule before any route was even considered. Regenerating `public/openapi.json` after removing them produces a byte-identical file, which is the measurement rather than the claim: they contributed nothing to the server's API surface, and three plugins' worth of duplicated handlers, resources and migrations were being carried, reviewed and tested for a cutover that was not going to happen.
