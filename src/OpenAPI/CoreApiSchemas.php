@@ -142,7 +142,9 @@ final class CoreApiSchemas
             self::twoFactorRecoveryRoutes(),
             self::dataTypeRoutes(),
             self::reportRoutes(),
-            self::resourceRoleGrantRoutes()
+            self::resourceRoleGrantRoutes(),
+            self::licensingRoutes(),
+            self::externalBillingRoutes()
         );
     }
 
@@ -4154,6 +4156,10 @@ final class CoreApiSchemas
                 'name' => self::str(),
                 'description' => self::str(true),
                 'is_active' => self::bool(),
+                // Null for a tier the operator or the platform owns; the
+                // plugin's name for one a plugin shipped. The pricing screen
+                // groups by it so nobody wonders where a tier came from.
+                'provider' => self::str(true),
                 'sort_order' => self::int(),
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
@@ -4166,6 +4172,10 @@ final class CoreApiSchemas
                 'name' => self::str(),
                 'description' => self::str(true),
                 'is_active' => self::bool(),
+                // Null for a tier the operator or the platform owns; the
+                // plugin's name for one a plugin shipped. The pricing screen
+                // groups by it so nobody wonders where a tier came from.
+                'provider' => self::str(true),
                 'sort_order' => self::int(),
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
@@ -4186,10 +4196,11 @@ final class CoreApiSchemas
                 'unit_amount' => self::int(),
                 'billing_period' => ['type' => 'string', 'enum' => ['month', 'year', 'once']],
                 'is_per_seat' => self::bool(),
+                'is_per_device' => self::bool(),
                 'is_active' => self::bool(),
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
-            ], ['id', 'plan_id', 'currency', 'unit_amount', 'billing_period', 'is_per_seat', 'is_active']),
+            ], ['id', 'plan_id', 'currency', 'unit_amount', 'billing_period', 'is_per_seat', 'is_per_device', 'is_active']),
             // Early birds, offers and promo codes are ONE object (#billing). A
             // promotion carrying a `code` is typed by the customer; one without
             // applies automatically to whoever qualifies. Exactly one of
@@ -4300,6 +4311,92 @@ final class CoreApiSchemas
                 'received' => self::int(),
                 'settled' => self::int(),
             ], ['received', 'settled'])),
+            // #affiliate — somebody who sends us customers, and what they are
+            // owed for it.
+            //
+            // `balances` IS A LIST, NOT A NUMBER, and that is the whole point:
+            // commissions are recorded in whatever currency the customer paid
+            // in, and one total across dinars and dollars is wrong in a way
+            // nobody can see on a screen. A payout is made in one currency at a
+            // time anyway.
+            'Affiliate' => self::object([
+                'id' => self::int(),
+                'code' => self::str(),
+                'name' => self::str(),
+                'email' => self::str(true),
+                'profile_id' => self::int(true),
+                // BASIS POINTS. 2000 is twenty per cent. Named in the
+                // description too, because a client reading `commission_bp: 20`
+                // as a percentage builds a screen that is wrong by a hundred.
+                'commission_bp' => self::int(),
+                'window_months' => self::int(),
+                'promotion_id' => self::int(true),
+                'is_active' => self::bool(),
+                'referral_count' => self::int(),
+                'converted_count' => self::int(),
+                'balances' => ['type' => 'array', 'items' => SchemaBuilder::ref('AffiliateBalance')],
+            ], ['id', 'code', 'name', 'commission_bp', 'window_months', 'is_active', 'referral_count', 'converted_count', 'balances']),
+            'AffiliateBalance' => self::object([
+                'currency' => self::str(),
+                'amount_minor' => self::int(),
+            ], ['currency', 'amount_minor']),
+            // A payout has THREE amounts and they are all different facts: what
+            // the affiliate earned, what is kept back and remitted on their
+            // behalf, and what actually leaves the bank. Recording one and
+            // calling it another is how a payout register stops reconciling
+            // with a bank statement.
+            'AffiliatePayout' => self::object([
+                'id' => self::int(),
+                'affiliate_id' => self::int(),
+                'total_minor' => self::int(),
+                'withholding_bp' => self::int(),
+                'withholding_minor' => self::int(),
+                'net_minor' => self::int(),
+                'currency' => self::str(),
+                'status' => self::str(),
+                'reference' => self::str(true),
+                'paid_at' => self::str(true),
+                'created_at' => self::str(true),
+                'commission_count' => self::int(),
+            ], ['id', 'affiliate_id', 'total_minor', 'withholding_bp', 'withholding_minor',
+                'net_minor', 'currency', 'status', 'commission_count']),
+            'AffiliatePayoutListResponse' => self::listEnvelope('AffiliatePayout'),
+            'AffiliatePayoutAssembleRequest' => self::object([
+                'currency' => self::str(),
+            ], ['currency']),
+            'AffiliatePayoutAssembledResponse' => self::dataEnvelope(self::object([
+                'payout_id' => self::int(),
+                'commissions' => self::int(),
+                'total_minor' => self::int(),
+                'withholding_minor' => self::int(),
+                'net_minor' => self::int(),
+            ], ['payout_id', 'commissions', 'total_minor', 'withholding_minor', 'net_minor'])),
+            'AffiliatePayoutSettleRequest' => self::object([
+                'reference' => self::str(),
+            ], ['reference']),
+            'AffiliatePayoutSettledResponse' => self::dataEnvelope(self::object([
+                'settled' => self::bool(),
+            ], ['settled'])),
+            'AffiliatePayoutDiscardedResponse' => self::dataEnvelope(self::object([
+                'discarded' => self::bool(),
+            ], ['discarded'])),
+            'AffiliateListResponse' => self::listEnvelope('Affiliate'),
+            'AffiliateResponse' => self::dataEnvelope(SchemaBuilder::ref('Affiliate')),
+            'AffiliateCreateRequest' => self::object([
+                'code' => self::str(),
+                'name' => self::str(),
+                'commission_bp' => self::int(),
+                'window_months' => self::int(true),
+                'email' => self::str(true),
+                'profile_id' => self::int(true),
+                'promotion_id' => self::int(true),
+            ], ['code', 'name', 'commission_bp']),
+            'AffiliateUpdateRequest' => self::object([
+                'commission_bp' => self::int(true),
+                'window_months' => self::int(true),
+                'promotion_id' => self::int(true),
+                'is_active' => self::bool(true),
+            ], []),
             'PromotionListResponse' => self::listEnvelope('Promotion'),
             'PromotionResponse' => self::dataEnvelope(SchemaBuilder::ref('Promotion')),
             'PromotionCreateRequest' => self::object([
@@ -4315,6 +4412,149 @@ final class CoreApiSchemas
                 'plan_ids' => ['type' => 'array', 'items' => self::int()],
             ], ['name']),
 
+            // ── Per-device licensing (#licensing) ─────────────────────────────
+            // A unit of hardware a tenant is licensed for. THE THREE TIMESTAMPS
+            // ARE SEPARATE ON PURPOSE: `provisioned_at` is when the serial was
+            // imported, `activated_at` when someone redeemed a code against it,
+            // `last_seen_at` when it last checked in. Which of them a price
+            // bills on is `licensing.billing_basis`, so collapsing them into one
+            // "date" would destroy the distinction the invoice depends on.
+            'LicensedDevice' => self::object([
+                'id' => self::int(),
+                'serial_number' => self::str(),
+                'label' => self::str(true),
+                'status' => ['type' => 'string', 'enum' => ['provisioned', 'active', 'retired']],
+                'provisioned_at' => self::str(true),
+                'activated_at' => self::str(true),
+                'last_seen_at' => self::str(true),
+            ], ['id', 'serial_number', 'status']),
+            'LicensedDeviceListResponse' => self::listEnvelope('LicensedDevice'),
+            // Each entry is either a bare serial string or an object carrying a
+            // label, because stock arrives both ways: a column pasted out of a
+            // spreadsheet, or a proper export with names attached.
+            'DeviceProvisionRequest' => self::object([
+                'serial_numbers' => [
+                    'type' => 'array',
+                    'maxItems' => 500,
+                    'items' => ['oneOf' => [
+                        self::str(),
+                        self::object([
+                            'serial_number' => self::str(),
+                            'label' => self::str(true),
+                        ], ['serial_number']),
+                    ]],
+                ],
+            ], ['serial_numbers']),
+            // A PARTIAL IMPORT IS LEGIBLE, not mysterious: re-uploading a
+            // spreadsheet is the normal way this goes wrong, so serials already
+            // present are counted rather than failing the batch, and anything
+            // refused comes back with the reason. 207 when some were rejected.
+            'DeviceProvisionResponse' => self::object([
+                'created' => self::int(),
+                'already_present' => self::int(),
+                'rejected' => [
+                    'type' => 'array',
+                    'items' => self::object([
+                        'serial_number' => self::str(true),
+                        'reason' => self::str(),
+                    ], ['reason']),
+                ],
+            ], ['created', 'already_present', 'rejected']),
+            'ActivationCodeIssueRequest' => self::object([
+                'licensed_device_id' => self::int(true),
+                'max_redemptions' => self::int(),
+                'expires_at' => self::str(true),
+            ], []),
+            // `code` APPEARS HERE AND NOWHERE ELSE, EVER. It is stored
+            // canonically and never returned in full again — the same contract
+            // as a generated API token. A caller that does not keep this
+            // response has to issue a new code.
+            'ActivationCodeIssuedResponse' => self::object([
+                'id' => self::int(),
+                'code' => self::str(),
+                'max_redemptions' => self::int(),
+                'expires_at' => self::str(true),
+            ], ['id', 'code', 'max_redemptions']),
+            'ActivationCodeRevokedResponse' => self::object([
+                'revoked' => self::bool(),
+            ], ['revoked']),
+            // A SERIAL, NEVER AN INTERNAL ID: a person can read a serial off the
+            // unit in front of them, and accepting a row id would let a caller
+            // enumerate rows by number. The tenant is NOT a field — it comes
+            // from the code, which is the only trustworthy scope available when
+            // the caller is anonymous.
+            'ActivationRedeemRequest' => self::object([
+                'code' => self::str(),
+                'serial_number' => self::str(true),
+            ], ['code']),
+            'ActivationRedeemResponse' => self::object([
+                'activated' => self::bool(),
+                'device_id' => self::int(true),
+            ], ['activated']),
+
+            // ── Buying a subscription (migration 149) ─────────────────────────
+            // whity-core does not take money; a separate service does. These
+            // shapes are the whole of what crosses that boundary — note what is
+            // absent: no amount, no currency, no payment method, no transaction,
+            // no provider. None of them are whity-core's business, and a field
+            // here would invite a client to act on one.
+            'CheckoutStartRequest' => self::object([
+                'plan_key' => self::str(),
+                'billing_period' => ['type' => 'string', 'enum' => ['month', 'year', 'once']],
+            ], ['plan_key']),
+            // Only a destination. The session reference is a capability token
+            // and is deliberately not returned — the browser needs somewhere to
+            // go, and nothing else here has to reach it.
+            'CheckoutStartResponse' => self::dataEnvelope(self::object([
+                'url' => self::str(),
+            ], ['url'])),
+            // WHAT A TENANT MAY BUY. Separate from the operator's plan catalogue,
+            // which is gated on plans:manage — a permission a paying customer
+            // never holds. Amounts are MINOR UNITS with a currency code; the
+            // dinar has three decimal places, so anything dividing by 100 is
+            // wrong by a factor of ten.
+            'PurchasablePlan' => self::object([
+                'plan_key' => self::str(),
+                'name' => self::str(),
+                'description' => self::str(true),
+                'unit_amount' => self::int(),
+                'currency' => self::str(),
+                'billing_period' => ['type' => 'string', 'enum' => ['month', 'year', 'once']],
+                'is_per_seat' => self::bool(),
+                'is_per_device' => self::bool(),
+                'is_addon' => self::bool(),
+            ], ['plan_key', 'name', 'unit_amount', 'currency', 'billing_period', 'is_addon']),
+            'PurchasablePlanListResponse' => self::listEnvelope('PurchasablePlan'),
+            // A RECEIPT, NOT AN INVOICE THIS DEPLOYMENT ISSUED. A tenant billed
+            // externally has no local invoice — the local billing run stands
+            // down for them so nobody is charged twice — so this is what they
+            // paid, read back from whoever took the money. Never used to decide
+            // access. Amounts are minor units.
+            'BillingReceipt' => self::object([
+                'number' => self::str(),
+                'status' => self::str(),
+                'total_minor' => self::int(),
+                'currency' => self::str(),
+                'paid_at' => self::str(true),
+                'issued_at' => self::str(true),
+            ], ['number', 'status', 'total_minor', 'currency']),
+            'BillingReceiptListResponse' => self::listEnvelope('BillingReceipt'),
+            'BillingQuantityRequest' => self::object([
+                'quantity' => self::int(),
+            ], ['quantity']),
+            'BillingQuantityResponse' => self::dataEnvelope(self::object([
+                'has_access' => self::bool(),
+            ], ['has_access'])),
+
+            'BillingAccessResponse' => self::dataEnvelope(self::object([
+                'has_access' => self::bool(),
+                'status' => self::str(true),
+                'plan' => self::str(true),
+                'access_until' => self::str(true),
+                'cancel_at_period_end' => self::bool(),
+                'checkout_status' => self::str(true),
+            ], ['has_access'])),
+
             'PlanPriceListResponse' => self::listEnvelope('PlanPrice'),
             'PlanPriceResponse' => self::dataEnvelope(SchemaBuilder::ref('PlanPrice')),
             'PlanPriceCreateRequest' => self::object([
@@ -4322,7 +4562,57 @@ final class CoreApiSchemas
                 'unit_amount' => self::int(),
                 'billing_period' => ['type' => 'string', 'enum' => ['month', 'year', 'once']],
                 'is_per_seat' => self::bool(),
+                // At most ONE of these. Both set is refused with 422 rather
+                // than accepted, because the billing run would have to choose a
+                // multiplier and whichever it chose would be wrong half the
+                // time, on an invoice somebody already paid.
+                'is_per_device' => self::bool(),
             ], ['currency', 'unit_amount', 'billing_period']),
+
+            // One sellable limit, as the tier editor needs to render it.
+            //
+            // `period` is what separates a standing CAP from a metered
+            // ALLOWANCE — "500 students" against "5 renders per day" — and the
+            // two are priced and displayed differently, so a client must not
+            // have to infer it from the key's spelling. `owner` names the
+            // plugin that declared the limit, or is null for core, so a vertical
+            // product's own limits group under the plugin that sells them.
+            'EntitlementDefinitionSchema' => self::object([
+                'type' => self::str(),
+                'default' => self::str(),
+                'description' => self::str(),
+                'period' => ['type' => 'string', 'enum' => ['day', 'week', 'month'], 'nullable' => true],
+                'owner' => ['type' => 'string', 'nullable' => true],
+            ], ['type', 'default', 'description']),
+            // Keyed by entitlement key, which is open-ended by design: plugins
+            // add their own at boot, so the property names cannot be enumerated
+            // in a static schema.
+            'EntitlementCatalogueResponse' => self::dataEnvelope([
+                'type' => 'object',
+                'additionalProperties' => SchemaBuilder::ref('EntitlementDefinitionSchema'),
+            ]),
+
+            'PlanUsage' => self::object([
+                'subscribers' => self::int(),
+                'invoices' => self::int(),
+                'prices' => self::int(),
+                'limits' => self::int(),
+                'promotions' => self::int(),
+                'deletable' => self::bool(),
+                // Separate from `deletable` because it changes what a client
+                // should OFFER: a tier with subscribers has a route to deletion
+                // (move them); a tier with invoices never will.
+                'permanently_undeletable' => self::bool(),
+                'refusal_reason' => self::str(true),
+            ], ['subscribers', 'invoices', 'prices', 'limits', 'promotions', 'deletable', 'permanently_undeletable']),
+            'PlanUsageResponse' => self::dataEnvelope(SchemaBuilder::ref('PlanUsage')),
+            'PlanMoveSubscribersRequest' => self::object([
+                'to_plan_id' => self::int(),
+            ], ['to_plan_id']),
+            'PlanMoveSubscribersResponse' => self::dataEnvelope(SchemaBuilder::ref('PlanMoveSubscribersResult')),
+            'PlanMoveSubscribersResult' => self::object([
+                'moved' => self::int(),
+            ], ['moved']),
 
             'PlanListResponse' => self::listEnvelope('PlanSummary'),
             'PlanResponse' => self::dataEnvelope(SchemaBuilder::ref('Plan')),
@@ -8921,6 +9211,275 @@ final class CoreApiSchemas
     }
 
     /**
+     * Buying a subscription, and finding out whether one was bought.
+     *
+     * whity-core's entire relationship with whoever takes the money is two
+     * questions — where to send a tenant to pay, and whether a tenant may use
+     * paid features — and that is all these routes are.
+     *
+     * THE WEBHOOK IS DOCUMENTED BUT NOT CALLABLE BY A CLIENT. It is listed so
+     * the surface is honest about what exists and what is open, not because
+     * anybody integrating should POST to it: the only sender that can is one
+     * holding the signing secret.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function externalBillingRoutes(): array
+    {
+        return [
+            self::permissionRoute('POST', '/api/billing/checkout', 'billing:pay', [
+                'summary' => 'Somewhere to send this tenant to pay',
+                'description' =>
+                    'Names a PLAN, never a price on the billing service — letting a caller pass the '
+                    . 'other side\'s price identifier through would make "which plan am I buying" a '
+                    . 'decision taken in the browser, and a tenant could name the cheapest price for '
+                    . 'the most expensive plan. Answers a single `url` to redirect to. '
+                    . 'WHAT IS BEHIND THAT URL IS NOT KNOWABLE HERE and must not become knowable: a '
+                    . 'card page, transfer instructions, or a method that does not exist yet. '
+                    . 'Requires the plan to be priced on these terms AND to carry the handle the '
+                    . 'billing service knows it by; without one, 422.',
+                'tags' => ['billing'],
+                'request' => 'CheckoutStartRequest',
+                'responses' => [
+                    200 => self::jsonResponse('Where to send the payer', 'CheckoutStartResponse'),
+                    404 => self::errorResponse('This deployment does not sell subscriptions'),
+                    409 => self::errorResponse('This workspace already has an active subscription'),
+                    422 => self::errorResponse('That plan cannot be bought on these terms'),
+                    502 => self::errorResponse('The billing service refused the request'),
+                    503 => self::errorResponse('The billing service is temporarily unreachable'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/billing/receipts', 'billing:view', [
+                'summary' => 'What this tenant has paid',
+                'description' =>
+                    'RECEIPTS, NOT INVOICES THIS DEPLOYMENT ISSUED. A tenant billed by the external '
+                    . 'service has no local invoice at all — the local billing run stands down for '
+                    . 'them precisely so nobody is charged twice — so the invoice list on the '
+                    . 'billing screen was empty for customers who had just paid. Accurate about our '
+                    . 'records, and a lie about their money. '
+                    . 'These are read back from whoever took the payment and are NEVER used to '
+                    . 'decide access: whether a tenant may use paid features is a separate question '
+                    . 'with a separate answer, and reconstructing it from payments would mean '
+                    . 'keeping a copy of a status table this side does not maintain. '
+                    . 'Amounts are MINOR UNITS with a currency code. Newest first. An empty list is '
+                    . 'the ordinary answer for a tenant who has never paid, and for a deployment '
+                    . 'that sells nothing.',
+                'tags' => ['billing'],
+                'responses' => [
+                    200 => self::jsonResponse('What this tenant has paid', 'BillingReceiptListResponse'),
+                    502 => self::errorResponse('The billing service refused the request'),
+                    503 => self::errorResponse('The billing service is temporarily unreachable'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/billing/quantity', 'billing:pay', [
+                'summary' => 'Buy more seats, or fewer',
+                'description' =>
+                    'THE ONLY CHANGE THE BILLING SERVICE SUPPORTS IN PLACE. There is no way to move '
+                    . 'a subscription to a different PLAN: doing so would mean cancelling and buying '
+                    . 'again, which either charges twice or leaves a gap in cover, so it is refused '
+                    . 'rather than faked. '
+                    . 'THE SUBSCRIPTION IS TAKEN FROM THIS DEPLOYMENT\'S OWN RECORD, never from the '
+                    . 'request — a caller naming a subscription identifier would be naming somebody '
+                    . 'else\'s the moment they guessed one. '
+                    . 'PRORATION IS NOT DESCRIBED HERE BECAUSE IT IS NOT OURS: an increase is '
+                    . 'charged immediately for the unused part of the period, and a decrease is '
+                    . 'never charged or refunded and applies at the next renewal. Quoting a figure '
+                    . 'of our own would put a number on screen that the invoice then contradicts. '
+                    . 'A quantity below 1 is refused — that is a cancellation by another name.',
+                'tags' => ['billing'],
+                'request' => 'BillingQuantityRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The change was applied', 'BillingQuantityResponse'),
+                    409 => self::errorResponse('This workspace has no subscription to change'),
+                    422 => self::errorResponse('quantity must be a whole number of at least 1'),
+                    502 => self::errorResponse('The billing service refused the request'),
+                    503 => self::errorResponse('The billing service is temporarily unreachable'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/billing/plans', 'billing:view', [
+                'summary' => 'What this tenant can buy',
+                'description' =>
+                    'The operator\'s plan catalogue is gated on `plans:manage`, which a paying '
+                    . 'customer never holds — so without this a tenant could be told to pay and had '
+                    . 'no way to discover what for, since checkout names a `plan_key`. '
+                    . 'ONLY GENUINELY PURCHASABLE PLANS: active, priced in this tenant\'s currency, '
+                    . 'and carrying the handle the billing service knows the price by. A plan '
+                    . 'missing any of those would produce a button that 422s. '
+                    . 'Amounts are MINOR UNITS — 15000 is 15.000 in a three-decimal currency like '
+                    . 'the dinar — so format from the integer and the code, and never divide by 100. '
+                    . '`is_per_seat` and `is_per_device` say what the amount multiplies by, so a '
+                    . 'price can be shown as "per seat" rather than as a total nobody is charged. '
+                    . 'An empty list is the ordinary answer on a deployment that sells nothing.',
+                'tags' => ['billing'],
+                'responses' => [
+                    200 => self::jsonResponse('Plans this tenant can buy', 'PurchasablePlanListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/billing/return', 'billing:view', [
+                'summary' => 'The payer is back — what actually happened?',
+                'description' =>
+                    'THE QUERY STRING IS EVIDENCE OF NOTHING. The payer arrives at '
+                    . '`?checkout=<ref>&status=<s>` in a browser they control, and anyone can type '
+                    . '`status=completed` into an address bar. Nothing in it is signed and nothing '
+                    . 'about it proves a payment ever happened. This route ignores it as an answer '
+                    . 'and re-reads access from the billing service, which is the authority. '
+                    . '`checkout_status` in the reply is read server-to-server for WORDING only — '
+                    . 'so "your card was declined" can be shown instead of a silent redirect — and '
+                    . 'is null when the billing service could not be asked. Access is decided by '
+                    . '`has_access` alone.',
+                'tags' => ['billing'],
+                'responses' => [
+                    200 => self::jsonResponse('What the billing service says about this tenant', 'BillingAccessResponse'),
+                    502 => self::errorResponse('The billing service refused the request'),
+                    503 => self::errorResponse('The billing service is temporarily unreachable'),
+                ] + self::authErrors(),
+            ]),
+            [
+                'method' => 'POST',
+                'path' => '/api/billing/webhook',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Subscription-change notifications (signed, not user-authenticated)',
+                    'description' =>
+                        'UNAUTHENTICATED BY NECESSITY: the sender is a server, holds no session, and '
+                        . 'never will. THE SIGNATURE IS THE CREDENTIAL — `X-Pay-Signature` is '
+                        . '`sha256=` plus the HMAC-SHA256 of `X-Pay-Timestamp . "." . rawBody`, '
+                        . 'verified with a constant-time comparison over the RAW bytes before the '
+                        . 'payload is decoded, and refused outright when no secret is configured. '
+                        . 'Deliveries repeat by design, so `X-Pay-Event-Id` is recorded and a '
+                        . 'replay is acknowledged without being acted on twice. '
+                        . 'THE BODY IS NOT A WRITE PATH: the only thing taken from it is which '
+                        . 'subject to go and ask about, so even a correctly signed forgery can do no '
+                        . 'more than make this deployment re-read its own state. Events other than '
+                        . 'subscription changes are acknowledged and ignored — a non-2xx would just '
+                        . 'burn the sender\'s retry budget on something that will never become '
+                        . 'interesting.',
+                    'tags' => ['billing'],
+                    'responses' => [
+                        200 => self::jsonResponse('Received, or deliberately ignored', self::object([
+                            'received' => self::bool(),
+                        ], ['received'])),
+                        401 => self::errorResponse('The signature did not verify, or the delivery was stale'),
+                        503 => self::errorResponse('Temporarily could not be acted on — retry'),
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Per-device licensing: stock, codes, and the redemption a student performs.
+     *
+     * THE LAST ROUTE HERE IS NOT LIKE THE OTHERS. Four are authenticated,
+     * tenant-scoped and RBAC-gated; `POST /api/public/licensing/redeem` has no
+     * capability at all, because the caller may be an end user or a student
+     * with no account, no session and no relationship to the tenant at the
+     * moment they type the code. They are authorised by POSSESSION, and every
+     * fact used to resolve the activation comes from the code rather than from
+     * the caller — including which tenant it belongs to.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function licensingRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/licensing/devices', 'licensing:view', [
+                'summary' => 'The units this tenant is licensed for',
+                'description' =>
+                    'Newest first, capped at 500. Carries the three timestamps separately — '
+                    . '`provisioned_at` (the serial was imported), `activated_at` (a code was redeemed '
+                    . 'against it) and `last_seen_at` (it last checked in) — because which one a '
+                    . 'per-device price bills on is configuration, not a property of the row. '
+                    . 'A unit with `activated_at` set has been put into service; one without is stock.',
+                'tags' => ['licensing'],
+                'responses' => [
+                    200 => self::jsonResponse('This tenant\'s licensed units', 'LicensedDeviceListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/licensing/devices', 'licensing:manage', [
+                'summary' => 'Provision serials in bulk',
+                'description' =>
+                    'BULK BECAUSE STOCK ARRIVES IN BOXES — up to 500 per request. Each entry is a '
+                    . 'serial string, or an object with `serial_number` and an optional `label`. '
+                    . 'A serial this tenant already has is SKIPPED, not rejected: re-uploading a '
+                    . 'spreadsheet is the normal way this goes wrong, and failing the whole batch on '
+                    . 'row 400 would leave the caller with no idea which 399 landed. The response '
+                    . 'counts what was created and what was already there; answers 207 when some '
+                    . 'entries were refused, with a reason for each. Serials are unique WITHIN a '
+                    . 'tenant — two customers may hold hardware carrying the same manufacturer serial.',
+                'tags' => ['licensing'],
+                'request' => 'DeviceProvisionRequest',
+                'responses' => [
+                    200 => self::jsonResponse('Every serial was accepted or already present', 'DeviceProvisionResponse'),
+                    207 => self::jsonResponse('Imported, with some entries refused', 'DeviceProvisionResponse'),
+                    422 => self::errorResponse('serial_numbers missing, empty, or over the 500 limit'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/licensing/codes', 'licensing:issue', [
+                'summary' => 'Mint an activation code',
+                'description' =>
+                    'The commercial act: something was sold, so a code exists to redeem. '
+                    . 'THE CODE IS RETURNED ONCE AND IS NEVER RETRIEVABLE IN FULL AGAIN — stored '
+                    . 'canonically, the same contract as a generated API token. Bind it to a unit '
+                    . 'with `licensed_device_id` (which must belong to the caller\'s tenant, or 404), '
+                    . 'or omit it and let the redeemer name the serial. `max_redemptions` defaults '
+                    . 'to 1; higher values exist for a classroom set redeemed from one printed card. '
+                    . '`expires_at` is YYYY-MM-DD or YYYY-MM-DD HH:MM:SS.',
+                'tags' => ['licensing'],
+                'request' => 'ActivationCodeIssueRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The code, shown for the only time', 'ActivationCodeIssuedResponse'),
+                    404 => self::errorResponse('No such device in this tenant'),
+                    422 => self::errorResponse('The redemption limit or expiry cannot be used'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/licensing/codes/{id:\d+}/revoke', 'licensing:manage', [
+                'summary' => 'Kill a code that leaked',
+                'description' =>
+                    'Irreversible, and scoped to the caller\'s tenant. Redemptions already made '
+                    . 'STAND — revoking cancels what the code can still do, not what it did, because '
+                    . 'the units it activated are in service and de-licensing them would strand a '
+                    . 'classroom mid-lesson. A code that does not exist, belongs to another tenant, '
+                    . 'or was already revoked answers 404 alike.',
+                'tags' => ['licensing'],
+                'responses' => [
+                    200 => self::jsonResponse('The code is dead', 'ActivationCodeRevokedResponse'),
+                    404 => self::errorResponse('No such code, or it was already revoked'),
+                ] + self::authErrors(),
+            ]),
+            [
+                'method' => 'POST',
+                'path' => '/api/public/licensing/redeem',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Activate a device with a code (public, unauthenticated)',
+                    'description' =>
+                        'UNAUTHENTICATED BY DESIGN. The person typing the code may be an end user or '
+                        . 'a student with no account and no session, so they are authorised by '
+                        . 'POSSESSION: the code\'s own entropy and check characters, the pre-auth IP '
+                        . 'rate limiter, and the fact that every fact used to resolve the activation '
+                        . 'comes from the code rather than the caller. Nothing the caller sends is '
+                        . 'trusted, including any tenant they name. '
+                        . 'Send `serial_number` — the number printed on the unit — when the code is '
+                        . 'not already bound to one; never an internal id, which a person cannot know '
+                        . 'and which would let a caller enumerate rows by number. '
+                        . 'ERRORS NEVER DISTINGUISH AN UNKNOWN CODE FROM A MISTYPED ONE, because '
+                        . 'doing so would let an anonymous caller learn which well-formed codes exist.',
+                    'tags' => ['licensing'],
+                    'request' => 'ActivationRedeemRequest',
+                    'responses' => [
+                        200 => self::jsonResponse('The unit is activated', 'ActivationRedeemResponse'),
+                        422 => self::errorResponse('The code cannot be redeemed — invalid, expired, revoked, spent, or needing a serial'),
+                        429 => self::errorResponse('Too many redemption attempts from this address'),
+                    ],
+                ],
+            ],
+        ];
+    }
+
+    /**
      * The operator's plan catalogue, prices and promotions.
      *
      * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
@@ -8961,6 +9520,134 @@ final class CoreApiSchemas
                     422 => self::errorResponse('The promotion cannot be created as described'),
                 ] + self::authErrors(),
             ]),
+            // #affiliate — the people who send us customers.
+            //
+            // THERE IS NO DELETE HERE, deliberately. Deactivating stops future
+            // earning; the row is kept because the commissions owed to somebody
+            // point at it, and an affiliate whose record vanished would take
+            // the evidence of their own payouts with them.
+            self::permissionRoute('GET', '/api/affiliates', 'plans:manage', [
+                'summary' => 'Who sends us customers, and what they are owed (operator)',
+                'description' =>
+                    'Every affiliate, active and retired, each carrying what they have earned and not '
+                    . 'yet been paid. `balances` is a LIST because commissions are recorded in whatever '
+                    . 'currency the customer paid in, and a single total across currencies is wrong in a '
+                    . 'way nobody can see. Amounts are minor units, and already net of clawbacks — a '
+                    . 'refund writes a negative row rather than editing the original, so the balance is a '
+                    . 'SUM. Commissions already settled by a payout are excluded: a balance that '
+                    . 'included them would be read as money still owed and paid twice. '
+                    . '`commission_bp` is BASIS POINTS — 2000 is twenty per cent.',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('Every affiliate, with what they are owed', 'AffiliateListResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/affiliates', 'plans:manage', [
+                'summary' => 'Create an affiliate (operator)',
+                'description' =>
+                    '`code` is what goes in the link, so it is restricted to letters, digits, dots, '
+                    . 'dashes and underscores — anything needing escaping produces a link that breaks in '
+                    . "somebody's email client, and the affiliate is the last to find out. Codes are "
+                    . 'unique without regard to case, matching how attribution looks them up: somebody '
+                    . 'writes the code on a slide and somebody else types it back. `commission_bp` is '
+                    . 'BASIS POINTS, 1 to 5000 — sending 20 for "twenty per cent" would create a 0.2% '
+                    . 'affiliate, so the units are enforced rather than guessed. `window_months` is how '
+                    . "long after a referred customer's FIRST PAYMENT they keep earning, defaulting to "
+                    . '12. `promotion_id` attaches a discount the code also grants, which is how most '
+                    . 'affiliates persuade anybody to use theirs.',
+                'tags' => ['plans'],
+                'request' => 'AffiliateCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The new affiliate', 'AffiliateResponse'),
+                    409 => self::errorResponse('Another affiliate already uses that code'),
+                    422 => self::errorResponse('The affiliate cannot be created as described'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/affiliates/{id:\d+}', 'plans:manage', [
+                'summary' => 'Renegotiate terms, or end the arrangement (operator)',
+                'description' =>
+                    'NOTHING HERE IS RETROACTIVE. Every commission already accrued copied the rate it '
+                    . 'was earned at onto its own row, so a new `commission_bp` moves only what has not '
+                    . 'been earned yet; and the window end of a referral is frozen when its first payment '
+                    . 'arrives, so a new `window_months` applies to referrals that have not converted. '
+                    . 'Sending `promotion_id: null` DETACHES the discount the code carried — omitting '
+                    . 'the field leaves it alone. `is_active: false` stops future earning and touches '
+                    . 'nothing earned: money already owed is owed whatever happens to the arrangement, '
+                    . 'which is why there is no way to delete an affiliate at all.',
+                'tags' => ['plans'],
+                'request' => 'AffiliateUpdateRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The affiliate as it now stands', 'AffiliateResponse'),
+                    404 => self::errorResponse('No such affiliate'),
+                    422 => self::errorResponse('The terms cannot be set as described'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/affiliates/{id:\d+}/payouts', 'plans:manage', [
+                'summary' => 'What has been paid to an affiliate, and what is drafted (operator)',
+                'description' =>
+                    'Every payout, draft and paid, newest first. Three amounts per row and they are '
+                    . 'different facts: `total_minor` is what the affiliate earned, `withholding_minor` '
+                    . 'is what is kept back and remitted on their behalf, and `net_minor` is what '
+                    . 'actually leaves the bank. `withholding_bp` is the rate it was assembled at, '
+                    . 'snapshot onto the row so changing the setting cannot restate a payout already '
+                    . 'made.',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('Every payout for this affiliate', 'AffiliatePayoutListResponse'),
+                    404 => self::errorResponse('No such affiliate'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/affiliates/{id:\d+}/payouts', 'plans:manage', [
+                'summary' => 'Gather what is owed into a draft payout (operator)',
+                'description' =>
+                    'ONE CURRENCY PER CALL, because a payment is one: commissions are recorded in '
+                    . 'whatever the customer paid in, and a payout spanning currencies would need a '
+                    . 'conversion rate nobody stored. Assembling CLAIMS the commissions it covers, so '
+                    . 'what is owed and what is being paid can never overlap and a balance cannot be '
+                    . 'paid twice. NOTHING HERE MOVES MONEY — it produces a net figure for a person to '
+                    . 'transfer, who then records the reference via PATCH. '
+                    . 'Refused with 422 when nothing is payable, which includes a balance that refunds '
+                    . 'have taken to zero or below: that carries forward to net against later earnings '
+                    . 'rather than becoming a payment. Refused with 409 when another payout claimed '
+                    . 'some of these commissions mid-assembly — ask again, the balance really moved.',
+                'tags' => ['plans'],
+                'request' => 'AffiliatePayoutAssembleRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The draft payout', 'AffiliatePayoutAssembledResponse'),
+                    404 => self::errorResponse('No such affiliate'),
+                    409 => self::errorResponse('Another payout claimed these commissions first'),
+                    422 => self::errorResponse('There is nothing payable in that currency'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/affiliate-payouts/{id:\d+}', 'plans:manage', [
+                'summary' => 'Record that the transfer happened (operator)',
+                'description' =>
+                    'A `reference` is REQUIRED: it is the only thing connecting this row to a real bank '
+                    . 'movement, and it is what gets quoted back when an affiliate asks where their '
+                    . 'money went. Refused with 409 if the payout is already paid — re-marking would '
+                    . 'overwrite the reference of a transfer that really happened, destroying the only '
+                    . 'record of which payment settled it.',
+                'tags' => ['plans'],
+                'request' => 'AffiliatePayoutSettleRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The payout is settled', 'AffiliatePayoutSettledResponse'),
+                    409 => self::errorResponse('This payout is already marked paid'),
+                    422 => self::errorResponse('A payment reference is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/affiliate-payouts/{id:\d+}', 'plans:manage', [
+                'summary' => 'Abandon a draft payout (operator)',
+                'description' =>
+                    'Releases the commissions it claimed back onto the balance, so a draft assembled by '
+                    . 'mistake does not strand the money. A PAID payout is refused with 409: the money '
+                    . 'has gone, and releasing its commissions would put an amount already transferred '
+                    . 'back on the balance to be paid a second time.',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('The draft is discarded', 'AffiliatePayoutDiscardedResponse'),
+                    409 => self::errorResponse('A payout that has been paid cannot be discarded'),
+                ] + self::authErrors(),
+            ]),
             self::permissionRoute('DELETE', '/api/promotions/{id:\d+}', 'plans:manage', [
                 'summary' => 'Retire a promotion (operator)',
                 'description' =>
@@ -8988,13 +9675,18 @@ final class CoreApiSchemas
             self::permissionRoute('POST', '/api/plans/{id:\d+}/prices', 'plans:manage', [
                 'summary' => 'Price this plan on a set of terms (operator)',
                 'description' =>
-                    'A plan may carry many prices — one per currency, billing period and seat basis — '
+                    'A plan may carry many prices — one per currency, billing period and unit basis — '
                     . 'but only ONE LIVE price per combination of those. A second live price for the '
                     . 'same terms is refused with 409 rather than accepted, because two of them would '
                     . 'make the checkout, the invoice and the price list each pick differently and '
                     . 'somebody be charged an amount no screen displayed. Retire the existing one first. '
                     . '`unit_amount` must be an integer of minor units; a decimal is refused with 422, '
-                    . 'since 49.9 truncating to 49 is a hundredfold error that looks like a real price.',
+                    . 'since 49.9 truncating to 49 is a hundredfold error that looks like a real price. '
+                    . 'THE UNIT BASIS IS WHAT `unit_amount` MULTIPLIES BY: neither flag set prices the '
+                    . 'plan flat, `is_per_seat` multiplies by the seats the tenant holds, and '
+                    . '`is_per_device` by its licensed devices. Both at once is refused with 422 — a '
+                    . 'price multiplies by one thing, or by nothing. Which devices count on a '
+                    . 'per-device price is the `licensing.billing_basis` setting, resolved per tenant.',
                 'tags' => ['plans'],
                 'request' => 'PlanPriceCreateRequest',
                 'responses' => [
@@ -9033,6 +9725,18 @@ final class CoreApiSchemas
                     422 => self::errorResponse('Validation failed'),
                 ] + self::authErrors(),
             ]),
+            self::permissionRoute('GET', '/api/plans/entitlement-catalogue', 'plans:manage', [
+                'summary' => 'The catalogue of sellable limits (operator)',
+                'description' => 'Every entitlement a tier can set: its kind (bool flag or int cap), '
+                    . 'its baseline grant, a human description, the calendar period it resets on when '
+                    . 'it is a metered allowance, and the plugin that declared it (null for core). '
+                    . 'Distinct from GET /api/v1/tenants/{id}/entitlements, which answers what one '
+                    . 'workspace receives; this answers what can be priced at all, and needs no tenant.',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('The sellable-limit catalogue', 'EntitlementCatalogueResponse'),
+                ] + self::authErrors(),
+            ]),
             self::permissionRoute('GET', '/api/plans/{id:\d+}', 'plans:manage', [
                 'summary' => 'Get a plan and its entitlement bundle (operator)',
                 'tags' => ['plans'],
@@ -9048,6 +9752,30 @@ final class CoreApiSchemas
                 'responses' => [
                     200 => self::jsonResponse('The updated plan', 'PlanResponse'),
                     404 => self::errorResponse('Plan not found'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/plans/{id:\d+}/usage', 'plans:manage', [
+                'summary' => 'What still points at a tier (operator)',
+                'description' => 'Subscribers, invoices, prices, limits and promotion links, plus '
+                    . 'whether the tier may be deleted. A tier with live subscribers or invoices is '
+                    . 'RETIRED rather than removed: tenant_plan.plan_id and invoices.plan_id are both '
+                    . 'ON DELETE SET NULL, so deleting one would silently detach its customers and '
+                    . 'blank it out of invoices that have already been paid.',
+                'tags' => ['plans'],
+                'responses' => [
+                    200 => self::jsonResponse('What the tier still holds', 'PlanUsageResponse'),
+                    404 => self::errorResponse('Plan not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/plans/{id:\d+}/move-subscribers', 'plans:manage', [
+                'summary' => 'Move every workspace on a tier to another one (operator)',
+                'description' => 'The remedy for a tier that cannot be deleted because people are on '
+                    . 'it. Each workspace resolves to the limits of the destination tier immediately.',
+                'tags' => ['plans'],
+                'request' => 'PlanMoveSubscribersRequest',
+                'responses' => [
+                    200 => self::jsonResponse('How many workspaces moved', 'PlanMoveSubscribersResponse'),
                     422 => self::errorResponse('Validation failed'),
                 ] + self::authErrors(),
             ]),

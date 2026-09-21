@@ -1,0 +1,121 @@
+Whity Core
+Copyright (C) 2026 Amro K. Saleh
+
+This product is licensed under the GNU Affero General Public License v3.0 only,
+with the Whity Plugin Exception. See LICENSE.
+
+================================================================================
+HOW THIS PROJECT IS LICENSED, IN THREE PARTS
+================================================================================
+
+Whity is deliberately split so that plugin authors are never bound by the
+licence of the host. Which licence applies depends on which part you touch:
+
+  AGPL-3.0-only        Whity Core itself -- src/, public/, database/,
+  (+ plugin exception) web/, and everything not listed below.
+                       Modify it and serve it over a network, and you owe your
+                       users the source.
+
+  MIT                  The plugin boundary, both halves:
+                         - whity/plugin-sdk        (PHP: interfaces, HTTP
+                                                    shapes, event constants)
+                         - @amroksaleh/ui          (React component library)
+                         - @amroksaleh/features    (feature modules)
+                         - @amroksaleh/api-client  (typed API client)
+                         - @amroksaleh/tokens      (design tokens)
+                       Build against these and your plugin is yours: license
+                       it however you like, including commercially.
+
+  Your choice          Plugins that depend only on the packages above. See the
+                       WHITY PLUGIN EXCEPTION in LICENSE.
+
+================================================================================
+THIRD-PARTY DEPENDENCIES
+================================================================================
+
+Whity Core depends on the following third-party software. None of it is
+redistributed in this source repository -- `vendor/` and `node_modules/` are
+not committed -- but published container images do bundle it, which is why it
+is attributed here.
+
+--------------------------------------------------------------------------------
+PHP (composer)  -- 10 packages, all permissive
+--------------------------------------------------------------------------------
+
+  MIT
+    composer/semver
+    defuse/php-encryption
+    paragonie/constant_time_encoding
+    paragonie/random_compat
+    psr/clock
+    psr/log
+    spomky-labs/otphp
+    symfony/deprecation-contracts
+    whity/plugin-sdk
+
+  BSD-3-Clause
+    firebase/php-jwt
+
+No PHP dependency carries a copyleft licence. Adding one would be a decision
+with consequences for the whole distribution, not a routine bump.
+
+--------------------------------------------------------------------------------
+JavaScript (npm)  -- 1,379 packages with a declared licence
+--------------------------------------------------------------------------------
+
+By licence:
+
+    1126  MIT
+      90  ISC
+      47  Apache-2.0
+      25  MPL-2.0
+      21  BSD-3-Clause
+      14  BSD-2-Clause
+      14  BlueOak-1.0.0
+      13  Apache-2.0 OR MIT
+      10  LGPL-3.0-or-later
+       ... and a small tail of other permissive licences
+
+The copyleft-family dependencies, and why each is compatible:
+
+  LGPL-3.0-or-later -- @img/sharp-libvips-*
+      Prebuilt libvips binaries behind `sharp`, which Next.js uses for image
+      optimisation. LGPLv3 is explicitly compatible with AGPLv3, and these are
+      separately-installed native binaries the user can replace, not code
+      linked into Whity's own sources.
+
+      WORTH KNOWING: an eventual proprietary commercial licence of Whity Core
+      cannot simply absorb these. LGPL section 4 allows bundling in a
+      proprietary work only where the user can replace the library. That is
+      satisfied today because sharp is an ordinary npm dependency -- but it is
+      a constraint to remember, not a settled matter to forget.
+
+  MPL-2.0 -- lightningcss (and platform binaries), axe-core
+      File-level copyleft and compatible with AGPL. Both are build- and
+      test-time tools; neither ships in a deployed application.
+
+--------------------------------------------------------------------------------
+Fonts, icons and other assets
+--------------------------------------------------------------------------------
+
+Where the UI loads webfonts or icon sets, each carries its own licence in the
+package that supplies it. Nothing in this repository redistributes a font file
+under Whity's own licence.
+
+================================================================================
+REGENERATING THIS FILE
+================================================================================
+
+The counts above are measured, not estimated:
+
+    composer:  php -r '$l=json_decode(file_get_contents("composer.lock"),true);
+               foreach($l["packages"] as $p)
+                 echo $p["name"]," ",implode(",",$p["license"]??[]),"\n";'
+
+    npm:       node -e 'const l=require("./package-lock.json");
+               const c={}; for(const p of Object.values(l.packages))
+                 if(p.license) c[p.license]=(c[p.license]||0)+1;
+               console.log(c)'
+
+Re-run both after any dependency change that adds a package, and update this
+file if a copyleft licence appears that is not listed above.

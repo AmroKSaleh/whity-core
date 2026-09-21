@@ -101,6 +101,7 @@ final class PlanPricesApiHandler
                 $amount,
                 (string) ($body['billing_period'] ?? ''),
                 ($body['is_per_seat'] ?? false) === true,
+                ($body['is_per_device'] ?? false) === true,
             );
         } catch (PlanValidationException $e) {
             // The exception's STRUCTURED fields, never its message. A handler
@@ -120,7 +121,7 @@ final class PlanPricesApiHandler
             // Reported as a CONFLICT with the reason, rather than as a 500 about
             // an index name nobody outside this file can act on.
             return Response::error(
-                'This plan already has a live price for that currency, period and seat basis. '
+                'This plan already has a live price for that currency, period and unit basis. '
                 . 'Retire the existing one first.',
                 409
             );

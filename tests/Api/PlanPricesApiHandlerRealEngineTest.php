@@ -165,6 +165,58 @@ final class PlanPricesApiHandlerRealEngineTest extends TestCase
         self::assertSame(201, $this->create(['currency' => 'SAR', 'unit_amount' => 1900, 'billing_period' => 'month', 'is_per_seat' => true])->getStatusCode());
     }
 
+    /**
+     * A PER-DEVICE PRICE CAN ACTUALLY BE CREATED THROUGH THE API.
+     *
+     * Worth its own test because the alternative failed silently for a while:
+     * the column existed, the billing run read it and multiplied by devices,
+     * and nothing anywhere could SET it — so every price came out flat and the
+     * feature was unreachable except by hand-written SQL. The assertion that
+     * matters is the last one; a 201 alone would pass against exactly that bug.
+     */
+    public function testAPerDevicePriceIsCreatedAndComesBackFlaggedAsOne(): void
+    {
+        $res = $this->create([
+            'currency' => 'SAR', 'unit_amount' => 1500, 'billing_period' => 'month', 'is_per_device' => true,
+        ]);
+
+        self::assertSame(201, $res->getStatusCode());
+
+        $body = json_decode((string) $res->getBody(), true);
+        self::assertTrue($body['data']['is_per_device'], 'the flag must survive the round trip');
+        self::assertFalse($body['data']['is_per_seat']);
+    }
+
+    /**
+     * BOTH MULTIPLIERS AT ONCE IS A 422, NOT A 409. The database refuses this
+     * pairing too, but a CHECK violation arrives as a PDOException that this
+     * handler reports as "already has a live price… retire the existing one
+     * first" — advice that cannot work, for a conflict that does not exist.
+     * The repository refuses it first so the caller is told what is actually
+     * wrong with the price they sent.
+     */
+    public function testAPriceCannotBeBothPerSeatAndPerDevice(): void
+    {
+        $res = $this->create([
+            'currency' => 'SAR', 'unit_amount' => 1500, 'billing_period' => 'month',
+            'is_per_seat' => true, 'is_per_device' => true,
+        ]);
+
+        self::assertSame(422, $res->getStatusCode());
+        self::assertStringNotContainsString('Retire', (string) $res->getBody());
+    }
+
+    /** A flat and a per-device price are different terms, so both may be live. */
+    public function testAFlatAndAPerDevicePriceCoexistOnTheSameTerms(): void
+    {
+        self::assertSame(201, $this->create([
+            'currency' => 'SAR', 'unit_amount' => 4900, 'billing_period' => 'month',
+        ])->getStatusCode());
+        self::assertSame(201, $this->create([
+            'currency' => 'SAR', 'unit_amount' => 1500, 'billing_period' => 'month', 'is_per_device' => true,
+        ])->getStatusCode());
+    }
+
     // ── retiring ─────────────────────────────────────────────────────────────
 
     /**

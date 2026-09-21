@@ -4,8 +4,8 @@ Welcome to the Whity Core documentation.
 
 ## Quick Links
 
-- **[Sprint 1 Setup Guide](Sprint-1-Setup.md)** — Local development setup for Sprint 1 MVP
-- **[Installation](Installation.md)** — Setup guide
+- **[Installation](Installation.md)** — Run it locally with Docker Compose, or deploy the published images
+- **[Architecture](Architecture.md)** — How a request flows through the worker, the plugin loader and the tenant context
 - **[Plugin Development](Plugin-Development.md)** — Build plugins
 
 ## System documentation
@@ -45,18 +45,32 @@ Whity Core is a white-labeled multi-tenant PHP 8.4 framework for SaaS applicatio
 - ✅ Extensible plugins (auto-discovery, hot-reload, lifecycle isolation)
 - ✅ Built-in RBAC security (`resource:action` permissions, role hierarchy)
 - ✅ FrankenPHP persistent workers
-- ✅ Production-ready
+
+**Status:** `0.2.8`, pre-1.0. It runs a live deployment, but the API is not frozen — a minor
+version can still change route shapes and schema. Pin an exact version, and read
+[Core Update](Core-Update.md) before upgrading.
 
 ## Getting Started
 
+Whity Core is a deployed application, not a library you pull into another project — there is
+no `amroksaleh/whity-core` package on Packagist. Clone it and bring the stack up:
+
 ```bash
-composer require amroksaleh/whity-core:^1.0
+git clone https://github.com/AmroKSaleh/whity-core.git
+cd whity-core
+composer install     # on the HOST first — the dev image ships no vendor/, and db-init exits 255 without one
+docker compose up
 ```
 
-See [Installation](Installation.md) for details.
+See [Installation](Installation.md) for the environment variables, the `db-init` bootstrap and
+the first-run seed.
+
+To deploy rather than develop, the release pipeline publishes versioned images —
+`ghcr.io/amroksaleh/whity-core`, `…/web`, and the optional `…/render` — whose tags must match
+each other. See [Deployment Guide](DEPLOYMENT_GUIDE.md) and [Core Update](Core-Update.md).
 
 ## License
 
-AGPL v3.0 with Commons Clause (free for non-commercial)
+AGPL-3.0-only with the Whity Plugin Exception (free software; plugins MIT)
 
 Commercial licensing: amroksaleh@gmail.com

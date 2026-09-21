@@ -837,8 +837,20 @@ final class SchemaFromMigrations
                 }
 
                 // SERIAL / BIGSERIAL -> INTEGER PRIMARY KEY AUTOINCREMENT
-                $sql = preg_replace('/\bBIGSERIAL\b/i', 'INTEGER', $sql) ?? $sql;
-                $sql = preg_replace('/\bSERIAL\b/i', 'INTEGER', $sql) ?? $sql;
+                //
+                // NOT PRECEDED BY A COLON. `\bSERIAL\b` also matches inside a
+                // named placeholder, so `VALUES (:tenant, :serial, ...)` was
+                // rewritten to `:INTEGER` — the statement then had a parameter
+                // the caller never bound, and PDO reported the baffling
+                // "column index out of range" rather than anything about
+                // SERIAL. Cost an afternoon on a test for a domain whose
+                // central noun happens to be "serial".
+                //
+                // `serial_number` was never at risk: `_` is a word character,
+                // so `\b` does not fall between them. It is the exact token
+                // `:serial` that breaks.
+                $sql = preg_replace('/(?<![:\w])BIGSERIAL\b/i', 'INTEGER', $sql) ?? $sql;
+                $sql = preg_replace('/(?<![:\w])SERIAL\b/i', 'INTEGER', $sql) ?? $sql;
 
                 // VARCHAR(n) -> TEXT
                 $sql = preg_replace('/\bVARCHAR\s*\(\d+\)/i', 'TEXT', $sql) ?? $sql;

@@ -112,6 +112,15 @@ final class TenantOwnedTables
         // unregistered like `permissions`.)
         'tenant_plan' => '055_create_plans.php',
 
+        // WC-affiliates — which workspace an affiliate referred (migration 154).
+        // The referral is the only affiliate table carrying a tenant: it says
+        // which workspace a referrer brought, which is tenant data. `affiliates`,
+        // `affiliate_commissions` and `affiliate_payouts` are about a party
+        // outside any tenant and carry no tenant_id, like `plans` and
+        // `promotions` — which workspace produced a commission is one join
+        // through here, where the predicate belongs.
+        'affiliate_referrals' => '154_create_affiliates.php',
+
         // Promotions — who took which early bird, offer or promo code, and what
         // it was worth (migration 141). The LEDGER is tenant-owned and every
         // query binds tenant_id; `promotions` and `promotion_plans` are global
@@ -139,6 +148,23 @@ final class TenantOwnedTables
         'invoice_lines' => '142_create_invoices.php',
         'payment_transactions' => '143_create_payment_transactions.php',
         'payment_methods' => '143_create_payment_transactions.php',
+
+        // Per-device licensing (migration 146). NOT `devices` — that name
+        // belongs to auth (migration 044: trusted browsers and device
+        // credentials). A row here is hardware with a serial that somebody pays
+        // for, which is a different thing that happens to share a word.
+        //
+        // `device_activation_codes` carries tenant_id even though the code
+        // itself is globally unique, because a redemption has to resolve the
+        // tenant FROM the code rather than be told it: an end user or student
+        // may redeem, and a tenant hint accepted from an untrusted caller is
+        // how one customer's code gets applied to another's account.
+        // `device_activation_redemptions` denormalises tenant_id from its
+        // parent for the same reason the invoice tables above do — so a read is
+        // policed directly instead of trusting a join.
+        'licensed_devices' => '146_create_licensed_devices.php',
+        'device_activation_codes' => '146_create_licensed_devices.php',
+        'device_activation_redemptions' => '146_create_licensed_devices.php',
 
         // WC-docdesigner — document/label designer persistence (migration 059).
         // Saved templates and reusable blocks; the client object is stored as JSON

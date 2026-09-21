@@ -1,10 +1,25 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/banner-dark.png">
+    <img alt="Whity — the substrate for running an organisation: identity, permissions, documents, forms and plugins, with every API route already an agent tool." src=".github/assets/banner-light.png" width="100%">
+  </picture>
+</p>
+
+<p align="center">
+  <a href="https://whity.dev">whity.dev</a> &nbsp;·&nbsp;
+  <a href="https://docs.whity.dev">docs</a> &nbsp;·&nbsp;
+  <a href="https://whity.dev/install">install</a> &nbsp;·&nbsp;
+  <a href="https://health.whity.dev">status</a> &nbsp;·&nbsp;
+  <a href="https://brand.whity.dev">brand</a>
+</p>
+
 # Whity Core
 
 **Open-source, white-labelable multi-tenant platform framework**
 
 Whity Core is a foundation for building data-driven, multi-tenant applications. It pairs a [FrankenPHP](https://frankenphp.dev/) worker runtime with a logical multi-tenant data model, a hot-loadable plugin system, and a permission-mesh RBAC layer — plus a token-driven design system and a Next.js admin UI.
 
-> **License:** AGPL-3.0 + Commons Clause — free for non-commercial use. See [License](#license).
+> **License:** AGPL-3.0-only with the [Whity Plugin Exception](LICENSE) — free software, commercial use permitted. Plugins are yours to license as you wish. See [License](#license).
 
 ---
 
@@ -24,7 +39,7 @@ Domain logic ships as **plugins** dropped into `/plugins/` — discovered, loade
 - **Operational safety** — graceful worker recycling on a configurable memory ceiling, `/api/health` endpoint reporting worker/memory/DB status (200 healthy, 503 degraded).
 - **Design system** — OKLCH design tokens (light + dark, white-label-overridable per tenant) generated from a single source to CSS, JSON, and Dart; shadcn/Radix component library on Tailwind v4.
 - **OpenAPI** — schema generated from the routing layer for client/type generation.
-- **Tested** — 3695+ PHPUnit tests (with real-engine SQLite coverage for data-layer logic), PHPStan, and 162 Playwright E2E tests.
+- **Tested** — 7,800+ PHPUnit tests (run against both SQLite and real PostgreSQL in CI), 2,300+ Jest component tests, 187 Playwright E2E tests, PHPStan at max level, and a set of standalone CI guards for tenant isolation, driver-dependent boolean reads, undeclared foreign keys, generated-artifact drift and i18n catalogue drift.
 
 ## Architecture
 
@@ -194,9 +209,17 @@ Embedding an n8n workflow engine was **deferred, not adopted** — [ADR 0008](do
 
 ## License
 
-**AGPL-3.0 + [Commons Clause](LICENSE)** — free for non-profit, internal, educational, research, and open-source use. Commercial use (SaaS, paid hosting, reselling, white-labeling for profit) is restricted.
+**[AGPL-3.0-only with the Whity Plugin Exception](LICENSE)** — genuine free software. Run it, modify it, deploy it, sell services around it. If you modify Whity Core and offer it to users over a network, you owe those users your source; that is the whole of the bargain.
 
-For commercial licensing: **amroksaleh@gmail.com**
+**Plugins are exempt.** The plugin boundary — `whity/plugin-sdk` on the PHP side, `@amroksaleh/ui` and friends on the client side — is MIT. A plugin that depends only on those is not a derivative work of the core, and you may license and sell it on any terms you choose. See the [Whity Plugin Exception](LICENSE) and [NOTICE](NOTICE).
+
+The **Whity name** is protected even though the code is free — fork freely, rename when you do. See [TRADEMARK.md](TRADEMARK.md).
+
+Contributing? Sign the [CLA](CLA.md) in your first pull request.
+
+The Commons Clause that previously accompanied this licence has been withdrawn in full. It forbade commercial use, which made Whity neither open source nor safely adoptable, and contradicted the AGPL text it was attached to.
+
+For a licence other than the AGPL: **amroksaleh@gmail.com**
 
 ## Getting help
 

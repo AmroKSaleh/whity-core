@@ -64,3 +64,9 @@ __pycache__/
 # these only survive a run that was KILLED — and then they sit at the root
 # looking exactly like source, which is how one of them nearly reached a commit.
 /.whity-probe-*.php
+
+# Wrangler's local state and cache. `.wrangler/state` is the LOCAL simulation of
+# KV that `wrangler kv` reads by default — committing it would publish a copy of
+# watchdog state that has nothing to do with the deployed namespace, and reading
+# it is already a trap that cost two misdiagnoses.
+ops/watchdog/.wrangler/

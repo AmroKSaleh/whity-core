@@ -1,5 +1,8 @@
 'use client';
 
+import { Affiliates } from './affiliates';
+import { TierFeatures } from './tier-features';
+import { TierLifecycle } from './tier-lifecycle';
 import { useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
@@ -169,6 +172,22 @@ export default function BillingPage() {
               )}
             </div>
 
+            {/* WHAT THIS TIER STILL HOLDS, and what may be done about it.
+                Shown per tier rather than behind a delete attempt: somebody
+                deciding whether to retire a tier needs to know it has
+                subscribers before they act, not after being refused. */}
+            {canManage && (
+              <TierLifecycle
+                plan={plan}
+                allPlans={(data ?? []).map((entry) => ({
+                  id: entry.plan.id,
+                  name: entry.plan.name,
+                  is_active: entry.plan.is_active,
+                }))}
+                onChanged={refetch}
+              />
+            )}
+
             {/* A plan whose prices could not be read says so. An empty list here
                 would be indistinguishable from "this plan has no prices", which
                 is a different and much less alarming thing. */}
@@ -235,6 +254,20 @@ export default function BillingPage() {
           </section>
         ))}
       </div>
+
+      {/* WHAT EACH TIER INCLUDES, on the same screen as what each tier COSTS.
+          They are one decision — "is there a reason to move up from Plus" is
+          answered by reading a price against a feature list — and splitting
+          them across two screens is how you end up selling three tiers that
+          differ only in the number on the invoice. */}
+      {!loading && !error && canManage && <TierFeatures />}
+
+      {/*
+        WHO SENDS US CUSTOMERS. On this page rather than its own because it is
+        the same gate (`plans:manage` on the system tenant) and the same
+        question: what this instance sells, and what it costs to sell it.
+      */}
+      {!loading && !error && canManage && <Affiliates />}
 
       {pricing && (
         <AddPriceDialog

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Health;
 
 /**
- * The three states a monitored component can be in.
+ * The states a monitored component can be in.
  *
  * Deliberately coarse. A public status page answers "can I use this right now",
  * not "what is the p99" — and every extra state is one more thing a reader has
@@ -13,10 +13,25 @@ namespace Whity\Core\Health;
  * slow, or a queue that is draining too slowly) is genuinely distinct from
  * both "fine" and "down", and hiding it inside OPERATIONAL is how a slow
  * decline goes unnoticed until it is an outage.
+ *
+ * UNKNOWN exists because the probe's honest answer is sometimes "I could not
+ * measure this", and the alternative was reporting that as OPERATIONAL. It was
+ * not hypothetical: the scheduler probe reads MAX(last_run_at) of enabled
+ * schedules, returned OPERATIONAL when the column was NULL, and so reported
+ * 100% uptime for a component that had never run once. A check that cannot
+ * fail until the thing has worked at least once is not a check.
+ *
+ * UNKNOWN is NOT downtime and must never be counted as such — an unconfigured
+ * render tier has not had an outage. It is excluded from uptime entirely
+ * rather than scored either way, which is the same position this project's
+ * watchdog already takes on its history bar: a day nobody looked at is drawn
+ * as a gap, not as green.
  */
 enum HealthStatus: string
 {
     case Operational = 'operational';
+    /** Not measurable right now — not a verdict about the component. */
+    case Unknown = 'unknown';
     case Degraded = 'degraded';
     case Down = 'down';
 
@@ -25,8 +40,12 @@ enum HealthStatus: string
     {
         return match ($this) {
             self::Operational => 0,
-            self::Degraded => 1,
-            self::Down => 2,
+            // Above operational so one unmeasured component stops the banner
+            // claiming everything is fine, and below degraded so it never
+            // outranks an actual fault in the roll-up.
+            self::Unknown => 1,
+            self::Degraded => 2,
+            self::Down => 3,
         };
     }
 
@@ -43,9 +62,15 @@ enum HealthStatus: string
         return $worst;
     }
 
-    /** Anything that is not fully operational counts against uptime. */
+    /**
+     * Whether this state counts against uptime.
+     *
+     * UNKNOWN does not: it is the absence of a measurement, and charging it as
+     * downtime would invent an outage out of a probe that never ran. It is also
+     * excluded from the denominator — see HealthSampleRepository::countsSince().
+     */
     public function countsAsDowntime(): bool
     {
-        return $this !== self::Operational;
+        return $this !== self::Operational && $this !== self::Unknown;
     }
 }

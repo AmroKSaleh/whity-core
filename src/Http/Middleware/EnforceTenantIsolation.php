@@ -239,6 +239,54 @@ class EnforceTenantIsolation
         // POST to this path is a 404 from the router rather than an
         // unauthenticated write that got this far.
         '#^/api/v1/document-verifications/[^/]+$#',
+        // #billing: a payment provider's settlement callback. A BANK CANNOT HOLD
+        // A SESSION — there is nothing here for this middleware to resolve, and
+        // no amount of configuration would give a provider one. Without this
+        // entry the route 401s before it is ever routed, so no callback can be
+        // delivered, no invoice can ever settle, and a tenant who paid stays
+        // locked out. That is exactly the state this shipped in: the handler was
+        // correct, the route was registered unauthenticated, and every request
+        // died a layer above it — which the handler's own tests could not see,
+        // because they called it directly.
+        //
+        // WHAT MAKES IT SAFE IS NOT AUTHENTICATION. The payload is verified
+        // inside the adapter, before it is parsed, with no way to obtain events
+        // from an unverified body; the tenant comes from the invoice the typed
+        // reference resolves to, never from anything the caller says; and a rail
+        // with no configured secret refuses every callback outright. An
+        // unregistered provider is a 404 from the handler, so this opens no
+        // surface for a rail the operator has not switched on.
+        //
+        // ANCHORED to exactly one segment, following the lesson
+        // `/api/v1/translations/` records above. An open `/api/v1/payments/`
+        // prefix would make the next route added under it public by default,
+        // and this is a surface where that mistake would be expensive.
+        //
+        // POST-only in practice: the route is registered for POST alone, so a
+        // GET to this path is a 404 from the router rather than an
+        // unauthenticated read that got this far.
+        '#^/api/v1/payments/webhook/[^/]+$#',
+        // Migration 149: the EXTERNAL billing service's notification endpoint.
+        // Same reasoning as the callback above and the same non-negotiable
+        // consequence: without this entry the route 401s before it is routed, so
+        // no notification is ever delivered, no subscription change is ever
+        // heard, and a tenant who paid waits for the reconciliation sweep to let
+        // them in. That is a latency bug rather than a lockout — the sweep is
+        // the real mechanism — but it silently throws away the thing that makes
+        // access appear in a second instead of an hour.
+        //
+        // WHAT MAKES IT SAFE IS THE SIGNATURE, verified over the RAW bytes with
+        // hash_equals before the payload is decoded, and refused outright when
+        // no secret is configured. And the payload is not a write path at all:
+        // the only thing taken from it is WHICH subject to go and ask about, so
+        // even a correctly signed forgery can do no more than make this
+        // deployment re-read its own state from the billing service.
+        //
+        // EXACTLY ONE SEGMENT AND NO PARAMETER, following the lesson
+        // `/api/v1/translations/` records above. There is one sender and one
+        // path; a parametrised form would make the next route added under
+        // `/billing/` public by default, on the surface where that is worst.
+        '#^/api/v1/billing/webhook$#',
         // Migration 132: an OPT-IN public form. The person filling in an
         // external application has no account and, in the case this exists for,
         // never will — so there is nothing here for this middleware to resolve.
@@ -272,6 +320,23 @@ class EnforceTenantIsolation
         '#^/api/v1/public/forms/[^/]+$#',
         '#^/api/v1/public/forms/[^/]+/uploads$#',
         '#^/api/v1/public/forms/[^/]+/submissions$#',
+
+        // Per-device licensing: redeeming an activation code. The person doing
+        // it may be an end user or a student with NO account, so there is no
+        // session to carry a tenant — the code itself resolves which tenant,
+        // which unit and whether the grant is live, and nothing supplied by the
+        // caller is trusted.
+        //
+        // THE SECOND OF THE TWO EDITS a public route needs. The route is
+        // registered in public/index.php; without this line the middleware
+        // refuses the request before routing and the endpoint 401s while
+        // appearing correctly registered. That exact mistake shipped once
+        // already (#1214), and was only caught by probing the deployed
+        // instance — the whole suite was green.
+        //
+        // Fully anchored, so no future route under /public/licensing/ becomes
+        // public by inheriting a prefix.
+        '#^/api/v1/public/licensing/redeem$#',
     ];
 
     /**

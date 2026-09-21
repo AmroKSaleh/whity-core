@@ -56,6 +56,22 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    # THE DATABASE IS THE ONE THAT MUST COME BACK. Without this line it was the
+    # ONLY container in the stack with no restart policy — render and
+    # health-watch declared one here, and frankenphp was surviving on a
+    # hand-applied `docker update`. A host restart on 2026-09-09 therefore
+    # brought every dependent service back up around a database that stayed
+    # down: FrankenPHP crash-looped for three hours on `could not translate
+    # host name "postgres"`, while the Next.js tier kept answering 200 and the
+    # health collector could not report any of it, because the only place it
+    # can write is the database that was missing.
+    #
+    # A stack where everything restarts EXCEPT its datastore is worse than one
+    # where nothing does: nothing-restarts fails visibly and completely, while
+    # this failed as a site that looked up and returned an error to every API
+    # call. `unless-stopped` rather than `always`, so a deliberate `docker stop`
+    # for maintenance still means stopped.
+    restart: unless-stopped
 
   frankenphp:
     build:
@@ -118,6 +134,23 @@ services:
       # invalid_request. Set to the externally-reachable origin (e.g. the tunnel/
       # proxy host), not the in-container bind.
       APP_URL: ${APP_URL:-}
+      # External billing service (migration 149). whity-core does not take money;
+      # a separate service does, and these name it and authenticate to it.
+      #
+      # EMPTY IS A SUPPORTED STATE, not a misconfiguration: with no base URL and
+      # no key the deployment sells nothing and walls nobody, which is correct
+      # for a self-hosted installation that bills its users some other way.
+      #
+      # PAY_WEBHOOK_SECRET is the ONLY thing authenticating the notification
+      # endpoint — there is no session behind it — so an empty value makes every
+      # delivery be refused rather than trusted. Listed here because compose
+      # passes environment EXPLICITLY: a variable absent from this block never
+      # reaches the container, however carefully it was set in the env file.
+      PAY_BASE_URL: ${PAY_BASE_URL:-}
+      PAY_API_KEY: ${PAY_API_KEY:-}
+      PAY_WEBHOOK_SECRET: ${PAY_WEBHOOK_SECRET:-}
+      PAY_TIMEOUT_SECONDS: ${PAY_TIMEOUT_SECONDS:-10}
+      PAY_WEBHOOK_TOLERANCE_SECONDS: ${PAY_WEBHOOK_TOLERANCE_SECONDS:-300}
     volumes:
       # Serve the committed tree (mirrors the dev compose bind mount). The app
       # writes a plugin-manifest cache + sqlite scratch file under /app at runtime,
@@ -128,6 +161,17 @@ services:
       postgres:
         condition: service_healthy
     working_dir: /app
+    # Declared here rather than left to a hand-applied `docker update --restart`,
+    # which is what was actually holding this container up. A policy set on a
+    # live container survives a reboot but NOT a `docker compose up -d`, which
+    # recreates from this file and would have silently dropped it back to `no` —
+    # so the deployment was one routine command away from losing it.
+    #
+    # `depends_on` does not cover this: it orders the FIRST start and nothing
+    # more. It will not restart this container when Postgres comes back, so the
+    # restart policy is what turns a database outage into something that
+    # recovers by itself instead of a crash loop somebody has to notice.
+    restart: unless-stopped
 
   # Document/label designer server-side render tier (ADR 0012 / WC-docdesigner
   # Track 2) — mirrors the dev compose `render` service (see docker-compose.yml
@@ -153,6 +197,14 @@ services:
     profiles:
       - render
     restart: unless-stopped
+    # Staging had none, and it showed: whity_staging_render was the only
+    # container in the stack with no health state at all. This is the same
+    # check the dev compose already runs.
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:8130/health',(r)=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   # Service-health collector behind the public /status page (WC-status-page).
   #
@@ -233,6 +285,139 @@ services:
       - |
         echo "[health-watch] service-health collector started";
         exec php public/index.php health:watch --interval=60
+
+  # ── The workers that actually do the deferred work ──────────────────────
+  #
+  # THESE WERE MISSING, and the cost was measurable: on 2026-09-14 this stack
+  # held 95 pending jobs whose oldest was 451 hours (≈19 days) old, and 90 rows
+  # in event_outbox whose oldest was 505 hours. Nothing had consumed either
+  # since 26 August, because no compose file on the staging side had ever
+  # defined a service to run them — the dev compose has them behind a `queue`
+  # profile with a comment saying staging "runs the same command under their
+  # orchestrator", and no orchestrator was doing so.
+  #
+  # IN THE DEFAULT STACK, not behind a profile, for the reason health-watch
+  # gives below: a worker you have to remember to enable is a worker that is
+  # off on the day it matters. That is not hypothetical here — it was off for
+  # nineteen days.
+  #
+  # Each uses `exec` so the PHP process IS the container process: its exit
+  # status becomes the container's, `restart: unless-stopped` acts on a real
+  # failure, and nothing reports a restart that never happened.
+
+  queue-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
+    container_name: whity_staging_queue_worker
+    environment:
+      APP_ENV: ${APP_ENV:-staging}
+      DB_USER: ${DB_USER:-whity}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set for staging}
+      DB_NAME: ${DB_NAME:-whity_core}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (>= 32 chars) for staging}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set for staging}
+      # Document-render jobs run HERE, not in the web tier, so this needs the
+      # same render wiring frankenphp has or those jobs fail inside the worker.
+      RENDER_SERVICE_URL: ${RENDER_SERVICE_URL:-http://render:8130}
+      RENDER_SHARED_SECRET: ${RENDER_SHARED_SECRET:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    working_dir: /app
+    restart: unless-stopped
+    # The base image inherits a HEALTHCHECK that curls the FrankenPHP admin
+    # endpoint on localhost:2019, which does not exist in a CLI container — it
+    # would report UNHEALTHY forever while working perfectly, and a red that is
+    # always red trains everyone to ignore the column. Disabled rather than
+    # faked: whether the queue is draining is measured properly by core's own
+    # health probe (oldest pending job age), published at /api/v1/status, and
+    # alerted on by the watchdog. That is the signal — not a second one here
+    # that could disagree with it.
+    healthcheck:
+      disable: true
+    command:
+      - sh
+      - -c
+      - |
+        echo "[queue-worker] durable job worker started";
+        exec php public/index.php queue:work --max-runtime=3600
+
+  events-relay:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
+    container_name: whity_staging_events_relay
+    environment:
+      APP_ENV: ${APP_ENV:-staging}
+      DB_USER: ${DB_USER:-whity}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set for staging}
+      DB_NAME: ${DB_NAME:-whity_core}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (>= 32 chars) for staging}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set for staging}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    working_dir: /app
+    restart: unless-stopped
+    healthcheck:
+      disable: true
+    # Runs ALONGSIDE queue:work, never instead of it (#1063): without this,
+    # HookManager::dispatchAsync() records events into event_outbox that are
+    # never delivered and the table grows without bound. It had reached 90 rows
+    # with the oldest 505 hours old before this service existed.
+    command:
+      - sh
+      - -c
+      - |
+        echo "[events-relay] domain-event relay started";
+        exec php public/index.php events:relay --max-runtime=3600
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
+    container_name: whity_staging_scheduler
+    environment:
+      APP_ENV: ${APP_ENV:-staging}
+      DB_USER: ${DB_USER:-whity}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set for staging}
+      DB_NAME: ${DB_NAME:-whity_core}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set (>= 32 chars) for staging}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set for staging}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    working_dir: /app
+    restart: unless-stopped
+    healthcheck:
+      disable: true
+    # Exactly-once-per-minute across workers via the shared-store tick lock, so
+    # a second replica is safe rather than a double-run. Core's scheduler probe
+    # reads MAX(last_run_at) of enabled schedules — which currently passes
+    # VACUOUSLY, because nothing has ever run and the column is NULL. A probe
+    # that cannot fail until the thing has worked once is worth knowing about.
+    command:
+      - sh
+      - -c
+      - |
+        echo "[scheduler] cron-tick scheduler started";
+        exec php public/index.php schedule:run --max-runtime=3600
 
 volumes:
   # Distinct named volume so staging data never mixes with the dev demo's.

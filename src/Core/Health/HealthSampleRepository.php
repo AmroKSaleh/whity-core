@@ -96,15 +96,25 @@ final class HealthSampleRepository
      */
     public function countsSince(string $since): array
     {
+        // UNKNOWN samples are excluded from BOTH sides, not scored as either.
+        // Counting them as downtime invents outages a component never had;
+        // counting them as uptime is the bug this state was added to fix. A
+        // window with nothing but unknown samples yields total = 0, which the
+        // caller already renders as "no uptime figure" rather than as 100%.
         $stmt = $this->pdo->prepare(
             'SELECT component,
-                    COUNT(*) AS total,
-                    SUM(CASE WHEN status <> :ok THEN 1 ELSE 0 END) AS down
+                    SUM(CASE WHEN status <> :unknown THEN 1 ELSE 0 END) AS total,
+                    SUM(CASE WHEN status <> :ok AND status <> :unknown2 THEN 1 ELSE 0 END) AS down
                FROM health_samples
               WHERE observed_at >= :since
               GROUP BY component'
         );
-        $stmt->execute([':ok' => HealthStatus::Operational->value, ':since' => $since]);
+        $stmt->execute([
+            ':ok' => HealthStatus::Operational->value,
+            ':unknown' => HealthStatus::Unknown->value,
+            ':unknown2' => HealthStatus::Unknown->value,
+            ':since' => $since,
+        ]);
 
         $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
@@ -127,14 +137,18 @@ final class HealthSampleRepository
     public function nonOperationalSince(string $since, int $limit = 5000): array
     {
         $stmt = $this->pdo->prepare(
+            // `status <> ok` alone would turn every unmeasured sample into an
+            // incident on the public page — an "outage" for a render tier that
+            // was simply never configured. Unknown is not a fault.
             'SELECT component, status, observed_at
                FROM health_samples
-              WHERE observed_at >= :since AND status <> :ok
+              WHERE observed_at >= :since AND status <> :ok AND status <> :unknown
               ORDER BY observed_at ASC
               LIMIT :limit'
         );
         $stmt->bindValue(':since', $since);
         $stmt->bindValue(':ok', HealthStatus::Operational->value);
+        $stmt->bindValue(':unknown', HealthStatus::Unknown->value);
         $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->execute();
 

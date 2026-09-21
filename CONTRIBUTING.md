@@ -25,9 +25,20 @@ numbering, task lifecycle, parallel execution) — see
 
 ## License
 
-By contributing, you agree your code is licensed under **AGPL v3.0 + Commons
-Clause** (see [LICENSE](LICENSE)). Security issues must **not** be filed as
-public issues — follow [SECURITY.md](SECURITY.md) instead.
+Whity Core is **AGPL-3.0-only with the [Whity Plugin Exception](LICENSE)**.
+
+Before your first contribution is merged, sign the **[CLA](CLA.md)** by adding
+a line to [CONTRIBUTORS.md](CONTRIBUTORS.md) in your pull request. You keep your
+copyright; you grant permission to relicense, which is what keeps commercial
+licensing possible. It takes a minute and it never expires. The reasoning is
+spelled out in full in [CLA.md](CLA.md) — including why declining is a
+legitimate choice.
+
+Writing a **plugin** rather than changing the core? You need none of this. The
+plugin boundary is MIT and your plugin is yours, including commercially.
+
+Security issues must **not** be filed as public issues — follow
+[SECURITY.md](SECURITY.md) instead.
 
 ## Development Environment Setup
 

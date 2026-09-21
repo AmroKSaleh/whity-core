@@ -58,11 +58,37 @@ final class QuoteService
      *         price's. Structural rather than a validation message, because
      *         {@see PromotionService} already refuses that pairing with a
      *         reason — reaching here with it means a caller skipped the check.
+     *
+     *         Also when `$price` is PER-DEVICE: its quantity depends on a
+     *         billing period a quote does not carry, so there is no number to
+     *         return that is not a guess. Same reasoning as the currency case —
+     *         a caller reached here that should not have.
      */
     public function quote(int $tenantId, array $price, ?array $promotion = null): Quote
     {
         $currency = (string) $price['currency'];
         $unit = Money::of((int) $price['unit_amount'], $currency);
+
+        // A PER-DEVICE PRICE IS REFUSED RATHER THAN QUOTED AS ONE UNIT. Falling
+        // through to the flat branch would quote 1 × unit for a price the
+        // billing run invoices at N × unit, and the customer would agree to one
+        // number and be charged another — the single worst outcome available
+        // here, and one that looks entirely plausible on screen.
+        //
+        // It is not merely unimplemented. Quoting it needs a PERIOD that a
+        // pre-purchase quote does not have: `licensing.billing_basis` may be
+        // `active_in_period`, which counts units seen BETWEEN two dates, and
+        // there is no honest default window for a tenant who has not bought
+        // anything yet. Whoever wires checkout to per-device plans has to decide
+        // what a quote means on that basis; this makes that a decision rather
+        // than an accident.
+        if (($price['is_per_device'] ?? false) === true) {
+            throw new MoneyException(
+                'A per-device price cannot be quoted: the quantity depends on a billing period '
+                . 'the quote does not have. Price it through the billing run, or decide what a '
+                . 'pre-purchase device count means first.'
+            );
+        }
 
         // Per-seat prices multiply by the seats the tenant actually holds. A
         // flat price is one of itself — expressed as quantity 1 rather than as a

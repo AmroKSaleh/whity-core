@@ -75,7 +75,22 @@ final class CoreJobs
                         $transports,
                         new QueueService(new JobRepository($pdo)),
                         null,
-                        $logger
+                        $logger,
+                        null,
+                        // THE AUDIT LOGGER, which this call used to omit.
+                        //
+                        // Every other dispatch path passes one — the HTTP path
+                        // in public/index.php and the delivery job a few lines
+                        // above — so error-alert notifications were the single
+                        // kind that reached a recipient with no
+                        // `notification.delivery.queued` row behind them.
+                        //
+                        // Which is the worst kind to lose: this job exists to
+                        // tell somebody the platform is failing, so "did the
+                        // alert actually go out?" is asked precisely when
+                        // things are already going wrong, and the trail that
+                        // answers it was the one with the hole.
+                        new \Whity\Core\Audit\AuditLogger($pdo, $logger)
                     ),
                     $logger,
                     is_string($_ENV['WHITY_PUBLIC_URL'] ?? null) ? (string) $_ENV['WHITY_PUBLIC_URL'] : null
@@ -133,6 +148,82 @@ final class CoreJobs
                             $billingSubscriptions
                         ),
                         $billingSettings,
+                        $logger ?? new \Psr\Log\NullLogger()
+                    )
+                ),
+                false
+            );
+
+            // The two sweeps that keep local billing state honest against the
+            // billing service: who may use paid features, and how many devices
+            // they are being charged for.
+            //
+            // Registered even when no billing service is configured: both runs
+            // answer with zero counts in that case rather than failing, so a
+            // self-hosted deployment schedules jobs that cost nothing instead of
+            // ones that error every night and teach an operator to ignore them.
+            // The portal comes from the same factory public/index.php uses, so
+            // "configured" cannot mean two different things.
+            $billingPortal = \Whity\Core\Billing\External\BillingPortalFactory::fromEnvironment();
+
+            $registry->register(
+                \Whity\Core\Billing\Jobs\ReconcileExternalAccessJob::NAME,
+                new \Whity\Core\Billing\Jobs\ReconcileExternalAccessJob(
+                    new \Whity\Core\Billing\External\AccessReconciliationRun(
+                        $pdo,
+                        $billingPortal,
+                        new \Whity\Core\Billing\External\AccessRecorder(
+                            $billingSubscriptions,
+                            new \Whity\Core\Plan\PlanRepository($pdo),
+                            $logger ?? new \Psr\Log\NullLogger()
+                        ),
+                        $logger ?? new \Psr\Log\NullLogger()
+                    )
+                ),
+                false
+            );
+
+            $registry->register(
+                \Whity\Core\Billing\Jobs\SyncDeviceQuantityJob::NAME,
+                new \Whity\Core\Billing\Jobs\SyncDeviceQuantityJob(
+                    new \Whity\Core\Billing\External\DeviceQuantitySyncRun(
+                        $pdo,
+                        $billingPortal,
+                        new \Whity\Core\Billing\LicensedDeviceCount($pdo, $billingSettings),
+                        $logger ?? new \Psr\Log\NullLogger()
+                    )
+                ),
+                false
+            );
+
+            // What referred customers paid, turned into what affiliates earned.
+            //
+            // BOTH SOURCES, ALWAYS, and not a choice between them: a workspace
+            // with local invoices from before it moved to the billing service
+            // and receipts from after earned its referrer money in both places.
+            // Picking one by a deployment-wide flag would stop paying at the
+            // moment of the move, silently, and the only person positioned to
+            // notice is the affiliate reading their own statement.
+            $registry->register(
+                \Whity\Core\Affiliate\Jobs\AccrueAffiliateCommissionsJob::NAME,
+                new \Whity\Core\Affiliate\Jobs\AccrueAffiliateCommissionsJob(
+                    new \Whity\Core\Affiliate\CommissionAccrualRun(
+                        $pdo,
+                        new \Whity\Core\Affiliate\CombinedPaymentSources(
+                            new \Whity\Core\Affiliate\LocalInvoicePayments($pdo),
+                            new \Whity\Core\Affiliate\ExternalReceiptPayments(
+                                $billingPortal,
+                                $logger ?? new \Psr\Log\NullLogger()
+                            )
+                        ),
+                        // Whether a refund claws the commission back is a
+                        // commercial decision, so it is read from settings
+                        // rather than decided here. Defaults to clawing back:
+                        // absorbing a refund means paying out of money nobody
+                        // collected, which somebody should choose deliberately.
+                        ($billingSettings->getGlobal()[
+                            \Whity\Core\Settings\SettingsRegistry::AFFILIATE_CLAWBACK_ON_REFUND
+                        ] ?? 'true') !== 'false',
                         $logger ?? new \Psr\Log\NullLogger()
                     )
                 ),

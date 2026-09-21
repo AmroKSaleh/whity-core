@@ -12,6 +12,9 @@ use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\Render\DocumentRenderer;
 use Whity\Core\Document\Render\DocumentRenderRejectedException;
 use Whity\Core\Document\Render\RenderServiceUnavailableException;
+use Whity\Core\Entitlement\EntitlementRegistry;
+use Whity\Core\Entitlement\MeterDecision;
+use Whity\Core\Entitlement\MeterService;
 use Whity\Core\Ou\OuReachResolver;
 use Whity\Core\RBAC\ScopedPermissionSet;
 use Whity\Core\Request;
@@ -91,8 +94,29 @@ final class DocumentRenderApiHandler
         // standing there, so this path cannot become a way to reach a template
         // the designer's own list would not have shown.
         private readonly OuReachResolver $ouReach,
+        /**
+         * What the tenant's TIER allows them to render, and how much of it is
+         * left. Nullable because a deployment can be assembled without meters —
+         * a self-hosted install rations nobody — and a null here means exactly
+         * that rather than "unlimited by accident": every limit's baseline is
+         * already unlimited, so the two agree.
+         */
+        private readonly ?MeterService $meters = null,
     ) {
     }
+
+    /**
+     * The limits one rendered document spends.
+     *
+     * TWO WINDOWS, ONE ACTION. A tier sells "5 a day and 50 a month" as two
+     * separate promises — the daily figure stops one afternoon eating the
+     * month, the monthly figure is what the price is for — and the meter spends
+     * both or neither.
+     */
+    private const RENDER_METERS = [
+        EntitlementRegistry::DOCUMENTS_RENDER_PER_DAY,
+        EntitlementRegistry::DOCUMENTS_RENDER_PER_MONTH,
+    ];
 
     /**
      * @param array<string, string> $params
@@ -138,15 +162,43 @@ final class DocumentRenderApiHandler
             $templateData = [];
         }
 
+        // SPENT BEFORE THE WORK, for the same reason the persist check above sits
+        // here: refusing after a headless browser has already rendered the page
+        // costs the half-gigabyte anyway. The unit is handed back below if the
+        // render does not happen.
+        $metered = false;
+        if ($this->meters !== null) {
+            $decision = $this->meters->consume($tenantId, self::RENDER_METERS);
+            if (!$decision->allowed) {
+                // 429 RATHER THAN 402, deliberately. 402 is what the payment
+                // wall answers for a workspace that has not paid, and a client
+                // seeing it redirects to billing. This tenant HAS paid; they
+                // have used what their plan includes, and the thing to do is
+                // wait for the window or move up a tier. Conflating the two
+                // would send somebody mid-month to a checkout that has nothing
+                // to sell them.
+                return Response::error($this->quotaMessage($decision), 429)
+                    ->withHeaders(['Retry-After' => (string) $this->secondsUntil($decision->resetsAt)]);
+            }
+            $metered = true;
+        }
+
         try {
             $pdf = $this->renderer->render($tenantId, $templateData, $body['dataRows'] ?? null, $body['sheet'] ?? null);
         } catch (DocumentRenderRejectedException $e) {
+            // NO DOCUMENT, NO CHARGE — on every failure path below. The render
+            // container being down, or a template the renderer rejects, is not
+            // the customer spending one of the five documents they get today.
+            $this->refund($tenantId, $metered);
+
             // ->clientMessage, never ->getMessage(): see the exception's docblock.
             return Response::error($e->clientMessage, 422);
         } catch (RenderServiceUnavailableException $e) {
+            $this->refund($tenantId, $metered);
             error_log('[DocumentRenderApiHandler] render failed: ' . $e->getMessage());
             return Response::error('Document rendering is temporarily unavailable', 503);
         } catch (\Throwable $e) {
+            $this->refund($tenantId, $metered);
             error_log('[DocumentRenderApiHandler] unexpected render failure: ' . $e->getMessage());
             return Response::error('Document rendering is temporarily unavailable', 503);
         }
@@ -227,5 +279,72 @@ final class DocumentRenderApiHandler
     private function permissionResolver(int $callerId, int $tenantId): callable
     {
         return ScopedPermissionSet::forProfile($this->roleChecker, $callerId, $tenantId);
+    }
+
+    /** Give a spent render back. A no-op when no meter was charged. */
+    private function refund(int $tenantId, bool $metered): void
+    {
+        if ($metered && $this->meters !== null) {
+            $this->meters->refund($tenantId, self::RENDER_METERS);
+        }
+    }
+
+    /**
+     * What to tell somebody who has run out.
+     *
+     * NAMES THE WINDOW, because "you have reached your limit" leads nowhere.
+     * The daily limit coming back tonight and the monthly one coming back on
+     * the 1st call for completely different actions — wait, or move up a tier —
+     * and only the customer can decide which. The date is included rather than
+     * a duration: "resets on 1 October" is something somebody can plan around.
+     */
+    private function quotaMessage(MeterDecision $decision): string
+    {
+        $period = $decision->period();
+        $window = match ($period) {
+            'day' => 'today',
+            'week' => 'this week',
+            default => 'this month',
+        };
+
+        return sprintf(
+            'This workspace has used all %d of the documents its plan allows %s. The allowance resets %s.',
+            $decision->limit,
+            $window,
+            $this->resetWording($decision->resetsAt)
+        );
+    }
+
+    private function resetWording(?string $resetsAt): string
+    {
+        if ($resetsAt === null) {
+            return 'soon';
+        }
+
+        try {
+            return 'on ' . (new \DateTimeImmutable($resetsAt))->format('j F Y');
+        } catch (\Exception) {
+            return 'soon';
+        }
+    }
+
+    /**
+     * Seconds until the window reopens, for Retry-After.
+     *
+     * FLOORED AT ONE. A zero would tell a client to retry immediately, which is
+     * how a polite client becomes a busy loop against a limit that has not
+     * moved.
+     */
+    private function secondsUntil(?string $resetsAt): int
+    {
+        if ($resetsAt === null) {
+            return 60;
+        }
+
+        try {
+            return max(1, (new \DateTimeImmutable($resetsAt))->getTimestamp() - time());
+        } catch (\Exception) {
+            return 60;
+        }
     }
 }

@@ -56,6 +56,10 @@ final class SettingsRegistry
     //     Default 'true' (approval required).
     public const SELF_REGISTRATION_ENABLED = 'auth.self_registration_enabled';
     public const REGISTRATION_APPROVAL_REQUIRED = 'auth.registration_approval_required';
+    // Whether a self-provisioned workspace must be paid for before it does
+    // anything. Off by default: turning it on is a commercial decision, and a
+    // sovereign instance that sells nothing has no billing service to pay.
+    public const REGISTRATION_PAYMENT_REQUIRED = 'auth.registration_payment_required';
 
     // Forgotten-password + 2FA-recovery instance governance
     // (WC-password-reset-2fa-recovery). Same two-toggle model as self-service
@@ -174,6 +178,22 @@ final class SettingsRegistry
     //     been promised, and not counting it lets a tenant invite a thousand
     //     people past a limit of ten and reach it the moment they accept.
     //     Instances that treat a seat as "someone actually working" set it off.
+    // WHICH DEVICES A PER-DEVICE PRICE COUNTS. "Per device" is at least three
+    // billing models and they produce different invoices from identical facts:
+    //
+    //   activated         — billed from the moment a code was redeemed and the
+    //                       unit entered service. The default, because it is
+    //                       what a customer intuitively thinks they pay for and
+    //                       it does not bill them for stock in a cupboard.
+    //   provisioned       — billed from the moment a serial was imported.
+    //   active_in_period  — billed only if the unit was seen during the period.
+    //
+    // Migration 146 records provisioned_at, activated_at and last_seen_at as
+    // SEPARATE facts precisely so this can be a setting rather than a schema
+    // decision: a deployment that changes its mind changes a value here instead
+    // of migrating historical invoices.
+    public const LICENSING_BILLING_BASIS = 'licensing.billing_basis';
+
     public const SEATS_ENFORCEMENT = 'seats.enforcement';
     public const SEATS_COUNT_INVITED = 'seats.count_invited';
 
@@ -219,28 +239,28 @@ final class SettingsRegistry
     public const BILLING_INVOICE_NUMBER_SCOPE = 'billing.invoice_number_scope';
     public const BILLING_INVOICE_NUMBER_RESET = 'billing.invoice_number_reset';
 
-    // PAYMENT RAILS (#billing). Which rails this instance offers, and how the
-    // one real rail is addressed.
+    // PAYMENT RAILS (#billing). Which rails this instance offers.
     //
-    // CliQ is Jordan's instant transfer network: the payer pushes money from
-    // their own bank app to an alias and types a reference. So the alias and
-    // the bank name are shown to a customer, and the reference prefix is what
-    // they will see on their statement.
+    // WHITY NO LONGER PROCESSES PAYMENTS ITSELF. The CliQ rail that used to
+    // live here — alias, bank name, reference prefix, and the semi-automatic
+    // reconciliation around them — has been removed: taking money against a
+    // bank moved to a separate payment service, and a second implementation
+    // inside the application would be a second place for money to go wrong.
     //
-    // THE WEBHOOK SECRET IS NOT HERE, deliberately. It follows the SMTP
-    // password's pattern — an `app_settings` key that is NOT a registry key,
-    // encrypted at rest, and therefore never surfaced by GET /settings, which
-    // only iterates registry keys. A shared secret that can be read back over
-    // the settings API is not a shared secret.
+    // What remains is the SEAM. Whity still records what it is owed and what
+    // has been paid; a rail is whatever tells it money arrived, and the
+    // adapter interface is where the payment service will plug in.
+    //
+    // A RAIL'S SHARED SECRET IS NOT A REGISTRY KEY, deliberately, and that
+    // outlives any particular rail. It follows the SMTP password's pattern —
+    // an `app_settings` key that is NOT registered here, encrypted at rest,
+    // and therefore never surfaced by GET /settings, which only iterates
+    // registry keys. See {@see \Whity\Core\Payment\PaymentSecrets}.
     //
     // `payments.mock_enabled` exists so a deployment can exercise the whole
-    // lifecycle without a bank. It defaults OFF and is global-only: a tenant
-    // able to turn on a rail that settles its own invoices for free is the
-    // sharpest possible version of a privilege escalation.
-    public const PAYMENTS_CLIQ_ENABLED = 'payments.cliq_enabled';
-    public const PAYMENTS_CLIQ_ALIAS = 'payments.cliq_alias';
-    public const PAYMENTS_CLIQ_BANK_NAME = 'payments.cliq_bank_name';
-    public const PAYMENTS_CLIQ_REFERENCE_PREFIX = 'payments.cliq_reference_prefix';
+    // lifecycle without any real rail at all. It defaults OFF and is
+    // global-only: a tenant able to turn on a rail that settles its own
+    // invoices for free is the sharpest possible privilege escalation.
     public const PAYMENTS_MOCK_ENABLED = 'payments.mock_enabled';
 
     // DUNNING (#billing). One setting says the whole retry policy: a list of
@@ -252,6 +272,37 @@ final class SettingsRegistry
     // its enterprise customers differently from its self-service ones.
     public const DUNNING_RETRY_SCHEDULE_DAYS = 'dunning.retry_schedule_days';
     public const DUNNING_LOCK_AFTER_DAYS = 'dunning.lock_after_days';
+
+    // AFFILIATE PROGRAMME. Whether a refunded payment claws its commission
+    // back, and it is a COMMERCIAL decision rather than a technical one —
+    // which is exactly why it is a setting and not a constant.
+    //
+    // Clawing back is correct: the revenue did not happen, so the share of it
+    // did not either. It is also the term affiliates like least, and a company
+    // that can afford to absorb refunds may choose to as a selling point. The
+    // default claws back, because absorbing it is a promise to pay out of
+    // money nobody collected, and that is a decision somebody should make
+    // deliberately rather than inherit.
+    //
+    // GLOBAL-ONLY. The payer is the platform, not the tenant: a per-tenant
+    // override would mean a referred customer's own settings decided what
+    // their referrer is paid.
+    public const AFFILIATE_CLAWBACK_ON_REFUND = 'affiliate.clawback_on_refund';
+
+    // What is kept back from an affiliate payout and remitted on their behalf,
+    // in BASIS POINTS (500 = 5%). Zero means none is withheld.
+    //
+    // ZERO BY DEFAULT, AND THAT IS THE RISKY DIRECTION. Withholding money
+    // nobody instructed us to withhold is worse than not withholding — it
+    // takes cash from somebody who then has to reclaim it from a tax
+    // authority — so it starts off and an operator turns it on. The danger is
+    // the familiar one of a zero nobody notices, which is mitigated by making
+    // it VISIBLE rather than implicit: the rate is snapshot onto every payout
+    // row, returned by the API, and stated on the screen even when it is zero.
+    //
+    // GLOBAL-ONLY. It is a fact about the paying company's obligations, not
+    // about any tenant.
+    public const AFFILIATE_WITHHOLDING_BP = 'affiliate.withholding_bp';
 
     // Plugin marketplace (WC plugin-store): comma-separated allowlist of trusted
     // store HOSTS the install-from-store endpoint may fetch packages from. EMPTY
@@ -624,6 +675,7 @@ final class SettingsRegistry
         self::ERROR_TRACKING_RETENTION_DAYS,
         self::SELF_REGISTRATION_ENABLED,
         self::REGISTRATION_APPROVAL_REQUIRED,
+        self::REGISTRATION_PAYMENT_REQUIRED,
         self::SELF_PASSWORD_RESET_ENABLED,
         self::PASSWORD_RESET_APPROVAL_REQUIRED,
         self::SELF_2FA_RECOVERY_ENABLED,
@@ -655,11 +707,10 @@ final class SettingsRegistry
         self::BILLING_INVOICE_NUMBER_FORMAT,
         self::BILLING_INVOICE_NUMBER_SCOPE,
         self::BILLING_INVOICE_NUMBER_RESET,
-        self::PAYMENTS_CLIQ_ENABLED,
-        self::PAYMENTS_CLIQ_ALIAS,
-        self::PAYMENTS_CLIQ_BANK_NAME,
-        self::PAYMENTS_CLIQ_REFERENCE_PREFIX,
         self::PAYMENTS_MOCK_ENABLED,
+        self::AFFILIATE_CLAWBACK_ON_REFUND,
+        self::AFFILIATE_WITHHOLDING_BP,
+        self::LICENSING_BILLING_BASIS,
         self::SEATS_ENFORCEMENT,
         self::SEATS_COUNT_INVITED,
         self::PLUGINS_STORE_ALLOWED_HOSTS,
@@ -689,6 +740,7 @@ final class SettingsRegistry
         self::MCP_ENABLED,
         self::SELF_REGISTRATION_ENABLED,
         self::REGISTRATION_APPROVAL_REQUIRED,
+        self::REGISTRATION_PAYMENT_REQUIRED,
         self::SELF_PASSWORD_RESET_ENABLED,
         self::PASSWORD_RESET_APPROVAL_REQUIRED,
         self::SELF_2FA_RECOVERY_ENABLED,
@@ -707,8 +759,8 @@ final class SettingsRegistry
         self::I18N_ENABLED,
         self::UI_HIDE_DATES,
         self::BILLING_TAX_INCLUSIVE,
-        self::PAYMENTS_CLIQ_ENABLED,
         self::PAYMENTS_MOCK_ENABLED,
+        self::AFFILIATE_CLAWBACK_ON_REFUND,
     ];
 
     /**
@@ -750,11 +802,11 @@ final class SettingsRegistry
      * @var list<string>
      */
     private const FEATURE_FLAG_KEYS = [
-        self::PAYMENTS_CLIQ_ENABLED,
         self::ERROR_TRACKING_ENABLED,
         self::MCP_ENABLED,
         self::SELF_REGISTRATION_ENABLED,
         self::REGISTRATION_APPROVAL_REQUIRED,
+        self::REGISTRATION_PAYMENT_REQUIRED,
         self::SELF_PASSWORD_RESET_ENABLED,
         self::PASSWORD_RESET_APPROVAL_REQUIRED,
         self::SELF_2FA_RECOVERY_ENABLED,
@@ -780,6 +832,7 @@ final class SettingsRegistry
         // Seat strictness. Three levels rather than the wall's four: a seat
         // limit is only ever consulted when something is being ADDED, so
         // "block writes" and "block everything" would be the same rule.
+        self::LICENSING_BILLING_BASIS => ['activated', 'provisioned', 'active_in_period'],
         self::SEATS_ENFORCEMENT => ['off', 'warn', 'block'],
         self::BILLING_INVOICE_NUMBER_SCOPE => ['shared', 'per_tenant'],
         self::BILLING_INVOICE_NUMBER_RESET => ['never', 'yearly', 'monthly'],
@@ -824,6 +877,7 @@ final class SettingsRegistry
         // Secure-by-default: signup CLOSED, approval REQUIRED when opened.
         self::SELF_REGISTRATION_ENABLED => 'false',
         self::REGISTRATION_APPROVAL_REQUIRED => 'true',
+        self::REGISTRATION_PAYMENT_REQUIRED => 'false',
         // Opposite defaults from signup above: forgetting a password is routine
         // and expected (OPEN by default), and approval is an opt-in extra gate
         // (OFF by default — frictionless self-service unless a tenant opts in).
@@ -874,6 +928,7 @@ final class SettingsRegistry
         // that never sold a seat must not start refusing members because a
         // limit it never set has a default. 'warn' counts and reports without
         // refusing; an operator opts into 'block'.
+        self::LICENSING_BILLING_BASIS => 'activated',
         self::SEATS_ENFORCEMENT => 'warn',
         self::SEATS_COUNT_INVITED => 'true',
         // Zero tax until an operator says otherwise — see the constant.
@@ -892,11 +947,12 @@ final class SettingsRegistry
         // Every rail OFF until an operator configures one. A payment rail
         // that is on by default is one that can take money before anybody
         // decided it should.
-        self::PAYMENTS_CLIQ_ENABLED => 'false',
-        self::PAYMENTS_CLIQ_ALIAS => '',
-        self::PAYMENTS_CLIQ_BANK_NAME => '',
-        self::PAYMENTS_CLIQ_REFERENCE_PREFIX => 'WHT-',
         self::PAYMENTS_MOCK_ENABLED => 'false',
+        // Claws back by default. See the constant for why absorbing a refund
+        // is a decision rather than a default.
+        self::AFFILIATE_CLAWBACK_ON_REFUND => 'true',
+        // Nothing withheld until somebody decides what the obligation is.
+        self::AFFILIATE_WITHHOLDING_BP => '0',
         self::DUNNING_RETRY_SCHEDULE_DAYS => '1,3,7',
         self::DUNNING_LOCK_AFTER_DAYS => '14',
         // Empty = install-from-store OFF (no trusted store); operator opts in.
@@ -1248,6 +1304,7 @@ final class SettingsRegistry
             self::MCP_ENABLED => self::validateMcpEnabled($value),
             self::SELF_REGISTRATION_ENABLED => self::validateBoolean($value, self::SELF_REGISTRATION_ENABLED),
             self::REGISTRATION_APPROVAL_REQUIRED => self::validateBoolean($value, self::REGISTRATION_APPROVAL_REQUIRED),
+            self::REGISTRATION_PAYMENT_REQUIRED => self::validateBoolean($value, self::REGISTRATION_PAYMENT_REQUIRED),
             self::SELF_PASSWORD_RESET_ENABLED => self::validateBoolean($value, self::SELF_PASSWORD_RESET_ENABLED),
             self::PASSWORD_RESET_APPROVAL_REQUIRED => self::validateBoolean($value, self::PASSWORD_RESET_APPROVAL_REQUIRED),
             self::SELF_2FA_RECOVERY_ENABLED => self::validateBoolean($value, self::SELF_2FA_RECOVERY_ENABLED),
@@ -1280,11 +1337,12 @@ final class SettingsRegistry
             self::BILLING_INVOICE_NUMBER_FORMAT => self::validateInvoiceNumberFormat($value),
             self::BILLING_INVOICE_NUMBER_SCOPE => self::validateEnum($key, $value),
             self::BILLING_INVOICE_NUMBER_RESET => self::validateEnum($key, $value),
-            self::PAYMENTS_CLIQ_ENABLED => self::validateBoolean($value, self::PAYMENTS_CLIQ_ENABLED),
             self::PAYMENTS_MOCK_ENABLED => self::validateBoolean($value, self::PAYMENTS_MOCK_ENABLED),
-            self::PAYMENTS_CLIQ_REFERENCE_PREFIX => self::validateCliqReferencePrefix($value),
             self::DUNNING_RETRY_SCHEDULE_DAYS => \Whity\Core\Billing\DunningSchedule::parseProblem($value),
             self::DUNNING_LOCK_AFTER_DAYS => self::validateLockAfterDays($value),
+            self::AFFILIATE_CLAWBACK_ON_REFUND => self::validateBoolean($value, self::AFFILIATE_CLAWBACK_ON_REFUND),
+            self::AFFILIATE_WITHHOLDING_BP => self::validateWithholdingBasisPoints($value),
+            self::LICENSING_BILLING_BASIS => self::validateEnum($key, $value),
             self::SEATS_COUNT_INVITED => self::validateBoolean($value, self::SEATS_COUNT_INVITED),
             self::MAIL_BRAND_COLOR => self::validateHexColor($value),
             self::MAIL_SMTP_HOST,
@@ -1340,15 +1398,12 @@ final class SettingsRegistry
             // asserts every key can validate its own default.
             //
             // Null means "any string is acceptable": a company name, a postal
-            // address, a tax registration and a bank alias are all free-form by
-            // nature, and the only thing worth refusing would be a length the
-            // column cannot hold.
+            // address and a tax registration are all free-form by nature, and the
+            // only thing worth refusing would be a length the column cannot hold.
             self::BILLING_TAX_LABEL,
             self::BILLING_SELLER_NAME,
             self::BILLING_SELLER_ADDRESS,
-            self::BILLING_SELLER_TAX_ID,
-            self::PAYMENTS_CLIQ_ALIAS,
-            self::PAYMENTS_CLIQ_BANK_NAME => null,
+            self::BILLING_SELLER_TAX_ID => null,
             default => "Unknown setting key: {$key}",
         };
     }
@@ -1528,17 +1583,6 @@ final class SettingsRegistry
      * exponent for would stop an operator selling in an ordinary two-decimal
      * currency for no reason, and the exponent table's safe default covers it.
      */
-    /**
-     * The prefix a payer sees, and types back. Letters only, because digits and
-     * punctuation invite exactly the transcription mistakes the reference's
-     * check characters exist to catch.
-     */
-    private static function validateCliqReferencePrefix(string $value): ?string
-    {
-        return preg_match('/^[A-Za-z]{2,8}-?$/', trim($value)) === 1
-            ? null
-            : 'must be two to eight letters, optionally followed by a hyphen (e.g. "WHT-")';
-    }
 
     /**
      * The day access is withdrawn. Zero is legitimate — due on receipt, locked
@@ -1575,6 +1619,32 @@ final class SettingsRegistry
         return (int) $value <= 10000
             ? null
             : 'must be at most 10000 basis points (100%)';
+    }
+
+    /**
+     * What is kept back from an affiliate payout, in basis points.
+     *
+     * Zero is legitimate and is the default: nothing is withheld until somebody
+     * establishes what the obligation is.
+     *
+     * CAPPED WELL BELOW 100%, unlike sales tax. A withholding rate is a slice of
+     * somebody's earnings, and a figure above half is a typo rather than a
+     * policy — most obviously a percentage typed where basis points belong (a
+     * "30" meaning thirty per cent is 30 bp and harmless, but a "3000" meaning
+     * three thousand basis points read as a percentage is not). Half is already
+     * more than any withholding regime the company is likely to meet, so the
+     * refusal costs nothing real and catches the mistake that would otherwise
+     * reach somebody's bank transfer.
+     */
+    private static function validateWithholdingBasisPoints(string $value): ?string
+    {
+        if (preg_match('/^\d+$/', trim($value)) !== 1) {
+            return 'must be a whole number of basis points (500 = 5%), or 0 for none';
+        }
+
+        return (int) $value <= 5000
+            ? null
+            : 'must be at most 5000 basis points (50%) — a higher figure is almost always a typo';
     }
 
     /** Days from issue to due. Zero is legitimate: due on receipt. */

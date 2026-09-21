@@ -32,7 +32,7 @@ use Whity\Core\Money\Money;
  *   GET  /api/billing/methods             → methods()      (which rails are offered)
  *
  * ONE PAY ENDPOINT FOR EVERY RAIL, and this is the requirement that shapes the
- * whole class. The tempting design is `POST /invoices/{id}/pay/cliq`, which
+ * whole class. The tempting design is `POST /invoices/{id}/pay/<rail>`, which
  * works today and structurally hardcodes the only rail that exists — so adding
  * a card provider later means a second endpoint, a second client path, a second
  * screen, and a fork in every one of them.

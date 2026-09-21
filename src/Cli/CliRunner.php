@@ -26,6 +26,7 @@ class CliRunner
         'schedule:run' => 'Whity\Cli\Commands\ScheduleRunCommand',
         'scale:seed' => 'Whity\Cli\Commands\ScaleSeedCommand',
         'health:watch' => 'Whity\Cli\Commands\HealthWatchCommand',
+        'payments:secret' => 'Whity\Cli\Commands\PaymentsCommand',
         'i18n:extract' => 'Whity\Cli\Commands\I18nCommand',
         'i18n:sync' => 'Whity\Cli\Commands\I18nCommand',
         'i18n:coverage' => 'Whity\Cli\Commands\I18nCommand',
