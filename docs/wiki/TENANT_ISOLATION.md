@@ -24,12 +24,28 @@ Tenant ids are **integers**. The special tenant id **0 is the system tenant** �
 public static function resolve(Request $request, JwtParser $jwtParser): int
 ```
 
-`resolve()` extracts the JWT (`Authorization: Bearer <token>`, falling back to the `access_token` cookie), validates it via `JwtParser`, reads the `tenant_id` claim, coerces a numeric claim to int, and **locks** the context. There is **no silent fallback** — every failure throws `TenantResolutionException`:
+`resolve()` extracts the JWT (`Authorization: Bearer <token>`, falling back to the `access_token` cookie), validates it via `JwtParser`, reads the tenant claim, coerces a numeric claim to int, and **locks** the context. There is **no silent fallback** — every failure throws `TenantResolutionException`:
 
 - missing token,
 - invalid/expired token,
-- missing `tenant_id` claim,
-- a `tenant_id` claim that is not a valid integer.
+- no tenant claim at all,
+- a tenant claim that is not a valid integer.
+
+#### Which claim: `active_tenant_id`, then `tenant_id`
+
+Since the identity cutover a profile can belong to several tenants, so the token has to say which one this session is acting in. `lockTenantFromPayload()` reads **`active_tenant_id` first and treats it as authoritative** — it is the claim the tenant switcher re-mints and the one gated against `memberships`. Only a token that lacks it entirely (a legacy pre-migration token) falls back to `tenant_id`. This is the dual-claim window of WC-d4340daf / [ADR 0005](../adr/0005-identity-tenant-membership-model.md) §5.
+
+**A malformed `active_tenant_id` is a typed failure and never falls back.** That asymmetry is the security property, not an implementation detail: if a bad new claim degraded to the legacy one, a caller holding both could corrupt `active_tenant_id` on purpose and have the system fall back to a `tenant_id` of its choosing — downgrade-picking its own tenant. So present-but-invalid throws, and only absent falls back.
+
+### Choosing the active tenant at login
+
+`active_tenant_id` is decided once, at authentication, from the profile's **active memberships** — never from anything the client sends:
+
+- **Exactly one membership** → it is used, and the session is issued directly.
+- **More than one** → the login does not guess. `requireTenantSelection()` returns a selection prompt and no session exists until the caller picks one, which is then validated against their memberships before a token is minted.
+- **With 2FA enabled**, the same rule applies one step later: a single membership is carried on the short-lived `temp` token, and a multi-membership profile defers the choice until after the second factor.
+
+Switching tenants afterwards re-mints the token with a new `active_tenant_id`; it is not a value a request can override, which is why `TenantContext` can treat the claim as authoritative. The declared-target signals below (`X-Tenant-Id` and friends) are a different thing entirely — they say which tenant a request *addresses*, never who the caller is.
 
 ### Locking
 
@@ -107,7 +123,7 @@ Why keep the header/query at all rather than going path-only? The `X-Tenant-Id` 
 
 Every handler/repository statement that runs **after tenant resolution** and touches a tenant-owned table carries an explicit, parameterised `tenant_id` predicate bound from `TenantContext`. **This hand-written predicate IS the query-level isolation mechanism** — there is no automatic query-rewriting layer. (The `ScopesToTenant` trait that previously advertised one was removed by WC-161: a full audit found zero production call sites, its rewriter refused the JOINs most list endpoints need, and it had no concept of the system tenant's cross-tenant visibility. An advertised guarantee that does not run is worse than none.)
 
-One pre-resolution lookup is inherent, and it is **no longer ambiguous**: the login path resolves an account by email before any tenant context exists (`AuthHandler`). That used to be issue #181, because the old schema's `UNIQUE(tenant_id, email)` allowed the same address in two tenants and a login could not say which was meant. The identity cutover closed it — `profile_emails` holds addresses under a **global** `UNIQUE(email)` (migration `029`), a profile is one person across the whole deployment, and which tenant they act in is a separate `memberships` row resolved into `active_tenant_id`. An email now identifies exactly one profile, so the pre-context lookup has a single answer by construction rather than by convention. See [ADR 0005](../adr/0005-identity-tenant-membership-model.md) for the model; migration `047` cites #181 as the resolved case its own namespacing mirrors.
+One pre-resolution lookup is inherent, and it is **no longer ambiguous**: the login path resolves an account by its globally-unique **verified** email before any tenant context exists (`AuthHandler`). Verification is a gate, not a flag — an unverified address never authenticates ([ADR 0005](../adr/0005-identity-tenant-membership-model.md) §2), because an unverified email is an unproven claim to an identity and the whole tenant boundary hangs off which profile the caller turns out to be. The refusal is the **generic** invalid-credentials response rather than a verification-specific one, and is latency-compensated: saying "that address exists but is unverified" is a user-enumeration oracle, and saying it *faster* than the password path is the same oracle with extra steps. That used to be issue #181, because the old schema's `UNIQUE(tenant_id, email)` allowed the same address in two tenants and a login could not say which was meant. The identity cutover closed it — `profile_emails` holds addresses under a **global** `UNIQUE(email)` (migration `029`), a profile is one person across the whole deployment, and which tenant they act in is a separate `memberships` row resolved into `active_tenant_id`. An email now identifies exactly one profile, so the pre-context lookup has a single answer by construction rather than by convention. See [ADR 0005](../adr/0005-identity-tenant-membership-model.md) for the model; migration `047` cites #181 as the resolved case its own namespacing mirrors.
 
 The conventions every query follows:
 
