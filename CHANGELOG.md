@@ -8,13 +8,41 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [0.2.9] - 2026-09-21
 
+### Added
+
+- **Affiliates: a referral is attributed, it accrues commission, and the commission gets paid.** A new workspace records who sent it (90-day window, last touch, cleared once the workspace exists); a scheduled run turns what referred customers actually paid into what affiliates earned; a payout is assembled from the accrued balance, withheld against, and marked paid. Commission is read from **both** payment sources always — local invoices and the billing service's receipts — rather than one chosen by a deployment-wide flag: a workspace with invoices from before it moved to the billing service and receipts from after earned its referrer money in both places, and picking one would stop paying at the moment of the move, silently, with the affiliate reading their own statement the only person positioned to notice. Whether a refund claws the commission back is a setting, defaulting to clawing back. **A payout is immutable once made, so set `affiliate.withholding_bp` before the first one.**
+- **Per-device licensing.** Licensed devices, activation codes and redemptions, billed per device on a basis each tenant sets, with a nightly sweep that keeps the billed quantity in step with what is actually activated.
+- **Plan tiers that mean something.** Editable by whoever prices them, retirable without losing who was on them, and a paying customer's tier now moves where it actually counts. Plugins declare their own limits and ship their own tiers instead of core hardcoding them. A tier move is recorded, or refused.
+- **A tenant can buy a subscription and unlock their features**, so the payment wall has something behind it. The billing screen shows what they pay for and what they have paid, and stops offering to sell them what they already have.
+- **Attribution on every change that costs money.** Mutating calls to the billing service carry an `X-Pay-Actor` header naming a profile or a job. A machine says it is a machine — the device sweep resizes subscriptions on nobody's instruction, and attributing that to whichever profile happened to be nearby would invent a person indistinguishable from a real one to whoever reads the log later. An email address is refused rather than trimmed, because the value renders on an operator dashboard shared across every client that service has.
+- **An external watchdog**, running off-instance on a cron against the public surfaces, plus a clock that re-checks dependency advisories daily.
+- **A billing seed dataset**, so the billing screens show what they are for on a fresh stack.
+
+### Changed
+
+- **The licence is now AGPL-3.0-only with the Whity Plugin Exception, and the Commons Clause condition is withdrawn.** Whity Core is free software; commercial use is permitted, and plugins are yours to license as you wish. This is a loosening — nothing you could do under 0.2.8 is now forbidden.
+- **Whity no longer processes payments itself.** Taking money against a bank moves to a separate payment service; core integrates with it rather than carrying a second implementation of it.
+
 ### Removed
 
+- **The CliQ rail, and with it the four `payments.cliq_*` settings.** It was built against a specification that was never confirmed — its own source file said so — which made it a guess that could only ever have been validated by taking real money with it. **The seam is kept, and that is the point**: `PaymentProviderAdapter`, the provider registry, `PaymentEvent`, the ledger, reconciliation, dunning, the invoice lifecycle and the webhook route are all unchanged, so adding a provider is implementing an interface rather than rebuilding a subsystem. If you set `payments.cliq_*` on 0.2.8, those keys no longer exist.
 - **The offline-twin plugins for Documents, Relations and Taxonomy.** Three in-tree plugins re-implemented features core already owns, as the "offline half" of a planned strangler-fig cutover: each was to become the sole provider of its resource on the desktop's PHP host, and eventually to replace core's version on the server. The premise did not survive contact with the product. Core owns `documents:*`, `relations:*` and `tags:*`, owns `/api/document-templates`, `/api/persons`, `/api/tags` and `/api/tag-groups`, and is where those features are actually being developed — so on every server the plugins were **inert by construction**: their routes collided with core's and were refused, and their screens were refused by the core-permission ownership rule before any route was even considered. Regenerating `public/openapi.json` after removing them produces a byte-identical file, which is the measurement rather than the claim: they contributed nothing to the server's API surface, and three plugins' worth of duplicated handlers, resources and migrations were being carried, reviewed and tested for a cutover that was not going to happen.
   - **Nothing on a server changes.** Devices reconcile their plugin set to the connected backend's catalogue, so a device simply stops being offered them; a device that already holds local rows keeps showing them through the desktop's composite adapter.
   - **Their migrations adopted core's tables rather than creating their own**, adding the sync columns (`version`, `client_uuid`, `deleted_at`, `updated_by`, `change_seq`) to `persons`, `tags`, `tag_groups`, `document_templates` and `document_blocks`. Those columns stay on databases where the migrations already ran. They are nullable or defaulted, nothing reads them now, and no rows were ever soft-deleted through them — so they are inert, not orphaned data. Dropping them is a separate decision with a separate migration, not something a plugin removal should do silently.
   - **`SERVER_DORMANT_FEATURES` is now empty, and that is a stronger assertion than it looks.** Every entry the list ever held was one of these four screens. With none left, the `#969` gate says something unqualified about the repository: every frontend feature an in-tree plugin declares actually registers and reaches a user.
 
+### Fixed
+
+- **A walled tenant could not reach the page that lets them pay**, and the payment webhook was refused before it was ever routed. Both now sit outside the wall — a deadlock rather than a preference, since guarding them means the payment that lifts the wall can never be recorded and a tenant stays locked out forever having paid.
+- **`/api/health` reported "I could not measure this" as operational.** A probe that cannot tell absent from present-but-elsewhere returns the reassuring answer, which is the one failure a health endpoint must not have.
+- **Error-alert notifications reached recipients with no audit row.** The dispatcher built for the error-alert job omitted its optional audit logger while every other dispatch path passed one — so the single kind of notification that exists to say the platform is failing was the one with no trail behind it, and "did the alert go out?" is asked precisely when things are already going wrong.
+- **A refund is read from a date rather than from an absence.** Deriving it arithmetically read a free invoice as refunded.
+- **The CliQ secret was neither settable nor actually encrypted** (fixed before the rail was removed).
+- The staging database was the only container that could not restart itself; the staging stack ran without the workers it was sized for; the billing service's configuration never reached the container; the status page misreported on phones and about components it could not see.
+
+### Security
+
+- **Next.js 16.3.4 — closes two critical unauthenticated RCE advisories.**
 
 ## [0.2.8] - 2026-09-07
 
