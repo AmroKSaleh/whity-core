@@ -1676,6 +1676,65 @@ class AuthHandler
     }
 
     /**
+     * Why this profile may no longer hold a session, or null when it may.
+     *
+     * IT RETURNS THE REASON RATHER THAN A BOOLEAN because the caller audits
+     * the refusal, and a boolean would force that audit to pick one label for
+     * three different situations — writing `profile_inactive` against a
+     * database outage. An audit trail that names the wrong cause is worse than
+     * one that says nothing, because it is believed.
+     *
+     * Kept separate from {@see currentProfileTokenEpoch()} rather than folded
+     * into its query to save a lookup: that method has eleven callers, and
+     * widening it for one of them would put a status read on ten paths that do
+     * not want one. This is a primary-key lookup on a table every request
+     * already touches.
+     *
+     * FAILS CLOSED AT BOTH ENDS, which is the opposite of the epoch read above
+     * and is deliberate:
+     *
+     *  - **No row.** The profile was deleted. This is NOT closing a live gap:
+     *    `TokenValidator::isProfileEpochCurrent()` already refuses a missing
+     *    row, so the token never reaches here — verified by removing this
+     *    method's caller and watching the deleted-profile test still pass.
+     *    It returns false anyway because the alternative is a method named
+     *    "may hold a session" answering yes about a profile that does not
+     *    exist, on the strength of a guard in another class.
+     *  - **Unreadable.** `Database` already health-checks and reconnects before
+     *    it throws, so reaching the catch means the database is genuinely gone
+     *    — every other request is failing too, and this endpoint would fail a
+     *    few lines later at `recordSession()` regardless. Refusing costs a user
+     *    one re-login during an outage; the alternative is minting a fresh
+     *    access token off a question we could not ask.
+     */
+    private function sessionRefusalReason(int $profileId): ?string
+    {
+        if ($profileId <= 0) {
+            return 'profile_missing';
+        }
+
+        try {
+            // @tenant-guard-ignore: profiles is a global identity table (ADR 0005 §1), not tenant-owned.
+            $stmt = $this->db->prepare('SELECT status FROM profiles WHERE id = ? LIMIT 1');
+            $stmt->execute([$profileId]);
+            $status = $stmt->fetchColumn();
+
+            if ($status === false) {
+                return 'profile_missing';
+            }
+
+            // Mirrors handleLogin: only 'inactive' is a refusal. An unknown
+            // status is treated as active there, and disagreeing here would
+            // mean a status somebody adds later silently ends every session
+            // instead of silently allowing them — the same bug, but one that
+            // logs the whole tenant out before anybody notices.
+            return (string) $status === 'inactive' ? 'profile_inactive' : null;
+        } catch (\Exception) {
+            return 'profile_unreadable';
+        }
+    }
+
+    /**
      * Revoke the caller's CURRENT access and refresh jtis (WC-185).
      *
      * Reads both auth cookies, parses each, and records its jti in the global
@@ -1867,6 +1926,27 @@ class AuthHandler
 
         $tokenEpoch = $this->currentProfileTokenEpoch($profileId);
         $email = isset($claims['email']) && is_string($claims['email']) ? $claims['email'] : '';
+
+        // A DEACTIVATED PROFILE MUST NOT BE ABLE TO REFRESH, for exactly the
+        // reason WC-525 gives below about the 2FA policy: a refresh is how a
+        // session outlives a decision taken after it was minted. The login gate
+        // (handleLogin, `profiles.status = 'inactive'`) runs ONCE. A refresh
+        // token rotates indefinitely.
+        //
+        // So without this, "Deactivate" meant "cannot log in again", never "is
+        // out": a leaver's open browser tab kept working for as long as it kept
+        // refreshing, while the audit log recorded a successful deactivation and
+        // nothing recorded that they were still inside. That gap is invisible
+        // from every screen an operator can look at, and it is widest in the one
+        // case the feature exists for — somebody leaving under bad terms.
+        $refusalReason = $this->sessionRefusalReason($profileId);
+        if ($refusalReason !== null) {
+            $this->audit('auth.refresh.failure', $request, $activeTenantId, $profileId, [
+                'reason' => $refusalReason,
+            ]);
+
+            return Response::error('Unauthorized', 401);
+        }
 
         // WC-525: a refresh is how a session PERSISTS across the deadline of an
         // admin-enforced 2FA policy that took effect (or whose grace period
