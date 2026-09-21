@@ -98,7 +98,7 @@ Create a plugin directory under `plugins/` containing a class that implements
 ## Learn the system
 
 - [Architecture](Architecture.md) — request lifecycle, plugins, RBAC, multi-tenancy, schema, deployment.
-- [Sprint 1 Setup Guide](Sprint-1-Setup.md) — detailed local development walkthrough.
+- [Sprint 1 Setup Guide](Sprint-1-Setup.md) — historical MVP walkthrough; its plugin example no longer matches the codebase (see the notice at the top of it).
 
 See [CONTRIBUTING.md](../../CONTRIBUTING.md) for contribution guidelines.
 

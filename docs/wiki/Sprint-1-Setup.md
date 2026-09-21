@@ -1,5 +1,20 @@
 # Sprint 1: Setup and Development Guide
 
+> **⚠️ Historical — this guide describes the Sprint 1 MVP and has not been maintained since.**
+>
+> Its worked example is an `AdminStats` **plugin**, and that is the part that has gone stale in a
+> way that will waste your time: `/api/admin/stats` is now a **core route** registered on
+> `AdminHandler` in `public/index.php`, not a plugin discovered by `PluginLoader`. Follow the
+> sections below on how the loader finds it and you will be looking for a file that does not exist.
+>
+> For a current local setup, use **[Installation](Installation.md)**. For the plugin contract, use
+> **[Plugin Development](Plugin-Development.md)** and the in-tree reference plugins under
+> `plugins/HelloWorld/` and `plugins/ExamplePlugin.php`.
+>
+> Kept because the request/RBAC walkthroughs still read usefully; retire or rewrite it when
+> somebody has the budget.
+
+
 This guide provides everything you need to set up the Whity Core development environment for the Sprint 1 "Hello World" MVP. It covers local development setup, testing the basic framework, and creating your first plugin.
 
 ## Overview
