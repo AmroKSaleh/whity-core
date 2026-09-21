@@ -379,6 +379,6 @@ flowchart LR
 - Permission internals: [PERMISSION_SYSTEM](PERMISSION_SYSTEM.md).
 - Tenant internals: [TENANT_ISOLATION](TENANT_ISOLATION.md).
 - Event hooks: [HOOK_SYSTEM](HOOK_SYSTEM.md).
-- Install / run locally: [Installation](Installation.md), [Sprint-1-Setup](Sprint-1-Setup.md).
+- Install / run locally: [Installation](Installation.md). ([Sprint-1-Setup](Sprint-1-Setup.md) is historical — see the notice at the top of it.)
 </content>
 </invoke>

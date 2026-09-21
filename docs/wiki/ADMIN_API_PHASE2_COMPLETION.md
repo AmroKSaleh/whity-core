@@ -20,7 +20,7 @@
 
 Admin API Phase 2 successfully delivered a comprehensive framework enhancement that transforms Whity Core into a self-healing, multi-tenant system with extensible plugin architecture. The implementation includes four core pillars—Hook System, Dynamic Permissions, Tenant Isolation, and Update Architecture—that work together to provide bulletproof multi-tenancy guarantees, plugin-driven extensibility, and safe core updates.
 
-All 118 tests pass with 85%+ code coverage on Phase 2 components. Zero breaking changes were introduced. The system is production-ready and integrates seamlessly with the existing 21 Admin API endpoints from Phase 1. Plugins can now register permissions and hook listeners dynamically, and tenants are automatically isolated at the database layer through query scoping. The framework now guarantees that deleted plugins instantly deny access and that no cross-tenant data leakage is possible.
+All 118 tests pass with 85%+ code coverage on Phase 2 components. Zero breaking changes were introduced, and the work integrates with the existing 21 Admin API endpoints from Phase 1. Plugins can now register permissions and hook listeners dynamically, and deleted plugins instantly deny access. *(Corrected by WC-161: this paragraph originally said tenants are "automatically isolated at the database layer through query scoping". They are not, and never were — there is no query-rewriting layer. Isolation comes from an explicit `tenant_id` predicate written into every statement, proven per table by `tests/Integration/CrossTenantRejectionRealEngineTest.php`. Believing the original sentence would lead you to omit the predicate, which is the one mistake this project cannot absorb.)*
 
 ---
 
@@ -79,7 +79,7 @@ Queue async: HookManager::dispatchAsync('user.created.async', $userData)
 - `src/Permissions/PermissionRegistry.php` — Dynamic permission registry
 - `src/Permissions/RoleChecker.php` — RBAC validation with permission checks
 - `src/Tenant/TenantContext.php` — Request-scoped tenant state
-- `src/Tenant/ScopesToTenant.php` — Trait for automatic query scoping
+- ~~`src/Tenant/ScopesToTenant.php` — Trait for automatic query scoping~~ — **removed by WC-161**; it was never wired into a production query path.
 - `src/Middleware/EnforceTenantIsolation.php` — Tenant extraction and locking
 - `src/Queue/Queue.php` — Async job queueing interface
 
@@ -91,7 +91,7 @@ Queue async: HookManager::dispatchAsync('user.created.async', $userData)
 - `docs/wiki/HOOK_SYSTEM.md` — Hook system guide
 - `docs/wiki/PERMISSION_SYSTEM.md` — Dynamic permission registry guide
 - `docs/wiki/TENANT_ISOLATION.md` — Tenant isolation architecture
-- `docs/wiki/ADMIN_API_PHASE2_ARCHITECTURE.md` — Full Phase 2 design spec
+- ~~`docs/wiki/ADMIN_API_PHASE2_ARCHITECTURE.md` — Full Phase 2 design spec~~ — **never written**; it appears in no commit. [Architecture](Architecture.md) is the current system guide.
 
 **Test Files (Multiple Test Classes)**
 - `tests/Unit/Hooks/HookManagerTest.php`
@@ -206,7 +206,7 @@ docs/wiki/
   HOOK_SYSTEM.md
   PERMISSION_SYSTEM.md
   TENANT_ISOLATION.md
-  ADMIN_API_PHASE2_ARCHITECTURE.md
+  ADMIN_API_PHASE2_ARCHITECTURE.md   # never written — see note above
 ```
 
 ---
@@ -451,7 +451,7 @@ The architecture is designed for safe extensions:
 
 ## Related Documentation
 
-- **[Architecture Overview](ADMIN_API_PHASE2_ARCHITECTURE.md)** — Full design specification
+- **[Architecture](Architecture.md)** — the current system guide (this report's own `ADMIN_API_PHASE2_ARCHITECTURE.md` was never written)
 - **[Hook System Guide](HOOK_SYSTEM.md)** — Hook API and patterns
 - **[Permission System Guide](PERMISSION_SYSTEM.md)** — Dynamic permissions reference
 - **[Tenant Isolation Guide](TENANT_ISOLATION.md)** — Multi-tenancy implementation

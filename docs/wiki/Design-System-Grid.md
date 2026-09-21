@@ -7,7 +7,7 @@ components: the **8px spacing grid**, the curated **icon set** (`@tabler/icons-r
 
 - **Tokens:** spacing/radius/type values are referenced from `base.json` by name. Do not
   redefine them here.
-- **Brand assets:** live in [`web/public/brand/`](../../web/public/brand/README.md).
+- **Brand assets:** per-tenant, uploaded through settings and served from `GET /api/v1/branding` — see [Theme-Customization](Theme-Customization.md).
 - **Components:** see [Component-Library](Component-Library.md); patterns: [UI-Patterns](UI-Patterns.md).
 
 ---
@@ -150,29 +150,26 @@ follows white-label theming.
 
 ## Brand assets
 
-Brand assets live in **[`web/public/brand/`](../../web/public/brand/README.md)** and are served
-at `/brand/*`. The folder README is the authoritative usage guide; this section summarizes how
-brand intersects the grid and token system.
+**There is no brand asset folder in the repo.** This section previously described
+`web/public/brand/` and two placeholder SVGs served at `/brand/*`; WC-237 deleted both when
+branding became per-tenant white-label, and the description outlived them.
 
-> [!IMPORTANT]
-> The SVGs in `web/public/brand/` are **clearly-marked placeholders**, not the official logo.
-> They exist so layout/spacing/integration have a real target. **Design owns the final assets**
-> and will replace them. Do not treat placeholder shapes/proportions as the official identity.
+Branding is now **data, not files**. Each tenant sets a site name, a wide logo, a square logo
+and a favicon through the settings layer, over an operator-level global set that acts as the
+fallback (which is what a single-tenant deployment actually uses) (`SettingsRegistry` / `SettingsService`, with
+`BrandingService` as the domain boundary). The bytes are held by the content-addressed
+`LocalStorageDriver`; SVG is accepted only after a hardened sanitizer and rendered `<img>`-only.
+The public, leak-proof `GET /api/v1/branding` resolves the right set by request host, so
+pre-auth surfaces — login, `<title>`, favicon — are branded before anybody is authenticated.
 
-### Why `web/public/brand/` (not `docs/`)
-
-The repo `.gitignore` ignores `docs/*` except `docs/wiki/` and `docs/adr/`, so asset folders
-under `docs/` would be dropped from commits. Putting brand assets under `web/public/brand/`
-keeps them version-controlled **and** servable by the app, with **no `.gitignore` change
-required**. (If a future task needs assets under `docs/`, add a one-line `!docs/assets/`
-un-ignore — flagged, not done here.)
-
-### Assets
-
-| File | Role |
+| Slot | Role |
 |------|------|
-| `whity-wordmark.svg` | "Whity" wordmark (logotype) — primary identity where there's width |
-| `whity-mark.svg` | App mark/glyph — favicon, collapsed sidebar, compact lockups |
+| Wide logo | Primary identity where there is width — header, login |
+| Square logo | Mark/glyph — collapsed sidebar, compact lockups |
+| Favicon | Browser tab |
+
+What follows still holds: it is about how a mark of any origin sits on the grid and takes its
+colour from the token system.
 
 ### Color usage (monochrome + accent)
 
@@ -240,7 +237,7 @@ The forthcoming **type scale** (token agent, in `base.json`) should resolve line
 
 ## Related documentation
 
-- [Brand assets README](../../web/public/brand/README.md) — logo usage, clearspace, color rules
+- [Theme-Customization](Theme-Customization.md) — per-tenant branding and accent overrides (replaces the deleted brand assets README)
 - [Design-System-Overview](Design-System-Overview.md) — architecture & principles
 - [Theme-Customization](Theme-Customization.md) — tokens & white-label theming
 - [Component-Library](Component-Library.md) — component specs & states
