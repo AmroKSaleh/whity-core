@@ -1,39 +1,50 @@
-import type { TranslateFn } from '@amroksaleh/features/i18n';
-
 /**
- * Display helpers for the notification-delivery page.
+ * Display decisions for the notification-delivery page — deliberately with no
+ * translation in them.
  *
- * They live beside `page.tsx` rather than inside it because an App Router page
- * module may export ONLY its default — `app-router-page-exports.test.ts`
- * enforces that, and caught these two when they started out in the page. The
- * rule is real: Next treats other named exports from a route module as route
- * configuration, so an unrecognised one is a contract violation rather than a
- * style preference.
+ * ── Why these do not take a `t` ───────────────────────────────────────────
  *
- * Keeping them exported also keeps them testable without rendering, which is
- * what the boundary cases below actually need.
+ * The obvious shape is `formatLatency(seconds, t): string`, and that is what
+ * this file had first. It does not work here: the key extractor resolves a
+ * key's domain from a literal `useTranslation('…')` in the same file, a
+ * parameter is not a binding, and a module of nothing but pure helpers has no
+ * component to inherit a domain from. The keys extract as
+ * `[unresolved-domain]` and the i18n drift gate fails — which is exactly what
+ * happened, after the helpers were moved out of `page.tsx` to satisfy a
+ * different rule (an App Router page module may export only its default).
+ *
+ * The established way out is to keep a component that uses them in the same
+ * file, as `document-templates/audience.tsx` does. There is no such component
+ * here: the one candidate renders a label and a number and translates
+ * nothing, so a `useTranslation` call in it would exist only to feed the
+ * extractor.
+ *
+ * So the split runs along a real seam instead: this module decides WHICH
+ * phrasing applies and computes the number; the page, which has the binding,
+ * turns that into words. The functions stay unit-testable without rendering,
+ * every `t()` call sits where the extractor can see it, and nothing exists
+ * purely to satisfy a tool.
  */
 
+/** Which phrasing the average send time needs, and the number to put in it. */
+export type LatencyDisplay =
+  | { unit: 'none' }
+  | { unit: 'subSecond'; value: string }
+  | { unit: 'seconds'; value: string }
+  | { unit: 'minutes'; value: string };
+
 /**
- * A latency in the coarsest unit that still reads as a duration.
+ * The coarsest unit that still reads as a duration.
  *
- * Takes the translate function rather than reaching for the hook: this is a
- * plain function, not a component. Sub-second values keep one decimal because
- * "0s" for a 400ms send reads as instant and would hide a regression to 900ms;
- * whole seconds and minutes do not need that precision.
+ * Sub-second values keep one decimal: "0s" for a 400ms send reads as instant
+ * and would hide a regression to 900ms. Whole seconds and minutes do not need
+ * that precision.
  */
-export function formatLatency(seconds: number | null, t: TranslateFn): string {
-  if (seconds === null) return t('notifications.latency.none', 'No deliveries sent yet');
-  if (seconds < 1) {
-    return t('notifications.latency.subSecond', '{n}s').replace('{n}', seconds.toFixed(1));
-  }
-  if (seconds < 60) {
-    return t('notifications.latency.seconds', '{n}s').replace('{n}', String(Math.round(seconds)));
-  }
-  return t('notifications.latency.minutes', '{n} min').replace(
-    '{n}',
-    String(Math.round(seconds / 60))
-  );
+export function latencyDisplay(seconds: number | null): LatencyDisplay {
+  if (seconds === null) return { unit: 'none' };
+  if (seconds < 1) return { unit: 'subSecond', value: seconds.toFixed(1) };
+  if (seconds < 60) return { unit: 'seconds', value: String(Math.round(seconds)) };
+  return { unit: 'minutes', value: String(Math.round(seconds / 60)) };
 }
 
 /**
@@ -44,10 +55,13 @@ export function formatLatency(seconds: number | null, t: TranslateFn): string {
  * failures, which is the one answer this figure must never give wrongly.
  *
  * Rounding follows the binary value, not the decimal literal: `0.0725 * 100`
- * is 7.249999999999999, so it shows as 7.2% rather than 7.3%. That is pinned
- * by a test rather than engineered around — closing it needs decimal
- * arithmetic on the string, and a tenth of a percentage point changes no
- * decision anybody makes from this screen.
+ * is 7.249999999999999, so it shows as 7.2% rather than 7.3%. Pinned by a
+ * test rather than engineered around — closing it needs decimal arithmetic on
+ * the string, and a tenth of a percentage point changes no decision anybody
+ * makes from this screen.
+ *
+ * No translation: a percentage is digits and a sign in every locale this
+ * ships to, and the digits themselves are the renderer's business.
  */
 export function formatRate(rate: number): string {
   return `${(rate * 100).toFixed(rate > 0 && rate < 0.01 ? 2 : 1)}%`;

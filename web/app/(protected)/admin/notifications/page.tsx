@@ -37,7 +37,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@amroksaleh/ui/card';
 import { EmptyState } from '@amroksaleh/ui/empty-state';
 import { Skeleton } from '@amroksaleh/ui/skeleton';
 import { AccessDenied } from '@amroksaleh/ui/access-denied';
-import { formatLatency, formatRate } from './format';
+import { latencyDisplay, formatRate } from './format';
 
 type DeliveryStatus = 'queued' | 'sent' | 'failed' | 'bounced';
 
@@ -68,6 +68,25 @@ const STATUS_LABELS: { key: DeliveryStatus; labelKey: string; label: string }[] 
   { key: 'failed', labelKey: 'notifications.status.failed', label: 'Failed' },
   { key: 'bounced', labelKey: 'notifications.status.bounced', label: 'Bounced' },
 ];
+
+/**
+ * The average send time in words. Lives here, not in `./format`, because this
+ * is the file with the `useTranslation('admin')` binding the key extractor
+ * reads — see that module's header for why the split runs where it does.
+ */
+function latencyText(seconds: number | null, t: ReturnType<typeof useTranslation>): string {
+  const d = latencyDisplay(seconds);
+  switch (d.unit) {
+    case 'none':
+      return t('notifications.latency.none', 'No deliveries sent yet');
+    case 'subSecond':
+      return t('notifications.latency.subSecond', '{n}s').replace('{n}', d.value);
+    case 'seconds':
+      return t('notifications.latency.seconds', '{n}s').replace('{n}', d.value);
+    case 'minutes':
+      return t('notifications.latency.minutes', '{n} min').replace('{n}', d.value);
+  }
+}
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
@@ -190,7 +209,7 @@ export default function NotificationsAdminPage() {
             />
             <Stat
               label={t('notifications.stat.latency', 'Average time to send')}
-              value={formatLatency(metrics.avg_latency_seconds, t)}
+              value={latencyText(metrics.avg_latency_seconds, t)}
             />
           </div>
 

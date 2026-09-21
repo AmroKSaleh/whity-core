@@ -46,7 +46,7 @@ jest.mock('@amroksaleh/features/i18n', () => ({
 }));
 
 import NotificationsAdminPage from '@/app/(protected)/admin/notifications/page';
-import { formatLatency, formatRate } from '@/app/(protected)/admin/notifications/format';
+import { latencyDisplay, formatRate } from '@/app/(protected)/admin/notifications/format';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -151,21 +151,36 @@ describe('the bounced count', () => {
 // ---------------------------------------------------------------------------
 
 describe('the average send time', () => {
-  const t = (_key: string, fallback: string) => fallback;
-
   it('keeps one decimal below a second, so a 400ms send is not shown as instant', () => {
-    expect(formatLatency(0.4, t)).toBe('0.4s');
-    expect(formatLatency(0.4, t)).not.toBe('0s');
+    expect(latencyDisplay(0.4)).toEqual({ unit: 'subSecond', value: '0.4' });
+    expect(latencyDisplay(0.4).unit).not.toBe('seconds');
   });
 
   it('rounds to whole seconds, then to minutes', () => {
-    expect(formatLatency(12.4, t)).toBe('12s');
-    expect(formatLatency(184, t)).toBe('3 min');
+    expect(latencyDisplay(12.4)).toEqual({ unit: 'seconds', value: '12' });
+    expect(latencyDisplay(184)).toEqual({ unit: 'minutes', value: '3' });
   });
 
-  it('says so when nothing has been sent, rather than showing zero', () => {
-    expect(formatLatency(null, t)).toBe('No deliveries sent yet');
-    expect(formatLatency(null, t)).not.toContain('0');
+  it('reports no-deliveries as its own case rather than a zero', () => {
+    expect(latencyDisplay(null)).toEqual({ unit: 'none' });
+  });
+
+  /**
+   * The unit decision above is only half of it — the page has to turn it into
+   * the right sentence. Asserting the rendered string catches a switch arm
+   * wired to the wrong key, which the unit tests cannot see.
+   */
+  it('renders the chosen wording on the page', async () => {
+    render(<NotificationsAdminPage />);
+
+    expect(await screen.findByText('12s')).toBeInTheDocument();
+  });
+
+  it('says so on the page when nothing has been sent', async () => {
+    respondWith({ data: { ...METRICS, avg_latency_seconds: null } });
+    render(<NotificationsAdminPage />);
+
+    expect(await screen.findByText('No deliveries sent yet')).toBeInTheDocument();
   });
 });
 
