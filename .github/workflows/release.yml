@@ -936,14 +936,66 @@ jobs:
           git tag -a "${RELEASE_TAG}" -m "${RELEASE_TAG}"
           git push origin "${RELEASE_TAG}"
 
-      - name: Create release with generated notes
+      - name: Create the release, with the CHANGELOG section as its notes
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          VERSION: ${{ needs.resolve.outputs.version }}
         run: |
+          # WHY NOT `--generate-notes` ALONE, WHICH IS WHAT THIS USED TO DO.
+          #
+          # That publishes the raw list of merged pull requests and nothing
+          # else. v0.2.9 shipped 47 of them, and sitting in that list at equal
+          # weight with a dependency bump were the two things a reader had to
+          # be told: the licence changed from the Commons Clause condition to
+          # AGPL-3.0-only, and the `payments.cliq_*` settings were removed, so
+          # anyone who had configured them found keys that no longer existed.
+          # Both were written up properly in CHANGELOG.md. Neither reached the
+          # release page, and the notes had to be replaced by hand afterwards.
+          #
+          # `release-prepare` already tells you, in the PR it opens, "Read the
+          # CHANGELOG section this dated. It is the release notes." This makes
+          # that true.
+          #
+          # The generated pull-request list is kept, folded into a <details>
+          # block: it answers "did my fix ship?", which the prose never does.
+          #
+          # awk rather than a scripting runtime: this job installs neither PHP
+          # nor Node, and a release must not fail on a missing interpreter at
+          # the last step before publishing.
+          SECTION="${RUNNER_TEMP}/section.md"
+          NOTES="${RUNNER_TEMP}/release-notes.md"
+
+          awk -v ver="${VERSION}" '
+            $0 == "## [" ver "]" || index($0, "## [" ver "] ") == 1 { inside = 1; next }
+            inside && index($0, "## [") == 1                        { exit }
+            inside                                                  { print }
+          ' CHANGELOG.md > "$SECTION"
+
+          # FAIL RATHER THAN PUBLISH EMPTY NOTES. Blank notes are worse than
+          # the PR list alone, and unrecoverable in the way that matters:
+          # people read the page on the day it ships. The tag already exists
+          # by this point, so a re-run after fixing the CHANGELOG picks up
+          # from here rather than burning a version number.
+          if [ ! -s "$SECTION" ]; then
+            echo "::error::CHANGELOG.md has no content under '## [${VERSION}]'. Write the release notes there, then re-run this job."
+            exit 1
+          fi
+
+          cp "$SECTION" "$NOTES"
+
+          # --notes-file and --generate-notes are mutually exclusive, so the
+          # generated list is fetched through the API and appended.
+          {
+            printf '\n\n---\n\n<details>\n<summary>Every merged pull request in this release</summary>\n\n'
+            gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="${RELEASE_TAG}" --jq .body
+            printf '\n\n</details>\n'
+          } >> "$NOTES"
+
           gh release create "${RELEASE_TAG}" \
             --title "${RELEASE_TAG}" \
-            --generate-notes \
+            --notes-file "$NOTES" \
             --verify-tag
 
   back-merge:
