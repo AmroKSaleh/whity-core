@@ -968,6 +968,23 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::SETTINGS_MANAGE,
     ];
     $items[] = [
+        'id' => 'notifications',
+        'label' => 'Notification Delivery',
+        'href' => '/admin/notifications',
+        'icon' => 'bell-cog',
+        'group' => 'system',
+        'order' => 7,
+        // WC-notifications: mirrors GET /api/notification-metrics, which is
+        // gated on notifications:manage in the handler — so the nav item gates
+        // on the same permission and the link cannot disagree with the screen
+        // behind it.
+        //
+        // In `system` beside Audit Logs rather than in `access`: this is an
+        // observability surface about the deployment's own plumbing, not a
+        // statement about people.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::NOTIFICATIONS_MANAGE,
+    ];
+    $items[] = [
         'id' => 'plugins',
         'label' => 'Plugins',
         'href' => '/admin/plugins',
