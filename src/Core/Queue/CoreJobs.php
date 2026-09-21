@@ -75,7 +75,22 @@ final class CoreJobs
                         $transports,
                         new QueueService(new JobRepository($pdo)),
                         null,
-                        $logger
+                        $logger,
+                        null,
+                        // THE AUDIT LOGGER, which this call used to omit.
+                        //
+                        // Every other dispatch path passes one — the HTTP path
+                        // in public/index.php and the delivery job a few lines
+                        // above — so error-alert notifications were the single
+                        // kind that reached a recipient with no
+                        // `notification.delivery.queued` row behind them.
+                        //
+                        // Which is the worst kind to lose: this job exists to
+                        // tell somebody the platform is failing, so "did the
+                        // alert actually go out?" is asked precisely when
+                        // things are already going wrong, and the trail that
+                        // answers it was the one with the hole.
+                        new \Whity\Core\Audit\AuditLogger($pdo, $logger)
                     ),
                     $logger,
                     is_string($_ENV['WHITY_PUBLIC_URL'] ?? null) ? (string) $_ENV['WHITY_PUBLIC_URL'] : null
