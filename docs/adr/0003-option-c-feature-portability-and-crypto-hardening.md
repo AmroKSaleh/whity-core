@@ -1,6 +1,9 @@
 # ADR 0003 — Option C: Feature Portability & Commodity Hardening
 
 - **Status:** Accepted
+- **Superseded in part by:** [ADR 0014](0014-agpl-with-plugin-exception.md) — its
+  **licensing** analysis only. Every architectural conclusion here stands, and the
+  MIT-licensed SDK this ADR argued for is what made ADR 0014 possible.
 - **Date:** 2026-06-09
 - **Tracking:** GitHub epic #156 (Tasker WC-157); child issues #157–#171; Tasker flow "Option C: Feature Portability & Commodity Hardening"
 - **Deciders:** Project owner + maintainers
@@ -35,7 +38,10 @@ completeness critic) established the forces:
    paths use it**; real isolation relies on developers hand-writing `tenant_id = ?` in
    every handler. For a framework that customers *extend*, a single forgotten predicate
    is a silent cross-tenant leak.
-4. **Whity-Core is also a product.** It is licensed (AGPL-3.0 + Commons Clause), so a
+4. **Whity-Core is also a product.** It is licensed (AGPL-3.0 + Commons Clause), so a  <!-- SUPERSEDED (ADR 0014, 2026-09): the Commons Clause condition was WITHDRAWN.
+       Whity Core is AGPL-3.0-only with the Whity Plugin Exception — free software,
+       commercial use permitted. The argument below is unaffected: it turns on the
+       cost of discarding working code, not on the licence. -->
    wholesale Laravel rebase would both discard substantial working, tested code (700+
    tests) and *weaken* the differentiation — a lean, sovereign, near-zero-dependency
    platform is the selling point, not "another Laravel starter."
@@ -109,8 +115,20 @@ no dependency:
   compatible with an AGPL-3.0 + Commons-Clause product — Commons Clause is a seller-side
   restriction with no inbound obligation, and none are GPL-incompatible per the
   dependency policy.
+  <!-- SUPERSEDED (ADR 0014, 2026-09): the Commons Clause is gone. The CONCLUSION
+       survives unchanged and gets stronger — those four inbound licences are
+       compatible with plain AGPL-3.0-only too, and dropping a seller-side
+       restriction removes a constraint rather than adding one. -->
 
-### License-string follow-up
+### License-string follow-up — RESOLVED, and not the way this section expected
+
+> **Superseded by [ADR 0014](0014-agpl-with-plugin-exception.md) (2026-09).** The
+> discrepancy below was real and is closed, but by changing the licence rather than
+> the string: the Commons Clause condition was **withdrawn**, and `composer.json` now
+> declares `AGPL-3.0-only` matching a `LICENSE` that carries AGPL-3.0-only with the
+> Whity Plugin Exception. The original text is kept because it is the evidence the
+> follow-up was tracked, and because "the declared string disagrees with the LICENSE
+> file" is a failure worth being able to point at later.
 
 `composer.json` declares `"license": "AGPL-3.0"` only, but `LICENSE` carries **AGPL-3.0
 + Commons Clause**. This discrepancy must be corrected (an SPDX expression plus a
