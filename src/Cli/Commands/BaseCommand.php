@@ -454,14 +454,20 @@ abstract class BaseCommand implements CliCommand, CommandHelp
         $router->register('DELETE', '/api/users/{id}',     [$usersHandler, 'delete'], null, null, \Whity\Core\RBAC\CorePermissions::USERS_DELETE);
 
         $rolesHandler = new RolesApiHandler($db->getPdo(), $hookManager);
-        $router->register('GET', '/api/roles', [$rolesHandler, 'list'], 'admin');
-        $router->register('POST', '/api/roles', [$rolesHandler, 'create'], 'admin');
-        $router->register('GET', '/api/roles/{id}', [$rolesHandler, 'get'], 'admin');
-        $router->register('PATCH', '/api/roles/{id}', [$rolesHandler, 'update'], 'admin');
-        $router->register('DELETE', '/api/roles/{id}', [$rolesHandler, 'delete'], 'admin');
-        $router->register('GET', '/api/roles/{id}/permissions', [$rolesHandler, 'getPermissions'], 'admin');
-        $router->register('POST', '/api/roles/{id}/permissions', [$rolesHandler, 'grantPermissions'], 'admin');
-        $router->register('DELETE', '/api/roles/{id}/permissions', [$rolesHandler, 'revokePermissions'], 'admin');
+        // #1258: gated on the `roles:*` slugs, mirroring public/index.php
+        // 2138-2146. Note `GET .../permissions` takes `permissions:read` and
+        // both writes take `roles:manage` — that asymmetry is index.php's, and
+        // is copied rather than tidied: the whole value of this block is that
+        // the two entry points answer identically, including where the answer
+        // looks odd.
+        $router->register('GET', '/api/roles', [$rolesHandler, 'list'], null, null, \Whity\Core\RBAC\CorePermissions::ROLES_READ);
+        $router->register('POST', '/api/roles', [$rolesHandler, 'create'], null, null, \Whity\Core\RBAC\CorePermissions::ROLES_WRITE);
+        $router->register('GET', '/api/roles/{id}', [$rolesHandler, 'get'], null, null, \Whity\Core\RBAC\CorePermissions::ROLES_READ);
+        $router->register('PATCH', '/api/roles/{id}', [$rolesHandler, 'update'], null, null, \Whity\Core\RBAC\CorePermissions::ROLES_WRITE);
+        $router->register('DELETE', '/api/roles/{id}', [$rolesHandler, 'delete'], null, null, \Whity\Core\RBAC\CorePermissions::ROLES_DELETE);
+        $router->register('GET', '/api/roles/{id}/permissions', [$rolesHandler, 'getPermissions'], null, null, \Whity\Core\RBAC\CorePermissions::PERMISSIONS_READ);
+        $router->register('POST', '/api/roles/{id}/permissions', [$rolesHandler, 'grantPermissions'], null, null, \Whity\Core\RBAC\CorePermissions::ROLES_MANAGE);
+        $router->register('DELETE', '/api/roles/{id}/permissions', [$rolesHandler, 'revokePermissions'], null, null, \Whity\Core\RBAC\CorePermissions::ROLES_MANAGE);
 
         $tenantsHandler = new TenantsApiHandler($db->getPdo(), $hookManager);
         // Only GET allowed - tenants can view their own info
@@ -490,25 +496,50 @@ abstract class BaseCommand implements CliCommand, CommandHelp
         // platform, and it was the one CLI-driven mutation whose audit rows the
         // handler already knew how to write and simply had no writer for.
         $pluginsHandler = new PluginsApiHandler($baseDir . '/plugins', $pluginLoader, $db->getPdo(), $auditLogger);
-        $router->register('GET', '/api/plugins', [$pluginsHandler, 'list'], 'admin');
-        $router->register('POST', '/api/plugins/{id}/enable', [$pluginsHandler, 'enable'], 'admin');
-        $router->register('POST', '/api/plugins/{id}/disable', [$pluginsHandler, 'disable'], 'admin');
-        $router->register('POST', '/api/plugins/reload', [$pluginsHandler, 'reload'], 'admin');
-        $router->register('POST', '/api/plugins/{id}/uninstall', [$pluginsHandler, 'uninstall'], 'admin');
+        // #1258: gated on the `plugins:*` slugs, mirroring public/index.php
+        // 2094-2100.
+        //
+        // The enable/disable PATHS moved too, from `{id}` to `{name}`, because
+        // index.php spells them that way. Nothing behaves differently:
+        // PluginsApiHandler::identifier() reads `$params['name'] ?? $params['id']`
+        // and resolvePluginKey() matches an FQCN or a human name either way, so
+        // the capture name was always cosmetic. It is reconciled because two
+        // entry points spelling one route differently is how they drift into
+        // meaning different things later.
+        //
+        // `uninstall` keeps `{id}` — that is also index.php's spelling. The
+        // inconsistency between enable and uninstall is index.php's own and is
+        // mirrored, not corrected here; changing the HTTP contract is a
+        // separate decision from making the CLI agree with it.
+        $router->register('GET', '/api/plugins', [$pluginsHandler, 'list'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_READ);
+        $router->register('POST', '/api/plugins/{name}/enable', [$pluginsHandler, 'enable'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_ENABLE);
+        $router->register('POST', '/api/plugins/{name}/disable', [$pluginsHandler, 'disable'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_DISABLE);
+        $router->register('POST', '/api/plugins/reload', [$pluginsHandler, 'reload'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_RELOAD);
+        $router->register('POST', '/api/plugins/{id}/uninstall', [$pluginsHandler, 'uninstall'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_UNINSTALL);
 
         $migrationsHandler = new MigrationsApiHandler($db, $baseDir . '/database/migrations');
+        // #1258/#990: STILL ROLE-GATED, and deliberately so. Unlike the three
+        // groups above there is no `migrations:*` slug to mirror onto — and
+        // index.php gates these on the role name too, so the two entry points
+        // already agree. Moving only this side would BREAK the mirror rather
+        // than complete it. Inventing a slug here needs a naming decision and a
+        // grant migration, which is what keeps it in #990.
         $router->register('GET', '/api/migrations', [$migrationsHandler, 'list'], 'admin');
         $router->register('POST', '/api/migrations/run', [$migrationsHandler, 'run'], 'admin');
         $router->register('POST', '/api/migrations/rollback', [$migrationsHandler, 'rollback'], 'admin');
 
         $ousHandler = new OusApiHandler($db->getPdo(), $hookManager);
-        $router->register('GET', '/api/ous', [$ousHandler, 'list'], 'admin');
-        $router->register('POST', '/api/ous', [$ousHandler, 'create'], 'admin');
-        $router->register('GET', '/api/ous/{id}', [$ousHandler, 'get'], 'admin');
-        $router->register('PATCH', '/api/ous/{id}', [$ousHandler, 'update'], 'admin');
-        $router->register('DELETE', '/api/ous/{id}', [$ousHandler, 'delete'], 'admin');
-        $router->register('POST', '/api/ous/{id}/roles', [$ousHandler, 'assignRole'], 'admin');
-        $router->register('DELETE', '/api/ous/{ouId}/roles/{roleId}', [$ousHandler, 'removeRole'], 'admin');
+        // #1258: gated on the `ous:*` slugs, mirroring public/index.php
+        // 2180-2188. Both role-assignment routes take `ous:assign`, which is
+        // index.php's choice: granting and revoking a role on an OU are the
+        // same authority in opposite directions.
+        $router->register('GET', '/api/ous', [$ousHandler, 'list'], null, null, \Whity\Core\RBAC\CorePermissions::OUS_READ);
+        $router->register('POST', '/api/ous', [$ousHandler, 'create'], null, null, \Whity\Core\RBAC\CorePermissions::OUS_WRITE);
+        $router->register('GET', '/api/ous/{id}', [$ousHandler, 'get'], null, null, \Whity\Core\RBAC\CorePermissions::OUS_READ);
+        $router->register('PATCH', '/api/ous/{id}', [$ousHandler, 'update'], null, null, \Whity\Core\RBAC\CorePermissions::OUS_WRITE);
+        $router->register('DELETE', '/api/ous/{id}', [$ousHandler, 'delete'], null, null, \Whity\Core\RBAC\CorePermissions::OUS_DELETE);
+        $router->register('POST', '/api/ous/{id}/roles', [$ousHandler, 'assignRole'], null, null, \Whity\Core\RBAC\CorePermissions::OUS_ASSIGN);
+        $router->register('DELETE', '/api/ous/{ouId}/roles/{roleId}', [$ousHandler, 'removeRole'], null, null, \Whity\Core\RBAC\CorePermissions::OUS_ASSIGN);
 
         // Generate a CLI token if none provided. This synthetic token is
         // authorised via JwtParser in the RBAC/tenant middleware (NOT via
