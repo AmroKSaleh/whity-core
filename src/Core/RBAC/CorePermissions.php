@@ -124,6 +124,15 @@ final class CorePermissions
     // tenant's providers.
     public const AUTH_PROVIDERS_MANAGE = 'auth_providers:manage';
 
+    /**
+     * Manage this tenant's verified email domains (#990).
+     *
+     * Sits beside `auth_providers:manage` deliberately: a verified domain and
+     * an identity provider answer one question between them — who may sign in
+     * here, and how. Migration 156 grants it to whoever already holds that.
+     */
+    public const EMAIL_DOMAINS_MANAGE = 'email_domains:manage';
+
     // Operator per-tenant entitlement management (WC-ent). Gates the operator API
     // that grants/limits a TARGET tenant's capabilities per subscription tier.
     // Necessary but not sufficient — the handler additionally requires the caller
@@ -443,6 +452,7 @@ final class CorePermissions
             self::MCP_TOKENS_MANAGE,
             self::REGISTRATIONS_APPROVE,
             self::AUTH_PROVIDERS_MANAGE,
+            self::EMAIL_DOMAINS_MANAGE,
             self::ENTITLEMENTS_MANAGE,
             self::STORAGE_MANAGE,
             self::PLANS_MANAGE,

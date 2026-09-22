@@ -4259,11 +4259,15 @@ $emailDomainHandler = new TenantEmailDomainApiHandler(
     $db->getPdo(),
     new \Whity\Core\Identity\DomainOwnershipVerifier(new \Whity\Core\Identity\SystemDnsTxtResolver())
 );
-$router->register('GET',    '/api/email-domains',              [$emailDomainHandler, 'list'],   'admin');
-$router->register('POST',   '/api/email-domains',              [$emailDomainHandler, 'create'], 'admin');
-$router->register('PATCH',  '/api/email-domains/{id:\d+}',     [$emailDomainHandler, 'update'], 'admin');
-$router->register('POST',   '/api/email-domains/{id:\d+}/verify', [$emailDomainHandler, 'verify'], 'admin');
-$router->register('DELETE', '/api/email-domains/{id:\d+}',     [$emailDomainHandler, 'delete'], 'admin');
+// #990: gated on `email_domains:manage` (6th positional arg; the role stays
+// null so RbacMiddleware enforces the permission). Migration 156 grants it to
+// every role already holding `auth_providers:manage` — by capability, never by
+// role name, so a deployment with a renamed administrative role keeps working.
+$router->register('GET',    '/api/email-domains',              [$emailDomainHandler, 'list'],   null, null, \Whity\Core\RBAC\CorePermissions::EMAIL_DOMAINS_MANAGE);
+$router->register('POST',   '/api/email-domains',              [$emailDomainHandler, 'create'], null, null, \Whity\Core\RBAC\CorePermissions::EMAIL_DOMAINS_MANAGE);
+$router->register('PATCH',  '/api/email-domains/{id:\d+}',     [$emailDomainHandler, 'update'], null, null, \Whity\Core\RBAC\CorePermissions::EMAIL_DOMAINS_MANAGE);
+$router->register('POST',   '/api/email-domains/{id:\d+}/verify', [$emailDomainHandler, 'verify'], null, null, \Whity\Core\RBAC\CorePermissions::EMAIL_DOMAINS_MANAGE);
+$router->register('DELETE', '/api/email-domains/{id:\d+}',     [$emailDomainHandler, 'delete'], null, null, \Whity\Core\RBAC\CorePermissions::EMAIL_DOMAINS_MANAGE);
 
 // 13e. Register the per-tenant identity-provider (SSO/OIDC) admin API (WC-e6287).
 // Gated on auth_providers:manage (6th positional arg; role stays null so
