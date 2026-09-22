@@ -76,12 +76,13 @@ const GRANDFATHERED = [
     // below — re-gate them together or the nav hides a page that works.
     'GET /api/admin/stats' => '#990: no stats slug; paired with the dashboard nav item',
 
-    // #990: no `email_domains:*` slug.
-    'GET /api/email-domains' => '#990: no email_domains:* slug exists yet',
-    'POST /api/email-domains' => '#990: no email_domains:* slug exists yet',
-    'PATCH /api/email-domains/{id:\d+}' => '#990: no email_domains:* slug exists yet',
-    'POST /api/email-domains/{id:\d+}/verify' => '#990: no email_domains:* slug exists yet',
-    'DELETE /api/email-domains/{id:\d+}' => '#990: no email_domains:* slug exists yet',
+    // The email_domains group is GONE — re-gated onto `email_domains:manage`
+    // by migration 156. Recorded as a comment rather than deleted silently:
+    // this list is the running record of what #990 still owes, and a group
+    // leaving it is the only visible sign of progress between here and the
+    // issue. The guard itself forced this edit — it refuses a grandfathered
+    // entry that has been fixed, which is the half of a bidirectional check
+    // that is easy to leave out and is the half that keeps the list honest.
 
     // Mirrors GET /api/admin/stats above; moves when that route moves.
     'nav:dashboard' => '#990: mirrors GET /api/admin/stats, which is role-gated',
