@@ -574,6 +574,17 @@ jobs:
       # and needs node_modules, which this job does not have. Parsing the
       # config's regexes means the check runs on every backend PR instead of
       # only where the frontend job fires.
+      # #1259 (from #990): a route gated on a ROLE NAME answers 403 on any
+      # deployment whose administrative role is renamed — to the very
+      # administrator it was written for. ci-grant-by-role-name-guard polices
+      # MIGRATIONS, and ci-permission-holder-guard reports role-gated routes
+      # but passes while they exist, so neither stops a new one.
+      #
+      # Reads BOTH entry points. Twenty of these sat in BaseCommand.php for
+      # months (#1258) precisely because no guard read the second one.
+      - name: Role-name route guard
+        run: php scripts/ci-role-name-route-guard.php
+
       - name: Playwright orphan-spec guard
         run: php scripts/ci-playwright-orphan-specs.php
 
