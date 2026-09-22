@@ -555,6 +555,21 @@ jobs:
       - name: Database-boolean guard
         run: php scripts/ci-db-bool-guard.php
 
+      # WHIT-616: the README advertises suite sizes, and that bullet has been
+      # corrected by hand three times (#685, #690, and #1266 — the last found
+      # it claiming 3695 PHPUnit tests against a real 7,875). A number
+      # maintained by hand in a file nobody re-reads while working drifts by
+      # construction, so it is gated rather than corrected a fourth time.
+      #
+      # The count comes from phpunit's own lister rather than a grep: data
+      # providers make the file count and the test count different numbers,
+      # and only one of them is what the README claims.
+      - name: README test counts
+        run: |
+          count=$(vendor/bin/phpunit --list-tests | grep -c '^ - ')
+          echo "phpunit --list-tests reports ${count} tests"
+          php scripts/ci-readme-test-counts.php --phpunit="${count}"
+
       # Vendored-SDK parity guard (#849): the Tauri desktop template carries its
       # own copy of sdk/src, because a device boots from a hand-rolled PSR-4
       # autoloader with no Composer behind it. Re-vendoring that copy was a
