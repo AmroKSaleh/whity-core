@@ -564,6 +564,19 @@ jobs:
       # The count comes from phpunit's own lister rather than a grep: data
       # providers make the file count and the test count different numbers,
       # and only one of them is what the README claims.
+      # WHIT-638: every Playwright project names the specs it runs in an
+      # explicit testMatch allowlist, so a spec file nobody adds to one is
+      # never collected — not skipped, not reported, just absent. Four had
+      # accumulated (11 tests, the oldest dormant since 2026-07-06) and no
+      # commit had ever mentioned any of them in the config.
+      #
+      # Static on purpose: `playwright test --list` would answer this directly
+      # and needs node_modules, which this job does not have. Parsing the
+      # config's regexes means the check runs on every backend PR instead of
+      # only where the frontend job fires.
+      - name: Playwright orphan-spec guard
+        run: php scripts/ci-playwright-orphan-specs.php
+
       - name: README test counts
         run: |
           count=$(vendor/bin/phpunit --list-tests | grep -c '^ - ')
