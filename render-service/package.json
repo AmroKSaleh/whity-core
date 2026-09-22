@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Server-side PDF/PNG export microservice for the whity-core document/label designer (ADR 0012). Loads the SAME React renderer the browser preview uses (web/components/documents/print-document.tsx) via headless Chromium, so exported output stays pixel-parity with the designer preview.",
-  "license": "UNLICENSED",
+  "license": "AGPL-3.0-only",
   "engines": {
     "node": ">=22"
   },
