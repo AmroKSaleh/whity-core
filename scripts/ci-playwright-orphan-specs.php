@@ -52,12 +52,23 @@ declare(strict_types=1);
  * into a project or deleting it, per file.
  *
  * Adding an entry here should feel worse than fixing the spec.
+ *
+ * None of the four is believed stale. The pages they drive all exist and the
+ * test names read as current behaviour, so the likely resolution is wiring
+ * rather than deleting — which is the more expensive answer, since a test that
+ * has never run may simply fail.
  */
 const TOLERATED = [
-    'register.spec.ts' => 'WHIT-638: never wired since 2026-07-06; predates the identity cutover, so may be stale',
-    'verify-email.spec.ts' => 'WHIT-638: never wired since 2026-07-08; predates the identity cutover, so may be stale',
-    'role-record-sections.spec.ts' => 'WHIT-638: never wired since 2026-08-23',
-    'document-create.spec.ts' => 'WHIT-638: never wired since 2026-08-24',
+    // Each entry says what the spec covers, because "never wired" alone invites
+    // the assumption that it is dead. It is not: all four target pages exist and
+    // every test reads as live coverage of a current surface. The first draft of
+    // this list guessed that the two July files predated the identity cutover and
+    // were probably stale — /register and /verify-email both still exist, so that
+    // guess was wrong and is recorded here rather than left to mislead.
+    'register.spec.ts' => 'WHIT-638: unwired since 2026-07-06. Covers /register — client-side validation and workspace creation. The page exists.',
+    'verify-email.spec.ts' => 'WHIT-638: unwired since 2026-07-08. Covers /verify-email — invalid-token handling and an enumeration-safe resend. The page exists, and the enumeration property is security-relevant.',
+    'role-record-sections.spec.ts' => 'WHIT-638: unwired since 2026-08-23. Covers the tenant-owned vs global base role editability asymmetry the instruction set documents (WC-110/WC-222).',
+    'document-create.spec.ts' => 'WHIT-638: unwired since 2026-08-24. Covers the organizer New-document picker being filled from real templates.',
 ];
 
 $root = dirname(__DIR__);
