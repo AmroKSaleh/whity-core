@@ -59,11 +59,21 @@ declare(strict_types=1);
  * allowlist rots on unrelated edits gets deleted.
  */
 const GRANDFATHERED = [
-    // #990: no `deployments:*` slug exists. Needs a naming decision and a
-    // grant migration, which is the whole reason these are not done yet.
-    'POST /api/deployments/apply' => '#990: no deployments:* slug exists yet',
-    'POST /api/deployments/rollback' => '#990: no deployments:* slug exists yet',
-    'GET /api/deployments/status' => '#990: no deployments:* slug exists yet',
+    // BLOCKED ON #1283, not merely unslugged — do not mint a slug family here
+    // without reading it first.
+    //
+    // DeploymentManager has ONE commit (2026-05-18), the feature has no UI and
+    // no caller anywhere in the repo, and `rollbackMigration()` says in its own
+    // comment that it only records the intent. The routes are nonetheless
+    // published in public/openapi.json and the generated typed client, and are
+    // reachable by anyone holding `admin`.
+    //
+    // Minting `deployments:*` would add catalogue rows, a grant migration and a
+    // permanent RBAC surface for something that may be deleted instead. #1283
+    // asks whether to finish it, unpublish the routes, or remove it.
+    'POST /api/deployments/apply' => '#1283: feature unfinished and uncalled; decide before slugging',
+    'POST /api/deployments/rollback' => '#1283: feature unfinished and uncalled; decide before slugging',
+    'GET /api/deployments/status' => '#1283: feature unfinished and uncalled; decide before slugging',
 
     // #990/#1258: no `migrations:*` slug. Registered in BOTH entry points and
     // role-gated in both, so the two currently AGREE — re-gating one side
@@ -72,9 +82,10 @@ const GRANDFATHERED = [
     'POST /api/migrations/run' => '#990: no migrations:* slug; CLI-only route',
     'POST /api/migrations/rollback' => '#990: no migrations:* slug; CLI-only route',
 
-    // #990: the dashboard aggregate. Paired with the `dashboard` nav item
-    // below — re-gate them together or the nav hides a page that works.
-    'GET /api/admin/stats' => '#990: no stats slug; paired with the dashboard nav item',
+    // The stats pair is GONE — the route and the `dashboard` nav item both moved
+    // onto `stats:read` by migration 157, in one commit. This guard is what made
+    // that atomic: re-gating either half alone left the other in the list and
+    // failed the build, which is the coupling working rather than nagging.
 
     // The email_domains group is GONE — re-gated onto `email_domains:manage`
     // by migration 156. Recorded as a comment rather than deleted silently:
@@ -83,9 +94,6 @@ const GRANDFATHERED = [
     // issue. The guard itself forced this edit — it refuses a grandfathered
     // entry that has been fixed, which is the half of a bidirectional check
     // that is easy to leave out and is the half that keeps the list honest.
-
-    // Mirrors GET /api/admin/stats above; moves when that route moves.
-    'nav:dashboard' => '#990: mirrors GET /api/admin/stats, which is role-gated',
 
     // LEGITIMATE, and the only one here that is not debt. The page has three
     // tabs behind three different permissions, and each enforces its own
