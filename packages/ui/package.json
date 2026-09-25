@@ -101,10 +101,10 @@
   "devDependencies": {
     "@storybook/addon-docs": "^10.6.0",
     "@storybook/react-vite": "^10.4.6",
-    "@tabler/icons-react": "^3.46.0",
+    "@tabler/icons-react": "^3.48.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/katex": "^0.16.8",
-    "@types/node": "^26.6.0",
+    "@types/node": "^26.6.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "katex": "^0.18.7",
