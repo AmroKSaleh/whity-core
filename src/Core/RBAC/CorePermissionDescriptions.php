@@ -95,6 +95,7 @@ final class CorePermissionDescriptions
         CorePermissions::REGISTRATIONS_APPROVE        => 'Review and approve/reject pending self-service registrations (system tenant)',
         CorePermissions::AUTH_PROVIDERS_MANAGE        => 'Manage this tenant\'s identity-provider (SSO/OIDC) configurations',
         CorePermissions::EMAIL_DOMAINS_MANAGE         => 'Manage this tenant\'s verified email domains — which addresses may be trusted for sign-in',
+        CorePermissions::STATS_READ                   => 'Read the admin dashboard aggregates — counts, role breakdown and signup trend for this tenant',
         CorePermissions::ENTITLEMENTS_MANAGE          => 'Manage a target tenant\'s entitlements (operator, per subscription tier)',
         CorePermissions::STORAGE_MANAGE               => 'Manage this tenant\'s storage backend configuration',
         CorePermissions::PLANS_MANAGE                 => 'Manage subscription plans and apply them to tenants (operator)',

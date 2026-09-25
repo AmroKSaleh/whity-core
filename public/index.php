@@ -711,9 +711,12 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'icon' => 'dashboard',
         'group' => 'overview',
         'order' => 1,
-        // WC-175 (#191): mirrors the dashboard's primary API (GET /api/admin/stats),
-        // which is gated on the 'admin' ROLE — so the nav item gates on the role.
-        'requiredRole' => 'admin',
+        // WC-175 (#191): mirrors the dashboard's primary API (GET /api/admin/stats).
+        // #990: that route now gates on `stats:read`, so this moves with it. The two
+        // must agree or the nav either hides a page that works or offers one that
+        // 403s — which is why they are re-gated in the same commit rather than one
+        // at a time.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::STATS_READ,
     ];
     $items[] = [
         'id' => 'users',
@@ -2159,7 +2162,13 @@ $migrationsHandler = new MigrationsApiHandler($db, __DIR__ . '/../database/migra
 $router->register('GET', '/api/migrations', [$migrationsHandler, 'list'], 'admin');
 
 $adminHandler = new AdminApiHandler($db, __DIR__ . '/../database/migrations');
-$router->register('GET', '/api/admin/stats', [$adminHandler, 'stats'], 'admin');
+// #990: gated on `stats:read` (6th positional arg; requiredRole stays null so
+// RbacMiddleware enforces the permission). Migration 157 grants it to every role
+// already holding `users:read` — this endpoint returns an AGGREGATE of rows that
+// permission already exposes one by one, so the grant confers nothing new. The
+// platform-wide tenant count stays restricted by the handler's own $isSystemUser
+// branch, which this does not touch.
+$router->register('GET', '/api/admin/stats', [$adminHandler, 'stats'], null, null, \Whity\Core\RBAC\CorePermissions::STATS_READ);
 
 // 12. Register OUs API handler. Gated on the seeded ous:* PERMISSIONS (6th
 // positional arg; requiredRole stays null so RbacMiddleware enforces the

@@ -25,6 +25,18 @@ final class CorePermissions
      */
     public const SOURCE = 'core';
 
+    /**
+     * Read the admin dashboard aggregates (#990).
+     *
+     * Its own slug rather than a reuse of `users:read`, because the Dashboard
+     * NAV ITEM must gate on the same thing as the route it points at, and
+     * `/admin` redirects to `/admin/stats` — so this pair decides whether the
+     * console has a landing page. Migration 157 grants it to whoever already
+     * holds `users:read`, since the endpoint aggregates rows that permission
+     * already exposes one by one.
+     */
+    public const STATS_READ = 'stats:read';
+
     // User management
     public const USERS_READ = 'users:read';
     public const USERS_WRITE = 'users:write';
@@ -419,6 +431,7 @@ final class CorePermissions
     public static function all(): array
     {
         return [
+            self::STATS_READ,
             self::USERS_READ,
             self::USERS_WRITE,
             self::USERS_DELETE,
