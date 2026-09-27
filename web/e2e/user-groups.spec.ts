@@ -14,11 +14,63 @@ import { uniqueSuffix } from './support/constants';
  * suite asserts the request body it sends, and the engine's real-engine suite
  * asserts what that body does.
  *
- * CLEANS UP AFTER ITSELF. Groups are TENANT-WIDE, so one left behind is one
- * every later run of every other spec sees; the name carries a unique suffix so
- * a failed run's leftovers are attributable rather than anonymous.
+ * CLEANS UP AFTER ITSELF, ON EVERY PATH — not just the happy one (#1264).
+ * Groups are TENANT-WIDE, so one left behind is one every later run of every
+ * other spec sees. The test deletes its group on its last line, and an
+ * `afterEach` removes whatever is still there when that line was never reached;
+ * the name carries a unique suffix so a leftover is attributable rather than
+ * anonymous.
  */
+/**
+ * Every group this file created on the server, for the afterEach net below.
+ *
+ * WHY A NET UNDER A TEST THAT ALREADY DELETES ITS OWN GROUP
+ * ---------------------------------------------------------
+ * Playwright abandons a test body at the first failed `expect`, and the delete
+ * is the LAST thing this test does. Between the Save and that line sit two
+ * visibility assertions, a full `page.reload()`, and a `toPass` block with a
+ * twenty-second budget that this file's own comment records as having been
+ * flaky on its first run. Every one of those is a path on which a TENANT-WIDE
+ * group survives the run and is then visible to every later spec and every
+ * human in the tenant.
+ *
+ * So the id is registered the moment the server confirms the row, before the
+ * first assertion that could strand it. The in-body delete STAYS: it asserts
+ * real behaviour — the row-action menu, the confirmation dialog, the row
+ * leaving the list — and this is a net under it, not a replacement. A repeat
+ * DELETE of an already-gone id 404s and is swallowed.
+ */
+const createdGroupIds: string[] = [];
+
 test.describe('User groups (admin)', () => {
+  /**
+   * Through `page.request`, matching `document-designer.spec.ts`: it shares the
+   * page's cookie jar, so it is already the authenticated admin session, and it
+   * works whatever state the failure left the page in — which a UI control does
+   * not. `X-Requested-With` is required; the backend refuses
+   * cookie-authenticated state-changing requests without it (WC-160, see
+   * e2e/support/api.ts).
+   *
+   * NOT through the `adminApi` fixture, though #1264 suggested it and it is
+   * nominally the setup/cleanup tool. `createAuthedApi` performs a real
+   * `POST /api/v1/login` and asserts on the result, so requesting it here would
+   * add an authentication that can fail during FIXTURE SETUP — before the
+   * `.catch()` below exists to swallow anything — and that failure would
+   * replace the real one in the report. A cleanup path should not be able to
+   * out-shout the thing it is cleaning up after.
+   *
+   * Failures are swallowed for the same reason.
+   */
+  test.afterEach(async ({ page }) => {
+    for (const id of createdGroupIds.splice(0)) {
+      await page.request
+        .delete(`/api/v1/user-groups/${id}`, {
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        })
+        .catch(() => undefined);
+    }
+  });
+
   test('defines a group, previews who it reaches, and deletes it', async ({
     adminPage,
     page,
@@ -55,7 +107,22 @@ test.describe('User groups (admin)', () => {
     // And the caveat that stops the sample reading as a stored membership list.
     await expect(preview).toContainText(/a group is a rule, not a saved list of people/i);
 
+    // The id comes from the create call's OWN response rather than from a
+    // lookup by name afterwards: the answer to this spec's own request names
+    // this spec's own row, with nothing to disambiguate and no window in which
+    // another writer could be credited to us.
+    const created = page.waitForResponse(
+      (r) => r.url().includes('/api/v1/user-groups') && r.request().method() === 'POST',
+      { timeout: 15_000 }
+    );
     await page.getByRole('button', { name: 'Save' }).click();
+
+    const response = await created;
+    expect(response.status(), 'saving should create the group').toBe(201);
+    const groupId = String(((await response.json()) as { data: { id: number | string } }).data.id);
+    // Registered HERE, not later: the row exists on the server as of this line,
+    // so from here on no failure may leak it.
+    createdGroupIds.push(groupId);
 
     // It is really there — reloaded from the server, not from local state.
     await expect(page.getByText(name)).toBeVisible();
