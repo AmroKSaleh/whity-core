@@ -31,7 +31,7 @@
   },
   "dependencies": {
     "@amroksaleh/ui": "^0.4.0",
-    "@tabler/icons-react": "^3.46.0"
+    "@tabler/icons-react": "^3.48.0"
   },
   "devDependencies": {
     "@hookform/resolvers": "^5.9.1",
