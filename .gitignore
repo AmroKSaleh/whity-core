@@ -22,7 +22,13 @@ docs/*
 # incremental re-analysis — see phpstan.neon and .github/workflows/automated-tests.yml)
 /.phpstan-cache/
 
-.claude/
+# Local agent state — notably .claude/worktrees/, which holds dozens of full
+# checkouts. Written as `.claude/*` rather than `.claude/` so a child can be
+# re-included below: git will not descend into a directory excluded with a
+# trailing slash, and a negation inside one is silently ignored.
+.claude/*
+# ...except project skills, which are shared knowledge and belong in the repo.
+!.claude/skills/
 .tasker/
 .playwright-mcp/
 tests/Local/
