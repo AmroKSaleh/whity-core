@@ -7,7 +7,11 @@ namespace Whity\Tests\Commands;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use Whity\Cli\Commands\MigrationsCommand;
+use Whity\Core\PluginLoader;
+use Whity\Core\Router;
 use Whity\Database\Database;
+use Whity\Sdk\MigrationInterface;
+use Whity\Sdk\PluginInterface;
 
 /**
  * TDD tests for WC-205: targeted rollback modes in MigrationsCommand.
@@ -151,12 +155,53 @@ final class MigrationsCommandTargetedRollbackTest extends TestCase
         $this->recordMigration('001_create_alpha',               '2026-01-01 00:00:03', 3);
 
         $output   = '';
-        $exitCode = $this->runCommand(['rollback', '--plugin', 'SamplePlugin'], $output);
+        $exitCode = $this->runCommand(['rollback', '--plugin', 'SamplePlugin'], $output, true);
 
         $this->assertSame(0, $exitCode, 'Plugin rollback should succeed');
         $this->assertMigrationNotRecorded('plugin:SamplePlugin:MigrationA');
         $this->assertMigrationNotRecorded('plugin:SamplePlugin:MigrationB');
         $this->assertMigrationRecorded('001_create_alpha', 'Core migration must be untouched');
+    }
+
+    /**
+     * The assertion the suite was missing: a rollback must revert the SCHEMA,
+     * not just the ledger. Deleting the tracking rows alone leaves a database
+     * whose ledger no longer describes it, and the next `migrate run` re-applies
+     * every up() over live data.
+     */
+    public function testRollbackPluginActuallyRunsDownAndNotJustTheLedger(): void
+    {
+        $this->pdo->exec('CREATE TABLE sample_a (id INTEGER PRIMARY KEY)');
+        $this->pdo->exec('CREATE TABLE sample_b (id INTEGER PRIMARY KEY)');
+        $this->recordMigration('plugin:SamplePlugin:MigrationA', '2026-01-01 00:00:01', 1);
+        $this->recordMigration('plugin:SamplePlugin:MigrationB', '2026-01-01 00:00:02', 2);
+
+        $output   = '';
+        $exitCode = $this->runCommand(['rollback', '--plugin', 'SamplePlugin'], $output, true);
+
+        $this->assertSame(0, $exitCode);
+        $this->assertFalse($this->tableExists('sample_a'), 'MigrationA::down() must have dropped sample_a');
+        $this->assertFalse($this->tableExists('sample_b'), 'MigrationB::down() must have dropped sample_b');
+    }
+
+    /**
+     * A recorded migration whose declaring plugin is not loaded cannot have its
+     * down() run. Reporting success and dropping the row anyway is what made
+     * this command destructive, so it must refuse — and change nothing.
+     */
+    public function testRollbackPluginRefusesWhenTheDeclaringPluginIsNotLoaded(): void
+    {
+        $this->recordMigration('plugin:SamplePlugin:MigrationA', '2026-01-01 00:00:01', 1);
+
+        $output   = '';
+        $exitCode = $this->runCommand(['rollback', '--plugin', 'SamplePlugin'], $output);
+
+        $this->assertSame(1, $exitCode, 'An unresolvable migration must fail, not report success');
+        $this->assertStringContainsString('refused', $output);
+        $this->assertMigrationRecorded(
+            'plugin:SamplePlugin:MigrationA',
+            'A refused rollback must leave the ledger untouched'
+        );
     }
 
     public function testRollbackPluginReverseOrderRespected(): void
@@ -167,7 +212,7 @@ final class MigrationsCommandTargetedRollbackTest extends TestCase
         $this->recordMigration('plugin:SamplePlugin:MigrationB', '2026-01-01 00:00:02', 2);
 
         $output   = '';
-        $exitCode = $this->runCommand(['rollback', '--plugin', 'SamplePlugin'], $output);
+        $exitCode = $this->runCommand(['rollback', '--plugin', 'SamplePlugin'], $output, true);
 
         $this->assertSame(0, $exitCode);
         // MigrationB should appear before MigrationA in the output
@@ -192,7 +237,8 @@ final class MigrationsCommandTargetedRollbackTest extends TestCase
         $this->recordMigration('plugin:SamplePlugin:MigrationA', '2026-01-01 00:00:01', 1);
         $this->recordMigration('plugin:OtherPlugin:MigrationX',  '2026-01-01 00:00:02', 2);
 
-        $exitCode = $this->runCommand(['rollback', '--plugin', 'SamplePlugin']);
+        $output   = '';
+        $exitCode = $this->runCommand(['rollback', '--plugin', 'SamplePlugin'], $output, true);
 
         $this->assertSame(0, $exitCode);
         $this->assertMigrationNotRecorded('plugin:SamplePlugin:MigrationA');
@@ -241,19 +287,59 @@ final class MigrationsCommandTargetedRollbackTest extends TestCase
      * Run the command and return the exit code.  Captures stdout into $output
      * if the reference parameter is provided.
      *
+     * Passing $withSamplePlugin loads a stub plugin declaring MigrationA and
+     * MigrationB. Without it the loader finds nothing, which is the "recorded
+     * but unloadable" case the plugin rollback must refuse.
+     *
      * @param list<string> $argv
      */
-    private function runCommand(array $argv, string &$output = ''): int
+    private function runCommand(array $argv, string &$output = '', bool $withSamplePlugin = false): int
     {
         $command  = new MigrationsCommand(
             injectedDb: $this->db,
-            pluginLoader: null,
+            pluginLoader: $withSamplePlugin ? $this->samplePluginLoader() : $this->emptyPluginLoader(),
             injectedMigrationDir: self::$sharedMigrationDir
         );
         ob_start();
         $exitCode = $command->execute($argv);
         $output   = (string) ob_get_clean();
         return $exitCode;
+    }
+
+    /**
+     * A loader that reports the stub SamplePlugin, so `rollback --plugin` can
+     * resolve `plugin:SamplePlugin:MigrationA/B` to real classes and RUN their
+     * down().  Overriding load() keeps the real filesystem scan out of the test.
+     */
+    private function samplePluginLoader(): PluginLoader
+    {
+        return new class ('', new Router('')) extends PluginLoader {
+            /** @return array<PluginInterface> */
+            public function getPlugins(): array
+            {
+                return [new SamplePluginStub()];
+            }
+
+            public function load(): void
+            {
+            }
+        };
+    }
+
+    /** A loader that reports no plugins at all. */
+    private function emptyPluginLoader(): PluginLoader
+    {
+        return new class ('', new Router('')) extends PluginLoader {
+            /** @return array<PluginInterface> */
+            public function getPlugins(): array
+            {
+                return [];
+            }
+
+            public function load(): void
+            {
+            }
+        };
     }
 
     private function buildSqlitePdo(): PDO
@@ -297,6 +383,14 @@ final class MigrationsCommandTargetedRollbackTest extends TestCase
         $stmt = $this->pdo->prepare('SELECT 1 FROM core_schema_migrations WHERE migration_name = ?');
         $stmt->execute([$name]);
         $this->assertNotFalse($stmt->fetch(), $message ?: "Migration '{$name}' should be recorded");
+    }
+
+    private function tableExists(string $table): bool
+    {
+        $stmt = $this->pdo->prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?");
+        $stmt->execute([$table]);
+
+        return $stmt->fetch() !== false;
     }
 
     private function assertMigrationNotRecorded(string $name, string $message = ''): void
@@ -359,5 +453,76 @@ class CreateBetaDependsAlpha {
 PHP);
 
         return $dir;
+    }
+}
+
+/**
+ * A plugin whose migrations do real, observable work, so a rollback that only
+ * deletes tracking rows can be told apart from one that reverts the schema.
+ *
+ * The suite used to record `plugin:SamplePlugin:MigrationA` against no plugin at
+ * all and assert only that the row disappeared. Every assertion passed while
+ * down() was never called — which is precisely how the defect survived.
+ */
+final class SamplePluginStub implements PluginInterface
+{
+    public function getName(): string
+    {
+        return 'SamplePlugin';
+    }
+
+    public function getVersion(): string
+    {
+        return '1.0.0';
+    }
+
+    /** @return array<mixed> */
+    public function getRoutes(): array
+    {
+        return [];
+    }
+
+    /** @return array<mixed> */
+    public function getPermissions(): array
+    {
+        return [];
+    }
+
+    /** @return array<mixed> */
+    public function getHooks(): array
+    {
+        return [];
+    }
+
+    /** @return list<class-string<MigrationInterface>> */
+    public function getMigrations(): array
+    {
+        return [MigrationA::class, MigrationB::class];
+    }
+}
+
+final class MigrationA implements MigrationInterface
+{
+    public function up(\PDO $pdo): void
+    {
+        $pdo->exec('CREATE TABLE IF NOT EXISTS sample_a (id INTEGER PRIMARY KEY)');
+    }
+
+    public function down(\PDO $pdo): void
+    {
+        $pdo->exec('DROP TABLE IF EXISTS sample_a');
+    }
+}
+
+final class MigrationB implements MigrationInterface
+{
+    public function up(\PDO $pdo): void
+    {
+        $pdo->exec('CREATE TABLE IF NOT EXISTS sample_b (id INTEGER PRIMARY KEY)');
+    }
+
+    public function down(\PDO $pdo): void
+    {
+        $pdo->exec('DROP TABLE IF EXISTS sample_b');
     }
 }
