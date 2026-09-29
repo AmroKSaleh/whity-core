@@ -17,17 +17,42 @@ use Whity\OpenAPI\SchemaGenerator;
  * WC-179: spec-drift gate.
  *
  * The committed public/openapi.json is a GENERATED ARTIFACT. It is produced by
- * `php public/index.php generate:openapi`, which wires the live PHP router
+ * `php public/index.php generate:openapi`, which wires a PUBLICATION router
  * (CoreApiSchemas::registerRoutes -> plugin load -> SchemaGenerator -> encode)
  * and writes deterministic JSON. If a route's method/path/schema changes but
  * the committed spec is not regenerated, the published contract silently lies
  * to the typed client (#168) and the schema-driven UI (#169).
  *
- * This gate regenerates the spec from the live router exactly as the command
- * does and FAILS when the committed file has drifted — the backend analogue of
- * the `web` job's typed-client `schema.d.ts` drift check (WC-168). It runs in
- * the existing `test` CI job, so a deliberate spec/router divergence fails CI
- * with no workflow change required.
+ * This gate regenerates the spec with that same wiring and FAILS when the
+ * committed file has drifted — the backend analogue of the `web` job's
+ * typed-client `schema.d.ts` drift check (WC-168). It runs in the existing
+ * `test` CI job, so a deliberate spec/router divergence fails CI with no
+ * workflow change required.
+ *
+ * WHAT THIS GATE DOES **NOT** COVER, AND WHY THAT IS DELIBERATE (KEY-13)
+ * ---------------------------------------------------------------------
+ * "Publication router" is not a synonym for "the application's route table".
+ * The router this gate builds carries the CoreApiSchemas CATALOGUE plus the
+ * reference plugins — it does NOT carry the core routes public/index.php
+ * registers without a catalogue declaration. 40 such routes exist today, so
+ * the published document is a strict SUBSET of what a running instance serves
+ * (`/api/openapi.json`, regenerated per request from the real router).
+ *
+ * That subset is the designed output of the KNOWN_UNDOCUMENTED-first policy,
+ * not a hole in this gate: a core route is published once someone authors its
+ * contract, and until then it is tracked with a reason in
+ * {@see RouteCatalogueCompletenessTest::KNOWN_UNDOCUMENTED}. The guarantee that
+ * buys is stated in the published document itself
+ * ({@see SchemaGenerator::DOCUMENT_DESCRIPTION}) and enforced by
+ * {@see RequestSchemaContractTest::testThePublishedDocumentMarksNoCoreOperationUndocumented}:
+ * every CORE operation in public/openapi.json is authored, so an absent
+ * `requestBody` there means "takes none" with no caveat.
+ *
+ * The earlier wording here said this gate regenerates "from the live router",
+ * which reads as a coverage claim it never made and cost a defect report to
+ * un-learn. The live-vs-catalogue direction is RouteCatalogueCompletenessTest's
+ * job; between the two, the set of live core routes absent from the published
+ * spec is pinned to KNOWN_UNDOCUMENTED with no third gate needed.
  *
  * Faithful-to-CI regeneration: the spec is rebuilt over ONLY the committed
  * reference plugins (ExamplePlugin + HelloWorld + UiKitShowcase), the same set
@@ -80,7 +105,7 @@ final class OpenApiSpecDriftTest extends TestCase
     }
 
     /**
-     * THE DRIFT GATE: regenerate from the live router exactly as
+     * THE DRIFT GATE: regenerate with the publication wiring exactly as
      * `generate:openapi` does and assert the committed spec is byte-for-byte
      * identical. A route/schema change committed without regenerating the spec
      * fails here (and therefore in CI).
@@ -159,9 +184,12 @@ final class OpenApiSpecDriftTest extends TestCase
     }
 
     /**
-     * Regenerate exactly as `generate:openapi` does — core catalogue first,
+     * Regenerate exactly as `generate:openapi` does — core CATALOGUE first,
      * then plugins (the runtime first-registration-wins ordering, WC-169) —
      * over the supplied router and the reference plugins only.
+     *
+     * The catalogue, not public/index.php: see the class docblock for why the
+     * published document is deliberately the authored subset.
      *
      * @param Router $router The router to register routes onto and read back.
      * @return array{spec: array<string, mixed>, errors: list<string>}
