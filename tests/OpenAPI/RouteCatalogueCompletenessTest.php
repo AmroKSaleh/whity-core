@@ -13,8 +13,12 @@ use Whity\OpenAPI\CoreApiSchemas;
  * explaining why. Add a declaration to CoreApiSchemas::routes() to graduate
  * a route out of the opt-out list.
  *
- * This test also verifies KNOWN_UNDOCUMENTED has no phantom entries (routes
- * that were removed from index.php without removing the opt-out).
+ * This test also keeps KNOWN_UNDOCUMENTED honest in both directions it can rot:
+ * no phantom entries (routes removed from index.php without removing the
+ * opt-out), and no graduated entries (routes CoreApiSchemas now declares but
+ * that were left on the opt-out list). The second matters because the published
+ * spec's gap is documented as being exactly this list — see
+ * docs/wiki/OpenAPI-Schema-Generation.md, "The two documents: published vs live".
  */
 final class RouteCatalogueCompletenessTest extends TestCase
 {
@@ -145,6 +149,43 @@ final class RouteCatalogueCompletenessTest extends TestCase
             "KNOWN_UNDOCUMENTED contains routes that no longer exist in index.php:\n"
             . implode("\n", $phantom)
             . "\n\nRemove them from KNOWN_UNDOCUMENTED."
+        );
+    }
+
+    /**
+     * The direction the other two assertions cannot see.
+     *
+     * testEveryLiveRouteIsDocumentedOrOptedOut subtracts BOTH the declarations
+     * and the opt-out list, so a route sitting in both is subtracted twice and
+     * passes. testKnownUndocumentedHasNoPhantomEntries only catches entries
+     * whose route left index.php. Neither notices a route that is still live,
+     * has SINCE been declared in CoreApiSchemas, and was left on the opt-out
+     * list — the list then overstates the gap and nothing fails.
+     *
+     * That is not hypothetical: three graduations (WC-388a61e3 auth + 2FA,
+     * WC-9b87 tenant email-domain, WC-e6287 identity) were each pruned by hand,
+     * and the comments marking them are still above this list. This assertion
+     * is what makes the next one fail loudly instead of relying on memory.
+     */
+    public function testKnownUndocumentedHasNoGraduatedEntries(): void
+    {
+        $declaredRoutes = $this->extractDeclaredRoutes();
+
+        // An empty catalogue would make the intersection below empty too, and
+        // this gate would pass by matching nothing at all.
+        $this->assertNotEmpty(
+            $declaredRoutes,
+            'CoreApiSchemas::routes() returned no routes; this gate would pass vacuously.'
+        );
+
+        $graduated = array_values(array_intersect(self::KNOWN_UNDOCUMENTED, $declaredRoutes));
+        $this->assertSame(
+            [],
+            $graduated,
+            "KNOWN_UNDOCUMENTED lists routes that CoreApiSchemas now declares:\n"
+            . implode("\n", $graduated)
+            . "\n\nThese are documented — remove them from KNOWN_UNDOCUMENTED so the "
+            . "opt-out list keeps matching the real published/live gap."
         );
     }
 
