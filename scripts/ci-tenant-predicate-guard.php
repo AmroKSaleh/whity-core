@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 /**
  * CI tenant-predicate guard (WC-192): enforce the platform's #1 isolation
- * invariant in CI. Scans src/ for SELECT/UPDATE/DELETE statements that touch a
+ * invariant in CI. Scans the given roots (CI passes src, database and plugins —
+ * #1262) for SELECT/UPDATE/DELETE statements that touch a
  * TENANT-OWNED table ({@see Whity\Core\Tenant\TenantOwnedTables}) without binding
  * a `tenant_id` predicate, and FAILS the build on any such statement that is not
  * a sanctioned global table ({@see Whity\Core\Tenant\SanctionedGlobalTables}) and
@@ -15,7 +16,12 @@ declare(strict_types=1);
  * cross-tenant data at runtime.
  *
  * Usage:  php scripts/ci-tenant-predicate-guard.php [path ...]
- *         (defaults to scanning src/)
+ *         (defaults to scanning src/; CI passes `src database plugins`)
+ *
+ * Migration directories are excluded by policy wherever they appear under a
+ * scanned root — see the note beside $isMigrationPath below. The number
+ * excluded is printed on every run, pass or fail, so the exclusion stays
+ * visible instead of becoming the next unnoticed coverage gap.
  */
 
 require dirname(__DIR__) . '/vendor/autoload.php';
@@ -27,14 +33,42 @@ if ($roots === []) {
     $roots = [dirname(__DIR__) . '/src'];
 }
 
+/**
+ * Migration directories are OUT OF SCOPE, and this is a policy, not an oversight.
+ *
+ * The invariant this guard enforces is a REQUEST-scoped one: a handler serving
+ * tenant A must not read tenant B's rows. A migration has no request and no
+ * current tenant behind it — it runs once, from the CLI, deliberately across
+ * every tenant at once. "Bind a tenant_id predicate" is therefore not merely
+ * unnecessary there, it is usually WRONG: a backfill that scoped itself would
+ * silently skip every tenant but one.
+ *
+ * So these paths are excluded here rather than annotated 40 times over. The
+ * count is reported on every run: an exclusion nobody can see is how this guard
+ * came to scan `src/` alone for so long while being trusted to cover more.
+ *
+ * NOT excluded, and deliberately so: a plugin's Api/ and Jobs/ code, which is
+ * request-scoped exactly like core's.
+ */
+$isMigrationPath = static function (string $file): bool {
+    $normalized = str_replace('\\', '/', $file);
+
+    return (bool) preg_match('#(^|/)([Mm]igrations)/#', $normalized);
+};
+
 $guard = new TenantPredicateGuard();
 $violations = [];
+$excludedMigrationHits = 0;
 foreach ($roots as $root) {
     if (!is_dir($root)) {
         fwrite(STDERR, "FAIL: not a directory: {$root}\n");
         exit(2);
     }
     foreach ($guard->scanDirectory($root) as $violation) {
+        if ($isMigrationPath((string) $violation['file'])) {
+            $excludedMigrationHits++;
+            continue;
+        }
         $violations[] = $violation;
     }
 }
@@ -76,8 +110,28 @@ if ($violations !== []) {
         fwrite(STDERR, "\n");
     }
 
+    if ($excludedMigrationHits > 0) {
+        fwrite(STDERR, sprintf(
+            "(%d further unscoped quer%s inside migration directories were excluded by\n"
+            . "policy and are NOT counted above — see the note in %s.)\n",
+            $excludedMigrationHits,
+            $excludedMigrationHits === 1 ? 'y' : 'ies',
+            basename(__FILE__)
+        ));
+    }
+
     exit(1);
 }
 
 echo "OK: no unscoped tenant-table queries found in: " . implode(', ', $roots) . ".\n";
+if ($excludedMigrationHits > 0) {
+    echo sprintf(
+        "     (%d unscoped quer%s inside migration directories were excluded by policy —\n"
+        . "      migrations run once, CLI-side, across all tenants at once; see the note in\n"
+        . "      %s.)\n",
+        $excludedMigrationHits,
+        $excludedMigrationHits === 1 ? 'y' : 'ies',
+        basename(__FILE__)
+    );
+}
 exit(0);

@@ -489,8 +489,13 @@ jobs:
       # DELETE touches a tenant-owned table without a tenant_id predicate and
       # without a reasoned `@tenant-guard-ignore:` annotation. Turns the #1
       # product risk (cross-tenant data exposure) into a CI-enforced invariant.
+      #
+      # Roots are passed EXPLICITLY (#1262). Invoked bare, the script defaults to
+      # src/ alone, so database/ and plugins/ had never been scanned while the
+      # guard was trusted to cover the repository — plugin Api/ and Jobs/ code is
+      # request-scoped exactly like core's, and nothing was watching it.
       - name: Tenant-predicate guard
-        run: php scripts/ci-tenant-predicate-guard.php
+        run: php scripts/ci-tenant-predicate-guard.php src database plugins
 
       # Grant-by-role-name guard (#1047): fail when a migration decides who holds
       # a permission by looking a role up as `WHERE name = 'admin'`.
