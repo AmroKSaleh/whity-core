@@ -39,6 +39,28 @@ use Whity\Core\Security\EncryptedSecretStore;
  */
 final class SsoAuthHandler
 {
+    /**
+     * Dispatched once per VERIFIED federated sign-in, after the identity has a
+     * local profile (and, when self-service workspaces are on, after any new
+     * workspace exists) and BEFORE the session is minted, so whatever a listener
+     * applies is already true for the session that follows.
+     *
+     * A notification: the payload is not read back, and a listener that throws
+     * is logged and ignored — it cannot refuse a sign-in. Payload:
+     *   profile_id            int
+     *   email                 string   the address stamped on the session
+     *   provider_key          string
+     *   issuer                string   the ID token's `iss`
+     *   subject               string   the ID token's `sub`, stable per issuer
+     *   global_trust          bool     operator (tenant 0) provider, or a tenant's own
+     *   provider_tenant_id    int      0 for global trust
+     *   provisioned_tenant_id int|null the workspace created by THIS sign-in, if any
+     *
+     * Nothing from the token beyond `iss` and `sub` is passed on: a listener that
+     * needs more about the person asks its own source with the subject.
+     */
+    public const SIGNED_IN_EVENT = 'auth.federated.signed_in';
+
     public function __construct(
         private readonly OidcEngine $engine,
         private readonly IdentityProviderRepository $providers,
@@ -50,6 +72,18 @@ final class SsoAuthHandler
         private readonly FederatedIdentityLinker $linker,
         private readonly \Whity\Core\Settings\SettingsService $settings,
         private readonly string $appUrl,
+        /**
+         * Gives a first-time global-trust sign-in with no membership a workspace
+         * of its own, when the operator has switched that on. Null (tests, and
+         * any composition that does not offer it) keeps the old behaviour: such
+         * a person bounces with `no_membership`.
+         */
+        private readonly ?\Whity\Core\Tenant\FederatedWorkspaceProvisioner $workspaces = null,
+        /**
+         * Announces a verified federated sign-in to plugins (see
+         * {@see self::SIGNED_IN_EVENT}). Null in tests that do not watch it.
+         */
+        private readonly ?\Whity\Core\Hooks\HookManager $hooks = null,
     ) {
     }
 
@@ -253,6 +287,38 @@ final class SsoAuthHandler
         // validated to belong to the tenant (or be global) before it is granted.
 
         $email = $this->loginEmailFor($profileId, $identity->normalizedEmail());
+
+        // Self-service workspace (global trust only): somebody the operator's own
+        // provider vouches for, who belongs to nothing yet, gets a workspace of
+        // their own instead of a dead end. The provisioner re-checks every
+        // condition itself (switched on, no membership in any status) and does
+        // nothing otherwise. A failure here is logged and falls through to the
+        // ordinary `no_membership` bounce rather than a 500.
+        $provisionedTenantId = null;
+        if ($this->workspaces !== null && $ctx->isGlobalTrust()) {
+            try {
+                $provisionedTenantId = $this->workspaces->provisionFor($profileId, $email, $ctx);
+            } catch (\Throwable $e) {
+                error_log('[sso] self-service workspace failed for profile ' . $profileId . ': ' . $e->getMessage());
+            }
+        }
+
+        if ($this->hooks !== null) {
+            try {
+                $this->hooks->dispatch(self::SIGNED_IN_EVENT, [
+                    'profile_id'            => $profileId,
+                    'email'                 => $email,
+                    'provider_key'          => $providerKey,
+                    'issuer'                => $identity->issuer,
+                    'subject'               => $identity->subject,
+                    'global_trust'          => $ctx->isGlobalTrust(),
+                    'provider_tenant_id'    => $tenantId,
+                    'provisioned_tenant_id' => $provisionedTenantId,
+                ]);
+            } catch (\Throwable $e) {
+                error_log('[sso] ' . self::SIGNED_IN_EVENT . ' listener failed for profile ' . $profileId . ': ' . $e->getMessage());
+            }
+        }
 
         // Mint the session (sets cookies as a side effect). Global-trust logs the
         // person into their own memberships (per-person identity, ADR 0005);

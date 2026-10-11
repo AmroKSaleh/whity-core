@@ -378,12 +378,30 @@ class MigrationsCommand implements CommandHelp, CliCommand
 
     /**
      * Roll back all executed migrations that belong to the named plugin, in
-     * reverse execution order.
+     * reverse execution order, by running each one's `down()`.
      *
-     * Delegates to {@see \Whity\Core\PluginMigrationRollback} which removes
-     * the tracking rows in id DESC order.  Because plugin classes may be
-     * unavailable at uninstall time, down() is intentionally NOT called —
-     * schema cleanup is the plugin author's responsibility.
+     * {@see \Whity\Core\PluginMigrationRollback} is used only to ENUMERATE the
+     * recorded migrations (id DESC). The rollback itself goes through
+     * {@see executePluginMigration()} — the same path the LIFO `migrate
+     * rollback` already takes — so each `down()` and its tracking-row delete
+     * commit or fail together.
+     *
+     * This command used to delegate the rollback itself to that service, which
+     * deletes tracking rows WITHOUT calling `down()`. That is correct for the
+     * uninstall path it was written for, where the plugin directory is about to
+     * be removed and its classes cannot be loaded — but wrong here: the plugin
+     * IS loaded when the CLI runs. The command reported "Successfully rolled
+     * back N migration(s)" while leaving every table, row and grant in place,
+     * and the resulting database had a ledger that no longer described it.
+     * `migrate run` then re-ran every `up()` over live data, and the first one
+     * that was not perfectly idempotent failed the deployment's migrate gate —
+     * permanently, and with the already-running container still answering
+     * /api/health with 200.
+     *
+     * Every record is resolved to its declaring class BEFORE anything executes.
+     * A rollback that stops halfway because migration 7 of 10 belongs to a
+     * plugin that is no longer loaded is worse than one that refuses to start,
+     * and after the fact the two are indistinguishable.
      *
      * @param string $pluginName The plugin's declared name (case-sensitive).
      * @param bool   $force      Currently unused but accepted for consistency.
@@ -399,24 +417,49 @@ class MigrationsCommand implements CommandHelp, CliCommand
                 return 0;
             }
 
+            // Resolve every record up front, walking the loader exactly once.
+            $declared = [];
+            foreach ($this->pluginMigrations() as $entry) {
+                $declared[$entry['record']] = $entry;
+            }
+
+            $unresolved = array_values(array_filter(
+                $list,
+                static fn(string $name): bool => !isset($declared[$name])
+            ));
+
+            if (!empty($unresolved)) {
+                echo "\n\033[0;31m✗ Rollback refused: these recorded migrations do not resolve to a loaded "
+                    . "class, so their down() cannot run:\033[0m\n";
+                foreach ($unresolved as $name) {
+                    echo "    - {$name}\n";
+                }
+                echo "\nNothing has been changed. Install or enable the declaring plugin and retry. To discard\n"
+                    . "the tracking rows WITHOUT reverting the schema, uninstall the plugin — that path drops\n"
+                    . "them deliberately and leaves schema cleanup to the plugin author.\n\n";
+                return 1;
+            }
+
             echo "\n\033[1;33mRolling back migrations for plugin '{$pluginName}'...\033[0m\n";
 
-            $result = $rollback->rollback($pluginName);
-
-            foreach ($result['rolled_back'] as $name) {
-                echo "  Rolling back: $name... \033[0;32m✓\033[0m\n";
+            $count = 0;
+            foreach ($list as $name) {
+                echo "  Rolling back: $name... ";
+                $this->executePluginMigration($declared[$name], 'down');
+                echo "\033[0;32m✓\033[0m\n";
+                $count++;
             }
 
-            foreach ($result['errors'] as $err) {
-                echo "  \033[0;31m✗ {$err}\033[0m\n";
-            }
-
-            $count = count($result['rolled_back']);
             echo "\n\033[0;32m✓ Successfully rolled back $count migration(s) for plugin '{$pluginName}'\033[0m\n\n";
 
-            return empty($result['errors']) ? 0 : 1;
+            return 0;
         } catch (\Exception $e) {
-            echo "\033[0;31m✗ Plugin rollback failed: " . $e->getMessage() . "\033[0m\n";
+            // Each migration committed atomically with its own tracking row, so
+            // the ledger still describes the database: the rollback stopped at
+            // this migration and the command can be re-run once the cause is
+            // fixed. Say so — the partial state is the surprising part.
+            echo "\n\033[0;31m✗ Plugin rollback failed: " . $e->getMessage() . "\033[0m\n";
+            echo "  Migrations rolled back before this point are committed; the rest remain applied.\n\n";
             return 1;
         }
     }

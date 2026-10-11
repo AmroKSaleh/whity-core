@@ -55,6 +55,7 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
     private int $providerId;        // GLOBAL-TRUST provider (system tenant 0) — default flow
     private int $tenantProviderId;  // TENANT-TRUST provider (Acme's own IdP)
     private \Whity\Core\Settings\SettingsService $settings;
+    private \Whity\Core\Hooks\HookManager $hooks;
 
     protected function setUp(): void
     {
@@ -118,7 +119,11 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
             $auth,
             new FederatedIdentityLinker($this->pdo, $extRepo, $emailRepo, new MembershipRepository($this->pdo), new \Whity\Core\Identity\TenantEmailDomainsRepository($this->pdo)),
             $this->settings,
-            self::APP_URL
+            self::APP_URL,
+            // Present but switched OFF (the default), so every test below that
+            // does not turn it on sees the pre-existing behaviour.
+            new \Whity\Core\Tenant\FederatedWorkspaceProvisioner($this->pdo, $this->settings),
+            $this->hooks = new \Whity\Core\Hooks\HookManager(),
         );
 
         $this->seed();
@@ -343,6 +348,21 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
         );
     }
 
+    public function testCallbackRefusesADeactivatedProfileEvenWithAnActiveMembership(): void
+    {
+        // Password login and refresh refuse profiles.status = 'inactive'; the
+        // federated path must too, or deactivation is bypassed by the IdP button.
+        $this->linkIdentity();
+        $this->exec("UPDATE profiles SET status = 'inactive' WHERE id = {$this->profileId}");
+        $this->primeFlow();
+        $_GET = ['code' => 'authcode', 'state' => 'state-1'];
+
+        $res = $this->runCallback();
+
+        self::assertStringContainsString('/login?sso_error=no_membership', $this->location($res));
+        self::assertArrayNotHasKey('access_token', $_COOKIE);
+    }
+
     public function testCallbackVerifiedEmailMatchAutoLinksExistingProfileAndLogsIn(): void
     {
         // No prior link, but the verified IdP email matches Alice's VERIFIED
@@ -508,6 +528,162 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
 
         $res = $this->runCallback();
         self::assertStringContainsString('/login?sso_error=failed', $this->location($res));
+    }
+
+    // ── self-service workspace on a first global-trust sign-in ───────────────
+
+    private function enableSelfProvision(): void
+    {
+        $this->settings->setGlobal(\Whity\Core\Settings\SettingsRegistry::SSO_SELF_PROVISION_WORKSPACE, 'true');
+    }
+
+    private function signInNewPerson(string $sub = 'fresh-sub', string $email = 'fresh@person.test'): \Whity\Sdk\Http\Response
+    {
+        $this->primeFlow(sub: $sub, email: $email, emailVerified: true);
+        $_GET = ['code' => 'authcode', 'state' => 'state-1'];
+        return $this->runCallback();
+    }
+
+    private function profileFor(string $sub): int
+    {
+        return (int) $this->col("SELECT profile_id FROM external_identities WHERE subject = '{$sub}'");
+    }
+
+    public function testSelfProvisionOffLeavesANewPersonWithoutAWorkspace(): void
+    {
+        $tenantsBefore = (int) $this->col('SELECT COUNT(*) FROM tenants');
+
+        $res = $this->signInNewPerson();
+
+        self::assertStringContainsString('/login?sso_error=no_membership', $this->location($res));
+        self::assertSame($tenantsBefore, (int) $this->col('SELECT COUNT(*) FROM tenants'));
+    }
+
+    public function testSelfProvisionGivesANewPersonTheirOwnWorkspaceAndSignsThemIn(): void
+    {
+        $this->enableSelfProvision();
+
+        $res = $this->signInNewPerson();
+
+        self::assertSame(self::APP_URL . '/dashboard', $this->location($res), $res->getBody());
+        $pid = $this->profileFor('fresh-sub');
+        $stmt = $this->pdo->prepare(
+            "SELECT m.tenant_id, m.status, r.name AS role, t.name AS tenant_name
+               FROM memberships m JOIN roles r ON r.id = m.role_id JOIN tenants t ON t.id = m.tenant_id
+              WHERE m.profile_id = :p"
+        );
+        $stmt->execute([':p' => $pid]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        self::assertCount(1, $rows);
+        self::assertSame('active', $rows[0]['status']);
+        self::assertSame('admin', $rows[0]['role']);
+        self::assertNotSame((string) $this->tenantId, (string) $rows[0]['tenant_id']);
+        self::assertNotSame('0', (string) $rows[0]['tenant_id']);
+        // The workspace went through the tenant provisioner, so it has the
+        // starters every tenant gets.
+        self::assertGreaterThan(
+            0,
+            (int) $this->col('SELECT COUNT(*) FROM document_templates WHERE tenant_id = ' . (int) $rows[0]['tenant_id'])
+        );
+    }
+
+    public function testSelfProvisionHappensOnceAcrossRepeatSignIns(): void
+    {
+        $this->enableSelfProvision();
+        $this->signInNewPerson();
+        $tenantsAfterFirst = (int) $this->col('SELECT COUNT(*) FROM tenants');
+
+        $res = $this->signInNewPerson();
+
+        self::assertSame(self::APP_URL . '/dashboard', $this->location($res), $res->getBody());
+        self::assertSame($tenantsAfterFirst, (int) $this->col('SELECT COUNT(*) FROM tenants'));
+        self::assertSame(1, (int) $this->col('SELECT COUNT(*) FROM memberships WHERE profile_id = ' . $this->profileFor('fresh-sub')));
+    }
+
+    public function testSelfProvisionLeavesAlonePeopleWhoAlreadyBelongSomewhere(): void
+    {
+        // Somebody already invited (not yet active) has been placed by a human;
+        // a fresh workspace would route around that decision.
+        $this->enableSelfProvision();
+        $this->exec("INSERT INTO profiles
+            (display_name, password_hash, two_factor_enabled, two_factor_secret,
+             two_factor_backup_codes_version, token_epoch, created_at, updated_at)
+            VALUES ('Invitee', '', false, NULL, 0, 0, NOW(), NOW())");
+        $inviteeId = (int) $this->pdo->lastInsertId();
+        (new ProfileEmailRepository($this->pdo))->insert($inviteeId, 'invitee@acme.test', true, true);
+        $roleId = (int) $this->col('SELECT id FROM roles ORDER BY id ASC LIMIT 1');
+        $this->pdo->prepare("INSERT INTO memberships (profile_id, tenant_id, role_id, ou_id, status, created_at)
+            VALUES (:p, :t, :r, NULL, 'invited', NOW())")
+            ->execute([':p' => $inviteeId, ':t' => $this->tenantId, ':r' => $roleId]);
+        $tenantsBefore = (int) $this->col('SELECT COUNT(*) FROM tenants');
+
+        $res = $this->signInNewPerson('invitee-sub', 'invitee@acme.test');
+
+        self::assertStringContainsString('/login?sso_error=no_membership', $this->location($res));
+        self::assertSame($tenantsBefore, (int) $this->col('SELECT COUNT(*) FROM tenants'));
+    }
+
+    public function testASignInIsAnnouncedWithTheSubjectAndAnyNewWorkspace(): void
+    {
+        $this->enableSelfProvision();
+        $seen = [];
+        $this->hooks->listen(SsoAuthHandler::SIGNED_IN_EVENT, function (array $data) use (&$seen): array {
+            $seen[] = $data;
+            return $data;
+        });
+
+        $this->signInNewPerson();
+        $this->signInNewPerson();
+
+        self::assertCount(2, $seen);
+        $pid = $this->profileFor('fresh-sub');
+        $tenantId = (int) $this->col("SELECT tenant_id FROM memberships WHERE profile_id = {$pid}");
+        self::assertSame($pid, $seen[0]['profile_id']);
+        self::assertSame('fresh-sub', $seen[0]['subject']);
+        self::assertSame(self::ISSUER, $seen[0]['issuer']);
+        self::assertSame('google', $seen[0]['provider_key']);
+        self::assertTrue($seen[0]['global_trust']);
+        self::assertSame($tenantId, $seen[0]['provisioned_tenant_id']);
+        // The second sign-in created nothing, and says so.
+        self::assertNull($seen[1]['provisioned_tenant_id']);
+    }
+
+    public function testADeactivatedAccountSigningInGetsNoWorkspace(): void
+    {
+        // An operator's deactivation is their deny switch; removing somebody's
+        // last membership must not turn it into a free new workspace.
+        $this->enableSelfProvision();
+        $this->exec("INSERT INTO profiles
+            (display_name, password_hash, two_factor_enabled, two_factor_secret,
+             two_factor_backup_codes_version, token_epoch, status, created_at, updated_at)
+            VALUES ('Banned', '', false, NULL, 0, 0, 'inactive', NOW(), NOW())");
+        $bannedId = (int) $this->pdo->lastInsertId();
+        (new ProfileEmailRepository($this->pdo))->insert($bannedId, 'banned@example.test', true, true);
+        $tenantsBefore = (int) $this->col('SELECT COUNT(*) FROM tenants');
+
+        $res = $this->signInNewPerson('banned-sub', 'banned@example.test');
+
+        self::assertStringContainsString('/login?sso_error=', $this->location($res));
+        self::assertSame($tenantsBefore, (int) $this->col('SELECT COUNT(*) FROM tenants'));
+    }
+
+    public function testSelfProvisionPicksAFreeNameWhenTheObviousOneIsTaken(): void
+    {
+        // The ID token names everyone "Alice"; an Alice workspace already exists.
+        $this->enableSelfProvision();
+        $this->exec("INSERT INTO tenants (name, slug, created_at) VALUES ('Alice', 'alice', NOW())");
+
+        $this->signInNewPerson();
+
+        $pid = $this->profileFor('fresh-sub');
+        $tenantId = (int) $this->col("SELECT tenant_id FROM memberships WHERE profile_id = {$pid}");
+        $stmt = $this->pdo->prepare('SELECT name, slug FROM tenants WHERE id = :id');
+        $stmt->execute([':id' => $tenantId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($row);
+        self::assertSame('Alice 2', $row['name']);
+        // The slug is opaque: a display name must never choose a host label.
+        self::assertMatchesRegularExpression('/^ws-[0-9a-f]{12}$/', $row['slug']);
     }
 }
 

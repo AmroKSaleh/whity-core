@@ -489,8 +489,13 @@ jobs:
       # DELETE touches a tenant-owned table without a tenant_id predicate and
       # without a reasoned `@tenant-guard-ignore:` annotation. Turns the #1
       # product risk (cross-tenant data exposure) into a CI-enforced invariant.
+      #
+      # Roots are passed EXPLICITLY (#1262). Invoked bare, the script defaults to
+      # src/ alone, so database/ and plugins/ had never been scanned while the
+      # guard was trusted to cover the repository — plugin Api/ and Jobs/ code is
+      # request-scoped exactly like core's, and nothing was watching it.
       - name: Tenant-predicate guard
-        run: php scripts/ci-tenant-predicate-guard.php
+        run: php scripts/ci-tenant-predicate-guard.php src database plugins
 
       # Grant-by-role-name guard (#1047): fail when a migration decides who holds
       # a permission by looking a role up as `WHERE name = 'admin'`.
@@ -554,6 +559,45 @@ jobs:
       # guard that fires on correct code is worse than no guard at all.
       - name: Database-boolean guard
         run: php scripts/ci-db-bool-guard.php
+
+      # WHIT-616: the README advertises suite sizes, and that bullet has been
+      # corrected by hand three times (#685, #690, and #1266 — the last found
+      # it claiming 3695 PHPUnit tests against a real 7,875). A number
+      # maintained by hand in a file nobody re-reads while working drifts by
+      # construction, so it is gated rather than corrected a fourth time.
+      #
+      # The count comes from phpunit's own lister rather than a grep: data
+      # providers make the file count and the test count different numbers,
+      # and only one of them is what the README claims.
+      # WHIT-638: every Playwright project names the specs it runs in an
+      # explicit testMatch allowlist, so a spec file nobody adds to one is
+      # never collected — not skipped, not reported, just absent. Four had
+      # accumulated (11 tests, the oldest dormant since 2026-07-06) and no
+      # commit had ever mentioned any of them in the config.
+      #
+      # Static on purpose: `playwright test --list` would answer this directly
+      # and needs node_modules, which this job does not have. Parsing the
+      # config's regexes means the check runs on every backend PR instead of
+      # only where the frontend job fires.
+      # #1259 (from #990): a route gated on a ROLE NAME answers 403 on any
+      # deployment whose administrative role is renamed — to the very
+      # administrator it was written for. ci-grant-by-role-name-guard polices
+      # MIGRATIONS, and ci-permission-holder-guard reports role-gated routes
+      # but passes while they exist, so neither stops a new one.
+      #
+      # Reads BOTH entry points. Twenty of these sat in BaseCommand.php for
+      # months (#1258) precisely because no guard read the second one.
+      - name: Role-name route guard
+        run: php scripts/ci-role-name-route-guard.php
+
+      - name: Playwright orphan-spec guard
+        run: php scripts/ci-playwright-orphan-specs.php
+
+      - name: README test counts
+        run: |
+          count=$(vendor/bin/phpunit --list-tests | grep -c '^ - ')
+          echo "phpunit --list-tests reports ${count} tests"
+          php scripts/ci-readme-test-counts.php --phpunit="${count}"
 
       # Vendored-SDK parity guard (#849): the Tauri desktop template carries its
       # own copy of sdk/src, because a device boots from a hand-rolled PSR-4

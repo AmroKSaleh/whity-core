@@ -711,9 +711,12 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'icon' => 'dashboard',
         'group' => 'overview',
         'order' => 1,
-        // WC-175 (#191): mirrors the dashboard's primary API (GET /api/admin/stats),
-        // which is gated on the 'admin' ROLE — so the nav item gates on the role.
-        'requiredRole' => 'admin',
+        // WC-175 (#191): mirrors the dashboard's primary API (GET /api/admin/stats).
+        // #990: that route now gates on `stats:read`, so this moves with it. The two
+        // must agree or the nav either hides a page that works or offers one that
+        // 403s — which is why they are re-gated in the same commit rather than one
+        // at a time.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::STATS_READ,
     ];
     $items[] = [
         'id' => 'users',
@@ -966,6 +969,23 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         // (settings:manage + system tenant, enforced in the handler) — so the
         // nav item gates on the same permission. A tenant admin never sees it.
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::SETTINGS_MANAGE,
+    ];
+    $items[] = [
+        'id' => 'notifications',
+        'label' => 'Notification Delivery',
+        'href' => '/admin/notifications',
+        'icon' => 'bell-cog',
+        'group' => 'system',
+        'order' => 7,
+        // WC-notifications: mirrors GET /api/notification-metrics, which is
+        // gated on notifications:manage in the handler — so the nav item gates
+        // on the same permission and the link cannot disagree with the screen
+        // behind it.
+        //
+        // In `system` beside Audit Logs rather than in `access`: this is an
+        // observability surface about the deployment's own plumbing, not a
+        // statement about people.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::NOTIFICATIONS_MANAGE,
     ];
     $items[] = [
         'id' => 'plugins',
@@ -2142,7 +2162,13 @@ $migrationsHandler = new MigrationsApiHandler($db, __DIR__ . '/../database/migra
 $router->register('GET', '/api/migrations', [$migrationsHandler, 'list'], 'admin');
 
 $adminHandler = new AdminApiHandler($db, __DIR__ . '/../database/migrations');
-$router->register('GET', '/api/admin/stats', [$adminHandler, 'stats'], 'admin');
+// #990: gated on `stats:read` (6th positional arg; requiredRole stays null so
+// RbacMiddleware enforces the permission). Migration 157 grants it to every role
+// already holding `users:read` — this endpoint returns an AGGREGATE of rows that
+// permission already exposes one by one, so the grant confers nothing new. The
+// platform-wide tenant count stays restricted by the handler's own $isSystemUser
+// branch, which this does not touch.
+$router->register('GET', '/api/admin/stats', [$adminHandler, 'stats'], null, null, \Whity\Core\RBAC\CorePermissions::STATS_READ);
 
 // 12. Register OUs API handler. Gated on the seeded ous:* PERMISSIONS (6th
 // positional arg; requiredRole stays null so RbacMiddleware enforces the
@@ -4242,11 +4268,15 @@ $emailDomainHandler = new TenantEmailDomainApiHandler(
     $db->getPdo(),
     new \Whity\Core\Identity\DomainOwnershipVerifier(new \Whity\Core\Identity\SystemDnsTxtResolver())
 );
-$router->register('GET',    '/api/email-domains',              [$emailDomainHandler, 'list'],   'admin');
-$router->register('POST',   '/api/email-domains',              [$emailDomainHandler, 'create'], 'admin');
-$router->register('PATCH',  '/api/email-domains/{id:\d+}',     [$emailDomainHandler, 'update'], 'admin');
-$router->register('POST',   '/api/email-domains/{id:\d+}/verify', [$emailDomainHandler, 'verify'], 'admin');
-$router->register('DELETE', '/api/email-domains/{id:\d+}',     [$emailDomainHandler, 'delete'], 'admin');
+// #990: gated on `email_domains:manage` (6th positional arg; the role stays
+// null so RbacMiddleware enforces the permission). Migration 156 grants it to
+// every role already holding `auth_providers:manage` — by capability, never by
+// role name, so a deployment with a renamed administrative role keeps working.
+$router->register('GET',    '/api/email-domains',              [$emailDomainHandler, 'list'],   null, null, \Whity\Core\RBAC\CorePermissions::EMAIL_DOMAINS_MANAGE);
+$router->register('POST',   '/api/email-domains',              [$emailDomainHandler, 'create'], null, null, \Whity\Core\RBAC\CorePermissions::EMAIL_DOMAINS_MANAGE);
+$router->register('PATCH',  '/api/email-domains/{id:\d+}',     [$emailDomainHandler, 'update'], null, null, \Whity\Core\RBAC\CorePermissions::EMAIL_DOMAINS_MANAGE);
+$router->register('POST',   '/api/email-domains/{id:\d+}/verify', [$emailDomainHandler, 'verify'], null, null, \Whity\Core\RBAC\CorePermissions::EMAIL_DOMAINS_MANAGE);
+$router->register('DELETE', '/api/email-domains/{id:\d+}',     [$emailDomainHandler, 'delete'], null, null, \Whity\Core\RBAC\CorePermissions::EMAIL_DOMAINS_MANAGE);
 
 // 13e. Register the per-tenant identity-provider (SSO/OIDC) admin API (WC-e6287).
 // Gated on auth_providers:manage (6th positional arg; role stays null so
@@ -4295,7 +4325,11 @@ $ssoAuthHandler = new \Whity\Api\SsoAuthHandler(
         new \Whity\Core\Identity\TenantEmailDomainsRepository($db->getPdo()),
     ),
     $settingsService,
-    (string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: '')
+    (string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''),
+    // Off unless the operator sets auth.sso_self_provision_workspace.
+    new \Whity\Core\Tenant\FederatedWorkspaceProvisioner($db->getPdo(), $settingsService, $hookManager),
+    // Announces each verified federated sign-in (auth.federated.signed_in).
+    $hookManager,
 );
 // Public list of ENABLED providers for the current tenant, so the login page can
 // render "Sign in with …" buttons (display-safe fields only; no secrets).

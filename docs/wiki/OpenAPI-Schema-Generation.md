@@ -22,15 +22,19 @@ Learn more: https://spec.openapis.org/oas/v3.0.3
 php public/index.php generate:openapi
 ```
 
-This generates `public/openapi.json` containing the complete API specification.
+This generates `public/openapi.json` — the **published** specification: core's
+authored contract plus the routes the discovered plugins declare. It is not a
+dump of everything the application serves; see
+[The two documents](#the-two-documents-published-vs-live) below before
+generating a client from it.
 
 ### Output
 
 The generated `openapi.json` includes:
-- **Paths:** All routes registered with the Router the generator is given. The
-  `generate:openapi` command currently registers PLUGIN routes only; the core
-  admin resources join the spec with #167 (the mechanism — `Router::register`
-  with a `schema` argument — is already in place for them)
+- **Paths:** the routes registered on the Router the generator is given — the
+  `CoreApiSchemas` catalogue (#167) followed by the discovered plugins' routes,
+  in that order, so a plugin can never shadow a core path
+  (first-registration-wins, WC-169)
 - **Methods:** HTTP method for each endpoint (GET, POST, PATCH, DELETE, etc.)
 - **Security:** Bearer token authentication configuration
 - **Typed bodies (WC-166):** routes that declare a `schema` get a `requestBody` and per-status `responses` referencing named `components.schemas` via `$ref`
@@ -41,6 +45,57 @@ Generation is **deterministic** (paths, methods, and component schemas are
 sorted — regenerating over the same routes is byte-identical) and
 **self-validating**: the command refuses to write a spec with dangling `$ref`s
 or response-less operations (exit 1 with the errors listed).
+
+## The two documents: published vs live
+
+A deployment serves the OpenAPI document at **two** URLs, and they do not carry
+the same set of routes. Pick deliberately:
+
+| | `/openapi.json` | `/api/openapi.json` |
+|---|---|---|
+| Produced by | the build, from `generate:openapi`; served as a static file | regenerated from the real router on every request |
+| Routes | core's **authored** catalogue + plugin routes | **every** route the instance actually serves |
+| Core operations marked `x-whity-undocumented` | none, ever | the not-yet-authored ones |
+| Use it for | generating typed clients, review, diffing a contract | discovery against a running instance |
+
+At the time of writing the published document carries 40 fewer core
+route-method pairs than the live one. **That gap is intended.** A core route
+joins the published contract when someone authors its schema in
+`CoreApiSchemas`; until then it is listed, with a reason and the task that will
+document it, in `RouteCatalogueCompletenessTest::KNOWN_UNDOCUMENTED`. Adding a
+route to `public/index.php` without either a declaration or an opt-out entry
+fails CI, so the list cannot silently grow.
+
+What the gap buys is the guarantee stated in the document's own
+`info.description`: **every core operation in `public/openapi.json` was
+authored**, so an absent `requestBody` there means "takes none" rather than
+"nobody wrote it down". Publishing the undeclared routes would make the
+published document route-complete at the cost of that guarantee — 40 core
+operations would arrive carrying generated defaults and no contract, and a
+client generator could no longer tell the two cases apart. The trade was made
+in favour of the guarantee; `RequestSchemaContractTest` enforces it in both
+directions.
+
+So: **generating a typed client from `/openapi.json` is correct and
+supported** — it yields exactly the endpoints core promises to keep stable. If
+you need the complete surface of a specific deployment (the desktop app's
+device and update endpoints, `/mcp`, `/api/v1/jobs`, …), read
+`/api/openapi.json` from that instance instead, and expect operations whose
+bodies are undeclared.
+
+Three guards keep this honest, and it is worth knowing which does what:
+
+- `RouteCatalogueCompletenessTest` — every live core route in
+  `public/index.php` is either declared in `CoreApiSchemas` or opted out in
+  `KNOWN_UNDOCUMENTED` with a reason.
+- `OpenApiSpecDriftTest` — the committed `public/openapi.json` matches a fresh
+  regeneration byte-for-byte. It regenerates from the **catalogue**, not from
+  `public/index.php`, so it does not and should not see the 40.
+- `RequestSchemaContractTest` — no core operation in the published document
+  claims to be undocumented, and no marked operation carries a declared body.
+
+Between the first two, the set of live core routes absent from the published
+spec is pinned to `KNOWN_UNDOCUMENTED`; no separate gate is needed for it.
 
 ## Declaring typed request/response bodies (WC-166)
 

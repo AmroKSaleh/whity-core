@@ -1,6 +1,7 @@
 ﻿'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { useTranslation } from '@amroksaleh/features/i18n';
@@ -47,9 +48,28 @@ export default function AuditLogsPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [total, setTotal] = useState(0);
 
+  // DEEP-LINKABLE FILTERS. Another screen can send somebody here already
+  // narrowed — `/admin/audit-logs?action=notification.` is how the
+  // notification-delivery page hands off its per-delivery trail instead of
+  // growing a second log viewer over the same rows.
+  //
+  // Read ONCE, as the initial state, deliberately: these are the same fields
+  // the inputs below bind to, so tracking the URL afterwards would fight the
+  // user every time they edited a box. The link sets the starting point; the
+  // page is theirs from then on.
+  const searchParams = useSearchParams();
+  const initialFilters: AuditLogFilters = {
+    ...EMPTY_FILTERS,
+    action: searchParams.get('action') ?? '',
+    targetType: searchParams.get('target_type') ?? '',
+    actor: searchParams.get('actor') ?? '',
+    from: searchParams.get('from') ?? '',
+    to: searchParams.get('to') ?? '',
+  };
+
   // Draft filters bound to the inputs; applied filters drive the query.
-  const [draftFilters, setDraftFilters] = useState<AuditLogFilters>(EMPTY_FILTERS);
-  const [appliedFilters, setAppliedFilters] = useState<AuditLogFilters>(EMPTY_FILTERS);
+  const [draftFilters, setDraftFilters] = useState<AuditLogFilters>(initialFilters);
+  const [appliedFilters, setAppliedFilters] = useState<AuditLogFilters>(initialFilters);
 
   const buildQuery = useCallback(
     (targetPage: number, filters: AuditLogFilters): string => {

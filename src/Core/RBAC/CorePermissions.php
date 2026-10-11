@@ -25,6 +25,18 @@ final class CorePermissions
      */
     public const SOURCE = 'core';
 
+    /**
+     * Read the admin dashboard aggregates (#990).
+     *
+     * Its own slug rather than a reuse of `users:read`, because the Dashboard
+     * NAV ITEM must gate on the same thing as the route it points at, and
+     * `/admin` redirects to `/admin/stats` — so this pair decides whether the
+     * console has a landing page. Migration 157 grants it to whoever already
+     * holds `users:read`, since the endpoint aggregates rows that permission
+     * already exposes one by one.
+     */
+    public const STATS_READ = 'stats:read';
+
     // User management
     public const USERS_READ = 'users:read';
     public const USERS_WRITE = 'users:write';
@@ -123,6 +135,15 @@ final class CorePermissions
     // scopes, domain binding. Tenant-scoped: an admin manages only their own
     // tenant's providers.
     public const AUTH_PROVIDERS_MANAGE = 'auth_providers:manage';
+
+    /**
+     * Manage this tenant's verified email domains (#990).
+     *
+     * Sits beside `auth_providers:manage` deliberately: a verified domain and
+     * an identity provider answer one question between them — who may sign in
+     * here, and how. Migration 156 grants it to whoever already holds that.
+     */
+    public const EMAIL_DOMAINS_MANAGE = 'email_domains:manage';
 
     // Operator per-tenant entitlement management (WC-ent). Gates the operator API
     // that grants/limits a TARGET tenant's capabilities per subscription tier.
@@ -410,6 +431,7 @@ final class CorePermissions
     public static function all(): array
     {
         return [
+            self::STATS_READ,
             self::USERS_READ,
             self::USERS_WRITE,
             self::USERS_DELETE,
@@ -443,6 +465,7 @@ final class CorePermissions
             self::MCP_TOKENS_MANAGE,
             self::REGISTRATIONS_APPROVE,
             self::AUTH_PROVIDERS_MANAGE,
+            self::EMAIL_DOMAINS_MANAGE,
             self::ENTITLEMENTS_MANAGE,
             self::STORAGE_MANAGE,
             self::PLANS_MANAGE,

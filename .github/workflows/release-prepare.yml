@@ -89,6 +89,36 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "branch=release/${VERSION}" >> "$GITHUB_OUTPUT"
 
+      - name: Refuse to prepare a release with no notes
+        run: |
+          # THE CHANGELOG'S [Unreleased] SECTION BECOMES THE RELEASE NOTES.
+          # `release.yml` publishes it verbatim, so an empty section means a
+          # release page with nothing on it.
+          #
+          # Checked HERE rather than at publish time on purpose. By the time
+          # release.yml reaches the notes it has already run the full suite,
+          # built three images, smoke-tested them and CREATED THE TAG — and a
+          # tag is immutable. Failing at that point is recoverable (re-run the
+          # job) but expensive and alarming. Failing here costs nothing: this
+          # workflow has not written anything yet, so the fix is to write the
+          # CHANGELOG and press the button again.
+          #
+          # v0.2.9 is why this exists: 47 merged pull requests, of which the
+          # section described exactly one, and the omissions included a licence
+          # change and the removal of four settings keys.
+          body=$(awk '
+            /^## \[Unreleased\]/ { inside = 1; next }
+            inside && index($0, "## [") == 1 { exit }
+            inside { print }
+          ' CHANGELOG.md | tr -d '[:space:]')
+
+          if [ -z "$body" ]; then
+            echo "::error::CHANGELOG.md's [Unreleased] section is empty. It becomes the release notes for this version — write it, then run this workflow again."
+            exit 1
+          fi
+
+          echo "[Unreleased] has content; it will be dated as this release's notes."
+
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:

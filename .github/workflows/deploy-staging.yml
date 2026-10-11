@@ -67,9 +67,31 @@ jobs:
           if [ -n "$HOST" ]; then
             echo "configured=true" >> "$GITHUB_OUTPUT"
             echo "Staging host is configured — deploy will run."
+            echo "### Staging deploy: running" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "::notice::STAGING_SSH_HOST is not set — skipping staging deploy (activate-by-config)."
+
+            # SAY SO ON THE RUN PAGE, not only in a log line nobody opens.
+            #
+            # This job succeeding is correct and deliberate — see the header:
+            # a repo with no staging host must not have a red pipeline. But a
+            # green tick next to the words "Deploy to staging" reads as "it
+            # deployed", and on this repository it did not: the release of
+            # v0.2.9 auto-triggered this workflow, it passed, and the instance
+            # stayed on the previous version until somebody deployed by hand.
+            #
+            # A summary block is the one place the distinction is visible
+            # without opening a job and reading its log, and it costs a
+            # deployment that IS configured nothing.
+            {
+              echo "### Staging deploy: SKIPPED — nothing was deployed"
+              echo
+              echo "\`STAGING_SSH_HOST\` is not set, so this workflow is inert (activate-by-config)."
+              echo "**This run being green does not mean anything was deployed.**"
+              echo
+              echo "To activate it, set \`STAGING_SSH_HOST\`, \`STAGING_SSH_USER\`, \`STAGING_SSH_KEY\` and \`STAGING_ENV\`."
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
 
   deploy:

@@ -6,6 +6,17 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-10-11
+
+### Added
+
+- **A first sign-in through the operator's identity provider can get its own workspace.** With the new global setting `auth.sso_self_provision_workspace` on (it is **off** by default), somebody whose verified identity comes from a tenant-0 provider and who belongs to nothing yet gets a workspace of their own as its `admin`, instead of bouncing with `no_membership`. It is the federated twin of self-registration, for instances where an external identity provider owns sign-up and billing. A tenant's own provider never triggers it, and neither does anybody who already holds a membership in any status, invited and suspended included. The workspace is created through the tenant provisioner, so it gets the starters and the `tenant.created` announcement every tenant gets. Every gate is re-checked inside the provisioner, not trusted from the caller. A deactivated profile gets nothing. With `auth.registration_payment_required` on, the workspace starts closed (`expired`/`block_all`) in the same transaction, exactly as a registered one does. Its slug is opaque (`ws-` and 12 hex digits), so a display name can never claim a host label under `BRANDING_BASE_DOMAIN`. Its name drops control and bidi characters and is never the person's email. **Do not turn this on for a consumer identity provider anyone can sign up to** unless one workspace per throwaway account is acceptable.
+- **`auth.federated.signed_in`**, dispatched once per verified federated sign-in before the session is minted. It carries the profile, the provider, the token's `iss` and `sub`, and the workspace this sign-in created, if any. A plugin can bring a workspace's limits up to date with an outside source on every sign-in. It is a notification and cannot refuse a sign-in.
+
+### Fixed
+
+- **A deactivated account could still sign in through a federated provider.** Password login and token refresh refused `profiles.status = 'inactive'`, but the "Sign in with …" path minted a session anyway, so the identity provider's button walked past the operator's deny switch. It is now refused with the same generic `no_membership` bounce, and the attempt is audited as `auth.login.failure` with reason `profile_inactive`.
+
 ## [0.2.9] - 2026-09-21
 
 ### Added
