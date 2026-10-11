@@ -4325,7 +4325,11 @@ $ssoAuthHandler = new \Whity\Api\SsoAuthHandler(
         new \Whity\Core\Identity\TenantEmailDomainsRepository($db->getPdo()),
     ),
     $settingsService,
-    (string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: '')
+    (string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''),
+    // Off unless the operator sets auth.sso_self_provision_workspace.
+    new \Whity\Core\Tenant\FederatedWorkspaceProvisioner($db->getPdo(), $settingsService, $hookManager),
+    // Announces each verified federated sign-in (auth.federated.signed_in).
+    $hookManager,
 );
 // Public list of ENABLED providers for the current tenant, so the login page can
 // render "Sign in with …" buttons (display-safe fields only; no secrets).

@@ -103,6 +103,16 @@ final class SettingsRegistry
     // Default 'true' — SSO is available where a provider is configured.
     public const SSO_ENABLED = 'auth.sso_enabled';
 
+    // Self-service workspace on a first federated sign-in. Global/operator-level.
+    // When 'true', a person who signs in through an OPERATOR (global-trust,
+    // tenant 0) identity provider and holds no membership anywhere gets a new
+    // workspace of their own, as its owner, instead of bouncing with
+    // `no_membership`. It is the federated twin of self-registration: the
+    // identity provider has already verified the address, so no password and
+    // no approval queue is involved. Tenant-trust providers never trigger it.
+    // Default 'false': a sovereign instance is operator-provisioned.
+    public const SSO_SELF_PROVISION_WORKSPACE = 'auth.sso_self_provision_workspace';
+
     // Desktop-client login TTL (WC-desktop-ttl). The maximum wall-clock a
     // native/desktop client's cached login (its device credential) stays valid
     // before the app must re-authenticate ONLINE — even offline, the client
@@ -680,6 +690,7 @@ final class SettingsRegistry
         self::PASSWORD_RESET_APPROVAL_REQUIRED,
         self::SELF_2FA_RECOVERY_ENABLED,
         self::SSO_ENABLED,
+        self::SSO_SELF_PROVISION_WORKSPACE,
         self::STORAGE_DRIVER,
         self::STORAGE_S3_ENDPOINT,
         self::STORAGE_S3_REGION,
@@ -745,6 +756,7 @@ final class SettingsRegistry
         self::PASSWORD_RESET_APPROVAL_REQUIRED,
         self::SELF_2FA_RECOVERY_ENABLED,
         self::SSO_ENABLED,
+        self::SSO_SELF_PROVISION_WORKSPACE,
         self::STORAGE_S3_PATH_STYLE,
         self::MAIL_EVENT_WELCOME,
         self::MAIL_EVENT_APPROVAL,
@@ -811,6 +823,7 @@ final class SettingsRegistry
         self::PASSWORD_RESET_APPROVAL_REQUIRED,
         self::SELF_2FA_RECOVERY_ENABLED,
         self::SSO_ENABLED,
+        self::SSO_SELF_PROVISION_WORKSPACE,
         self::PLUGINS_STORE_ENABLED,
         self::DOCUMENTS_RENDER_ENABLED,
         self::I18N_ENABLED,
@@ -888,6 +901,7 @@ final class SettingsRegistry
         // always has a path back in without an extra operator opt-in.
         self::SELF_2FA_RECOVERY_ENABLED => 'true',
         self::SSO_ENABLED => 'true',
+        self::SSO_SELF_PROVISION_WORKSPACE => 'false',
         // 72 hours (3 days). A native client offline longer than this must
         // re-authenticate online before it will work again.
         self::AUTH_DESKTOP_LOGIN_MAX_HOURS => '72',
@@ -1309,6 +1323,7 @@ final class SettingsRegistry
             self::PASSWORD_RESET_APPROVAL_REQUIRED => self::validateBoolean($value, self::PASSWORD_RESET_APPROVAL_REQUIRED),
             self::SELF_2FA_RECOVERY_ENABLED => self::validateBoolean($value, self::SELF_2FA_RECOVERY_ENABLED),
             self::SSO_ENABLED => self::validateBoolean($value, self::SSO_ENABLED),
+            self::SSO_SELF_PROVISION_WORKSPACE => self::validateBoolean($value, self::SSO_SELF_PROVISION_WORKSPACE),
             self::AUTH_DESKTOP_LOGIN_MAX_HOURS => self::validateDesktopLoginMaxHours($value),
             self::STORAGE_DRIVER => self::validateStorageDriver($value),
             self::STORAGE_S3_PATH_STYLE => self::validateBoolean($value, self::STORAGE_S3_PATH_STYLE),

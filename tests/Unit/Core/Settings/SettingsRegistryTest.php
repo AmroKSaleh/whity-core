@@ -26,7 +26,7 @@ final class SettingsRegistryTest extends TestCase
              'auth.registration_payment_required',
              'auth.self_password_reset_enabled', 'auth.password_reset_approval_required',
              'auth.self_2fa_recovery_enabled',
-             'auth.sso_enabled', 'auth.desktop_login_max_hours',
+             'auth.sso_enabled', 'auth.sso_self_provision_workspace', 'auth.desktop_login_max_hours',
              'storage.driver', 'storage.s3.endpoint', 'storage.s3.region', 'storage.s3.bucket',
              'storage.s3.access_key', 'storage.s3.path_style', 'storage.s3.public_base_url',
              'mail.transport', 'mail.smtp.host', 'mail.smtp.port', 'mail.smtp.encryption',
@@ -407,7 +407,10 @@ final class SettingsRegistryTest extends TestCase
         // 85 since affiliate payouts added affiliate.withholding_bp, which is
         // snapshot onto each payout so changing it cannot restate one already
         // made.
-        self::assertCount(85, $describe);
+        // 86 since auth.sso_self_provision_workspace, which lets a first
+        // sign-in through the operator's identity provider create its own
+        // workspace instead of bouncing with no_membership.
+        self::assertCount(86, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]
