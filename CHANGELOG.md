@@ -6,6 +6,11 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+### Added
+
+- **A first sign-in through the operator's identity provider can get its own workspace.** With the new global setting `auth.sso_self_provision_workspace` on (it is **off** by default), somebody whose verified identity comes from a tenant-0 provider and who belongs to nothing yet gets a workspace of their own as its `admin`, instead of bouncing with `no_membership`. It is the federated twin of self-registration, for instances where an external identity provider owns sign-up and billing. A tenant's own provider never triggers it, and neither does anybody who already holds a membership in any status, invited and suspended included. The workspace is created through the tenant provisioner, so it gets the starters and the `tenant.created` announcement every tenant gets.
+- **`auth.federated.signed_in`**, dispatched once per verified federated sign-in before the session is minted. It carries the profile, the provider, the token's `iss` and `sub`, and the workspace this sign-in created, if any. A plugin can bring a workspace's limits up to date with an outside source on every sign-in. It is a notification and cannot refuse a sign-in.
+
 ## [0.2.9] - 2026-09-21
 
 ### Added
