@@ -348,6 +348,21 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
         );
     }
 
+    public function testCallbackRefusesADeactivatedProfileEvenWithAnActiveMembership(): void
+    {
+        // Password login and refresh refuse profiles.status = 'inactive'; the
+        // federated path must too, or deactivation is bypassed by the IdP button.
+        $this->linkIdentity();
+        $this->exec("UPDATE profiles SET status = 'inactive' WHERE id = {$this->profileId}");
+        $this->primeFlow();
+        $_GET = ['code' => 'authcode', 'state' => 'state-1'];
+
+        $res = $this->runCallback();
+
+        self::assertStringContainsString('/login?sso_error=no_membership', $this->location($res));
+        self::assertArrayNotHasKey('access_token', $_COOKIE);
+    }
+
     public function testCallbackVerifiedEmailMatchAutoLinksExistingProfileAndLogsIn(): void
     {
         // No prior link, but the verified IdP email matches Alice's VERIFIED
@@ -633,6 +648,25 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
         self::assertNull($seen[1]['provisioned_tenant_id']);
     }
 
+    public function testADeactivatedAccountSigningInGetsNoWorkspace(): void
+    {
+        // An operator's deactivation is their deny switch; removing somebody's
+        // last membership must not turn it into a free new workspace.
+        $this->enableSelfProvision();
+        $this->exec("INSERT INTO profiles
+            (display_name, password_hash, two_factor_enabled, two_factor_secret,
+             two_factor_backup_codes_version, token_epoch, status, created_at, updated_at)
+            VALUES ('Banned', '', false, NULL, 0, 0, 'inactive', NOW(), NOW())");
+        $bannedId = (int) $this->pdo->lastInsertId();
+        (new ProfileEmailRepository($this->pdo))->insert($bannedId, 'banned@example.test', true, true);
+        $tenantsBefore = (int) $this->col('SELECT COUNT(*) FROM tenants');
+
+        $res = $this->signInNewPerson('banned-sub', 'banned@example.test');
+
+        self::assertStringContainsString('/login?sso_error=', $this->location($res));
+        self::assertSame($tenantsBefore, (int) $this->col('SELECT COUNT(*) FROM tenants'));
+    }
+
     public function testSelfProvisionPicksAFreeNameWhenTheObviousOneIsTaken(): void
     {
         // The ID token names everyone "Alice"; an Alice workspace already exists.
@@ -646,7 +680,10 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
         $stmt = $this->pdo->prepare('SELECT name, slug FROM tenants WHERE id = :id');
         $stmt->execute([':id' => $tenantId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        self::assertSame(['name' => 'Alice 2', 'slug' => 'alice-2'], $row);
+        self::assertIsArray($row);
+        self::assertSame('Alice 2', $row['name']);
+        // The slug is opaque: a display name must never choose a host label.
+        self::assertMatchesRegularExpression('/^ws-[0-9a-f]{12}$/', $row['slug']);
     }
 }
 

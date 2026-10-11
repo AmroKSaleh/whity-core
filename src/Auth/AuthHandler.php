@@ -607,6 +607,21 @@ class AuthHandler
         Request $request,
         ?int $restrictToTenantId = null,
     ): Response {
+        // A deactivated account (profiles.status = 'inactive') must never get a
+        // session, whichever door it uses. Password login and refresh already
+        // refuse it; without this the identity provider's button walked straight
+        // past the operator's deny switch. Same generic answer as a missing
+        // membership, so the bounce reveals nothing about the account.
+        $refusal = $this->sessionRefusalReason($profileId);
+        if ($refusal !== null) {
+            $this->audit('auth.login.failure', $request, null, $profileId, [
+                'email'  => $email,
+                'reason' => $refusal,
+                'via'    => 'sso',
+            ]);
+            return Response::error('No active membership', 403);
+        }
+
         if ($restrictToTenantId !== null) {
             // Tenant-trust: the session may ONLY target the configuring tenant.
             if (!$this->hasActiveMembershipInTenant($profileId, $restrictToTenantId)) {

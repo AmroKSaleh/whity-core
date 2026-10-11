@@ -297,7 +297,7 @@ final class SsoAuthHandler
         $provisionedTenantId = null;
         if ($this->workspaces !== null && $ctx->isGlobalTrust()) {
             try {
-                $provisionedTenantId = $this->workspaces->provisionFor($profileId, $email);
+                $provisionedTenantId = $this->workspaces->provisionFor($profileId, $email, $ctx);
             } catch (\Throwable $e) {
                 error_log('[sso] self-service workspace failed for profile ' . $profileId . ': ' . $e->getMessage());
             }
