@@ -13,7 +13,7 @@ use SplFileInfo;
  * EVERY PLACE THAT CAN GIVE SOMEBODY A SEAT, frozen.
  *
  * A seat is taken by creating a membership or by activating one that was
- * suspended, and those happen in NINE files — most of them writing the SQL
+ * suspended, and those happen in TEN files — most of them writing the SQL
  * themselves rather than going through {@see \Whity\Core\Identity\MembershipRepository}.
  * A guard placed in the repository would be bypassed by the two admin paths,
  * self-registration, invitation acceptance and tenant creation, which between
@@ -21,7 +21,7 @@ use SplFileInfo;
  *
  * This is the same treatment {@see \Tests\Unit\Core\Identity\ProfileCredentialWriteSitesTest}
  * gives credential writes, and its docblock records why: that bug "was reported
- * as one endpoint... It was six". Seats are nine, and the ninth was found by this very test after a careful
+ * as one endpoint... It was six". Seats were nine, and the ninth was found by this very test after a careful
  * manual survey had settled on eight — a rule that survives only while
  * everybody remembers it does not survive.
  *
@@ -32,8 +32,8 @@ use SplFileInfo;
  * separate change, because six of them are authentication-sensitive and each
  * wants its own test.
  *
- * What it asserts is that the SET IS UNCHANGED. A tenth site cannot appear
- * quietly, and the nine below cannot be quietly forgotten while the wiring is
+ * What it asserts is that the SET IS UNCHANGED. An eleventh site cannot appear
+ * quietly, and the ten below cannot be quietly forgotten while the wiring is
  * done. Without it, "seats are enforced" would be a sentence about five of the
  * six paths people actually arrive through, which is the failure this whole
  * class of test exists to prevent.
@@ -67,6 +67,11 @@ final class SeatConsumingSitesTest extends TestCase
         'src/Core/Identity/InvitationService.php' => true,
         // Creating a tenant mints its first owner.
         'src/Api/TenantsApiHandler.php' => true,
+        // A first sign-in through the operator's identity provider creating its
+        // own workspace: the same first owner as above, minted by the person
+        // rather than by an operator. Always the workspace's first member, so a
+        // seat limit of one or more admits it.
+        'src/Core/Tenant/FederatedWorkspaceProvisioner.php' => true,
         // The shared repository: SSO just-in-time provisioning and email-domain
         // auto-join both arrive here.
         'src/Core/Identity/MembershipRepository.php' => true,
