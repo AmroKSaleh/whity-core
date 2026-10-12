@@ -385,7 +385,13 @@ class EnforceTenantIsolation
     public function __construct(
         JwtParser $jwtParser,
         ?LoggerInterface $logger = null,
-        ?ActiveTenantMembershipGuard $membershipGuard = null
+        ?ActiveTenantMembershipGuard $membershipGuard = null,
+        /**
+         * Resolves which route answers a request, so a plugin's public webhook
+         * is admitted only when its OWN handler is the one that would run
+         * (WHIT-671). Null admits no plugin webhook at all.
+         */
+        private readonly ?\Whity\Core\Router $router = null,
     ) {
         $this->jwtParser = $jwtParser;
         $this->logger = $logger ?? new NullLogger();
@@ -405,6 +411,11 @@ class EnforceTenantIsolation
 
         // Public endpoints carry no tenant context; let them through untouched.
         if ($this->isPublicRoute($path) || $this->isPublicPluginStoreRead($request->getMethod(), $path)) {
+            return $next($request);
+        }
+        // A plugin's declared webhook (WHIT-671): the exact method and served
+        // path it registered, and only when its own route is what would run.
+        if (\Whity\Core\Plugin\PluginPublicRoutes::admits($request, $this->router, $path)) {
             return $next($request);
         }
 

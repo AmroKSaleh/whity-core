@@ -262,6 +262,11 @@ final class ToolDeriver
                 if (is_string($prefix) && in_array($prefix, $this->suppressedNamespaces, true)) {
                     continue;
                 }
+                // A plugin's public webhook is a notification from another
+                // server, signed for that server; it is never an MCP tool.
+                if (\Whity\Core\Plugin\PluginPublicRoutes::allows($route['method'], $route['path'])) {
+                    continue;
+                }
                 $declarations[] = $route;
             }
         }
