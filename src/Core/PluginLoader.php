@@ -2011,6 +2011,9 @@ class PluginLoader
 
         // Drop the plugin's routes and hook subscriptions so it stops serving.
         $this->router->unregisterByNamespace($info['namespacePrefix']);
+        // ...and its public webhook paths with them (WHIT-671), so a disabled
+        // plugin leaves nothing reachable without tenant resolution.
+        \Whity\Core\Plugin\PluginPublicRoutes::removeOwner($info['namespacePrefix']);
 
         if ($this->hookManager !== null) {
             foreach ($info['hooks'] as $hook) {
@@ -3046,6 +3049,31 @@ class PluginLoader
                 continue;
             }
 
+            // A PUBLIC route (WHIT-671): one shape only, refused otherwise. The
+            // key must be the boolean true; anything else that is not absent or
+            // false is treated as a request to be public and judged as one, so a
+            // typo can never quietly produce a public route OR a private one its
+            // author believed public.
+            $wantsPublic = array_key_exists('public', $route) && $route['public'] !== false;
+            if ($wantsPublic) {
+                $refusal = $route['public'] === true
+                    ? \Whity\Core\Plugin\PluginPublicRoutes::refusal(
+                        $plugin->getName(),
+                        (string) $method,
+                        (string) $path,
+                        $requiredPermission,
+                        $requiredRole,
+                    )
+                    : "'public' must be the boolean true";
+                if ($refusal !== null) {
+                    $this->logWarning(
+                        "Plugin {$pluginKey} route {$method} {$path} asks to be public: {$refusal}; "
+                        . 'the route was NOT registered (fail-closed).'
+                    );
+                    continue;
+                }
+            }
+
             if (is_callable($handler)) {
                 // The optional 'schema' key (WC-166) carries the route's typed
                 // OpenAPI declaration through to the router/generator.
@@ -3073,6 +3101,12 @@ class PluginLoader
                         . 'route and was NOT registered (first registration wins).'
                     );
                     continue;
+                }
+
+                if ($wantsPublic) {
+                    // The SERVED path, exactly: the middleware sees /api/v1/...,
+                    // and only that one path becomes public.
+                    \Whity\Core\Plugin\PluginPublicRoutes::add($namespacePrefix, $this->router->versionedPath((string) $path));
                 }
 
                 $upperMethod = strtoupper((string) $method);

@@ -793,7 +793,9 @@ class EnforceTenantIsolation
                 return true;
             }
         }
-        return false;
+        // A plugin's declared webhook (WHIT-671): exact served paths only, each
+        // checked at registration to be POST /api/v1/<its slug>/webhooks/<name>.
+        return \Whity\Core\Plugin\PluginPublicRoutes::has($path);
     }
 
     /**
