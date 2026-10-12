@@ -533,7 +533,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List the workspaces a pending multi-membership sign-in may choose from */
+        get: operations["get_api_v1_auth_select_tenant"];
         put?: never;
         /** Select the active tenant after a multi-membership login */
         post: operations["post_api_v1_auth_select_tenant"];
@@ -7269,6 +7270,15 @@ export interface components {
         PendingPasswordResetListResponse: {
             data: components["schemas"]["PendingPasswordResetItem"][];
         };
+        PendingSelectionResponse: {
+            data: {
+                memberships: {
+                    tenant_id: number;
+                    tenant_name: string;
+                    role: string;
+                }[];
+            };
+        };
         PendingTwoFactorRecoveryItem: {
             id: number;
             profile_id: number;
@@ -11082,6 +11092,62 @@ export interface operations {
             };
             /** @description Too many attempts */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_auth_select_tenant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Active memberships of the pending selection */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingSelectionResponse"];
+                };
+            };
+            /** @description No pending selection cookie, or an expired/invalid one */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
                 headers: {
                     [name: string]: unknown;
                 };

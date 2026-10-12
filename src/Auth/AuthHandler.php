@@ -469,6 +469,42 @@ class AuthHandler
      * @param array<string, mixed> $params  Unused route params.
      * @return Response Session (200) on success, or 400/401 on invalid selection.
      */
+    /**
+     * GET /api/auth/select-tenant — the workspaces a pending selection may
+     * choose from (WHIT-672).
+     *
+     * A federated sign-in for somebody with several active memberships sets
+     * the short-lived selection cookie and REDIRECTS (a browser cannot follow
+     * a JSON body), so the membership list the password login returns inline
+     * never reached the client. Without this, an SSO-only person with two
+     * workspaces had no way to pick one.
+     *
+     * Reads ONLY the cookie; mints nothing; does not consume the cookie (the
+     * POST completes the choice). Answers that profile's ACTIVE memberships as
+     * tenant id, tenant name and role name — the same three fields the inline
+     * prompt already returns, and nothing more.
+     *
+     * @param array<string, string> $params
+     */
+    public function handlePendingSelection(Request $request, array $params = []): Response
+    {
+        $token = CookieManager::getTenantSelectionToken();
+        if ($token === null) {
+            return Response::error('No pending tenant selection', 401);
+        }
+        $claims = $this->jwtParser->parse($token);
+        if ($claims === null
+            || ($claims['type'] ?? null) !== 'tenant_select'
+            || !isset($claims['profile_id']) || !is_int($claims['profile_id']) || $claims['profile_id'] <= 0
+        ) {
+            return Response::error('Invalid or expired selection token', 401);
+        }
+
+        return Response::json(['data' => [
+            'memberships' => $this->listActiveMemberships($claims['profile_id']),
+        ]]);
+    }
+
     public function handleSelectTenant(Request $request, array $params = []): Response
     {
         $tokenMode = self::isTokenMode($request);

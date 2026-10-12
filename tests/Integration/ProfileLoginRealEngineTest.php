@@ -415,6 +415,82 @@ final class ProfileLoginRealEngineTest extends TestCase
     }
 
     /**
+     * WHIT-672: the pending selection can be READ, so a client that only holds
+     * the selection cookie (every SSO sign-in, which redirects instead of
+     * returning the list) can show the choice. Reading it mints nothing and
+     * does not consume the cookie.
+     */
+    public function testThePendingSelectionListsTheCookieHoldersWorkspaces(): void
+    {
+        $this->memberships->insert($this->profileIdA, self::TENANT_B, 1);
+        $this->login('alice@corp.com');
+        $selectClaims = $this->jwtParser->lastPayloadOfType('tenant_select');
+        self::assertIsArray($selectClaims);
+        $_COOKIE['tenant_select_token'] = $this->jwtParser->create($selectClaims, 300, 'tenant_select');
+        $this->jwtParser->captured = [];
+
+        $response = $this->pendingSelection();
+
+        self::assertSame(200, $response->getStatusCode());
+        $body = json_decode($response->getBody(), true);
+        self::assertIsArray($body);
+        $tenantIds = array_map(static fn (array $m): int => $m['tenant_id'], $body['data']['memberships']);
+        self::assertSame([self::TENANT_A, self::TENANT_B], $tenantIds);
+        self::assertArrayHasKey('tenant_name', $body['data']['memberships'][0]);
+        self::assertArrayHasKey('role', $body['data']['memberships'][0]);
+        self::assertSame(['tenant_id', 'tenant_name', 'role'], array_keys($body['data']['memberships'][0]));
+        self::assertNull($this->jwtParser->lastPayloadOfType('access'), 'Reading the choice must not mint a session.');
+        // Still usable to complete the choice.
+        self::assertSame(200, $this->selectTenant(self::TENANT_B)->getStatusCode());
+    }
+
+    public function testThePendingSelectionWithoutACookieIsRefused(): void
+    {
+        unset($_COOKIE['tenant_select_token']);
+
+        self::assertSame(401, $this->pendingSelection()->getStatusCode());
+    }
+
+    public function testThePendingSelectionRefusesAnyOtherKindOfToken(): void
+    {
+        // An access token is a valid signed JWT, but not a pending selection.
+        $_COOKIE['tenant_select_token'] = $this->jwtParser->create(
+            ['profile_id' => $this->profileIdA, 'email' => 'alice@corp.com'],
+            300,
+            'access'
+        );
+
+        self::assertSame(401, $this->pendingSelection()->getStatusCode());
+    }
+
+    public function testThePendingSelectionRefusesAForgedToken(): void
+    {
+        $forged = new JwtParser('a_completely_different_secret_value_xxxxxxx');
+        $_COOKIE['tenant_select_token'] = $forged->create(
+            ['profile_id' => $this->profileIdA, 'email' => 'alice@corp.com'],
+            300,
+            'tenant_select'
+        );
+
+        self::assertSame(401, $this->pendingSelection()->getStatusCode());
+    }
+
+    public function testThePendingSelectionListsOnlyActiveMemberships(): void
+    {
+        $this->memberships->insert($this->profileIdA, self::TENANT_B, 1, null, 'suspended');
+        $_COOKIE['tenant_select_token'] = $this->jwtParser->create(
+            ['profile_id' => $this->profileIdA, 'email' => 'alice@corp.com'],
+            300,
+            'tenant_select'
+        );
+
+        $body = json_decode($this->pendingSelection()->getBody(), true);
+
+        self::assertIsArray($body);
+        self::assertSame([self::TENANT_A], array_map(static fn (array $m): int => $m['tenant_id'], $body['data']['memberships']));
+    }
+
+    /**
      * select-tenant must REFUSE a tenant the caller holds no active membership in
      * (the authorization gate — the submitted tenant_id is never trusted alone).
      */
@@ -607,6 +683,11 @@ final class ProfileLoginRealEngineTest extends TestCase
     }
 
     /** Drive POST /api/auth/select-tenant with the chosen tenant id. */
+    private function pendingSelection(): \Whity\Core\Response
+    {
+        return $this->handler->handlePendingSelection(new Request('GET', '/api/auth/select-tenant', [], ''));
+    }
+
     private function selectTenant(int $tenantId): \Whity\Core\Response
     {
         return $this->handler->handleSelectTenant(new Request('POST', '/api/auth/select-tenant', [], (string) json_encode([
