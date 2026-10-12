@@ -6,6 +6,8 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+## [0.2.12] - 2026-10-12
+
 ### Fixed
 
 - **Signing in with SSO when you belong to more than one workspace was a dead end.** The sign-in set a short-lived selection cookie and redirected to the login page, but the list of workspaces to choose from never reached the browser, so somebody without a password had no way to pick one. `GET /api/v1/auth/select-tenant` now lists the active workspaces for that pending sign-in (tenant id, name and role, nothing more), and the existing `POST` completes the choice. It mints nothing, does not consume the cookie, refuses a missing, expired or forged token, and is never cached.
