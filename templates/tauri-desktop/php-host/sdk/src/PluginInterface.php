@@ -67,6 +67,22 @@ interface PluginInterface
      *   the host to emit a derivation-time lint warning and produces an MCP
      *   tool with no body parameters, which gives AI clients no guidance on
      *   the expected request shape. Inline schemas (array) are always resolved.
+     * - 'public' (bool, optional, host-enforced since core 0.2.11): `true`
+     *   makes the route reachable WITHOUT a session or tenant, for a webhook
+     *   from an outside service that cannot hold one. Accepted for exactly one
+     *   shape: method POST, path `/api/<your plugin's slug>/webhooks/<name>`
+     *   (<name> matching `[a-z0-9][a-z0-9-]{0,62}`, no parameters), and no
+     *   requiredPermission or requiredRole. Any other route asking to be public
+     *   is NOT registered (fail-closed, with a logged reason), as is any value
+     *   other than the boolean `true`. Public means only "no tenant
+     *   resolution": YOUR HANDLER MUST AUTHENTICATE THE SENDER, by verifying
+     *   its signature over the raw request body with `hash_equals` BEFORE
+     *   decoding or acting on anything in it, and must work out which tenant
+     *   an event concerns from data it trusts, never from the caller's say-so.
+     *   It must not THROW on unverified input either: it answers anybody.
+     *   Only the declared POST, and only while this plugin's own route is
+     *   the one that answers that path, is admitted without a tenant.
+     *   On an older host the key is ignored and the route stays private.
      *
      * @return array<array{method: string, path: string, handler: callable, requiredRole?: ?string, requiredPermission?: ?string, schema?: array<string, mixed>}>
      */
