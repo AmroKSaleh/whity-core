@@ -533,7 +533,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the workspaces a pending multi-membership sign-in may choose from */
+        /** List the workspaces open to a pending multi-membership sign-in */
         get: operations["get_api_v1_auth_select_tenant"];
         put?: never;
         /** Select the active tenant after a multi-membership login */

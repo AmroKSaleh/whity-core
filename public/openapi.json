@@ -2975,7 +2975,7 @@
         "/api/v1/auth/select-tenant": {
             "get": {
                 "operationId": "get_api_v1_auth_select_tenant",
-                "summary": "List the workspaces a pending multi-membership sign-in may choose from",
+                "summary": "List the workspaces open to a pending multi-membership sign-in",
                 "tags": [
                     "auth"
                 ],

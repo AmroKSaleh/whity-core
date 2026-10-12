@@ -280,7 +280,7 @@ final class CoreApiSchemas
             'requiredRole' => null,
             'requiredPermission' => null,
             'schema' => [
-                'summary' => 'List the workspaces a pending multi-membership sign-in may choose from',
+                'summary' => 'List the workspaces open to a pending multi-membership sign-in',
                 'tags' => ['auth'],
                 'responses' => [
                     200 => self::jsonResponse('Active memberships of the pending selection', 'PendingSelectionResponse'),
