@@ -111,7 +111,8 @@ class CookieManager
      */
     public static function getAccessToken(): ?string
     {
-        return $_COOKIE['access_token'] ?? null;
+        $value = $_COOKIE['access_token'] ?? null;
+        return is_string($value) ? $value : null;
     }
 
     /**
@@ -123,7 +124,8 @@ class CookieManager
      */
     public static function getRefreshToken(): ?string
     {
-        return $_COOKIE['refresh_token'] ?? null;
+        $value = $_COOKIE['refresh_token'] ?? null;
+        return is_string($value) ? $value : null;
     }
 
     /**
@@ -152,7 +154,8 @@ class CookieManager
      */
     public static function getTempToken(): ?string
     {
-        return $_COOKIE['temp_auth_token'] ?? null;
+        $value = $_COOKIE['temp_auth_token'] ?? null;
+        return is_string($value) ? $value : null;
     }
 
     /**
@@ -188,7 +191,8 @@ class CookieManager
     /** Get the tenant-selection token from cookies, or null if absent. */
     public static function getTenantSelectionToken(): ?string
     {
-        return $_COOKIE['tenant_select_token'] ?? null;
+        $value = $_COOKIE['tenant_select_token'] ?? null;
+        return is_string($value) ? $value : null;
     }
 
     /** Clear the tenant-selection token cookie (same Path as the setter). */
@@ -219,7 +223,8 @@ class CookieManager
     /** Get the SSO flow-state token from cookies, or null if absent. */
     public static function getSsoFlowToken(): ?string
     {
-        return $_COOKIE['sso_flow_token'] ?? null;
+        $value = $_COOKIE['sso_flow_token'] ?? null;
+        return is_string($value) ? $value : null;
     }
 
     /** Clear the SSO flow-state cookie (same Path as the setter). */

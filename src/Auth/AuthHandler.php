@@ -447,29 +447,6 @@ class AuthHandler
     }
 
     /**
-     * POST /api/auth/select-tenant — ADR 0005 §6 tenant selection completion.
-     *
-     * The login step returns { requires_tenant_selection: true, memberships:[…] }
-     * and issues NO session; instead it sets a short-lived selection cookie
-     * binding the profile. This endpoint takes the chosen tenant_id, RE-VALIDATES
-     * that the caller still holds an ACTIVE membership in that tenant, and only
-     * then mints the session JWT. The selection token binds the two calls so a
-     * caller can never select a tenant they do not belong to.
-     *
-     * Tenant 0 is NOT special-cased here: if the caller genuinely HOLDS an active
-     * tenant-0 membership (the system admin), selecting it is LEGITIMATE system
-     * authority, not an escalation. The escalation the review flagged is a
-     * multi-membership user having tenant 0 silently auto-picked — that is closed
-     * upstream by NEVER auto-selecting for multi-membership (always prompt); it is
-     * not closed by refusing a tenant the caller actually belongs to. The real
-     * integrity guard (don't grant tenant-0 memberships to non-admins) lives at
-     * membership creation (see MembershipRepository::insert follow-up note).
-     *
-     * @param Request              $request HTTP request with { tenant_id } in body.
-     * @param array<string, mixed> $params  Unused route params.
-     * @return Response Session (200) on success, or 400/401 on invalid selection.
-     */
-    /**
      * GET /api/auth/select-tenant — the workspaces a pending selection may
      * choose from (WHIT-672).
      *
@@ -500,11 +477,44 @@ class AuthHandler
             return Response::error('Invalid or expired selection token', 401);
         }
 
-        return Response::json(['data' => [
-            'memberships' => $this->listActiveMemberships($claims['profile_id']),
-        ]]);
+        // Deactivated during the selection window: nothing to choose.
+        if ($this->sessionRefusalReason($claims['profile_id']) !== null) {
+            return Response::error('Invalid or expired selection token', 401);
+        }
+        $memberships = $this->listActiveMemberships($claims['profile_id']);
+        if ($memberships === []) {
+            // Everything was suspended in the window, or the list could not be
+            // read: say so rather than offering an empty choice.
+            return Response::error('No active membership', 403);
+        }
+
+        return Response::json(['data' => ['memberships' => $memberships]])
+            ->withHeaders(['Cache-Control' => 'no-store']);
     }
 
+    /**
+     * POST /api/auth/select-tenant — ADR 0005 §6 tenant selection completion.
+     *
+     * The login step returns { requires_tenant_selection: true, memberships:[…] }
+     * and issues NO session; instead it sets a short-lived selection cookie
+     * binding the profile. This endpoint takes the chosen tenant_id, RE-VALIDATES
+     * that the caller still holds an ACTIVE membership in that tenant, and only
+     * then mints the session JWT. The selection token binds the two calls so a
+     * caller can never select a tenant they do not belong to.
+     *
+     * Tenant 0 is NOT special-cased here: if the caller genuinely HOLDS an active
+     * tenant-0 membership (the system admin), selecting it is LEGITIMATE system
+     * authority, not an escalation. The escalation the review flagged is a
+     * multi-membership user having tenant 0 silently auto-picked — that is closed
+     * upstream by NEVER auto-selecting for multi-membership (always prompt); it is
+     * not closed by refusing a tenant the caller actually belongs to. The real
+     * integrity guard (don't grant tenant-0 memberships to non-admins) lives at
+     * membership creation (see MembershipRepository::insert follow-up note).
+     *
+     * @param Request              $request HTTP request with { tenant_id } in body.
+     * @param array<string, mixed> $params  Unused route params.
+     * @return Response Session (200) on success, or 400/401 on invalid selection.
+     */
     public function handleSelectTenant(Request $request, array $params = []): Response
     {
         $tokenMode = self::isTokenMode($request);
@@ -534,6 +544,12 @@ class AuthHandler
 
         $profileId = $claims['profile_id'];
         $email     = isset($claims['email']) && is_string($claims['email']) ? $claims['email'] : '';
+
+        // A profile deactivated during the 5-minute selection window must not
+        // get the session it was about to choose (WHIT-672 review).
+        if ($this->sessionRefusalReason($profileId) !== null) {
+            return Response::error('Invalid or expired selection token', 401);
+        }
 
         $body = JsonBody::parsed($request);
         if (!isset($body['tenant_id']) || !is_numeric($body['tenant_id'])) {

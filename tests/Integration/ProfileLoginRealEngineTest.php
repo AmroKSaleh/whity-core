@@ -475,6 +475,43 @@ final class ProfileLoginRealEngineTest extends TestCase
         self::assertSame(401, $this->pendingSelection()->getStatusCode());
     }
 
+    public function testAProfileDeactivatedDuringTheWindowCanNeitherListNorChoose(): void
+    {
+        $this->memberships->insert($this->profileIdA, self::TENANT_B, 1);
+        $_COOKIE['tenant_select_token'] = $this->jwtParser->create(
+            ['profile_id' => $this->profileIdA, 'email' => 'alice@corp.com'],
+            300,
+            'tenant_select'
+        );
+        $this->pdo->exec("UPDATE profiles SET status = 'inactive' WHERE id = {$this->profileIdA}");
+        $this->jwtParser->captured = [];
+
+        self::assertSame(401, $this->pendingSelection()->getStatusCode());
+        self::assertSame(401, $this->selectTenant(self::TENANT_B)->getStatusCode());
+        self::assertNull($this->jwtParser->lastPayloadOfType('access'));
+    }
+
+    public function testACookieSentAsAnArrayReadsAsAbsentNotAsAnError(): void
+    {
+        $_COOKIE['tenant_select_token'] = ['x' => 'y'];
+
+        self::assertSame(401, $this->pendingSelection()->getStatusCode());
+    }
+
+    public function testThePendingSelectionIsNeverCached(): void
+    {
+        $_COOKIE['tenant_select_token'] = $this->jwtParser->create(
+            ['profile_id' => $this->profileIdA, 'email' => 'alice@corp.com'],
+            300,
+            'tenant_select'
+        );
+
+        $response = $this->pendingSelection();
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('no-store', array_change_key_case($response->getHeaders())['cache-control'] ?? null);
+    }
+
     public function testThePendingSelectionListsOnlyActiveMemberships(): void
     {
         $this->memberships->insert($this->profileIdA, self::TENANT_B, 1, null, 'suspended');
@@ -682,12 +719,12 @@ final class ProfileLoginRealEngineTest extends TestCase
         ])));
     }
 
-    /** Drive POST /api/auth/select-tenant with the chosen tenant id. */
     private function pendingSelection(): \Whity\Core\Response
     {
         return $this->handler->handlePendingSelection(new Request('GET', '/api/auth/select-tenant', [], ''));
     }
 
+    /** Drive POST /api/auth/select-tenant with the chosen tenant id. */
     private function selectTenant(int $tenantId): \Whity\Core\Response
     {
         return $this->handler->handleSelectTenant(new Request('POST', '/api/auth/select-tenant', [], (string) json_encode([
