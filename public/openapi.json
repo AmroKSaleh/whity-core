@@ -2,7 +2,7 @@
     "openapi": "3.0.0",
     "info": {
         "title": "Whity Core API",
-        "version": "0.2.11",
+        "version": "0.2.12",
         "description": "Request bodies are declared, not implied: where an operation accepts one, it is described here. An operation with no `requestBody` accepts none \u2014 a reviewed contract, not a gap in this document. The exception is an operation marked `x-whity-undocumented: true`: that one carries no authored contract at all, its summary and responses are generated defaults, and it may well take a body. Every CORE operation in the published `public/openapi.json` is authored, so the marker appears there only on plugin routes that declare no schema of their own; a document served live by a running instance may mark core routes too."
     },
     "servers": [
@@ -2973,6 +2973,65 @@
             }
         },
         "/api/v1/auth/select-tenant": {
+            "get": {
+                "operationId": "get_api_v1_auth_select_tenant",
+                "summary": "List the workspaces open to a pending multi-membership sign-in",
+                "tags": [
+                    "auth"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Active memberships of the pending selection",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PendingSelectionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "No pending selection cookie, or an expired/invalid one",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
             "post": {
                 "operationId": "post_api_v1_auth_select_tenant",
                 "summary": "Select the active tenant after a multi-membership login",
@@ -45549,6 +45608,44 @@
                         "items": {
                             "$ref": "#/components/schemas/PendingPasswordResetItem"
                         }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "PendingSelectionResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "memberships": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "tenant_id": {
+                                            "type": "integer"
+                                        },
+                                        "tenant_name": {
+                                            "type": "string"
+                                        },
+                                        "role": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "tenant_id",
+                                        "tenant_name",
+                                        "role"
+                                    ]
+                                }
+                            }
+                        },
+                        "required": [
+                            "memberships"
+                        ]
                     }
                 },
                 "required": [
