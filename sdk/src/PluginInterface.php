@@ -84,7 +84,7 @@ interface PluginInterface
      *   the one that answers that path, is admitted without a tenant.
      *   On an older host the key is ignored and the route stays private.
      *
-     * @return array<array{method: string, path: string, handler: callable, requiredRole?: ?string, requiredPermission?: ?string, schema?: array<string, mixed>, public?: bool}>
+     * @return array<array{method: string, path: string, handler: callable, requiredRole?: ?string, requiredPermission?: ?string, schema?: array<string, mixed>}>
      */
     public function getRoutes(): array;
 

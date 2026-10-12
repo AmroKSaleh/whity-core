@@ -3056,9 +3056,13 @@ class PluginLoader
             // false is treated as a request to be public and judged as one, so a
             // typo can never quietly produce a public route OR a private one its
             // author believed public.
-            $wantsPublic = array_key_exists('public', $route) && $route['public'] !== false;
+            // Read untyped: the SDK's documented route shape predates the key,
+            // and a plugin's array is runtime data whatever its declared type.
+            /** @var array<string, mixed> $declared */
+            $declared = $route;
+            $wantsPublic = array_key_exists('public', $declared) && $declared['public'] !== false;
             if ($wantsPublic) {
-                $refusal = $route['public'] === true
+                $refusal = $declared['public'] === true
                     ? \Whity\Core\Plugin\PluginPublicRoutes::refusal(
                         $plugin->getName(),
                         (string) $method,
