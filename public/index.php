@@ -1600,6 +1600,9 @@ $router->register('POST', '/api/login/2fa', [$authHandler, 'handle2fa'], null);
 // the handler re-validates the chosen tenant against the caller's active
 // memberships before minting the session.
 $router->register('POST', '/api/auth/select-tenant', [$authHandler, 'handleSelectTenant'], null);
+// WHIT-672: READ the pending selection (same public path, same cookie), so a
+// client holding only the selection cookie (every SSO sign-in) can show the choice.
+$router->register('GET', '/api/auth/select-tenant', [$authHandler, 'handlePendingSelection'], null);
 $router->register('GET', '/api/me', [$authHandler, 'handleMe'], null);
 $router->register('PATCH', '/api/me', [$authHandler, 'handleUpdateMe'], null);
 $router->register('POST', '/api/auth/refresh', [$authHandler, 'handleRefresh'], null);

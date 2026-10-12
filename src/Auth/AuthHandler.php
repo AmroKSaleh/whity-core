@@ -447,6 +447,52 @@ class AuthHandler
     }
 
     /**
+     * GET /api/auth/select-tenant — the workspaces a pending selection may
+     * choose from (WHIT-672).
+     *
+     * A federated sign-in for somebody with several active memberships sets
+     * the short-lived selection cookie and REDIRECTS (a browser cannot follow
+     * a JSON body), so the membership list the password login returns inline
+     * never reached the client. Without this, an SSO-only person with two
+     * workspaces had no way to pick one.
+     *
+     * Reads ONLY the cookie; mints nothing; does not consume the cookie (the
+     * POST completes the choice). Answers that profile's ACTIVE memberships as
+     * tenant id, tenant name and role name — the same three fields the inline
+     * prompt already returns, and nothing more.
+     *
+     * @param array<string, string> $params
+     */
+    public function handlePendingSelection(Request $request, array $params = []): Response
+    {
+        $token = CookieManager::getTenantSelectionToken();
+        if ($token === null) {
+            return Response::error('No pending tenant selection', 401);
+        }
+        $claims = $this->jwtParser->parse($token);
+        if ($claims === null
+            || ($claims['type'] ?? null) !== 'tenant_select'
+            || !isset($claims['profile_id']) || !is_int($claims['profile_id']) || $claims['profile_id'] <= 0
+        ) {
+            return Response::error('Invalid or expired selection token', 401);
+        }
+
+        // Deactivated during the selection window: nothing to choose.
+        if ($this->sessionRefusalReason($claims['profile_id']) !== null) {
+            return Response::error('Invalid or expired selection token', 401);
+        }
+        $memberships = $this->listActiveMemberships($claims['profile_id']);
+        if ($memberships === []) {
+            // Everything was suspended in the window, or the list could not be
+            // read: say so rather than offering an empty choice.
+            return Response::error('No active membership', 403);
+        }
+
+        return Response::json(['data' => ['memberships' => $memberships]])
+            ->withHeaders(['Cache-Control' => 'no-store']);
+    }
+
+    /**
      * POST /api/auth/select-tenant — ADR 0005 §6 tenant selection completion.
      *
      * The login step returns { requires_tenant_selection: true, memberships:[…] }
@@ -498,6 +544,12 @@ class AuthHandler
 
         $profileId = $claims['profile_id'];
         $email     = isset($claims['email']) && is_string($claims['email']) ? $claims['email'] : '';
+
+        // A profile deactivated during the 5-minute selection window must not
+        // get the session it was about to choose (WHIT-672 review).
+        if ($this->sessionRefusalReason($profileId) !== null) {
+            return Response::error('Invalid or expired selection token', 401);
+        }
 
         $body = JsonBody::parsed($request);
         if (!isset($body['tenant_id']) || !is_numeric($body['tenant_id'])) {

@@ -272,6 +272,23 @@ final class CoreApiSchemas
             ],
         ];
 
+        // GET /api/auth/select-tenant — AuthHandler::handlePendingSelection()
+        // WHIT-672: the choices a pending (cookie) selection may pick from.
+        $pendingSelectionRoute = [
+            'method' => 'GET',
+            'path' => '/api/auth/select-tenant',
+            'requiredRole' => null,
+            'requiredPermission' => null,
+            'schema' => [
+                'summary' => 'List the workspaces open to a pending multi-membership sign-in',
+                'tags' => ['auth'],
+                'responses' => [
+                    200 => self::jsonResponse('Active memberships of the pending selection', 'PendingSelectionResponse'),
+                    401 => self::errorResponse('No pending selection cookie, or an expired/invalid one'),
+                ],
+            ],
+        ];
+
         // ── Authenticated session surface ────────────────────────────────────
 
         // GET /api/me  — AuthHandler::handleMe()
@@ -474,6 +491,7 @@ final class CoreApiSchemas
             $loginRoute,
             $login2faRoute,
             $selectTenantRoute,
+            $pendingSelectionRoute,
             $switchTenantRoute,
             $getMeRoute,
             $patchMeRoute,
@@ -3671,6 +3689,13 @@ final class CoreApiSchemas
             'SelectTenantRequest' => self::object([
                 'tenant_id' => self::int(),
             ], ['tenant_id']),
+
+            // GET /api/auth/select-tenant — the pending selection's choices (WHIT-672)
+            'PendingSelectionResponse' => self::object([
+                'data' => self::object([
+                    'memberships' => ['type' => 'array', 'items' => $membershipEntry],
+                ], ['memberships']),
+            ], ['data']),
 
             // POST /api/auth/select-tenant — 200 response (session issued)
             'SessionUserResponse' => self::object([
