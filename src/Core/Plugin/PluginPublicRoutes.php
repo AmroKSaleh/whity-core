@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace Whity\Core\Plugin;
 
+use Whity\Core\Router;
 use Whity\Sdk\PluginNamespace;
 
 /**
- * The plugin webhook paths that bypass tenant resolution (WHIT-671).
+ * The plugin webhook routes that bypass tenant resolution (WHIT-671).
  *
  * WHY THIS EXISTS
  * ---------------
@@ -19,7 +20,7 @@ use Whity\Sdk\PluginNamespace;
  * not name a product to put it there.
  *
  * WHAT A PLUGIN MAY MAKE PUBLIC: exactly one shape, decided by
- * {@see self::acceptable()}. All of these must hold:
+ * {@see self::refusal()}. All of these must hold:
  *   - the method is POST (a notification, never a read);
  *   - the path is `/api/<the plugin's own slug>/webhooks/<name>`, with
  *     <name> matching `[a-z0-9][a-z0-9-]{0,62}` and no parameters, so a plugin
@@ -28,23 +29,32 @@ use Whity\Sdk\PluginNamespace;
  *   - the route demands no permission and no role (asking for both is a
  *     contradiction, so it is refused rather than guessed at).
  *
+ * WHAT IS ADMITTED AT REQUEST TIME is narrower than "this path": the METHOD
+ * must be the registered one (POST), and the route the router actually
+ * resolves for the request must belong to the plugin that registered it
+ * ({@see self::admits()}). So a later route on the same path with another
+ * method, or a core PATTERN route that happens to capture the plugin's literal
+ * path, is never reached without a tenant because of this registry — the
+ * bypass is tied to the plugin's own handler, not to a string.
+ *
  * PUBLIC MEANS ONLY "NO TENANT RESOLUTION". It does not authenticate the
  * caller; the plugin's handler must, by verifying the sender's signature over
  * the raw body before acting on anything in it. That is the same rule core's
  * own webhooks follow.
  *
  * PER PROCESS. Every FrankenPHP worker loads plugins at boot and fills its own
- * copy; a disabled plugin's paths are removed with its routes.
+ * copy; a disabled, reloaded or uninstalled plugin's routes are removed with
+ * its other routes.
  */
 final class PluginPublicRoutes
 {
-    /** The only methods a public plugin route may use. */
+    /** The only method a public plugin route may use. */
     public const METHOD = 'POST';
 
     private const NAME_PATTERN = '[a-z0-9][a-z0-9-]{0,62}';
 
-    /** @var array<string, array<string, true>> owner => served path => true */
-    private static array $byOwner = [];
+    /** @var array<string, string> "METHOD path" => owner (the plugin's namespace prefix) */
+    private static array $owners = [];
 
     /**
      * Why a declared public route is refused, or null when it is acceptable.
@@ -63,7 +73,8 @@ final class PluginPublicRoutes
         if ($slug === null) {
             return 'the plugin name yields no namespace slug';
         }
-        $shape = '#^/api/' . preg_quote($slug, '#') . '/webhooks/' . self::NAME_PATTERN . '$#';
+        // `D`: `$` must not also match before a trailing newline.
+        $shape = '#^/api/' . preg_quote($slug, '#') . '/webhooks/' . self::NAME_PATTERN . '$#D';
         if (preg_match($shape, $path) !== 1) {
             return "a public plugin route must be exactly /api/{$slug}/webhooks/<name>, <name> matching " . self::NAME_PATTERN;
         }
@@ -73,32 +84,48 @@ final class PluginPublicRoutes
         return null;
     }
 
-    /** Record a served path (the router's /api/v1/... form) as public. */
-    public static function add(string $owner, string $servedPath): void
+    /** Record a served route (the router's /api/v1/... path) as public. */
+    public static function add(string $owner, string $method, string $servedPath): void
     {
-        self::$byOwner[$owner][$servedPath] = true;
+        self::$owners[strtoupper($method) . ' ' . $servedPath] = $owner;
     }
 
-    /** Forget every public path an owner (a plugin's namespace) registered. */
+    /** Forget every public route an owner (a plugin's namespace) registered. */
     public static function removeOwner(string $owner): void
     {
-        unset(self::$byOwner[$owner]);
+        self::$owners = array_filter(self::$owners, static fn (string $o): bool => $o !== $owner);
     }
 
-    /** Whether this exact served path is a plugin's public webhook. */
-    public static function has(string $path): bool
+    /** Whether this exact method and served path were registered as public. */
+    public static function allows(string $method, string $path): bool
     {
-        foreach (self::$byOwner as $paths) {
-            if (isset($paths[$path])) {
-                return true;
-            }
+        return isset(self::$owners[strtoupper($method) . ' ' . $path]);
+    }
+
+    /**
+     * Whether a request may skip tenant resolution as a plugin webhook: the
+     * method and path were registered public AND the route the router resolves
+     * for it is the registering plugin's own. Without a router to ask, nothing
+     * is admitted.
+     */
+    public static function admits(\Whity\Sdk\Http\Request $request, ?Router $router, string $path): bool
+    {
+        // The router matches core requests; anything else is not admitted.
+        if (!$request instanceof \Whity\Core\Request) {
+            return false;
         }
-        return false;
+        $key = strtoupper($request->getMethod()) . ' ' . $path;
+        $owner = self::$owners[$key] ?? null;
+        if ($owner === null || $router === null) {
+            return false;
+        }
+        $route = $router->match($request);
+        return $route !== null && ($route['namespacePrefix'] ?? null) === $owner;
     }
 
     /** Tests only: start from nothing. */
     public static function reset(): void
     {
-        self::$byOwner = [];
+        self::$owners = [];
     }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Unit\Core;
 
 use PHPUnit\Framework\TestCase;
+use Whity\Auth\JwtParser;
 use Whity\Core\Hooks\HookManager;
 use Whity\Core\Plugin\PluginPublicRoutes;
 use Whity\Core\PluginLoader;
@@ -12,14 +13,14 @@ use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\Request;
 use Whity\Core\Router;
 use Whity\Http\Middleware\EnforceTenantIsolation;
+use Whity\Sdk\Http\Response;
 
 /**
  * A plugin may declare ONE kind of public route: a POST webhook at
  * /api/<its own slug>/webhooks/<name>, with no permission and no role (WHIT-671).
- * Anything else that asks to be public is refused outright, the same
- * fail-closed treatment as a malformed requiredPermission. Public means only
- * "reachable without tenant resolution"; the handler still authenticates its
- * caller, by signature.
+ * Anything else that asks to be public is refused outright. And what is
+ * admitted at request time is narrower than a path: the registered method, and
+ * only when the plugin's own route is the one that would run.
  */
 final class PluginPublicWebhookRoutesTest extends TestCase
 {
@@ -52,25 +53,27 @@ final class Plugin implements PluginInterface
     public function getRoutes(): array
     {
         $ok = fn (Request $r): Response => Response::json(['ok' => true]);
+        $boom = function (Request $r): Response { throw new \RuntimeException('unsigned input'); };
         return [
-            // The one accepted shape.
+            // The accepted shape, and one that throws.
             ['method' => 'POST', 'path' => '/api/__SLUG__/webhooks/billing', 'handler' => $ok, 'public' => true],
+            ['method' => 'POST', 'path' => '/api/__SLUG__/webhooks/boom', 'handler' => $boom, 'public' => true],
             // Refused: not POST.
             ['method' => 'GET', 'path' => '/api/__SLUG__/webhooks/peek', 'handler' => $ok, 'public' => true],
             // Refused: not under /webhooks/.
             ['method' => 'POST', 'path' => '/api/__SLUG__/things', 'handler' => $ok, 'public' => true],
             // Refused: another plugin's slug.
             ['method' => 'POST', 'path' => '/api/other/webhooks/x', 'handler' => $ok, 'public' => true],
-            // Refused: a public route cannot also demand a permission.
+            // Refused: a public route cannot also demand a permission or a role.
             ['method' => 'POST', 'path' => '/api/__SLUG__/webhooks/gated', 'handler' => $ok, 'public' => true, 'requiredPermission' => '__SLUG__:write'],
-            // Refused: a role likewise.
             ['method' => 'POST', 'path' => '/api/__SLUG__/webhooks/roled', 'handler' => $ok, 'public' => true, 'requiredRole' => 'admin'],
             // Refused: "public" must be the boolean true, nothing truthy.
             ['method' => 'POST', 'path' => '/api/__SLUG__/webhooks/truthy', 'handler' => $ok, 'public' => 'yes'],
-            // Refused: a name outside [a-z0-9-], or a deeper path.
+            // Refused: a bad name, a deeper path, a parameter, a trailing newline.
             ['method' => 'POST', 'path' => '/api/__SLUG__/webhooks/Bad_Name', 'handler' => $ok, 'public' => true],
             ['method' => 'POST', 'path' => '/api/__SLUG__/webhooks/a/b', 'handler' => $ok, 'public' => true],
             ['method' => 'POST', 'path' => '/api/__SLUG__/webhooks/{provider}', 'handler' => $ok, 'public' => true],
+            ['method' => 'POST', 'path' => "/api/__SLUG__/webhooks/nl\n", 'handler' => $ok, 'public' => true],
             // An ordinary route: registered, never public.
             ['method' => 'POST', 'path' => '/api/__SLUG__/webhooks/private', 'handler' => $ok],
         ];
@@ -102,17 +105,43 @@ PHP;
         return $loader;
     }
 
+    private function path(string $tail): string
+    {
+        return '/api/v1/' . $this->slug . '/webhooks/' . $tail;
+    }
+
+    private function admitted(string $method, string $path): bool
+    {
+        return PluginPublicRoutes::admits(new Request($method, $path, [], ''), $this->router, $path);
+    }
+
     private function routed(string $method, string $path): bool
     {
         return $this->router->match(new Request($method, $path, [], '')) !== null;
     }
 
-    public function testTheOneAcceptedShapeIsRoutedAndPublic(): void
+    public function testTheOneAcceptedShapeIsRoutedAndAdmitted(): void
     {
         $this->load();
 
-        self::assertTrue($this->routed('POST', '/api/v1/' . $this->slug . '/webhooks/billing'));
-        self::assertTrue(EnforceTenantIsolation::pathBypassesTenantResolution('/api/v1/' . $this->slug . '/webhooks/billing'));
+        self::assertTrue($this->routed('POST', $this->path('billing')));
+        self::assertTrue($this->admitted('POST', $this->path('billing')));
+    }
+
+    public function testItPassesTheRealMiddlewareWithNoTokenAndNothingElseDoes(): void
+    {
+        $this->load();
+        $middleware = new EnforceTenantIsolation(new JwtParser(str_repeat('k', 40)), null, null, $this->router);
+        $next = static fn (): Response => Response::json(['reached' => true]);
+
+        $through = $middleware->handle(new Request('POST', $this->path('billing'), [], '{}'), $next);
+        $private = $middleware->handle(new Request('POST', $this->path('private'), [], '{}'), $next);
+
+        self::assertSame(200, $through->getStatusCode());
+        self::assertSame(401, $private->getStatusCode());
+        // Without a router to ask, no plugin webhook is admitted at all.
+        $blind = new EnforceTenantIsolation(new JwtParser(str_repeat('k', 40)));
+        self::assertSame(401, $blind->handle(new Request('POST', $this->path('billing'), [], '{}'), $next)->getStatusCode());
     }
 
     public function testEveryOtherRequestToBePublicIsRefusedAndNotRegistered(): void
@@ -120,38 +149,75 @@ PHP;
         $this->load();
 
         foreach ([
-            ['GET', '/api/v1/' . $this->slug . '/webhooks/peek'],
+            ['GET', $this->path('peek')],
             ['POST', '/api/v1/' . $this->slug . '/things'],
             ['POST', '/api/v1/other/webhooks/x'],
-            ['POST', '/api/v1/' . $this->slug . '/webhooks/gated'],
-            ['POST', '/api/v1/' . $this->slug . '/webhooks/roled'],
-            ['POST', '/api/v1/' . $this->slug . '/webhooks/truthy'],
-            ['POST', '/api/v1/' . $this->slug . '/webhooks/Bad_Name'],
-            ['POST', '/api/v1/' . $this->slug . '/webhooks/a/b'],
+            ['POST', $this->path('gated')],
+            ['POST', $this->path('roled')],
+            ['POST', $this->path('truthy')],
+            ['POST', $this->path('Bad_Name')],
+            ['POST', $this->path('a/b')],
+            ['POST', $this->path('anything')],
         ] as [$method, $path]) {
             self::assertFalse($this->routed($method, $path), "{$method} {$path} must not be registered");
-            self::assertFalse(EnforceTenantIsolation::pathBypassesTenantResolution($path), "{$path} must not be public");
+            self::assertFalse($this->admitted($method, $path), "{$method} {$path} must not be admitted");
         }
-        self::assertFalse(EnforceTenantIsolation::pathBypassesTenantResolution('/api/v1/' . $this->slug . '/webhooks/anything'));
     }
 
     public function testAnOrdinaryRouteBesideItStaysPrivate(): void
     {
         $this->load();
 
-        self::assertTrue($this->routed('POST', '/api/v1/' . $this->slug . '/webhooks/private'));
-        self::assertFalse(EnforceTenantIsolation::pathBypassesTenantResolution('/api/v1/' . $this->slug . '/webhooks/private'));
+        self::assertTrue($this->routed('POST', $this->path('private')));
+        self::assertFalse($this->admitted('POST', $this->path('private')));
     }
 
-    public function testOnlyTheServedPathIsPublicNotTheDeclaredOne(): void
+    public function testOnlyTheServedPathAndMethodAreAdmitted(): void
     {
         $this->load();
 
-        // The declared form is never served, so it must not be public either.
-        self::assertFalse(EnforceTenantIsolation::pathBypassesTenantResolution('/api/__SLUG__/webhooks/billing'));
-        // Nor any prefix or extension of the public path.
-        self::assertFalse(EnforceTenantIsolation::pathBypassesTenantResolution('/api/v1/' . $this->slug . '/webhooks/billing/x'));
-        self::assertFalse(EnforceTenantIsolation::pathBypassesTenantResolution('/api/v1/' . $this->slug . '/webhooks/'));
+        self::assertFalse($this->admitted('POST', '/api/' . $this->slug . '/webhooks/billing'));
+        self::assertFalse($this->admitted('POST', $this->path('billing') . '/x'));
+        self::assertFalse($this->admitted('POST', $this->path('')));
+        foreach (['GET', 'PUT', 'PATCH', 'DELETE', 'HEAD'] as $method) {
+            self::assertFalse($this->admitted($method, $this->path('billing')), "{$method} must not be admitted");
+        }
+    }
+
+    public function testALaterRouteOnTheSamePathWithAnotherMethodIsNotPublic(): void
+    {
+        $this->load();
+        $this->router->register('GET', '/api/' . $this->slug . '/webhooks/billing', static fn (): Response => Response::json([]), null, 'SomebodyElse');
+
+        self::assertTrue($this->routed('GET', $this->path('billing')));
+        self::assertFalse($this->admitted('GET', $this->path('billing')));
+        self::assertTrue($this->admitted('POST', $this->path('billing')));
+    }
+
+    public function testACorePatternRouteThatCapturesThePathKeepsItPrivate(): void
+    {
+        // Core registers first and the first match wins: here a core pattern
+        // would answer the plugin's literal path, so it must not become public.
+        $this->router->register('POST', '/api/' . $this->slug . '/{id}/{action}', static fn (): Response => Response::json([]), null, null, 'core:write');
+        $this->load();
+
+        self::assertFalse($this->admitted('POST', $this->path('billing')));
+    }
+
+    public function testARegisteredPathIsAdmittedOnlyWhileItsOwnersRouteAnswersIt(): void
+    {
+        // The second layer: whatever the registry says, the request is admitted
+        // only if the route that would RUN belongs to the registered owner, so
+        // a route order that changes after registration cannot open someone
+        // else's handler.
+        $path = '/api/v1/elsewhere/webhooks/x';
+        $this->router->register('POST', '/api/elsewhere/webhooks/x', static fn (): Response => Response::json([]), null, 'TheRealOwner');
+        PluginPublicRoutes::add('SomebodyElse', 'POST', $path);
+
+        self::assertFalse($this->admitted('POST', $path));
+
+        PluginPublicRoutes::add('TheRealOwner', 'POST', $path);
+        self::assertTrue($this->admitted('POST', $path));
     }
 
     public function testDisablingThePluginClosesItsPublicPath(): void
@@ -160,6 +226,33 @@ PHP;
 
         self::assertTrue($loader->disablePlugin($this->name . '\\Plugin'));
 
-        self::assertFalse(EnforceTenantIsolation::pathBypassesTenantResolution('/api/v1/' . $this->slug . '/webhooks/billing'));
+        self::assertFalse($this->admitted('POST', $this->path('billing')));
+    }
+
+    public function testAReloadThatDropsThePluginClosesItsPublicPath(): void
+    {
+        $loader = $this->load();
+        self::assertTrue($this->admitted('POST', $this->path('billing')));
+
+        unlink($this->dir . '/' . $this->name . '/Plugin.php');
+        rmdir($this->dir . '/' . $this->name);
+        $loader->reload();
+
+        self::assertFalse(PluginPublicRoutes::allows('POST', $this->path('billing')));
+    }
+
+    public function testAnonymousFailuresOnAPublicRouteCannotQuarantineThePlugin(): void
+    {
+        $this->load();
+        $boom = $this->router->match(new Request('POST', $this->path('boom'), [], ''));
+        self::assertNotNull($boom);
+
+        for ($i = 0; $i < 5; $i++) {
+            self::assertSame(500, ($boom['handler'])(new Request('POST', $this->path('boom'), [], ''), [])->getStatusCode());
+        }
+
+        $billing = $this->router->match(new Request('POST', $this->path('billing'), [], ''));
+        self::assertNotNull($billing);
+        self::assertSame(200, ($billing['handler'])(new Request('POST', $this->path('billing'), [], ''), [])->getStatusCode());
     }
 }

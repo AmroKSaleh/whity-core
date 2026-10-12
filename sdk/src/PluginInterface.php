@@ -79,6 +79,9 @@ interface PluginInterface
      *   its signature over the raw request body with `hash_equals` BEFORE
      *   decoding or acting on anything in it, and must work out which tenant
      *   an event concerns from data it trusts, never from the caller's say-so.
+     *   It must not THROW on unverified input either: it answers anybody.
+     *   Only the declared POST, and only while this plugin's own route is
+     *   the one that answers that path, is admitted without a tenant.
      *   On an older host the key is ignored and the route stays private.
      *
      * @return array<array{method: string, path: string, handler: callable, requiredRole?: ?string, requiredPermission?: ?string, schema?: array<string, mixed>, public?: bool}>

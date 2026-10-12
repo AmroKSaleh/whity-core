@@ -1270,7 +1270,9 @@ $rbacMiddleware = new RbacMiddleware($jwtParser, $roleChecker);
 $tenantIsolationMiddleware = new EnforceTenantIsolation(
     $jwtParser,
     $logger,
-    new \Whity\Auth\ActiveTenantMembershipGuard($db->getPdo())
+    new \Whity\Auth\ActiveTenantMembershipGuard($db->getPdo()),
+    // Admits a plugin's declared webhook only when its own route would run (WHIT-671).
+    $router,
 );
 
 // 8. Initialize HTTP kernel and register middleware

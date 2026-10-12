@@ -830,6 +830,8 @@ class PluginLoader
     {
         foreach ($this->registeredPlugins as $info) {
             $this->router->unregisterByNamespace($info['namespacePrefix']);
+            // A reload must not leave a removed plugin's webhook public (WHIT-671).
+            \Whity\Core\Plugin\PluginPublicRoutes::removeOwner($info['namespacePrefix']);
 
             if ($this->hookManager !== null) {
                 foreach ($info['hooks'] as $hook) {
@@ -3079,7 +3081,7 @@ class PluginLoader
                 // OpenAPI declaration through to the router/generator.
                 $schema = isset($route['schema']) && is_array($route['schema']) ? $route['schema'] : null;
 
-                $wrappedHandler = $this->wrapHandler($pluginKey, $handler);
+                $wrappedHandler = $this->wrapHandler($pluginKey, $handler, $wantsPublic);
                 $accepted = $this->router->register(
                     $method,
                     $path,
@@ -3104,9 +3106,20 @@ class PluginLoader
                 }
 
                 if ($wantsPublic) {
-                    // The SERVED path, exactly: the middleware sees /api/v1/...,
-                    // and only that one path becomes public.
-                    \Whity\Core\Plugin\PluginPublicRoutes::add($namespacePrefix, $this->router->versionedPath((string) $path));
+                    // The SERVED path, exactly: the middleware sees /api/v1/...
+                    // Public only if THIS route is what the router resolves for
+                    // it: a core pattern route registered earlier (first match
+                    // wins) could otherwise capture the literal path.
+                    $served = $this->router->versionedPath((string) $path);
+                    $resolved = $this->router->match(new \Whity\Core\Request('POST', $served, [], ''));
+                    if ($resolved !== null && ($resolved['namespacePrefix'] ?? null) === $namespacePrefix) {
+                        \Whity\Core\Plugin\PluginPublicRoutes::add($namespacePrefix, 'POST', $served);
+                    } else {
+                        $this->logWarning(
+                            "Plugin {$pluginKey} route POST {$path} asks to be public, but another route answers "
+                            . 'that path; it was registered PRIVATE.'
+                        );
+                    }
                 }
 
                 $upperMethod = strtoupper((string) $method);
@@ -4575,9 +4588,9 @@ class PluginLoader
      * @param callable $handler The raw plugin route handler.
      * @return callable(Request, array<string, string>): Response
      */
-    private function wrapHandler(string $pluginKey, callable $handler): callable
+    private function wrapHandler(string $pluginKey, callable $handler, bool $public = false): callable
     {
-        return function (Request $request, array $params = []) use ($pluginKey, $handler): Response {
+        return function (Request $request, array $params = []) use ($pluginKey, $handler, $public): Response {
             $lifecycle = $this->lifecycles[$pluginKey] ?? null;
 
             if ($lifecycle !== null && $lifecycle->isFailed()) {
@@ -4599,7 +4612,10 @@ class PluginLoader
 
                 return $result;
             } catch (Throwable $e) {
-                $this->handlePluginThrowable($pluginKey, $e, 'route handler');
+                // A PUBLIC route's failures do not count toward quarantine: an
+                // anonymous caller must not be able to switch a plugin off by
+                // sending it input it throws on (WHIT-671).
+                $this->handlePluginThrowable($pluginKey, $e, 'route handler', !$public);
                 return Response::error('Internal plugin error', 500);
             }
         };
@@ -4695,10 +4711,12 @@ class PluginLoader
      * @param string $boundary Human-readable description of the boundary that caught it.
      * @return void
      */
-    private function handlePluginThrowable(string $pluginKey, Throwable $e, string $boundary): void
+    private function handlePluginThrowable(string $pluginKey, Throwable $e, string $boundary, bool $countsTowardQuarantine = true): void
     {
         $lifecycle = $this->lifecycles[$pluginKey] ?? null;
-        $lifecycle?->recordError($e);
+        if ($countsTowardQuarantine) {
+            $lifecycle?->recordError($e);
+        }
 
         $context = [
             'plugin' => $pluginKey,
