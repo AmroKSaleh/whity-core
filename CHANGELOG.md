@@ -6,6 +6,8 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-10-12
+
 ### Added
 
 - **A plugin can receive a webhook.** A plugin route may set `'public' => true` for exactly one shape: `POST /api/<the plugin's own slug>/webhooks/<name>`, with no permission and no role. That one path is then reachable without a session or tenant, so an outside service (a billing or identity provider) can deliver notifications to it. Any other route asking to be public is not registered and the reason is logged, as with a malformed permission. Disabling the plugin closes the path. Public means only "no tenant resolution": the plugin's handler must verify the sender's signature over the raw body before acting on anything. Older hosts ignore the key and keep the route private.
