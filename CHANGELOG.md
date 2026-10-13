@@ -6,6 +6,10 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+### Added
+
+- **Flowing documents can be branded and can print forms.** `POST /render/flow` takes an optional `theme` (hex colours for ink, muted text, an accent, lines and a tint); without one a document prints exactly as before. A running head or foot slot may now be an object with a line of text, a smaller second line, an embedded image (a `data:image/…` URI, never fetched) and a boxed label such as a paper's form letter. Five new blocks print forms and exam papers: `facts` (a row of key facts), `fields` (writing lines and character boxes to fill in by hand), `list` (a list in a plain, outlined or tinted panel), `question` (number, text, marks, choices in one to four columns, and ruled lines or an answer box) and `divider`. Each is kept whole across page breaks, and all their text is escaped and bidi-isolated like every other block.
+
 ## [0.2.12] - 2026-10-12
 
 ### Fixed

@@ -467,6 +467,41 @@ document's own font, direction and bidi isolation. The requirement — real
 margins, and a running header and footer on every page — is met; the mechanism
 the issue guessed at is not the one that meets it.
 
+### Theme, running-head parts, and form blocks
+
+A flowing document can carry a **`theme`** of up to five hex colours, `ink`,
+`muted`, `accent`, `line` and `tint`, written as CSS custom properties. Without
+one the document prints exactly as before: every colour the stylesheet used is
+now a property whose default is the old value. Hex only, because the value is
+written into a stylesheet.
+
+A **running head or foot slot** (`start`, `center`, `end`) is still a string with
+`{{page}}`-style tokens, or now an object of parts:
+
+```json
+{ "text": "University of Example", "subtext": "EE201 · Final examination",
+  "image": { "src": "data:image/png;base64,…", "alt": "", "heightMm": 12 },
+  "badge": { "label": "Form", "value": "A" } }
+```
+
+The image must be an embedded `data:image/png|jpeg|webp|svg+xml` URI (never
+fetched), at most 512 KiB and 2–30 mm tall. Give the page a top margin that
+fits it (about 34 mm for a 12 mm logo).
+
+**Form blocks** for printed forms and exam papers. Each is one unit to the
+paginator and is never split across a page:
+
+| Block | Shape | Prints |
+|---|---|---|
+| `facts` | `items: [{label, value}]` (1–6) | one bordered row of key facts |
+| `fields` | `title?`, `fields: [{label, kind: line\|boxes, boxes?, span: full\|half}]` | a panel of hand-written fields: a writing line, or 1–40 character boxes laid out left to right |
+| `list` | `title?`, `tone: plain\|outline\|tint`, `ordered?`, `items: [string]` | a list in a panel |
+| `question` | `number?`, `text`, `marks?`, `note?`, `choices?: {columns: 1–4, items: [{label?, text}]}`, `answer?: {kind: lines, lines: 1–40} \| {kind: box, unit?, widthMm?}` | a numbered question with its marks, its choices in columns (a choice with no label prints an empty bubble), and its answer space |
+| `divider` | `text?` | a rule, with words in the middle if given |
+
+`render-service/scripts/generate-flow-form-fixture.js` builds a document using
+all of them; CI renders it in both directions.
+
 ### Flowing-mode configuration
 
 | Variable | Default | Notes |

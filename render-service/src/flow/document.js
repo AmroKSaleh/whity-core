@@ -73,7 +73,43 @@ const BLOCK_TYPES = new Set([
   // which is the wrong property for the one mark on a document that is supposed
   // to attest to where it came from.
   'qr',
+  // The blocks a printed FORM needs (an exam paper above all): a row of key
+  // facts, fields a person fills in by hand, a list in a panel, a question with
+  // its answer space, and a divider. Each is one unit to the paginator - never
+  // split across a page - because half a question on one page and its choices
+  // on the next is a misprint.
+  'facts',
+  'fields',
+  'list',
+  'question',
+  'divider',
 ]);
+
+/** The colours a caller may theme, each a CSS custom property `--flow-<key>`. */
+const THEME_KEYS = ['ink', 'muted', 'accent', 'line', 'tint'];
+const HEX_COLOUR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+const RUNNING_SLOTS = ['start', 'center', 'end'];
+const SLOT_KEYS = new Set(['text', 'subtext', 'image', 'badge']);
+
+/* Embedded raster or vector only. `data:text/html` and friends would turn an
+ * <img> into something else entirely, and an http(s) src would be an outbound
+ * fetch from inside the render tier (see `figure`). */
+const IMAGE_DATA_URI = /^data:image\/(?:png|jpeg|webp|svg\+xml)[;,]/;
+const MAX_IMAGE_BYTES = Number(process.env.RENDER_FLOW_MAX_IMAGE_BYTES || 512 * 1024);
+/* A running-head image lives in the page margin; past this it is not a logo,
+ * it is a second page header that the margin cannot hold. */
+const MAX_SLOT_IMAGE_MM = 30;
+
+const MAX_FACTS = 6;
+const MAX_FIELDS = 24;
+const MAX_FIELD_BOXES = 40;
+const MAX_LIST_ITEMS = 60;
+const MAX_CHOICES = 26;
+const MAX_ANSWER_LINES = 40;
+const LIST_TONES = new Set(['plain', 'outline', 'tint']);
+const FIELD_KINDS = new Set(['line', 'boxes']);
+const ANSWER_KINDS = new Set(['lines', 'box']);
 
 /**
  * How large the QR is drawn, in millimetres.
@@ -221,6 +257,173 @@ function validateBlockLayout(block, i) {
   return null;
 }
 
+function isString(value) {
+  return typeof value === 'string';
+}
+
+function optionalString(value) {
+  return value === undefined || typeof value === 'string';
+}
+
+function wholeIn(value, min, max) {
+  const n = asFiniteNumber(value);
+  return n !== null && Math.trunc(n) === n && n >= min && n <= max;
+}
+
+/** An embedded image as a slot carries it: {src, alt?, heightMm?}. */
+function validateImage(image, at) {
+  if (!isPlainObject(image)) {
+    return `"${at}" must be an object with a data: URI "src"`;
+  }
+  if (typeof image.src !== 'string' || !IMAGE_DATA_URI.test(image.src)) {
+    return `"${at}.src" must be a data:image/png, jpeg, webp or svg+xml URI (remote images are not fetched)`;
+  }
+  if (image.src.length > MAX_IMAGE_BYTES) {
+    return `"${at}.src" exceeds ${MAX_IMAGE_BYTES} bytes`;
+  }
+  if (!optionalString(image.alt)) {
+    return `"${at}.alt" must be a string`;
+  }
+  if (image.heightMm !== undefined) {
+    const h = asFiniteNumber(image.heightMm);
+    if (h === null || h < 2 || h > MAX_SLOT_IMAGE_MM) {
+      return `"${at}.heightMm" must be between 2 and ${MAX_SLOT_IMAGE_MM}`;
+    }
+  }
+  return null;
+}
+
+/**
+ * A running head or foot: up to three slots, each a string (tokens such as
+ * {{page}} are filled per page) or {text, subtext, image, badge}.
+ */
+function validateRunning(spec, name) {
+  if (spec === undefined || spec === null) return null;
+  if (!isPlainObject(spec)) {
+    return `"${name}" must be an object of start/center/end slots`;
+  }
+  for (const key of Object.keys(spec)) {
+    if (!RUNNING_SLOTS.includes(key)) {
+      return `"${name}.${key}" is not a slot; use start, center or end`;
+    }
+    const slot = spec[key];
+    const at = `${name}.${key}`;
+    if (slot === null || typeof slot === 'string') continue;
+    if (!isPlainObject(slot)) {
+      return `"${at}" must be a string or an object`;
+    }
+    for (const k of Object.keys(slot)) {
+      if (!SLOT_KEYS.has(k)) {
+        return `"${at}.${k}" is not a slot key; use text, subtext, image or badge`;
+      }
+    }
+    if (!optionalString(slot.text) || !optionalString(slot.subtext)) {
+      return `"${at}.text" and "${at}.subtext" must be strings`;
+    }
+    if (slot.image !== undefined) {
+      const err = validateImage(slot.image, `${at}.image`);
+      if (err) return err;
+    }
+    if (slot.badge !== undefined) {
+      if (!isPlainObject(slot.badge) || !isString(slot.badge.value) || !optionalString(slot.badge.label)) {
+        return `"${at}.badge" must be {label?, value} strings`;
+      }
+    }
+  }
+  return null;
+}
+
+/** The form blocks' own shape checks; null when the block is fine. */
+function validateFormBlock(block, i) {
+  const at = `content[${i}]`;
+  if (block.type === 'facts') {
+    if (!Array.isArray(block.items) || block.items.length === 0 || block.items.length > MAX_FACTS) {
+      return `"${at}.items" must list 1-${MAX_FACTS} facts`;
+    }
+    for (const item of block.items) {
+      if (!isPlainObject(item) || !isString(item.label) || !isString(item.value)) {
+        return `"${at}.items" entries must be {label, value} strings`;
+      }
+    }
+  }
+  if (block.type === 'fields') {
+    if (!optionalString(block.title)) return `"${at}.title" must be a string`;
+    if (!Array.isArray(block.fields) || block.fields.length === 0 || block.fields.length > MAX_FIELDS) {
+      return `"${at}.fields" must list 1-${MAX_FIELDS} fields`;
+    }
+    for (const field of block.fields) {
+      if (!isPlainObject(field) || !isString(field.label)) {
+        return `"${at}.fields" entries must have a string "label"`;
+      }
+      if (field.kind !== undefined && !FIELD_KINDS.has(field.kind)) {
+        return `"${at}.fields[].kind" must be line or boxes`;
+      }
+      if (field.kind === 'boxes' && !wholeIn(field.boxes, 1, MAX_FIELD_BOXES)) {
+        return `"${at}.fields[].boxes" must be a whole number 1-${MAX_FIELD_BOXES}`;
+      }
+      if (field.span !== undefined && field.span !== 'full' && field.span !== 'half') {
+        return `"${at}.fields[].span" must be full or half`;
+      }
+    }
+  }
+  if (block.type === 'list') {
+    if (!optionalString(block.title)) return `"${at}.title" must be a string`;
+    if (block.tone !== undefined && !LIST_TONES.has(block.tone)) {
+      return `"${at}.tone" must be one of: ${[...LIST_TONES].join(', ')}`;
+    }
+    if (block.ordered !== undefined && typeof block.ordered !== 'boolean') {
+      return `"${at}.ordered" must be true or false`;
+    }
+    if (!Array.isArray(block.items) || block.items.length === 0 || block.items.length > MAX_LIST_ITEMS || !block.items.every(isString)) {
+      return `"${at}.items" must be 1-${MAX_LIST_ITEMS} strings`;
+    }
+  }
+  if (block.type === 'question') {
+    if (!isString(block.text) || block.text === '') return `"${at}.text" must be the question's text`;
+    if (block.number !== undefined && !isString(block.number) && asFiniteNumber(block.number) === null) {
+      return `"${at}.number" must be a string or a number`;
+    }
+    if (!optionalString(block.marks) || !optionalString(block.note)) {
+      return `"${at}.marks" and "${at}.note" must be strings`;
+    }
+    if (block.choices !== undefined) {
+      const c = block.choices;
+      if (!isPlainObject(c)) return `"${at}.choices" must be an object`;
+      if (c.columns !== undefined && !wholeIn(c.columns, 1, 4)) {
+        return `"${at}.choices.columns" must be 1-4`;
+      }
+      if (!Array.isArray(c.items) || c.items.length === 0 || c.items.length > MAX_CHOICES) {
+        return `"${at}.choices.items" must list 1-${MAX_CHOICES} choices`;
+      }
+      for (const item of c.items) {
+        if (!isPlainObject(item) || !isString(item.text) || !optionalString(item.label)) {
+          return `"${at}.choices.items" entries must be {label?, text} strings`;
+        }
+      }
+    }
+    if (block.answer !== undefined) {
+      const a = block.answer;
+      if (!isPlainObject(a) || !ANSWER_KINDS.has(a.kind)) {
+        return `"${at}.answer.kind" must be lines or box`;
+      }
+      if (a.kind === 'lines' && !wholeIn(a.lines, 1, MAX_ANSWER_LINES)) {
+        return `"${at}.answer.lines" must be a whole number 1-${MAX_ANSWER_LINES}`;
+      }
+      if (a.kind === 'box') {
+        if (!optionalString(a.unit)) return `"${at}.answer.unit" must be a string`;
+        if (a.widthMm !== undefined) {
+          const w = asFiniteNumber(a.widthMm);
+          if (w === null || w < 15 || w > 180) return `"${at}.answer.widthMm" must be between 15 and 180`;
+        }
+      }
+    }
+  }
+  if (block.type === 'divider' && !optionalString(block.text)) {
+    return `"${at}.text" must be a string`;
+  }
+  return null;
+}
+
 function validateFlowPayload(payload) {
   if (!isPlainObject(payload)) {
     return 'Request body must be a JSON object';
@@ -249,6 +452,27 @@ function validateFlowPayload(payload) {
     return '"direction" must be "rtl" or "ltr"';
   }
 
+  if (payload.theme !== undefined) {
+    if (!isPlainObject(payload.theme)) {
+      return '"theme" must be an object of colours';
+    }
+    for (const [key, value] of Object.entries(payload.theme)) {
+      if (!THEME_KEYS.includes(key)) {
+        return `"theme.${key}" is not a theme colour; use ${THEME_KEYS.join(', ')}`;
+      }
+      // Hex only: the value is written into a stylesheet, and a colour NAME
+      // is one short step from a value that closes the rule.
+      if (typeof value !== 'string' || !HEX_COLOUR.test(value)) {
+        return `"theme.${key}" must be a hex colour such as #032230`;
+      }
+    }
+  }
+
+  for (const name of ['header', 'footer']) {
+    const err = validateRunning(payload[name], name);
+    if (err) return err;
+  }
+
   if (!Array.isArray(content)) {
     return '"content" must be an array of blocks';
   }
@@ -270,6 +494,10 @@ function validateFlowPayload(payload) {
     const layoutError = validateBlockLayout(block, i);
     if (layoutError !== null) {
       return layoutError;
+    }
+    const formError = validateFormBlock(block, i);
+    if (formError !== null) {
+      return formError;
     }
     if (block.type === 'heading') {
       const level = asFiniteNumber(block.level);
@@ -491,13 +719,54 @@ function normaliseFlowDocument(payload) {
     direction,
     lang: typeof payload.lang === 'string' && payload.lang !== '' ? payload.lang : (direction === 'rtl' ? 'ar' : 'en'),
     labels,
-    header: isPlainObject(payload.header) ? payload.header : null,
-    footer: isPlainObject(payload.footer) ? payload.footer : { center: labels.pageOf },
+    header: isPlainObject(payload.header) ? normaliseRunning(payload.header) : null,
+    footer: isPlainObject(payload.footer) ? normaliseRunning(payload.footer) : { center: labels.pageOf },
+    theme: isPlainObject(payload.theme) ? normaliseTheme(payload.theme) : null,
     title: typeof payload.title === 'string' ? payload.title : '',
     frontMatter,
     content,
     index: { headings, tables, figures },
   };
+}
+
+/** Only the known keys, only valid hex: what reaches the stylesheet. */
+function normaliseTheme(theme) {
+  const out = {};
+  for (const key of THEME_KEYS) {
+    if (typeof theme[key] === 'string' && HEX_COLOUR.test(theme[key])) {
+      out[key] = theme[key];
+    }
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * Running slots as the paginator reads them: a string stays a string; an
+ * object keeps only the keys it may carry, so nothing unvalidated rides along
+ * into the page.
+ */
+function normaliseRunning(spec) {
+  const out = {};
+  for (const key of RUNNING_SLOTS) {
+    const slot = spec[key];
+    if (typeof slot === 'string') {
+      out[key] = slot;
+    } else if (isPlainObject(slot)) {
+      const clean = {};
+      if (typeof slot.text === 'string') clean.text = slot.text;
+      if (typeof slot.subtext === 'string') clean.subtext = slot.subtext;
+      if (isPlainObject(slot.image) && typeof slot.image.src === 'string' && IMAGE_DATA_URI.test(slot.image.src)) {
+        clean.image = { src: slot.image.src, alt: typeof slot.image.alt === 'string' ? slot.image.alt : '' };
+        const h = asFiniteNumber(slot.image.heightMm);
+        if (h !== null) clean.image.heightMm = Math.max(2, Math.min(MAX_SLOT_IMAGE_MM, h));
+      }
+      if (isPlainObject(slot.badge) && typeof slot.badge.value === 'string') {
+        clean.badge = { label: typeof slot.badge.label === 'string' ? slot.badge.label : '', value: slot.badge.value };
+      }
+      out[key] = clean;
+    }
+  }
+  return out;
 }
 
 module.exports = {
