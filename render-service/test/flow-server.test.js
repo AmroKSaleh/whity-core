@@ -73,6 +73,27 @@ describe('whity_render flow route', () => {
     ],
   });
 
+  test('a document whose content cannot be laid out is 422 with the reason and the problems (WHIT-674)', async () => {
+    const { FlowLayoutError } = require('../src/flow/errors');
+    renderFlowToPdf.mockImplementationOnce(async () => {
+      throw new FlowLayoutError([{ page: 3, reason: 'unit taller than the content box', kind: 'content', unit: 'question', anchor: null }]);
+    });
+    const res = await request(app).post('/render/flow').set('X-Render-Secret', SECRET).send(payload());
+    expect(res.status).toBe(422);
+    expect(res.body.error).toMatch(/question on page 3 is taller than a page/);
+    expect(res.body.problems).toEqual([{ page: 3, reason: 'unit taller than the content box', unit: 'question' }]);
+  });
+
+  test('a layout fault that is the renderer’s own stays a 500 with nothing internal in it', async () => {
+    const { FlowLayoutError } = require('../src/flow/errors');
+    renderFlowToPdf.mockImplementationOnce(async () => {
+      throw new FlowLayoutError([{ page: 1, reason: 'front-matter entry prints page 17 but the anchor is recorded on 11', kind: 'renderer' }]);
+    });
+    const res = await request(app).post('/render/flow').set('X-Render-Secret', SECRET).send(payload());
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Render failed' });
+  });
+
   test('without the secret header it is 401 and the renderer is never called', async () => {
     const res = await request(app).post('/render/flow').send(payload());
     expect(res.status).toBe(401);

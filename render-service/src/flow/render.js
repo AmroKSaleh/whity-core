@@ -1,5 +1,7 @@
 'use strict';
 
+const { FlowLayoutError } = require('./errors');
+
 /**
  * Puppeteer orchestration for the FLOWING render mode (#1072, first half).
  *
@@ -85,11 +87,10 @@ async function renderFlowToPdf(payload) {
       // cross-reference after them suspect, and a contents list of
       // plausible-looking wrong numbers is a worse outcome than no contents
       // list, so this fails the render instead of shipping one.
-      const first = outcome.result.problems[0];
-      throw new Error(
-        `Flow pagination problem on page ${first.page}: ${first.reason}` +
-          (outcome.result.problems.length > 1 ? ` (and ${outcome.result.problems.length - 1} more)` : '')
-      );
+      // Carries the problems, and whether every one is the document's own
+      // (src/flow/errors.js): the server answers those with a 422 the caller
+      // can act on, and anything of the renderer's own with a 500.
+      throw new FlowLayoutError(outcome.result.problems);
     }
 
     const pdfStartedAt = Date.now();

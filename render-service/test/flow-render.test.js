@@ -147,6 +147,17 @@ describe('renderFlowToPdf', () => {
     await expect(renderFlowToPdf(payload())).rejects.toThrow(/produced no pages/);
   });
 
+  test('a layout refusal is a FlowLayoutError carrying its problems (WHIT-674)', async () => {
+    mockFlowResult = {
+      ...goodResult(),
+      problems: [{ page: 3, reason: 'unit taller than the content box', kind: 'content', unit: 'question', anchor: null }],
+    };
+    const err = await renderFlowToPdf(payload()).catch((e) => e);
+    expect(err.name).toBe('FlowLayoutError');
+    expect(err.contentOnly).toBe(true);
+    expect(err.problems).toHaveLength(1);
+  });
+
   test('no PDF is produced by any of the refusals', async () => {
     mockFlowResult = { ...goodResult(), problems: [{ page: 3, reason: 'nope' }] };
     await expect(renderFlowToPdf(payload())).rejects.toThrow();
