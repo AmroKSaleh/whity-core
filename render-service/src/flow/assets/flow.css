@@ -19,7 +19,7 @@
 }
 
 /*
- * THE THEME (WHIT-673). Every colour this mode prints in is a custom property,
+ * THE THEME (WHIT-673). The colours a theme can change are custom properties,
  * and each default is the literal it replaced, so a document without a
  * `theme` prints exactly as before. html.js writes the caller's validated hex
  * values over these on :root - which outranks `html` on specificity, so the
@@ -36,9 +36,6 @@ html {
   --flow-tint: #eeeeee;
 }
 
-.flow-themed {
-  --flow-grid: var(--flow-line);
-}
 
 html,
 body {
@@ -733,6 +730,7 @@ body {
 }
 
 .flow-answer-box {
+  max-width: 100%;
   display: flex;
   align-items: center;
   justify-content: flex-end;

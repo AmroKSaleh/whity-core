@@ -401,7 +401,10 @@ function buildFlowHtml(doc) {
   const theme = doc.theme
     ? Object.entries(doc.theme)
         .map(([key, value]) => `  --flow-${key}: ${value};\n`)
-        .join('')
+        .join('') +
+      // Table and answer-line rules follow the theme's line colour only when
+      // it names one; a theme that sets just an accent keeps the darker grid.
+      (doc.theme.line ? `  --flow-grid: ${doc.theme.line};\n` : '')
     : '';
 
   // Everything the browser-side paginator needs: geometry, the running

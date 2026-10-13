@@ -1498,6 +1498,8 @@ jobs:
             head -c 5 "/tmp/flow-form-$dir.pdf" | grep -q '%PDF-'
             pages=$(grep -i '^x-render-page-count:' "/tmp/flow-form-$dir.headers" | grep -o '[0-9][0-9]*' | head -1)
             echo "form fixture ($dir): ${pages} pages"
+            # The running head carries an embedded image: it must be IN the PDF.
+            grep -a -q '/Subtype */Image' "/tmp/flow-form-$dir.pdf"
             # A cover page plus forty questions: more than two pages, and far
             # fewer than forty (which would mean each question took a page).
             test "${pages}" -ge 3

@@ -485,18 +485,22 @@ A **running head or foot slot** (`start`, `center`, `end`) is still a string wit
 ```
 
 The image must be an embedded `data:image/png|jpeg|webp|svg+xml` URI (never
-fetched), at most 512 KiB and 2–30 mm tall. Give the page a top margin that
-fits it (about 34 mm for a 12 mm logo).
+fetched), at most 512 KiB and 2–30 mm tall, and no taller than its margin
+minus 6 mm: a 12 mm logo in the head needs a `topMm` of at least 18 (more with
+a second line of text). A slot name other than start, center or end is
+ignored, as before.
 
 **Form blocks** for printed forms and exam papers. Each is one unit to the
-paginator and is never split across a page:
+paginator and is never split across a page, so each is capped at what fits one
+A4 page (answer lines 25, list items 30, choices 12); a unit that still cannot
+fit fails the render rather than overflowing:
 
 | Block | Shape | Prints |
 |---|---|---|
 | `facts` | `items: [{label, value}]` (1–6) | one bordered row of key facts |
 | `fields` | `title?`, `fields: [{label, kind: line\|boxes, boxes?, span: full\|half}]` | a panel of hand-written fields: a writing line, or 1–40 character boxes laid out left to right |
-| `list` | `title?`, `tone: plain\|outline\|tint`, `ordered?`, `items: [string]` | a list in a panel |
-| `question` | `number?`, `text`, `marks?`, `note?`, `choices?: {columns: 1–4, items: [{label?, text}]}`, `answer?: {kind: lines, lines: 1–40} \| {kind: box, unit?, widthMm?}` | a numbered question with its marks, its choices in columns (a choice with no label prints an empty bubble), and its answer space |
+| `list` | `title?`, `tone: plain\|outline\|tint`, `ordered?`, `items: [string]` (1–30) | a list in a panel |
+| `question` | `number?`, `text`, `marks?`, `note?`, `choices?: {columns: 1–4, items: [{label?, text}] (1–12)}`, `answer?: {kind: lines, lines: 1–25} \| {kind: box, unit?, widthMm?}` | a numbered question with its marks, its choices in columns (a choice with no label prints an empty bubble), and its answer space |
 | `divider` | `text?` | a rule, with words in the middle if given |
 
 `render-service/scripts/generate-flow-form-fixture.js` builds a document using

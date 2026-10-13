@@ -96,17 +96,29 @@ const SLOT_KEYS = new Set(['text', 'subtext', 'image', 'badge']);
  * <img> into something else entirely, and an http(s) src would be an outbound
  * fetch from inside the render tier (see `figure`). */
 const IMAGE_DATA_URI = /^data:image\/(?:png|jpeg|webp|svg\+xml)[;,]/;
-const MAX_IMAGE_BYTES = Number(process.env.RENDER_FLOW_MAX_IMAGE_BYTES || 512 * 1024);
+/* A value that is not a number would otherwise become NaN, and `length > NaN`
+ * is never true - a typo in the environment would remove the cap entirely. */
+const MAX_IMAGE_BYTES = Number.isFinite(Number(process.env.RENDER_FLOW_MAX_IMAGE_BYTES))
+  && Number(process.env.RENDER_FLOW_MAX_IMAGE_BYTES) > 0
+  ? Number(process.env.RENDER_FLOW_MAX_IMAGE_BYTES)
+  : 512 * 1024;
 /* A running-head image lives in the page margin; past this it is not a logo,
- * it is a second page header that the margin cannot hold. */
+ * it is a second page header that the margin cannot hold. The real limit is
+ * the page's own margin (see validateRunningFit); this is the ceiling. */
 const MAX_SLOT_IMAGE_MM = 30;
+/* How much of a margin band the furniture may use: the band is drawn this far
+ * from the content box, and needs a little air on the paper edge too. */
+const RUNNING_BAND_ALLOWANCE_MM = 6;
 
+/* The form blocks are never split across a page, so each cap is what still
+ * FITS one page of A4 with ordinary margins. A larger value would pass
+ * validation and then fail pagination with nothing the caller could act on. */
 const MAX_FACTS = 6;
 const MAX_FIELDS = 24;
 const MAX_FIELD_BOXES = 40;
-const MAX_LIST_ITEMS = 60;
-const MAX_CHOICES = 26;
-const MAX_ANSWER_LINES = 40;
+const MAX_LIST_ITEMS = 30;
+const MAX_CHOICES = 12;
+const MAX_ANSWER_LINES = 25;
 const LIST_TONES = new Set(['plain', 'outline', 'tint']);
 const FIELD_KINDS = new Set(['line', 'boxes']);
 const ANSWER_KINDS = new Set(['lines', 'box']);
@@ -299,19 +311,15 @@ function validateImage(image, at) {
  */
 function validateRunning(spec, name) {
   if (spec === undefined || spec === null) return null;
-  if (!isPlainObject(spec)) {
-    return `"${name}" must be an object of start/center/end slots`;
-  }
-  for (const key of Object.keys(spec)) {
-    if (!RUNNING_SLOTS.includes(key)) {
-      return `"${name}.${key}" is not a slot; use start, center or end`;
-    }
+  // Lenient where it always was: before slot objects existed, any header
+  // object was passed through, and stored templates may carry a slot name or a
+  // number this mode ignores. Those are still ignored (unknown names) or
+  // printed as text (numbers) - only the new OBJECT form is checked strictly.
+  if (!isPlainObject(spec)) return null;
+  for (const key of RUNNING_SLOTS) {
     const slot = spec[key];
     const at = `${name}.${key}`;
-    if (slot === null || typeof slot === 'string') continue;
-    if (!isPlainObject(slot)) {
-      return `"${at}" must be a string or an object`;
-    }
+    if (slot === undefined || slot === null || typeof slot !== 'object' || Array.isArray(slot)) continue;
     for (const k of Object.keys(slot)) {
       if (!SLOT_KEYS.has(k)) {
         return `"${at}.${k}" is not a slot key; use text, subtext, image or badge`;
@@ -327,6 +335,35 @@ function validateRunning(spec, name) {
     if (slot.badge !== undefined) {
       if (!isPlainObject(slot.badge) || !isString(slot.badge.value) || !optionalString(slot.badge.label)) {
         return `"${at}.badge" must be {label?, value} strings`;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * A running-head image must fit the margin band it is drawn in. The bands are
+ * not measured by the paginator, so an image taller than the margin would run
+ * off the paper and the render would still succeed.
+ */
+function validateRunningFit(payload) {
+  if (payload.page !== undefined && !isPlainObject(payload.page)) return null;
+  const margin = resolvePage(payload.page).margin;
+  const bands = [
+    ['header', margin.top],
+    ['footer', margin.bottom],
+  ];
+  for (const [name, marginMm] of bands) {
+    const spec = payload[name];
+    if (!isPlainObject(spec)) continue;
+    for (const key of RUNNING_SLOTS) {
+      const slot = spec[key];
+      if (!isPlainObject(slot) || !isPlainObject(slot.image)) continue;
+      const h = asFiniteNumber(slot.image.heightMm) ?? 10;
+      const room = Math.max(0, marginMm - RUNNING_BAND_ALLOWANCE_MM);
+      if (h > room) {
+        return `"${name}.${key}.image.heightMm" (${h}mm) does not fit the ${name === 'header' ? 'top' : 'bottom'} margin; ` +
+          `give the page a ${name === 'header' ? 'topMm' : 'bottomMm'} of at least ${Math.ceil(h + RUNNING_BAND_ALLOWANCE_MM)}`;
       }
     }
   }
@@ -472,6 +509,8 @@ function validateFlowPayload(payload) {
     const err = validateRunning(payload[name], name);
     if (err) return err;
   }
+  const fitError = validateRunningFit(payload);
+  if (fitError) return fitError;
 
   if (!Array.isArray(content)) {
     return '"content" must be an array of blocks';
@@ -751,6 +790,8 @@ function normaliseRunning(spec) {
     const slot = spec[key];
     if (typeof slot === 'string') {
       out[key] = slot;
+    } else if (typeof slot === 'number' && Number.isFinite(slot)) {
+      out[key] = String(slot);
     } else if (isPlainObject(slot)) {
       const clean = {};
       if (typeof slot.text === 'string') clean.text = slot.text;

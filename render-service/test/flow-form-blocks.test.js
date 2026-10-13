@@ -107,9 +107,23 @@ describe('running head and foot slots', () => {
     expect(validateFlowPayload(tall)).toMatch(/heightMm/);
   });
 
-  test('refuses an unknown slot name and an unknown slot key', () => {
-    expect(validateFlowPayload(doc([{ type: 'paragraph', text: 'x' }], { header: { middle: 'x' } }))).toMatch(/header\.middle/);
+  test('an unknown key inside a slot object is refused', () => {
     expect(validateFlowPayload(doc([{ type: 'paragraph', text: 'x' }], { footer: { start: { html: '<b>x</b>' } } }))).toMatch(/footer\.start\.html/);
+  });
+
+  test('stays lenient for what stored templates already send: unknown slot names are ignored, numbers print', () => {
+    const legacy = doc([{ type: 'paragraph', text: 'x' }], { header: { left: 'x', center: 5 } });
+    expect(validateFlowPayload(legacy)).toBeNull();
+    const normalised = normaliseFlowDocument(legacy);
+    expect(normalised.header).toEqual({ center: '5' });
+  });
+
+  test('refuses a running-head image taller than the margin it is drawn in', () => {
+    const big = doc([{ type: 'paragraph', text: 'x' }], { header: { start: { image: { src: PNG, heightMm: 25 } } } });
+    // Default top margin is 25mm: a 25mm logo cannot fit in it.
+    expect(validateFlowPayload(big)).toMatch(/topMm of at least 31/);
+    const roomy = { ...big, page: { preset: 'a4', margin: { topMm: 32 } } };
+    expect(validateFlowPayload(roomy)).toBeNull();
   });
 });
 
@@ -225,7 +239,10 @@ describe('question', () => {
     expect(validateFlowPayload(doc([{ ...choice, choices: { columns: 5, items: choice.choices.items } }]))).toMatch(/columns/);
     expect(validateFlowPayload(doc([{ ...choice, choices: { items: [] } }]))).toMatch(/choices\.items/);
     expect(validateFlowPayload(doc([{ type: 'question', text: 'x', answer: { kind: 'lines', lines: 0 } }]))).toMatch(/lines/);
-    expect(validateFlowPayload(doc([{ type: 'question', text: 'x', answer: { kind: 'lines', lines: 41 } }]))).toMatch(/lines/);
+    // Capped at what fits one page, because a question is never split.
+    expect(validateFlowPayload(doc([{ type: 'question', text: 'x', answer: { kind: 'lines', lines: 26 } }]))).toMatch(/lines/);
+    expect(validateFlowPayload(doc([{ type: 'list', items: Array(31).fill('a') }]))).toMatch(/items/);
+    expect(validateFlowPayload(doc([{ type: 'question', text: 'x', choices: { items: Array(13).fill({ text: 'a' }) } }]))).toMatch(/choices\.items/);
     expect(validateFlowPayload(doc([{ type: 'question', text: 'x', answer: { kind: 'canvas' } }]))).toMatch(/answer\.kind/);
     expect(validateFlowPayload(doc([{ type: 'question', text: 'x', answer: { kind: 'box', widthMm: 500 } }]))).toMatch(/widthMm/);
   });

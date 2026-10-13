@@ -87,6 +87,10 @@
     return String(template === null || template === undefined ? '' : template).replace(
       /\{\{\s*([a-zA-Z]+)\s*\}\}/g,
       function (_all, key) {
+        // Own keys only: `{{constructor}}` must not print Object's source.
+        if (!Object.prototype.hasOwnProperty.call(values, key)) {
+          return '';
+        }
         return values[key] === undefined || values[key] === null ? '' : String(values[key]);
       }
     );
