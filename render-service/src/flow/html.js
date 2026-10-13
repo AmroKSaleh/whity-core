@@ -51,7 +51,7 @@ const DEFAULT_FONT_STACK =
   "'Noto Naskh Arabic', 'Noto Sans Arabic', 'DejaVu Sans', 'Liberation Sans', Arial, sans-serif";
 
 const { escapeHtml, isolateForeignRuns } = require('./bidi');
-const { QR_SIZE_MM } = require('./document');
+const { QR_SIZE_MM, MAX_FIELD_BOXES, MAX_ANSWER_LINES } = require('./document');
 
 /* Already a dependency of this service for the fixed-canvas mode's barcode
  * element; the flowing mode draws its verification code with the same encoder
@@ -239,6 +239,125 @@ function renderQr(block, direction) {
   );
 }
 
+/* ---------------------------------------------------------------- forms
+ *
+ * The blocks a printed form needs. Each is one paginator unit (its
+ * data-flow-unit is its own type, and the paginator splits only paragraphs
+ * and tables), so a question never parts from its choices at a page break.
+ * Every caller string goes through isolateForeignRuns, which escapes it and
+ * isolates runs in the other direction: an Arabic stem with "12 V" in it
+ * prints the 12 before the V.
+ */
+
+/**
+ * A count from the payload, clamped to [1, max] where it is used. Validation
+ * already refuses anything outside the range; repeating the bound here means a
+ * caller of buildFlowHtml that skipped validation still cannot ask for a
+ * string of any length it likes.
+ */
+function repeatBounded(markup, value, max) {
+  const n = Math.trunc(Number(value));
+  const count = Number.isFinite(n) && n > 1 ? n : 1;
+  let out = '';
+  // The loop's own bound is the constant, not the payload's number.
+  for (let i = 0; i < max; i += 1) {
+    if (i >= count) break;
+    out += markup;
+  }
+  return out;
+}
+
+function unitOpen(block, type, extraClass) {
+  const lay = blockLayout(block);
+  return (
+    `<div class="flow-${type}${extraClass ? ` ${extraClass}` : ''}${lay.cls}" data-flow-unit="${type}"` +
+    `${lay.attrs}${styleAttr(lay.style, '')}>`
+  );
+}
+
+function renderFacts(block, direction) {
+  const items = block.items
+    .map(
+      (item) =>
+        `<div class="flow-fact"><span class="flow-fact-label">${isolateForeignRuns(item.label, direction)}</span>` +
+        `<span class="flow-fact-value">${isolateForeignRuns(item.value, direction)}</span></div>`
+    )
+    .join('');
+  return `${unitOpen(block, 'facts', `flow-facts-${block.items.length}`)}${items}</div>`;
+}
+
+function renderFields(block, direction) {
+  const title = block.title ? `<div class="flow-panel-title">${isolateForeignRuns(block.title, direction)}</div>` : '';
+  const fields = block.fields
+    .map((field) => {
+      const full = field.span === 'full' ? ' flow-field-full' : '';
+      const input =
+        field.kind === 'boxes'
+          ? `<span class="flow-field-boxes">${repeatBounded('<span class="flow-field-box"></span>', field.boxes, MAX_FIELD_BOXES)}</span>`
+          : '<span class="flow-field-line"></span>';
+      return `<div class="flow-field${full}"><span class="flow-field-label">${isolateForeignRuns(field.label, direction)}</span>${input}</div>`;
+    })
+    .join('');
+  return `${unitOpen(block, 'fields', 'flow-panel flow-panel-outline')}${title}<div class="flow-field-grid">${fields}</div></div>`;
+}
+
+function renderList(block, direction) {
+  const tone = block.tone || 'outline';
+  const title = block.title ? `<div class="flow-panel-title">${isolateForeignRuns(block.title, direction)}</div>` : '';
+  const tag = block.ordered ? 'ol' : 'ul';
+  const items = block.items.map((item) => `<li>${isolateForeignRuns(item, direction)}</li>`).join('');
+  return `${unitOpen(block, 'list', `flow-panel flow-panel-${tone}`)}${title}<${tag} class="flow-list-items">${items}</${tag}></div>`;
+}
+
+function renderAnswer(answer, direction) {
+  if (!answer) return '';
+  if (answer.kind === 'lines') {
+    return `<div class="flow-answer-lines">${repeatBounded('<span class="flow-answer-line"></span>', answer.lines, MAX_ANSWER_LINES)}</div>`;
+  }
+  const width = Number.isFinite(Number(answer.widthMm)) ? Number(answer.widthMm) : 60;
+  const unit = answer.unit ? `<span class="flow-answer-unit">${isolateForeignRuns(answer.unit, direction)}</span>` : '';
+  return `<div class="flow-answer-box" style="width:${mm(width)}">${unit}</div>`;
+}
+
+/*
+ * A choice takes its direction from its own first strong character
+ * (dir="auto"): a choice that is only "5 Ω" on an Arabic paper is a Latin run
+ * on its own, and in the paper's direction it printed as "Ω 5".
+ */
+function renderQuestion(block, direction) {
+  const number =
+    block.number !== undefined && block.number !== ''
+      ? `<span class="flow-question-number"><bdi>${escapeHtml(String(block.number))}</bdi></span>`
+      : '<span class="flow-question-number flow-question-number-none"></span>';
+  const marks = block.marks ? `<span class="flow-question-marks">${isolateForeignRuns(block.marks, direction)}</span>` : '<span></span>';
+  let choices = '';
+  if (block.choices) {
+    const columns = Number(block.choices.columns) || 1;
+    choices =
+      `<div class="flow-choices flow-choices-${columns}">` +
+      block.choices.items
+        .map(
+          (item) =>
+            `<span class="flow-choice"><span class="flow-choice-mark">${item.label ? isolateForeignRuns(item.label, direction) : ''}</span>` +
+            `<span class="flow-choice-text" dir="auto">${isolateForeignRuns(item.text, direction)}</span></span>`
+        )
+        .join('') +
+      '</div>';
+  }
+  const note = block.note ? `<div class="flow-question-note">${isolateForeignRuns(block.note, direction)}</div>` : '';
+  const answer = renderAnswer(block.answer, direction);
+  const bodyHtml = choices || note || answer ? `<div class="flow-question-body">${choices}${note}${answer}</div>` : '';
+  return (
+    `${unitOpen(block, 'question')}${number}` +
+    `<span class="flow-question-text">${isolateForeignRuns(block.text, direction)}</span>${marks}${bodyHtml}</div>`
+  );
+}
+
+function renderDivider(block, direction) {
+  const text = block.text ? `<span class="flow-divider-text">${isolateForeignRuns(block.text, direction)}</span>` : '';
+  return `${unitOpen(block, 'divider')}${text}</div>`;
+}
+
 function renderBlock(block, direction) {
   switch (block.type) {
     case 'heading': {
@@ -266,6 +385,16 @@ function renderBlock(block, direction) {
       return renderFigure(block, direction);
     case 'qr':
       return renderQr(block, direction);
+    case 'facts':
+      return renderFacts(block, direction);
+    case 'fields':
+      return renderFields(block, direction);
+    case 'list':
+      return renderList(block, direction);
+    case 'question':
+      return renderQuestion(block, direction);
+    case 'divider':
+      return renderDivider(block, direction);
     case 'pageBreak':
       return '<div class="flow-page-break" data-flow-unit="pageBreak"></div>';
     case 'spacer':
@@ -284,6 +413,17 @@ function renderBlock(block, direction) {
 function buildFlowHtml(doc) {
   const fontStack = doc.fontFamily || DEFAULT_FONT_STACK;
   const body = doc.content.map((block) => renderBlock(block, doc.direction)).join('\n');
+  // The theme: validated hex colours only (document.js), written as the custom
+  // properties flow.css reads. Absent keys leave the stylesheet's defaults,
+  // which are the colours this mode always printed in.
+  const theme = doc.theme
+    ? Object.entries(doc.theme)
+        .map(([key, value]) => `  --flow-${key}: ${value};\n`)
+        .join('') +
+      // Table and answer-line rules follow the theme's line colour only when
+      // it names one; a theme that sets just an accent keeps the darker grid.
+      (doc.theme.line ? `  --flow-grid: ${doc.theme.line};\n` : '')
+    : '';
 
   // Everything the browser-side paginator needs: geometry, the running
   // header/footer templates, the front-matter spec, and the cross-reference
@@ -314,12 +454,12 @@ function buildFlowHtml(doc) {
   --flow-margin-bottom: ${mm(doc.page.margin.bottom)};
   --flow-margin-left: ${mm(doc.page.margin.left)};
   --flow-font: ${fontStack};
-}
+${theme}}
 @page { size: ${mm(doc.page.widthMm)} ${mm(doc.page.heightMm)}; margin: 0; }
 </style>
 <style>${FLOW_CSS}</style>
 </head>
-<body>
+<body${doc.theme ? ' class="flow-themed"' : ''}>
 <div id="flow-source" aria-hidden="true">
 ${body}
 </div>

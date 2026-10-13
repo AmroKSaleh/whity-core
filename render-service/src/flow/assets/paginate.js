@@ -87,6 +87,10 @@
     return String(template === null || template === undefined ? '' : template).replace(
       /\{\{\s*([a-zA-Z]+)\s*\}\}/g,
       function (_all, key) {
+        // Own keys only: `{{constructor}}` must not print Object's source.
+        if (!Object.prototype.hasOwnProperty.call(values, key)) {
+          return '';
+        }
         return values[key] === undefined || values[key] === null ? '' : String(values[key]);
       }
     );
@@ -623,6 +627,63 @@
     return current;
   }
 
+  /**
+   * A slot given as parts (WHIT-673): an embedded image, a line of text with an
+   * optional smaller second line, and a boxed label. Built with DOM calls, and
+   * every string still goes through the same isolation as a plain slot; the
+   * image src was checked to be a data:image URI before it got here.
+   */
+  function richSlot(slot, part, values) {
+    var any = false;
+    slot.className += ' flow-running-rich';
+    if (part.image && part.image.src) {
+      var img = document.createElement('img');
+      img.className = 'flow-running-image';
+      img.src = part.image.src;
+      img.alt = part.image.alt || '';
+      img.style.height = mmToPx(part.image.heightMm || 10) + 'px';
+      slot.appendChild(img);
+      any = true;
+    }
+    var text = fillTokens(part.text || '', values);
+    var subtext = fillTokens(part.subtext || '', values);
+    if (text || subtext) {
+      var words = document.createElement('div');
+      words.className = 'flow-running-words' + (subtext ? ' flow-running-has-sub' : '');
+      if (text) {
+        var main = document.createElement('span');
+        main.className = 'flow-running-text';
+        main.innerHTML = bidi.isolateForeignRuns(text, doc.direction);
+        words.appendChild(main);
+      }
+      if (subtext) {
+        var sub = document.createElement('span');
+        sub.className = 'flow-running-subtext';
+        sub.innerHTML = bidi.isolateForeignRuns(subtext, doc.direction);
+        words.appendChild(sub);
+      }
+      slot.appendChild(words);
+      any = true;
+    }
+    if (part.badge && part.badge.value) {
+      var badge = document.createElement('div');
+      badge.className = 'flow-running-badge';
+      if (part.badge.label) {
+        var label = document.createElement('span');
+        label.className = 'flow-running-badge-label';
+        label.innerHTML = bidi.isolateForeignRuns(fillTokens(part.badge.label, values), doc.direction);
+        badge.appendChild(label);
+      }
+      var value = document.createElement('span');
+      value.className = 'flow-running-badge-value';
+      value.innerHTML = bidi.isolateForeignRuns(fillTokens(part.badge.value, values), doc.direction);
+      badge.appendChild(value);
+      slot.appendChild(badge);
+      any = true;
+    }
+    return any;
+  }
+
   function runningBand(spec, className, values) {
     var band = document.createElement('div');
     band.className = 'flow-running ' + className;
@@ -632,6 +693,13 @@
       var slot = document.createElement('div');
       slot.className = 'flow-running-slot flow-running-slot-' + slots[i];
       var template = spec ? spec[slots[i]] : '';
+      if (template && typeof template === 'object') {
+        if (richSlot(slot, template, values)) {
+          any = true;
+        }
+        band.appendChild(slot);
+        continue;
+      }
       var text = fillTokens(template, values);
       if (text) {
         any = true;
