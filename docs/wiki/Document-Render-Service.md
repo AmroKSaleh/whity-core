@@ -517,6 +517,8 @@ all of them; CI renders it in both directions.
 | `RENDER_FLOW_MAX_TABLE_ROWS` | `5000` | Hard ceiling on rows in one table. |
 | `RENDER_FLOW_MAX_BYTES` | 20 MiB | Hard ceiling on the whole payload. Deliberately below express's 25 MiB `json` limit, so an oversized payload is refused by this service with its own error rather than by the body parser. (This row said 40 MiB until 2026-08-31; the code has always said 20 — see `src/flow/document.js`.) |
 
+A refusal whose every problem is the document's own (a never-split block taller than a page, content past the page box) is a **422** with `error` (a sentence naming the unit and page) and `problems` (`page`, `reason`, `unit`, `anchor`); the caller can fix it. Any other layout problem stays a 500.
+
 A render whose pagination overran a page box is **refused**, not returned: an
 overrun means a unit was placed where it does not fit, so at least one recorded
 page number describes a layout that did not happen, and every cross-reference
