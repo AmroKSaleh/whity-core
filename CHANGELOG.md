@@ -6,6 +6,8 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+## [0.2.14] - 2026-10-13
+
 ### Fixed
 
 - **A flowing document that cannot fit a page now says why.** `POST /render/flow` still refuses a document the paginator cannot lay out honestly, but when every problem is the content's own (a block that is never split, such as a question, list panel or figure, taller than a page, or content running past the page box) it now answers **422** with a sentence naming the unit and the page and a `problems` list (`page`, `reason`, `unit`, `anchor`), instead of a bare 500 "Render failed". Core relays that sentence as a rejected render, so a caller can tell the author what to shorten. A layout fault of the renderer's own (a front-matter list that did not converge) stays a 500 with its detail in the log only.
