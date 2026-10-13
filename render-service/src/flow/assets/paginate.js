@@ -261,6 +261,9 @@
           state.problems.push({
             page: pages.length,
             reason: 'unit taller than the content box',
+            // The document's to fix (WHIT-674): shorten or split this unit.
+            kind: 'content',
+            unit: node.getAttribute ? node.getAttribute('data-flow-unit') : null,
             anchor: node.getAttribute ? node.getAttribute('data-anchor') : null,
           });
         }
@@ -752,6 +755,8 @@
           state.problems.push({
             page: i + 1,
             reason: 'content overruns the page box by ' + Math.round(rect.bottom - box.bottom) + 'px',
+            kind: 'content',
+            unit: children[j].getAttribute ? children[j].getAttribute('data-flow-unit') : null,
             anchor: children[j].getAttribute ? children[j].getAttribute('data-anchor') : null,
           });
         }

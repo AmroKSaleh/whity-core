@@ -335,6 +335,25 @@ app.post('/render/flow', renderRateLimiter, async (req, res) => {
     res.set('X-Render-Paginate-Ms', String(pagination.paginateMs));
     res.send(pdf);
   } catch (err) {
+    // A document whose CONTENT cannot be laid out is the caller's to fix
+    // (WHIT-674): 422, with the sentence and the problems - page, reason, unit
+    // and anchor, all values the renderer itself produced. Anything else,
+    // including a layout fault of the renderer's own, stays a 500 whose detail
+    // goes only to the log.
+    if (err && err.name === 'FlowLayoutError' && err.contentOnly) {
+      // eslint-disable-next-line no-console
+      console.warn('[whity_render] flow document cannot be laid out:', err.message);
+      res.status(422).json({
+        error: err.message,
+        problems: err.problems.map((p) => ({
+          page: p.page,
+          reason: p.reason,
+          ...(p.unit ? { unit: p.unit } : {}),
+          ...(p.anchor ? { anchor: p.anchor } : {}),
+        })),
+      });
+      return;
+    }
     // eslint-disable-next-line no-console
     console.error('[whity_render] flow render failed:', err && err.stack ? err.stack : err);
     res.status(500).json({ error: 'Render failed' });
