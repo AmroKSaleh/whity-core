@@ -51,7 +51,7 @@ const DEFAULT_FONT_STACK =
   "'Noto Naskh Arabic', 'Noto Sans Arabic', 'DejaVu Sans', 'Liberation Sans', Arial, sans-serif";
 
 const { escapeHtml, isolateForeignRuns } = require('./bidi');
-const { QR_SIZE_MM } = require('./document');
+const { QR_SIZE_MM, MAX_FIELD_BOXES, MAX_ANSWER_LINES } = require('./document');
 
 /* Already a dependency of this service for the fixed-canvas mode's barcode
  * element; the flowing mode draws its verification code with the same encoder
@@ -249,6 +249,17 @@ function renderQr(block, direction) {
  * prints the 12 before the V.
  */
 
+/**
+ * A count from the payload, clamped to [1, max] where it is used. Validation
+ * already refuses anything outside the range; repeating the bound here means a
+ * caller of buildFlowHtml that skipped validation still cannot ask for a
+ * string of any length it likes.
+ */
+function boundedCount(value, max) {
+  const n = Math.trunc(Number(value));
+  return Number.isFinite(n) ? Math.min(Math.max(n, 1), max) : 1;
+}
+
 function unitOpen(block, type, extraClass) {
   const lay = blockLayout(block);
   return (
@@ -275,7 +286,7 @@ function renderFields(block, direction) {
       const full = field.span === 'full' ? ' flow-field-full' : '';
       const input =
         field.kind === 'boxes'
-          ? `<span class="flow-field-boxes">${'<span class="flow-field-box"></span>'.repeat(Number(field.boxes))}</span>`
+          ? `<span class="flow-field-boxes">${'<span class="flow-field-box"></span>'.repeat(boundedCount(field.boxes, MAX_FIELD_BOXES))}</span>`
           : '<span class="flow-field-line"></span>';
       return `<div class="flow-field${full}"><span class="flow-field-label">${isolateForeignRuns(field.label, direction)}</span>${input}</div>`;
     })
@@ -294,7 +305,7 @@ function renderList(block, direction) {
 function renderAnswer(answer, direction) {
   if (!answer) return '';
   if (answer.kind === 'lines') {
-    return `<div class="flow-answer-lines">${'<span class="flow-answer-line"></span>'.repeat(Number(answer.lines))}</div>`;
+    return `<div class="flow-answer-lines">${'<span class="flow-answer-line"></span>'.repeat(boundedCount(answer.lines, MAX_ANSWER_LINES))}</div>`;
   }
   const width = Number.isFinite(Number(answer.widthMm)) ? Number(answer.widthMm) : 60;
   const unit = answer.unit ? `<span class="flow-answer-unit">${isolateForeignRuns(answer.unit, direction)}</span>` : '';
