@@ -18,6 +18,25 @@
   box-sizing: border-box;
 }
 
+/*
+ * THE THEME (WHIT-673). The colours a theme can change are custom properties,
+ * and each default is the literal it replaced, so a document without a
+ * `theme` prints exactly as before. html.js writes the caller's validated hex
+ * values over these on :root - which outranks `html` on specificity, so the
+ * caller's theme wins although its rule comes first in the page. The body
+ * carries `flow-themed` when there is a theme, for the few rules that only
+ * make sense with a brand (the running head's heavier rule and its accent).
+ */
+html {
+  --flow-ink: #111111;
+  --flow-muted: #444444;
+  --flow-accent: transparent;
+  --flow-line: #cccccc;
+  --flow-grid: #999999;
+  --flow-tint: #eeeeee;
+}
+
+
 html,
 body {
   margin: 0;
@@ -25,7 +44,7 @@ body {
   font-family: var(--flow-font);
   font-size: 10.5pt;
   line-height: 1.55;
-  color: #111111;
+  color: var(--flow-ink);
   background: #ffffff;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -151,12 +170,12 @@ body {
   gap: 4mm;
   font-size: 8.5pt;
   line-height: 1.3;
-  color: #444444;
+  color: var(--flow-muted);
 }
 
 .flow-running-header {
   bottom: calc(100% - var(--flow-margin-top) + 3mm);
-  border-bottom: 0.3mm solid #cccccc;
+  border-bottom: 0.3mm solid var(--flow-line);
   padding-bottom: 1.5mm;
 }
 
@@ -167,7 +186,7 @@ body {
 
 .flow-running-footer {
   top: calc(var(--flow-margin-top) + var(--flow-content-height) + 4mm);
-  border-top: 0.3mm solid #cccccc;
+  border-top: 0.3mm solid var(--flow-line);
   padding-top: 1.5mm;
 }
 
@@ -263,14 +282,14 @@ body {
 
 .flow-table th,
 .flow-table td {
-  border: 0.25mm solid #999999;
+  border: 0.25mm solid var(--flow-grid);
   padding: 1.2mm 1.8mm;
   text-align: start;
   vertical-align: top;
 }
 
 .flow-table th {
-  background: #eeeeee;
+  background: var(--flow-tint);
   font-weight: 700;
 }
 
@@ -416,4 +435,325 @@ body {
 .flow-toc-level-3 {
   padding-inline-start: 12mm;
   font-size: 9.5pt;
+}
+
+/* ---- Themed running head, and rich slots (WHIT-673) ------------------------ */
+
+.flow-themed .flow-running-header {
+  border-bottom: 0.6mm solid var(--flow-ink);
+}
+
+/* A short accent segment at the start of the head's rule. */
+.flow-themed .flow-running-header::after {
+  content: "";
+  position: absolute;
+  bottom: -0.6mm;
+  inset-inline-start: 0;
+  width: 28mm;
+  height: 0.6mm;
+  background: var(--flow-accent);
+}
+
+/* A slot built from parts rather than one line of text. It lays out in a row
+ * (image, words, badge) and does not clip, because a logo cut off by an
+ * ellipsis is worse than a slightly crowded head. */
+.flow-running-slot.flow-running-rich {
+  display: flex;
+  align-items: center;
+  gap: 3mm;
+  white-space: normal;
+  overflow: visible;
+}
+
+.flow-running-slot-center.flow-running-rich {
+  justify-content: center;
+}
+
+.flow-running-slot-end.flow-running-rich {
+  justify-content: flex-end;
+}
+
+.flow-running-image {
+  display: block;
+  width: auto;
+  flex: none;
+}
+
+.flow-running-words {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.flow-running-words .flow-running-text {
+  color: var(--flow-ink);
+}
+
+.flow-running-has-sub .flow-running-text {
+  font-size: 11pt;
+  font-weight: 700;
+}
+
+.flow-running-subtext {
+  font-size: 8pt;
+}
+
+.flow-running-badge {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 16mm;
+  padding: 0.6mm 2.5mm;
+  border: 0.5mm solid var(--flow-ink);
+  border-radius: 2mm;
+  color: var(--flow-ink);
+}
+
+.flow-running-badge-label {
+  font-size: 6.5pt;
+  color: var(--flow-muted);
+}
+
+.flow-running-badge-value {
+  font-size: 15pt;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+/* ---- Form blocks (WHIT-673) -------------------------------------------------
+ *
+ * Panels and boxes are drawn in the theme's colours. The candidate's writing
+ * lines and character boxes are drawn in INK, not the faint line colour,
+ * because a photocopy must not lose them; ruled answer lines use the grid
+ * colour, so a page of them guides the hand without shouting.
+ */
+
+.flow-panel {
+  margin: 0 0 5mm;
+  padding: 3.5mm 4.5mm;
+  border-radius: 2.5mm;
+}
+
+.flow-panel-outline {
+  border: 0.3mm solid var(--flow-line);
+}
+
+.flow-panel-tint {
+  background: var(--flow-tint);
+}
+
+.flow-panel-plain {
+  padding: 0;
+}
+
+.flow-panel-title {
+  margin: 0 0 2mm;
+  font-weight: 700;
+}
+
+.flow-facts {
+  display: grid;
+  margin: 0 0 5mm;
+  border: 0.3mm solid var(--flow-line);
+  border-radius: 2.5mm;
+  overflow: hidden;
+}
+
+.flow-facts-1 { grid-template-columns: 1fr; }
+.flow-facts-2 { grid-template-columns: repeat(2, 1fr); }
+.flow-facts-3 { grid-template-columns: repeat(3, 1fr); }
+.flow-facts-4 { grid-template-columns: repeat(4, 1fr); }
+.flow-facts-5 { grid-template-columns: repeat(5, 1fr); }
+.flow-facts-6 { grid-template-columns: repeat(6, 1fr); }
+
+.flow-fact {
+  display: flex;
+  flex-direction: column;
+  padding: 2.5mm 3.5mm;
+  border-inline-start: 0.3mm solid var(--flow-line);
+}
+
+.flow-fact:first-child {
+  border-inline-start: 0;
+}
+
+.flow-fact-label {
+  font-size: 7.5pt;
+  color: var(--flow-muted);
+}
+
+.flow-fact-value {
+  font-size: 11pt;
+  font-weight: 700;
+}
+
+.flow-field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4mm 8mm;
+}
+
+.flow-field {
+  display: flex;
+  flex-direction: column;
+  gap: 1mm;
+}
+
+.flow-field-full {
+  grid-column: 1 / -1;
+}
+
+.flow-field-label {
+  font-size: 8pt;
+  color: var(--flow-muted);
+}
+
+.flow-field-line {
+  display: block;
+  height: 7mm;
+  border-bottom: 0.3mm solid var(--flow-ink);
+}
+
+/* Character boxes run left to right whatever the page direction: they hold
+ * digits, and a student number is written in reading order of its digits. */
+.flow-field-boxes {
+  display: flex;
+  gap: 1mm;
+  direction: ltr;
+}
+
+.flow-field-box {
+  width: 6mm;
+  height: 7mm;
+  border: 0.3mm solid var(--flow-ink);
+  border-radius: 1mm;
+}
+
+.flow-list-items {
+  margin: 0;
+  padding-inline-start: 5mm;
+}
+
+.flow-list-items li {
+  margin: 0.6mm 0;
+}
+
+.flow-question {
+  display: grid;
+  grid-template-columns: 8mm 1fr auto;
+  column-gap: 3mm;
+  margin: 0 0 5.5mm;
+}
+
+.flow-question-number {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 7mm;
+  height: 7mm;
+  margin-top: 0.4mm;
+  border-radius: 50%;
+  background: var(--flow-ink);
+  color: #ffffff;
+  font-size: 9pt;
+  font-weight: 700;
+}
+
+.flow-question-number-none {
+  background: transparent;
+}
+
+.flow-question-text {
+  font-weight: 500;
+}
+
+.flow-question-marks {
+  align-self: start;
+  margin-top: 0.4mm;
+  padding: 0.2mm 2.5mm;
+  border: 0.3mm solid var(--flow-line);
+  border-radius: 9mm;
+  font-size: 8pt;
+  white-space: nowrap;
+}
+
+.flow-question-body {
+  grid-column: 2 / 4;
+  margin-top: 2mm;
+}
+
+.flow-choices {
+  display: grid;
+  gap: 1.8mm 6mm;
+}
+
+.flow-choices-1 { grid-template-columns: 1fr; }
+.flow-choices-2 { grid-template-columns: repeat(2, 1fr); }
+.flow-choices-3 { grid-template-columns: repeat(3, 1fr); }
+.flow-choices-4 { grid-template-columns: repeat(4, 1fr); }
+
+.flow-choice {
+  display: flex;
+  align-items: center;
+  gap: 2.5mm;
+}
+
+.flow-choice-mark {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 5.5mm;
+  height: 5.5mm;
+  border: 0.35mm solid var(--flow-ink);
+  border-radius: 50%;
+  font-size: 8pt;
+  font-weight: 700;
+}
+
+.flow-question-note {
+  margin-top: 1mm;
+  font-size: 8pt;
+  color: var(--flow-muted);
+}
+
+.flow-answer-lines {
+  display: flex;
+  flex-direction: column;
+}
+
+.flow-answer-line {
+  display: block;
+  height: 8mm;
+  border-bottom: 0.25mm solid var(--flow-grid);
+}
+
+.flow-answer-box {
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 11mm;
+  padding: 0 3mm;
+  border: 0.3mm solid var(--flow-ink);
+  border-radius: 1.5mm;
+  color: var(--flow-muted);
+  font-size: 9pt;
+}
+
+.flow-divider {
+  display: flex;
+  align-items: center;
+  gap: 4mm;
+  margin: 3mm 0 5mm;
+  font-size: 9pt;
+  color: var(--flow-muted);
+}
+
+.flow-divider::before,
+.flow-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 0.3mm solid var(--flow-line);
 }

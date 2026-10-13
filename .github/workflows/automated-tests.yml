@@ -1485,6 +1485,27 @@ jobs:
           # And each breakBefore claims a page of its own.
           test "${hinted}" -eq 3
 
+      # The form blocks, the theme and a running head built from parts
+      # (WHIT-673). Forty questions cannot fit one page and a question is never
+      # split, so a render that returns at all placed every one whole: a unit
+      # that cannot be placed is reported and fails the render.
+      - name: Flowing render draws the form blocks (RTL and LTR)
+        run: |
+          for dir in rtl ltr; do
+            node render-service/scripts/generate-flow-form-fixture.js --direction "$dir" --out "/tmp/flow-form-$dir.json"
+            curl -fsS -X POST http://127.0.0.1:18130/render/flow -H 'Content-Type: application/json' -H 'X-Render-Secret: ci_render_shared_secret_min_32_chars_zz' --data @"/tmp/flow-form-$dir.json" -D "/tmp/flow-form-$dir.headers" -o "/tmp/flow-form-$dir.pdf"
+            test -s "/tmp/flow-form-$dir.pdf"
+            head -c 5 "/tmp/flow-form-$dir.pdf" | grep -q '%PDF-'
+            pages=$(grep -i '^x-render-page-count:' "/tmp/flow-form-$dir.headers" | grep -o '[0-9][0-9]*' | head -1)
+            echo "form fixture ($dir): ${pages} pages"
+            # The running head carries an embedded image: it must be IN the PDF.
+            grep -a -q '/Subtype */Image' "/tmp/flow-form-$dir.pdf"
+            # A cover page plus forty questions: more than two pages, and far
+            # fewer than forty (which would mean each question took a page).
+            test "${pages}" -ge 3
+            test "${pages}" -le 12
+          done
+
       - name: Flowing render round-trip (LTR)
         run: |
           curl -fsS -X POST http://127.0.0.1:18130/render/flow \
