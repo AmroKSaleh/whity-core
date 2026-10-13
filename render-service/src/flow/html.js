@@ -255,9 +255,16 @@ function renderQr(block, direction) {
  * caller of buildFlowHtml that skipped validation still cannot ask for a
  * string of any length it likes.
  */
-function boundedCount(value, max) {
+function repeatBounded(markup, value, max) {
   const n = Math.trunc(Number(value));
-  return Number.isFinite(n) ? Math.min(Math.max(n, 1), max) : 1;
+  const count = Number.isFinite(n) && n > 1 ? n : 1;
+  let out = '';
+  // The loop's own bound is the constant, not the payload's number.
+  for (let i = 0; i < max; i += 1) {
+    if (i >= count) break;
+    out += markup;
+  }
+  return out;
 }
 
 function unitOpen(block, type, extraClass) {
@@ -286,7 +293,7 @@ function renderFields(block, direction) {
       const full = field.span === 'full' ? ' flow-field-full' : '';
       const input =
         field.kind === 'boxes'
-          ? `<span class="flow-field-boxes">${'<span class="flow-field-box"></span>'.repeat(boundedCount(field.boxes, MAX_FIELD_BOXES))}</span>`
+          ? `<span class="flow-field-boxes">${repeatBounded('<span class="flow-field-box"></span>', field.boxes, MAX_FIELD_BOXES)}</span>`
           : '<span class="flow-field-line"></span>';
       return `<div class="flow-field${full}"><span class="flow-field-label">${isolateForeignRuns(field.label, direction)}</span>${input}</div>`;
     })
@@ -305,7 +312,7 @@ function renderList(block, direction) {
 function renderAnswer(answer, direction) {
   if (!answer) return '';
   if (answer.kind === 'lines') {
-    return `<div class="flow-answer-lines">${'<span class="flow-answer-line"></span>'.repeat(boundedCount(answer.lines, MAX_ANSWER_LINES))}</div>`;
+    return `<div class="flow-answer-lines">${repeatBounded('<span class="flow-answer-line"></span>', answer.lines, MAX_ANSWER_LINES)}</div>`;
   }
   const width = Number.isFinite(Number(answer.widthMm)) ? Number(answer.widthMm) : 60;
   const unit = answer.unit ? `<span class="flow-answer-unit">${isolateForeignRuns(answer.unit, direction)}</span>` : '';
