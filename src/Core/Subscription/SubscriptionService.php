@@ -87,7 +87,8 @@ final class SubscriptionService
      * — it is never subscribed.
      *
      * @param array{status?: ?string, current_period_end?: ?string, grace_until?: ?string,
-     *              enforcement_mode?: ?string, external_ref?: ?string} $changes
+     *              enforcement_mode?: ?string, external_ref?: ?string,
+     *              billed_externally?: bool} $changes
      * @throws SubscriptionException On the system tenant or an invalid status/mode.
      */
     public function setSubscription(int $tenantId, array $changes): void
@@ -112,6 +113,13 @@ final class SubscriptionService
             'grace_until'        => $changes['grace_until']        ?? ($current['grace_until'] ?? null),
             'enforcement_mode'   => $changes['enforcement_mode']   ?? ($current['enforcement_mode'] ?? null),
             'external_ref'       => $changes['external_ref']       ?? ($current['external_ref'] ?? null),
+            /*
+             * Whose tenant this is (migration 158). Carried through the same merge as the rest
+             * so a caller that does not mention it cannot silently clear it — which matters
+             * here more than elsewhere, because clearing it would quietly re-admit a tenant to
+             * the local billing run.
+             */
+            'billed_externally'  => $changes['billed_externally']  ?? ($current['billed_externally'] ?? false),
         ];
 
         $this->repo->upsert($tenantId, $state);

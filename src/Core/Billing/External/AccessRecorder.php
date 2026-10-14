@@ -98,6 +98,15 @@ final class AccessRecorder
                 'status' => $status,
                 'current_period_end' => $snapshot->accessUntil,
                 'external_ref' => $snapshot->subscriptionRef,
+                /*
+                 * WHOSE TENANT THIS IS, from the service's own answer, so the local billing
+                 * run can refuse a subject it does not own (migration 158).
+                 *
+                 * Written on EVERY reconciliation rather than once, so the two sides converge
+                 * instead of drifting: a tenant handed back to the local engine stops being
+                 * marked the moment the service says so, with no second call to remember.
+                 */
+                'billed_externally' => $snapshot->billedByService,
             ]);
         } catch (SubscriptionException $e) {
             // A status this deployment does not know cannot be written, and

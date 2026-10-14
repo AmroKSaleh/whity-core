@@ -26,6 +26,20 @@ namespace Whity\Core\Billing\External;
 final class AccessSnapshot
 {
     /**
+     * The owner value that means "YOU bill this subject" — this platform.
+     *
+     * NAMED FOR US, NOT FOR THEM, deliberately. The obvious implementation is
+     * to match the billing service's own name and block on it, which hardcodes
+     * one vendor into a platform that is meant to work with any of them, and
+     * leaves every other service unrecognised and therefore unguarded.
+     *
+     * So the test is inverted: the service either says this subject is the
+     * PRODUCT's to bill, or it names somebody else, and anybody else means
+     * hands off. A second billing service needs no change here.
+     */
+    public const BILLED_BY_PRODUCT = 'product';
+
+    /**
      * @param string      $subjectRef  The id the billing service knows this payer by.
      * @param bool        $hasAccess   The answer. Not computed here.
      * @param string|null $planCode    The plan's code on the billing side, matched
@@ -60,6 +74,19 @@ final class AccessSnapshot
          * a state, a scheduled change.
          */
         public readonly ?string $planCodeAtPeriodEnd = null,
+        /**
+         * Whether the BILLING SERVICE owns this subject's billing, as opposed
+         * to this platform's own engine.
+         *
+         * This platform ships a billing engine AND can be pointed at an
+         * external billing service, so one payer can be reachable by both.
+         * Nothing structurally stops them charging the same person, which is
+         * the failure this field exists to close from our side.
+         *
+         * False when the service did not say — see fromPayload for why "not
+         * said" must not mean "stop billing".
+         */
+        public readonly bool $billedByService = false,
     ) {
     }
 
@@ -110,6 +137,31 @@ final class AccessSnapshot
             ($payload['cancel_at_period_end'] ?? false) === true,
             self::stringOrNull($payload['subscription_id'] ?? null),
             self::stringOrNull($payload['plan_at_period_end'] ?? null),
+            /*
+             * WHO MAY BILL THIS SUBJECT, when the service says so at all.
+             *
+             * Three cases, and only one of them blocks:
+             *   absent      — the service does not publish an owner. Not said.
+             *   'product'   — ours to bill. Carry on.
+             *   anything else — somebody else owns this subject. Hands off.
+             *
+             * ABSENT MUST NOT BLOCK, and that is the decision worth defending.
+             * The cautious-looking default is to read silence as "assume it is
+             * theirs", which turns a billing service that has never heard of
+             * this field into a deployment that silently stops invoicing
+             * everybody — no error, no log line, and nothing connecting the
+             * symptom to a JSON key nobody sent.
+             *
+             * So this is purely additive. The existing guard in
+             * SubscriptionBillingRun, which skips a tenant holding an external
+             * subscription reference, still covers the live double-charge on
+             * its own. This catches the case that one cannot: a subject the
+             * service OWNS but has never billed, who therefore has no external
+             * reference to be recognised by.
+             */
+            is_string($payload['billed_by'] ?? null)
+                && $payload['billed_by'] !== ''
+                && $payload['billed_by'] !== self::BILLED_BY_PRODUCT,
         );
     }
 
