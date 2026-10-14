@@ -287,6 +287,11 @@ final class SubscriptionBillingRun
                 AND current_period_end <= :now
                 AND tenant_id <> :system
                 AND external_ref IS NULL
+                -- NOR A TENANT THE BILLING SERVICE OWNS (migration 158). `external_ref IS NULL`
+                -- above asks "is there a live external subscription", which is a different
+                -- question from "whose tenant is this" and cannot see a subject the service
+                -- owns but has never billed. Both, because they fail in different directions.
+                AND billed_externally = FALSE
               ORDER BY current_period_end ASC, tenant_id ASC
               LIMIT :limit'
         );
