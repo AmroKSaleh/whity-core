@@ -1204,6 +1204,22 @@ jobs:
         working-directory: render-service
         run: npm ci
 
+      # THIS LOCKFILE WAS AUDITED BY NOTHING ON A PR until now, which is the
+      # gap that let a bad dependency walk in unremarked. The `web` job's
+      # `npm audit` runs from the repository root and therefore covers only
+      # the root lockfile; this project is deliberately outside that workspace
+      # (see the comment on the install step above), so its own lockfile was
+      # reachable only by the SCHEDULED re-audit in security-scan.yml. A PR
+      # introducing a critical advisory here passed every gate and waited for
+      # the nightly to notice.
+      #
+      # `critical` matches the root gate rather than being argued separately;
+      # `high` would fail today on braces/brace-expansion arriving through
+      # jest, which are dev-only and have no patched version in existence.
+      - name: npm security audit
+        working-directory: render-service
+        run: npm audit --audit-level=critical
+
       # Bundles web/components/documents/print-document.tsx + packages/ui/src
       # in from source — the single most likely thing to break when either
       # side changes independently, and the cheapest to check (no Docker).
@@ -1592,12 +1608,24 @@ jobs:
         run: npm ci
 
       # Fail on a critical advisory in an installed npm dependency
-      # (WC-232ec317). Temporarily lowered from --audit-level=high: sharp's
-      # CVE-2026-33327 et al. (GHSA-f88m-g3jw-g9cj) has no forward fix — next
-      # vendors its own pinned sharp range (still ^0.34.5 as of next@16.2.11)
-      # and the only "fix" npm offers is downgrading next to 14.2.35, which is
-      # not viable. Re-tighten to --audit-level=high once Next.js ships a
-      # release with an unaffected sharp range.
+      # (WC-232ec317). Lowered from --audit-level=high, and the reason has
+      # CHANGED since this note was first written, which is why it is being
+      # rewritten rather than left: the original blocker was sharp's
+      # GHSA-f88m-g3jw-g9cj, and sharp is now on 0.35.5 and unaffected.
+      #
+      # What blocks `high` TODAY is braces (GHSA-vfj7-8cjw-p6xm). It has no
+      # patched version in existence — 3.0.3 is both the vulnerable ceiling
+      # and the latest release — and it arrives through micromatch/fast-glob
+      # under shadcn and the eslint/ts-morph tooling. npm audit reports it
+      # eight times because it names every package in the chain that reaches
+      # it; it is one advisory, build-time only, and nothing shipped depends
+      # on it. npm's suggested "fixes" are downgrades (shadcn 4.21 -> 1.0.0,
+      # eslint-config-next 16.3 -> 14.2.35) and are not fixes.
+      #
+      # So: re-tighten to --audit-level=high when braces ships a patch or
+      # leaves the tree, NOT when Next.js moves. Check both before assuming a
+      # dependency is stuck — an advisory can also be resolved by its parent
+      # dropping the dependency, which is how extract-zip left this repo.
       - name: npm security audit
         working-directory: .
         run: npm audit --audit-level=critical
