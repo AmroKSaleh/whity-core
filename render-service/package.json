@@ -31,5 +31,8 @@
     "jest": "^29.7.0",
     "pdfjs-dist": "^6.2.108",
     "supertest": "^7.1.0"
+  },
+  "overrides": {
+    "basic-ftp": "^6.2.1"
   }
 }
