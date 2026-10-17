@@ -18,19 +18,19 @@
     "flow:geometry": "node scripts/check-flow-rtl-geometry.js"
   },
   "dependencies": {
-    "bwip-js": "^4.11.2",
-    "express": "^5.1.0",
-    "express-rate-limit": "^8.6.1",
-    "katex": "^0.18.1",
+    "bwip-js": "^4.11.4",
+    "express": "^5.3.0",
+    "express-rate-limit": "^8.7.1",
+    "katex": "^0.19.0",
     "puppeteer-core": "^24.10.0",
-    "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
   },
   "devDependencies": {
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.2",
     "jest": "^29.7.0",
-    "pdfjs-dist": "^6.2.108",
-    "supertest": "^7.1.0"
+    "pdfjs-dist": "^6.4.299",
+    "supertest": "^7.3.1"
   },
   "overrides": {
     "basic-ftp": "^6.2.1"
