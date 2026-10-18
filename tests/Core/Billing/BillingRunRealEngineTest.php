@@ -285,6 +285,70 @@ final class BillingRunRealEngineTest extends TestCase
     }
 
     /**
+     * A TENANT THE BILLING SERVICE OWNS IS NEVER BILLED LOCALLY (migration 158).
+     *
+     * This platform ships a billing engine and can also be pointed at an external billing
+     * service, and a deployment part-way through moving between them runs both at once. The
+     * failure being closed is one payer charged twice, which is not recoverable by apologising.
+     */
+    public function testATenantOwnedByTheBillingServiceIsNotBilled(): void
+    {
+        $this->priceThePlan(5000, 'JOD', 'month');
+        $this->subscribe(self::TENANT, '2026-10-01 00:00:00');
+        $this->pdo->exec(
+            'UPDATE tenant_plan SET billed_externally = TRUE WHERE tenant_id = ' . self::TENANT
+        );
+
+        $result = $this->billing->run($this->now);
+
+        self::assertSame(0, $result['invoiced']);
+        // Never considered, not merely refused later — same reasoning as the system tenant
+        // above. A non-zero `skipped` would mean the query stopped excluding them and
+        // something deeper was catching it instead.
+        self::assertSame(0, $result['skipped']);
+        self::assertSame([], $this->invoices->listForTenant(self::TENANT));
+    }
+
+    /**
+     * AND THE SAME TENANT IS BILLED WHEN NOBODY ELSE OWNS THEM, so the exclusion above is a
+     * narrowing rather than an off switch.
+     *
+     * Without this, setting the column unconditionally — or defaulting it wrong in a migration
+     * — would stop a self-hosted deployment billing anybody, and every test above would still
+     * pass because none of them set it.
+     */
+    public function testATenantNobodyElseOwnsIsStillBilled(): void
+    {
+        $this->priceThePlan(5000, 'JOD', 'month');
+        $this->subscribe(self::TENANT, '2026-10-01 00:00:00');
+
+        self::assertSame(1, $this->billing->run($this->now)['invoiced']);
+    }
+
+    /**
+     * THE CASE THE EXISTING GUARD CANNOT SEE, and the reason this column exists at all.
+     *
+     * `external_ref IS NULL` already skips a tenant holding a live external subscription. It
+     * asks "is there currently an external subscription", not "whose tenant is this" — so a
+     * subject the service OWNS but has never billed, somebody mid-signup or on a free tier
+     * over there, has no external reference and is invisible to it. If a local tenant_plan row
+     * survives from before the migration, the local run bills them.
+     */
+    public function testAnOwnedTenantWithNoExternalReferenceIsStillNotBilled(): void
+    {
+        $this->priceThePlan(5000, 'JOD', 'month');
+        $this->subscribe(self::TENANT, '2026-10-01 00:00:00');
+        $this->pdo->exec(
+            'UPDATE tenant_plan SET billed_externally = TRUE, external_ref = NULL
+              WHERE tenant_id = ' . self::TENANT
+        );
+
+        $result = $this->billing->run($this->now);
+
+        self::assertSame(0, $result['invoiced'], 'A tenant the service owns was billed because it had no external reference.');
+    }
+
+    /**
      * A misconfigured plan is skipped LOUDLY — not billed at zero, which would
      * look like a settled month, and not raised, which would leave every tenant
      * after it unbilled.

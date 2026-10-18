@@ -31,6 +31,28 @@ updates:
       npm-minor-patch:
         update-types: ["minor", "patch"]
 
+  # The render service, which has its OWN package.json and lockfile and is NOT a
+  # workspace of the root — so nothing above reaches it.
+  #
+  # Its absence here is not theoretical. A critical proxy-addr advisory was fixed
+  # in the root lockfile and closed, while the identical dependency sat
+  # unpatched in render-service/package-lock.json for months: GitHub kept
+  # RAISING the alert, because the scanner reads every lockfile, but Dependabot
+  # never opened a PR for it, because no ecosystem/directory pair covered the
+  # directory. The alert then reads as a regression rather than as a gap.
+  #
+  # Any future sidecar with its own lockfile needs its own entry for the same
+  # reason. The root entry covers the workspaces only because they share the
+  # root lockfile.
+  - package-ecosystem: "npm"
+    directory: "/render-service"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      npm-minor-patch:
+        update-types: ["minor", "patch"]
+
   # GitHub Actions workflow dependencies (would have surfaced #198).
   - package-ecosystem: "github-actions"
     directory: "/"

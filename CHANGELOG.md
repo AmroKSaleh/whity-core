@@ -6,6 +6,12 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+## [0.2.15] - 2026-10-18
+
+### Fixed
+
+- **A mail client's one-click unsubscribe was refused before it reached the plugin that sent the email.** RFC 8058 has the client POST the form-encoded body `List-Unsubscribe=One-Click` to the address in an email's `List-Unsubscribe` header, which a plugin serves as a public webhook. `RequestBodyValidator` accepts JSON objects and multipart uploads only, so it answered `400 Invalid request body` and the button in Gmail or Apple Mail failed silently: the person asked to stop and kept getting mail. That exact body, form-encoded, now passes through as an empty body; any other form-encoded body is still refused.
+
 ## [0.2.14] - 2026-10-13
 
 ### Fixed

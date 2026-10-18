@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Core\Subscription;
 
 use PDO;
+use Whity\Core\Db\DbBool;
 
 /**
  * Data-access for the billing lifecycle columns of `tenant_plan` (WC-billing).
@@ -33,7 +34,7 @@ final class SubscriptionRepository
     public function findForTenant(int $tenantId): ?array
     {
         $stmt = $this->db->prepare(
-            'SELECT tenant_id, plan_id, status, current_period_end, grace_until, enforcement_mode, external_ref
+            'SELECT tenant_id, plan_id, status, current_period_end, grace_until, enforcement_mode, external_ref, billed_externally
              FROM tenant_plan WHERE tenant_id = :tenant_id'
         );
         $stmt->execute([':tenant_id' => $tenantId]);
@@ -50,6 +51,9 @@ final class SubscriptionRepository
             'grace_until'        => $row['grace_until'] !== null ? (string) $row['grace_until'] : null,
             'enforcement_mode'   => $row['enforcement_mode'] !== null ? (string) $row['enforcement_mode'] : null,
             'external_ref'       => $row['external_ref'] !== null ? (string) $row['external_ref'] : null,
+            // DbBool, not a bare cast: the same logical value arrives as a native bool,
+            // '1'/'0' or 't'/'f' depending on the driver, and a bare (bool) reads 'f' as true.
+            'billed_externally'  => DbBool::of($row['billed_externally'] ?? false),
         ];
     }
 
@@ -58,21 +62,25 @@ final class SubscriptionRepository
      * absent (plan_id left null; a plan is assigned separately via PlanService).
      *
      * @param array{status: ?string, current_period_end: ?string, grace_until: ?string,
-     *              enforcement_mode: ?string, external_ref: ?string} $state
+     *              enforcement_mode: ?string, external_ref: ?string,
+     *              billed_externally: bool} $state
      */
     public function upsert(int $tenantId, array $state): void
     {
         $stmt = $this->db->prepare(
             'INSERT INTO tenant_plan
-                 (tenant_id, status, current_period_end, grace_until, enforcement_mode, external_ref, assigned_at)
+                 (tenant_id, status, current_period_end, grace_until, enforcement_mode, external_ref,
+                  billed_externally, assigned_at)
              VALUES
-                 (:tenant_id, :status, :period_end, :grace_until, :enforcement_mode, :external_ref, NOW())
+                 (:tenant_id, :status, :period_end, :grace_until, :enforcement_mode, :external_ref,
+                  :billed_externally, NOW())
              ON CONFLICT (tenant_id) DO UPDATE SET
                  status             = EXCLUDED.status,
                  current_period_end = EXCLUDED.current_period_end,
                  grace_until        = EXCLUDED.grace_until,
                  enforcement_mode   = EXCLUDED.enforcement_mode,
-                 external_ref       = EXCLUDED.external_ref'
+                 external_ref       = EXCLUDED.external_ref,
+                 billed_externally  = EXCLUDED.billed_externally'
         );
         $stmt->execute([
             ':tenant_id'        => $tenantId,
@@ -81,6 +89,7 @@ final class SubscriptionRepository
             ':grace_until'      => $state['grace_until'],
             ':enforcement_mode' => $state['enforcement_mode'],
             ':external_ref'     => $state['external_ref'],
+            ':billed_externally' => $state['billed_externally'] ? 1 : 0,
         ]);
     }
 }
