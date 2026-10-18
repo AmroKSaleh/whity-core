@@ -42,6 +42,15 @@ use Whity\Sdk\Http\Response;
  * {@see JsonBody::parsed()} instead of decoding php://input a second time (it is
  * read-once on a persistent worker).
  *
+ * One exact exception to the shape rule: the RFC 8058 one-click unsubscribe
+ * POST. A mail client (Gmail, Apple Mail, Outlook) sends the body
+ * `List-Unsubscribe=One-Click` as `application/x-www-form-urlencoded` to the
+ * URL in an email's List-Unsubscribe header, which is a public plugin webhook.
+ * Refusing it as malformed JSON made the client's unsubscribe button fail
+ * silently, so mail kept arriving to a person who had asked it to stop. That
+ * one body passes through as an empty body (the handler reads nothing from
+ * it); any other form-encoded body is still refused.
+ *
  * Deliberate non-targets: reads (GET/HEAD/OPTIONS) carry no body worth
  * validating and pass through untouched, as does a genuinely EMPTY body on any
  * method (a no-op PATCH/DELETE is legitimate) — those resolve to an empty array
@@ -66,6 +75,9 @@ final class RequestBodyValidator
      */
     private const BODY_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
 
+    /** The one body RFC 8058 defines for a one-click unsubscribe POST. */
+    public const ONE_CLICK_UNSUBSCRIBE_BODY = 'List-Unsubscribe=One-Click';
+
     /** The single, stable message returned for every envelope rejection. */
     private const GENERIC_MESSAGE = 'Invalid request body';
 
@@ -79,6 +91,19 @@ final class RequestBodyValidator
     public function __construct(?int $maxBytes = null)
     {
         $this->maxBytes = $maxBytes ?? self::maxBytesFromEnv();
+    }
+
+    /**
+     * Whether a body is RFC 8058's one-click unsubscribe POST: form-encoded
+     * (any parameters after the media type are ignored) and exactly
+     * `List-Unsubscribe=One-Click`.
+     */
+    public static function isOneClickUnsubscribe(?string $contentType, string $body): bool
+    {
+        $mediaType = strtolower(trim(explode(';', (string) $contentType, 2)[0]));
+
+        return $mediaType === 'application/x-www-form-urlencoded'
+            && trim($body) === self::ONE_CLICK_UNSUBSCRIBE_BODY;
     }
 
     /**
@@ -106,6 +131,13 @@ final class RequestBodyValidator
         }
 
         $body = $request->getBody();
+
+        // RFC 8058 one-click unsubscribe: exactly this body, form-encoded. It
+        // carries nothing a handler reads, so it continues as an empty body.
+        if (self::isOneClickUnsubscribe($request->getHeader('Content-Type'), $body)) {
+            $request->setAttribute(JsonBody::ATTR_PARSED_BODY, []);
+            return $next($request);
+        }
 
         // An empty body is always legitimate (e.g. a no-op PATCH/DELETE). It is
         // not subjected to a shape check; the handler sees [].

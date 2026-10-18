@@ -175,6 +175,44 @@ class RequestBodyValidatorTest extends TestCase
         $this->assertGenericRejection($response);
     }
 
+    // ---- RFC 8058 one-click unsubscribe ------------------------------------
+
+    public function testOneClickUnsubscribeBodyPassesAsAnEmptyBody(): void
+    {
+        $request = new Request(
+            'POST',
+            '/api/v1/acme/webhooks/unsubscribe?t=abc',
+            ['Content-Type' => 'application/x-www-form-urlencoded; charset=utf-8'],
+            'List-Unsubscribe=One-Click'
+        );
+
+        $reached = false;
+        $seen = null;
+        $response = $this->validator->handle($request, $this->nextHandler($reached, $seen));
+
+        $this->assertTrue($reached, 'A mail client\'s one-click unsubscribe must reach the handler');
+        $this->assertSame(200, $response->getStatusCode());
+        $this->assertNotNull($seen);
+        $this->assertSame([], $seen->getAttribute(\Whity\Http\JsonBody::ATTR_PARSED_BODY));
+    }
+
+    public function testOtherFormEncodedBodiesAreStillRejected(): void
+    {
+        foreach ([
+            ['application/x-www-form-urlencoded', 'List-Unsubscribe=One-Click&extra=1'],
+            ['application/x-www-form-urlencoded', 'email=a@b.c'],
+            ['text/plain', 'List-Unsubscribe=One-Click'],
+            [null, 'List-Unsubscribe=One-Click'],
+        ] as [$type, $body]) {
+            $request = new Request('POST', '/api/users', $type === null ? [] : ['Content-Type' => $type], $body);
+            $reached = false;
+            $response = $this->validator->handle($request, $this->nextHandler($reached));
+
+            $this->assertFalse($reached, "Only the exact form-encoded one-click body passes ({$type} / {$body})");
+            $this->assertGenericRejection($response);
+        }
+    }
+
     // ---- shape -----------------------------------------------------------
 
     public function testMalformedJsonRejectedWithGeneric400(): void
