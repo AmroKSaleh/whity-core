@@ -97,9 +97,22 @@
  * flags is measuring a browser this service does not run.
  */
 
-const puppeteer = require('puppeteer-core');
-
 const { CHROMIUM_LAUNCH_ARGS, chromiumExecutablePath } = require('./renderer');
+
+/*
+ * puppeteer-core is ESM-only from v25 and is loaded where it is used, not at
+ * the top of this file. See the long note in src/renderer.js: a top-level
+ * require here is what broke every suite that loads src/server.js, including
+ * the many that never launch a browser.
+ *
+ * `runCapabilityProbe` already took its launcher as `deps.launch`, so a test
+ * that injects one never reaches this.
+ */
+async function launchChromium(options) {
+  const mod = await import('puppeteer-core');
+
+  return (mod.default ?? mod).launch(options);
+}
 
 /** CSS's own definition: 96px to the inch, 25.4mm to the inch. */
 const PX_PER_MM = 96 / 25.4;
@@ -720,7 +733,7 @@ async function withPage(browser, html, fn) {
  * @returns {Promise<object>} The report, always.
  */
 async function runCapabilityProbe(deps = {}) {
-  const launch = deps.launch || ((options) => puppeteer.launch(options));
+  const launch = deps.launch || ((options) => launchChromium(options));
   const startedAt = Date.now();
   let browser = null;
 
