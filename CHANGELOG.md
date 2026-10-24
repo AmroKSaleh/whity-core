@@ -6,6 +6,16 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+### Security
+
+- **The image now runs PHP 8.4.27, which carries the fixes for CVE-2026-109618 and CVE-2026-109619.** Both are rated 9.2 and are unauthenticated remote code execution, and both were reported exploited in the wild when PHP released the fix on 2026-10-21. **Anybody self-hosting Whity should update.** PHP 8.5 is not needed and does not help: the fixes were backported, so 8.5.12, 8.4.27, 8.3.36 and 8.2.35 all carry the same patch.
+- **`session.upload_progress.enabled` is now off, which mitigates CVE-2026-115560.** That one has no patch published at the time of this release and affects fully updated builds including 8.5.12, so moving the base image forward does not resolve it; it also closes the known attack paths for CVE-2026-109619. It has to be an ini setting rather than anything in application code, because PHP runs the upload-progress handler from the SAPI while parsing a multipart body and starts a session itself to do it — so the path is reachable by an unauthenticated POST, on routes unrelated to uploads, on a platform that never calls `session_start()` anywhere. Nothing in Whity reads upload progress. If you run Whity from source or from your own image rather than the published one, set this yourself.
+- **`expose_php` is now off.** PHP announced its exact patch version in `X-Powered-By` on every response, including responses the application never sees — a fatal during boot, a request refused before the kernel runs. On its own that is not a vulnerability; during an advisory it tells anyone asking which exploit to try first and how far behind a deployment is, without them having to probe for it.
+
+### Fixed
+
+- **The base image is pinned to an exact PHP patch version, so a dependency bot can see it.** It was `dunglas/frankenphp:1-php8.4`, and a floating tag gives Dependabot nothing to bump — the string is already correct for every patch release, so the `docker` watcher configured in `.github/dependabot.yml` ran every week, found the tag current and reported nothing. It had opened no pull requests at all, which is why 8.4.27 went unnoticed for three days. Nothing else would have caught it either: the only thing that rebuilds this image is a release, and releases are cut for application changes. `tests/Ops/BaseImagePinTest.php` now fails if the tag goes back to a floating one, because the pin and the Dependabot entry are one mechanism rather than two.
+
 ## [0.2.15] - 2026-10-18
 
 ### Fixed
