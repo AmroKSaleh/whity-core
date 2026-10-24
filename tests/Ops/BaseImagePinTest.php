@@ -67,10 +67,15 @@ final class BaseImagePinTest extends TestCase
 
         self::assertSame(1, $matched, 'no FROM dunglas/frankenphp:… AS base line in the Dockerfile');
 
+        // Read through `??` rather than indexing $m directly: a successful
+        // preg_match guarantees the group to a reader but not to PHPStan,
+        // which types the matches array as array{0?: string, 1?: non-empty-string}.
+        $tag = $m[1] ?? '';
+
         self::assertMatchesRegularExpression(
             '/php\d+\.\d+\.\d+/',
-            $m[1],
-            'the base image tag "'.$m[1].'" does not name an exact PHP patch version. '
+            $tag,
+            'the base image tag "'.$tag.'" does not name an exact PHP patch version. '
             .'Dependabot cannot bump a floating tag, so this turns the docker watcher into a no-op '
             .'and the next PHP security release will land here unnoticed, exactly as 8.4.27 did.',
         );
