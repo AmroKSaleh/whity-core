@@ -2,6 +2,19 @@
 # :latest drifted to PHP 8.5, whose new deprecations (e.g.
 # ReflectionProperty::setAccessible()) pollute every HTTP response in dev.
 #
+# PINNED TO AN EXACT PATCH, not the floating `1-php8.4`, and that is the point
+# rather than a detail. Dependabot has watched `package-ecosystem: docker` in
+# this directory the whole time, but a floating tag gives it nothing to bump:
+# the tag string never changes, so it opened no PR when PHP 8.4.27 shipped the
+# fixes for CVE-2026-109618 and CVE-2026-109619 (both CVSS 9.2, unauthenticated
+# RCE, exploited in the wild per watchTowr). A deployment running this image
+# was still on PHP 8.4.26 three days later and nothing in the pipeline had
+# noticed, because the only thing that rebuilds this image is a release, and a
+# release is cut for application changes rather than for base-image ones.
+#
+# So the version is written out here where a bump is a diff somebody reviews.
+# A stale exact pin is visible; a stale floating tag is not.
+#
 # Two stages (WC-172):
 #   * base    — runtime only. Dev and staging composes build THIS stage and
 #               bind-mount the checkout over /app, so it ships no code.
@@ -9,7 +22,7 @@
 #               production (no-dev) composer install. The release workflow
 #               builds this stage and pushes it to GHCR; container-based
 #               deployments run it as-is (see docs/wiki/Core-Update.md).
-FROM dunglas/frankenphp:1-php8.4 AS base
+FROM dunglas/frankenphp:1-php8.4.27 AS base
 
 # Install required packages for the PostgreSQL and zip extensions. libzip-dev
 # backs ext-zip, which the staged plugin-upload installer (WC-220) needs to
@@ -45,6 +58,32 @@ RUN { \
       echo 'post_max_size = 64M'; \
       echo 'memory_limit = 256M'; \
     } > "$PHP_INI_DIR/conf.d/zz-whity-uploads.ini"
+
+# Settings that exist for what a response would otherwise give away, or for a
+# request-parsing feature nothing here uses. Separate from the uploads ini on
+# purpose: these are not tuning, and a later limits change should not have to
+# reason about them.
+#
+# expose_php — PHP announces its exact patch version in X-Powered-By on every
+# response, including ones the application never sees (a fatal during boot, a
+# request refused before the kernel runs). That is a free answer to "is this
+# host worth firing the current RCE at", and it dates the deployment besides.
+# A sibling service in this estate turned it off for exactly that reason some
+# time ago; core never did, and a live deployment was found announcing its
+# patch level during the 2026-10 PHP advisories.
+#
+# session.upload_progress.enabled — the mitigation PHP published for
+# CVE-2026-115560, which is unpatched as of today and affects even 8.5.12, and
+# which also closes the known attack paths for CVE-2026-109619. It has to be an
+# ini setting rather than anything in application code: PHP runs the upload
+# progress handler from the SAPI while parsing a multipart body, and it starts
+# a session by itself to do so, so an unauthenticated POST reaches it on a
+# platform that — like this one — never calls session_start() anywhere.
+# Nothing here reads upload progress, so turning it off costs us nothing.
+RUN { \
+      echo 'expose_php = Off'; \
+      echo 'session.upload_progress.enabled = 0'; \
+    } > "$PHP_INI_DIR/conf.d/zz-whity-security.ini"
 
 # Set working directory
 WORKDIR /app
