@@ -6,6 +6,8 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+## [0.2.16] - 2026-10-24
+
 ### Security
 
 - **The image now runs PHP 8.4.27, which carries the fixes for CVE-2026-109618 and CVE-2026-109619.** Both are rated 9.2 and are unauthenticated remote code execution, and both were reported exploited in the wild when PHP released the fix on 2026-10-21. **Anybody self-hosting Whity should update.** PHP 8.5 is not needed and does not help: the fixes were backported, so 8.5.12, 8.4.27, 8.3.36 and 8.2.35 all carry the same patch.
