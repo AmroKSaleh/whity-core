@@ -21,28 +21,50 @@ const PAGE_CSS_CALLS = [];
 const PDF_CALLS = [];
 const GOTO_CALLS = [];
 
-jest.mock('puppeteer-core', () => ({
-  launch: jest.fn(async () => ({
-    newPage: async () => ({
-      evaluateOnNewDocument: async () => {},
-      goto: async (url, opts) => {
-        GOTO_CALLS.push({ url, opts });
-      },
-      addStyleTag: async (arg) => {
-        PAGE_CSS_CALLS.push(arg);
-      },
-      waitForFunction: async () => {},
-      pdf: async (options) => {
-        PDF_CALLS.push(options);
-        return Buffer.from('%PDF-1.4\nmock\n%%EOF');
-      },
-      close: async () => {},
-    }),
+/*
+ * Injected rather than `jest.mock('puppeteer-core', …)`.
+ *
+ * puppeteer-core is ESM-only from v25, and jest-runtime refuses to require an
+ * ESM module at all — so module mocking is no longer available here whatever
+ * the mock returns. `setLauncherForTests` is the seam that replaced it, and it
+ * is the same shape `runCapabilityProbe(deps.launch)` has always used.
+ *
+ * This is the better test for it anyway: it substitutes the one function the
+ * renderer actually calls, rather than standing in for a whole package.
+ */
+const fakeLaunch = async () => ({
+  newPage: async () => ({
+    evaluateOnNewDocument: async () => {},
+    goto: async (url, opts) => {
+      GOTO_CALLS.push({ url, opts });
+    },
+    addStyleTag: async (arg) => {
+      PAGE_CSS_CALLS.push(arg);
+    },
+    waitForFunction: async () => {},
+    pdf: async (options) => {
+      PDF_CALLS.push(options);
+      return Buffer.from('%PDF-1.4\nmock\n%%EOF');
+    },
     close: async () => {},
-  })),
-}));
+  }),
+  close: async () => {},
+});
 
-const { renderToPdf, shutdown } = require('../src/renderer');
+const { renderToPdf, shutdown, setLauncherForTests } = require('../src/renderer');
+
+let previousLauncher = null;
+
+beforeAll(() => {
+  previousLauncher = setLauncherForTests(fakeLaunch);
+});
+
+// Restored rather than just cleared: the launcher is module state, and a test
+// file that leaves a stub behind would hand it to whatever runs next in the
+// same worker.
+afterAll(() => {
+  setLauncherForTests(previousLauncher);
+});
 
 const template = (overrides = {}) => ({
   version: 2,
