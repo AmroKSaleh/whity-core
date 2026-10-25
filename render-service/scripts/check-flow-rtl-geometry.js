@@ -42,7 +42,13 @@
  * Exit code 0 only when every assertion holds in both directions.
  */
 
-const puppeteer = require('puppeteer-core');
+// ESM-only from v25; loaded where it is used, like src/renderer.js does.
+const loadPuppeteer = async () => {
+  const mod = await import('puppeteer-core');
+
+  return mod.default ?? mod;
+};
+
 const { normaliseFlowDocument } = require('../src/flow/document');
 const { buildFlowHtml } = require('../src/flow/html');
 
@@ -395,6 +401,7 @@ function assertDirection(result, direction, failures) {
 }
 
 async function main() {
+  const puppeteer = await loadPuppeteer();
   const browser = await puppeteer.launch({
     executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
     headless: true,
