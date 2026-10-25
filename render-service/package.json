@@ -22,7 +22,7 @@
     "express": "^5.3.0",
     "express-rate-limit": "^8.7.1",
     "katex": "^0.19.0",
-    "puppeteer-core": "^24.10.0",
+    "puppeteer-core": "^25.15.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
