@@ -61,6 +61,23 @@ updates:
     open-pull-requests-limit: 10
 
   # Dockerfile base images.
+  #
+  # THIS ENTRY ONLY WORKS IF THE BASE IS PINNED TO AN EXACT PATCH, and it spent
+  # months proving the point. Dependabot bumps a version string; the base was
+  # the floating `dunglas/frankenphp:1-php8.4`, which has no version string to
+  # bump — the tag is already correct for every patch release ever published —
+  # so the watcher ran every week, found nothing to say, and said nothing. It
+  # opened zero pull requests in its entire life, and the first anybody noticed
+  # was PHP 8.4.27 landing fixes for two CVSS 9.2 unauthenticated RCEs
+  # (CVE-2026-109618, CVE-2026-109619) with a deployment still serving 8.4.26
+  # three days later.
+  #
+  # This is the same failure as the render-service gap above, one layer down:
+  # there, a directory nothing covered; here, a tag nothing could move. Both
+  # read as "configured" on inspection.
+  #
+  # tests/Ops/BaseImagePinTest.php now fails if the Dockerfile goes back to a
+  # floating tag, because the pin and this entry are one mechanism, not two.
   - package-ecosystem: "docker"
     directory: "/"
     schedule:

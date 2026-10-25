@@ -26,7 +26,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const puppeteer = require('puppeteer-core');
+// ESM-only from v25; loaded where it is used, like src/renderer.js does.
+const loadPuppeteer = async () => {
+  const mod = await import('puppeteer-core');
+
+  return mod.default ?? mod;
+};
 
 const { CHROMIUM_LAUNCH_ARGS, chromiumExecutablePath } = require('../src/renderer');
 const { PAGED_MEDIA_TEXT_HTML } = require('../src/capability-probe');
@@ -51,6 +56,7 @@ async function main() {
     process.exit(2);
   }
 
+  const puppeteer = await loadPuppeteer();
   const browser = await puppeteer.launch({
     executablePath: chromiumExecutablePath(),
     args: CHROMIUM_LAUNCH_ARGS,
