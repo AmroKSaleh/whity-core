@@ -59,7 +59,22 @@ jobs:
         id: composer
         run: |
           set +e
-          docker run --rm -v "$PWD":/app -w /app composer:2 audit --no-interaction > composer-audit.txt 2>&1
+          # Pulled FIRST and quietly. Without this the layer-download progress
+          # goes into composer-audit.txt along with the result, and the alert
+          # body below — which takes the first 800 bytes of that file — is
+          # nothing but layer ids.
+          docker pull -q composer:2 > /dev/null 2>&1
+          # `--locked` AUDITS composer.lock. Without it, composer looks for an
+          # installed vendor/ that a bare checkout does not have, refuses with
+          # "No installed packages found. Please run composer install before
+          # running audit", and exits 1. This step has therefore never audited
+          # anything: it reported that same refusal as a critical advisory
+          # every single day since it was written. Because it failed daily and
+          # unconditionally, a REAL npm advisory produced exactly the same red
+          # as every other morning — which is how the October PHP and Next.js
+          # criticals sat here unnoticed while this job dutifully "alarmed".
+          docker run --rm -v "$PWD":/app -w /app composer:2 \
+            audit --locked --no-interaction > composer-audit.txt 2>&1
           echo "exit=$?" >> "$GITHUB_OUTPUT"
           cat composer-audit.txt
           set -e
