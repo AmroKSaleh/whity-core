@@ -6,7 +6,7 @@ requires only PHP, never `whity-core`. That is what makes a plugin
 distributable across Whity-based applications without dragging a host
 framework along.
 
-## Contract surface (v1.43.0)
+## Contract surface (v1.44.0)
 
 | Type | Since | Purpose |
 | --- | --- | --- |
@@ -114,7 +114,7 @@ A quarantined plugin is in `state: "failed"` with `last_error.type` of
 `"quarantine"` and a message naming the mismatch:
 
 ```
-requires plugin SDK '^2.0', but the host provides 1.43.0
+requires plugin SDK '^2.0', but the host provides 1.44.0
 ```
 
 The same message is written to the host's error log at load, so it is visible

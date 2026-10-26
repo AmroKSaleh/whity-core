@@ -233,6 +233,78 @@ const BOXLESS_BLOCK_TYPES = new Set(['pageBreak', 'spacer']);
  *
  * @returns {string|null} An error message, or null when the block is fine.
  */
+/**
+ * The URL schemes a document body may link to (WHIT-681).
+ *
+ * An `href` is the only value in a body that is INTERPRETED rather than
+ * displayed, and this HTML is loaded by a real browser in the render
+ * container in order to be printed. `javascript:` there is script execution,
+ * not a broken link, and `data:` is the same thing wearing a different hat.
+ * Relative URLs are refused too — there is nothing for them to be relative
+ * to on paper.
+ */
+const LINK_SCHEMES = /^(?:https?|mailto):/i;
+
+/**
+ * Inline runs over a block's text (WHIT-681).
+ *
+ * THE INVARIANT IS THE POINT. Concatenating `run.text` in order must
+ * reconstruct `block.text` exactly — the same contract `TextRun` already
+ * carries on the canvas side. `text` is what every plain-text consumer reads:
+ * `{{field}}` interpolation, the outline summary, the contents entry, a
+ * Markdown export. If the two can disagree, the document prints one thing and
+ * exports another and nothing anywhere notices.
+ *
+ * A mismatch is REFUSED rather than reconciled. Preferring one side would be
+ * guessing which the author meant, and the guess is silent; a 422 naming the
+ * two strings is not.
+ */
+function validateRuns(block, at) {
+  if (block.runs === undefined) {
+    return null;
+  }
+  if (!Array.isArray(block.runs)) {
+    return `"${at}.runs" must be an array of inline runs`;
+  }
+
+  let rebuilt = '';
+  for (let r = 0; r < block.runs.length; r += 1) {
+    const run = block.runs[r];
+    if (!isPlainObject(run)) {
+      return `"${at}.runs[${r}]" must be an object`;
+    }
+    if (typeof run.text !== 'string') {
+      return `"${at}.runs[${r}].text" must be a string`;
+    }
+    for (const mark of ['bold', 'italic']) {
+      if (run[mark] !== undefined && typeof run[mark] !== 'boolean') {
+        return `"${at}.runs[${r}].${mark}" must be true or false`;
+      }
+    }
+    if (run.href !== undefined) {
+      // Normalise, check the normalised value, then KEEP it. Checking a
+      // trimmed copy while rendering the untrimmed original would be
+      // validating one string and printing another — the same shape of bug
+      // the runs/text invariant below exists to stop.
+      const href = typeof run.href === 'string' ? run.href.trim() : '';
+      if (href === '' || !LINK_SCHEMES.test(href)) {
+        return `"${at}.runs[${r}].href" must be an absolute http, https or mailto URL`;
+      }
+      run.href = href;
+    }
+    rebuilt += run.text;
+  }
+
+  if (rebuilt !== block.text) {
+    return (
+      `"${at}.runs" must reconstruct "${at}.text" exactly when concatenated — ` +
+      `the runs spell ${JSON.stringify(rebuilt)} and the text is ${JSON.stringify(block.text)}`
+    );
+  }
+
+  return null;
+}
+
 function validateBlockLayout(block, i) {
   const boxless = BOXLESS_BLOCK_TYPES.has(block.type);
 
@@ -549,6 +621,12 @@ function validateFlowPayload(payload) {
     }
     if (block.type === 'paragraph' && typeof block.text !== 'string') {
       return `"content[${i}].text" must be a string`;
+    }
+    if (block.type === 'paragraph' || block.type === 'heading') {
+      const runsError = validateRuns(block, `content[${i}]`);
+      if (runsError !== null) {
+        return runsError;
+      }
     }
     if (block.type === 'table') {
       if (!Array.isArray(block.rows)) {

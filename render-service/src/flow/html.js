@@ -74,6 +74,43 @@ function escapeJsonForScript(value) {
     .replace(/\u2029/g, '\\u2029');
 }
 
+/**
+ * The inline content of a text-bearing block: its runs if it has them, its
+ * plain text if it does not (WHIT-681).
+ *
+ * EVERY run still goes through `isolateForeignRuns`, which is the whole
+ * difficulty. The obvious implementation — escape the run, wrap it in
+ * `<strong>` — silently drops bidi isolation, so a bolded Latin serial inside
+ * an Arabic sentence stops being isolated the moment somebody bolds it. The
+ * isolate therefore sits INSIDE the mark, around the text, exactly where it
+ * sits when there is no mark at all.
+ *
+ * Nesting is link > strong > em > isolated text. The order matters only for
+ * output stability, but a stable order is what makes the rendering testable.
+ *
+ * `href` is the one value here that is interpreted rather than displayed, so
+ * it is escaped as an attribute AND its scheme has already been allow-listed
+ * by `validateFlowPayload`. Both halves are deliberate: validation keeps
+ * `javascript:` out of a document that a real browser loads, and escaping
+ * keeps a quote in a legitimate URL from closing the attribute.
+ */
+function inlineContent(block, direction) {
+  const runs = Array.isArray(block.runs) ? block.runs : null;
+  if (runs === null || runs.length === 0) {
+    return isolateForeignRuns(block.text, direction);
+  }
+
+  let out = '';
+  for (const run of runs) {
+    let piece = isolateForeignRuns(run.text, direction);
+    if (run.italic) piece = `<em>${piece}</em>`;
+    if (run.bold) piece = `<strong>${piece}</strong>`;
+    if (run.href) piece = `<a href="${escapeHtml(run.href)}">${piece}</a>`;
+    out += piece;
+  }
+  return out;
+}
+
 function mm(value) {
   return `${Number(value)}mm`;
 }
@@ -367,7 +404,7 @@ function renderBlock(block, direction) {
         `<h${block.level} class="flow-heading flow-heading-${block.level}${lay.cls}" ` +
         `data-flow-unit="heading" data-level="${block.level}" data-anchor="${escapeHtml(block.anchorId)}"` +
         `${lay.attrs}${styleAttr(lay.style, '')}>` +
-        `${number}${isolateForeignRuns(block.text, direction)}</h${block.level}>`
+        `${number}${inlineContent(block, direction)}</h${block.level}>`
       );
     }
     case 'paragraph': {
@@ -376,7 +413,7 @@ function renderBlock(block, direction) {
       return (
         `<p class="flow-paragraph${align}${lay.cls}" data-flow-unit="paragraph"` +
         `${lay.attrs}${styleAttr(lay.style, '')}>` +
-        `${isolateForeignRuns(block.text, direction)}</p>`
+        `${inlineContent(block, direction)}</p>`
       );
     }
     case 'table':

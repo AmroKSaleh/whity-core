@@ -247,13 +247,22 @@ final class FlowDocument
      * @param bool $unnumbered A front-matter-style title: no `2.3.1`, and never
      *                         in the contents list.
      *
+     * @param list<array<string, mixed>>|null $runs Inline formatting over
+     *        `$text` — see {@see self::checkedRuns()} for the contract.
+     *
      * @throws RenderRejectedException On a level outside 1-6. Refused rather
      *         than clamped: a 0 or a 7 is a caller's arithmetic being wrong
      *         about its own structure, and silently promoting it to 1 would
-     *         produce a plausible document with the wrong outline.
+     *         produce a plausible document with the wrong outline. Also when
+     *         the runs do not describe `$text`.
      */
-    public function heading(int $level, string $text, bool $inContents = true, bool $unnumbered = false): self
-    {
+    public function heading(
+        int $level,
+        string $text,
+        bool $inContents = true,
+        bool $unnumbered = false,
+        ?array $runs = null
+    ): self {
         if ($level < self::MIN_HEADING_LEVEL || $level > self::MAX_HEADING_LEVEL) {
             throw RenderRejectedException::because(
                 'Heading level must be between ' . self::MIN_HEADING_LEVEL
@@ -262,6 +271,9 @@ final class FlowDocument
         }
 
         $block = ['type' => 'heading', 'level' => $level, 'text' => $text];
+        if ($runs !== null) {
+            $block['runs'] = $this->checkedRuns($text, $runs);
+        }
         if (!$inContents) {
             $block['inContents'] = false;
         }
@@ -274,12 +286,93 @@ final class FlowDocument
         return $this;
     }
 
-    /** A paragraph of body text. */
-    public function paragraph(string $text): self
+    /**
+     * A paragraph of body text.
+     *
+     * @param list<array<string, mixed>>|null $runs Inline formatting over
+     *        `$text` — see {@see self::checkedRuns()} for the contract.
+     *
+     * @throws RenderRejectedException When the runs do not describe `$text`.
+     */
+    public function paragraph(string $text, ?array $runs = null): self
     {
-        $this->content[] = ['type' => 'paragraph', 'text' => $text];
+        $block = ['type' => 'paragraph', 'text' => $text];
+        if ($runs !== null) {
+            $block['runs'] = $this->checkedRuns($text, $runs);
+        }
+
+        $this->content[] = $block;
 
         return $this;
+    }
+
+    /**
+     * Validate inline runs against the text they format (WHIT-681).
+     *
+     * A run is `['text' => string, 'bold' => bool, 'italic' => bool,
+     * 'href' => string]` with everything but `text` optional.
+     *
+     * TWO RULES, BOTH REFUSED RATHER THAN REPAIRED.
+     *
+     * The runs must reconstruct `$text` exactly when concatenated. `text` is
+     * what every plain-text consumer reads — `{{field}}` interpolation, the
+     * outline summary, the contents entry, an export — so runs that disagree
+     * with it mean the document prints one thing and exports another, forever,
+     * silently. Repairing it would mean guessing which half the caller meant,
+     * and the guess is invisible; this exception is not. The render service
+     * enforces the same rule and would answer 422, but a plugin author is
+     * better served by the refusal arriving where the mistake was written.
+     *
+     * An `href` must be an absolute http, https or mailto URL. It is the one
+     * value in a body that is INTERPRETED rather than displayed, and the flow
+     * HTML is loaded by a real browser in the render container in order to be
+     * printed: `javascript:` there is script execution, not a broken link.
+     *
+     * @param  list<array<string, mixed>> $runs
+     * @return list<array<string, mixed>>
+     *
+     * @throws RenderRejectedException
+     */
+    private function checkedRuns(string $text, array $runs): array
+    {
+        $rebuilt = '';
+        foreach ($runs as $i => $run) {
+            if (!is_array($run) || !isset($run['text']) || !is_string($run['text'])) {
+                throw RenderRejectedException::because(
+                    'Inline run ' . $i . ' must be an array with a string "text".'
+                );
+            }
+            foreach (['bold', 'italic'] as $mark) {
+                if (isset($run[$mark]) && !is_bool($run[$mark])) {
+                    throw RenderRejectedException::because(
+                        'Inline run ' . $i . ' has a non-boolean "' . $mark . '".'
+                    );
+                }
+            }
+            if (isset($run['href'])) {
+                // Normalise, validate the normalised value, then KEEP it.
+                // Validating a trimmed copy and emitting the untrimmed original
+                // would be checking one string and shipping another — the exact
+                // shape of bug the runs/text invariant below exists to stop.
+                $href = is_string($run['href']) ? trim($run['href']) : '';
+                if ($href === '' || preg_match('#^(?:https?|mailto):#i', $href) !== 1) {
+                    throw RenderRejectedException::because(
+                        'Inline run ' . $i . ' must link to an absolute http, https or mailto URL.'
+                    );
+                }
+                $runs[$i]['href'] = $href;
+            }
+            $rebuilt .= $run['text'];
+        }
+
+        if ($rebuilt !== $text) {
+            throw RenderRejectedException::because(
+                'Inline runs must reconstruct the text exactly when concatenated. '
+                . 'The runs spell "' . $rebuilt . '" and the text is "' . $text . '".'
+            );
+        }
+
+        return array_values($runs);
     }
 
     /**

@@ -30,6 +30,12 @@
  */
 
 /** Levels the renderer accepts; anything else is refused with a 422. */
+// Type-only, and type-only in both directions: `types.ts` imports `FlowContent`
+// from here. The cycle is erased at compile time and exists because the two
+// halves of one designer share one inline-run vocabulary rather than each
+// declaring its own.
+import type { TextRun } from './types';
+
 export type FlowHeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
 /**
@@ -103,10 +109,31 @@ export function blockAcceptsLayout(block: FlowBlock): block is FlowBoxedBlock {
   return block.type !== 'pageBreak' && block.type !== 'spacer';
 }
 
+/**
+ * Inline runs over a flowing block's text (WHIT-681).
+ *
+ * The SAME `TextRun` the canvas half has always used, deliberately rather
+ * than a second flow-shaped copy: one vocabulary means one set of helpers,
+ * one Markdown mapping and one answer to "does this document support bold".
+ *
+ * THE INVARIANT travels with the type. Concatenating `run.text` in document
+ * order must reconstruct the block's plain `text` exactly, because `text` is
+ * what every plain-text consumer reads — `{{field}}` interpolation, the
+ * outline summary, the contents entry, a Markdown export. The render service
+ * REFUSES a block whose runs disagree with its text rather than picking one,
+ * since picking one is a silent guess about which the author meant.
+ *
+ * Absent or empty means what it has always meant: the whole text renders
+ * unmarked. Nothing has to be migrated to carry runs.
+ */
+export type FlowRuns = TextRun[];
+
 export interface FlowHeadingBlock extends FlowBlockLayout {
   type: 'heading';
   level: FlowHeadingLevel;
   text: string;
+  /** See {@link FlowRuns}. */
+  runs?: FlowRuns;
   /** Excluded from the generated table of contents when false. */
   inContents?: boolean;
   /** Skips the renderer's automatic numbering. */
@@ -116,6 +143,8 @@ export interface FlowHeadingBlock extends FlowBlockLayout {
 export interface FlowParagraphBlock extends FlowBlockLayout {
   type: 'paragraph';
   text: string;
+  /** See {@link FlowRuns}. */
+  runs?: FlowRuns;
   /**
    * `start` is the default and is left unset rather than written out — the
    * renderer only emits an alignment class for `center` and `end`, so storing
