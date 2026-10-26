@@ -186,6 +186,16 @@ final class TenantOwnedTables
         'documents'          => '108_create_documents.php',
         'document_artifacts' => '108_create_documents.php',
 
+        // WHIT-679 — the EDITABLE body a document is drafted in (migration
+        // 159), one row per document, with the tenant denormalised from the
+        // parent for the same reason `document_artifacts` above does it. The
+        // first write is an INSERT with no existing row to filter, so
+        // {@see \Whity\Core\Document\DocumentBodyRepository::save()} inserts
+        // from a SELECT over `documents` and the tenant predicate binds there
+        // — a cross-tenant write writes nothing rather than creating a body on
+        // somebody else's document.
+        'document_bodies'    => '159_create_document_bodies.php',
+
         // #947 item 3 — the document ROUTING engine (migration 112). Four
         // tables, all tenant-owned with an explicit `tenant_id` rather than one
         // inferred through the document: the predicate guard has to be able to

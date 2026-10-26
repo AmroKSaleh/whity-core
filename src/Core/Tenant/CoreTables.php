@@ -68,6 +68,7 @@ final class CoreTables
         'devices' => '044_create_devices.php',
         'document_artifacts' => '108_create_documents.php',
         'document_blocks' => '059_create_document_designer_tables.php',
+        'document_bodies' => '159_create_document_bodies.php',
         'document_collection_items' => '114_create_document_collections.php',
         'document_collections' => '114_create_document_collections.php',
         'document_qr_scans' => '122_create_document_qr_tracking.php',
