@@ -59,11 +59,18 @@ jobs:
       # No `npm ci`. This reads the committed lockfile against the live advisory
       # database, which is the whole point: the question is not "does it build"
       # but "has the world's opinion of these exact versions changed".
-      - name: npm audit (critical)
+      # `high`, not `critical`. This sat at `critical` only because braces
+      # (GHSA-vfj7-8cjw-p6xm) had no patched version in existence and would
+      # have failed every run. Both lockfiles now report "found 0
+      # vulnerabilities" at every level — braces no longer carries an advisory
+      # in any state, and extract-zip left the tree when its parent dropped it
+      # — so the floor returns to the one security-scan.yml and the Go-Live
+      # checklist have always named.
+      - name: npm audit (high and above)
         id: audit
         run: |
           set +e
-          npm audit --audit-level=critical > audit.txt 2>&1
+          npm audit --audit-level=high > audit.txt 2>&1
           echo "exit=$?" >> "$GITHUB_OUTPUT"
           cat audit.txt
           set -e
@@ -118,7 +125,7 @@ jobs:
             HEADLINE="TEST — a drill, not an advisory. If you are reading this, the dependency advisory watch can still reach you."
           else
             DRILL=no
-            HEADLINE="A critical advisory now affects the committed lockfile."
+            HEADLINE="A high or critical advisory now affects the committed lockfile."
           fi
 
           DELIVERED=no
@@ -171,5 +178,5 @@ jobs:
             exit 0
           fi
 
-          echo "::error::A critical advisory affects the committed lockfile. $SUMMARY"
+          echo "::error::A high or critical advisory affects the committed lockfile. $SUMMARY"
           exit 1
