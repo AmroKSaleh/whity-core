@@ -1213,12 +1213,15 @@ jobs:
       # introducing a critical advisory here passed every gate and waited for
       # the nightly to notice.
       #
-      # `critical` matches the root gate rather than being argued separately;
-      # `high` would fail today on braces/brace-expansion arriving through
-      # jest, which are dev-only and have no patched version in existence.
+      # `high` matches the root gate rather than being argued separately. It
+      # sat at `critical` while braces/brace-expansion reached this lockfile
+      # through jest with no patched version in existence. Audited on its own
+      # before the change — not inferred from the root — and it reports "found
+      # 0 vulnerabilities" at every level, so the two gates move together on
+      # evidence rather than one following the other.
       - name: npm security audit
         working-directory: render-service
-        run: npm audit --audit-level=critical
+        run: npm audit --audit-level=high
 
       # Bundles web/components/documents/print-document.tsx + packages/ui/src
       # in from source — the single most likely thing to break when either
@@ -1607,28 +1610,25 @@ jobs:
         working-directory: .
         run: npm ci
 
-      # Fail on a critical advisory in an installed npm dependency
-      # (WC-232ec317). Lowered from --audit-level=high, and the reason has
-      # CHANGED since this note was first written, which is why it is being
-      # rewritten rather than left: the original blocker was sharp's
-      # GHSA-f88m-g3jw-g9cj, and sharp is now on 0.35.5 and unaffected.
+      # Fail on a high or critical advisory in an installed npm dependency
+      # (WC-232ec317). RESTORED to `high` on 2026-10-26 — where this gate
+      # belongs, and where security-scan.yml and the Go-Live checklist have
+      # said it was the whole time.
       #
-      # What blocks `high` TODAY is braces (GHSA-vfj7-8cjw-p6xm). It has no
-      # patched version in existence — 3.0.3 is both the vulnerable ceiling
-      # and the latest release — and it arrives through micromatch/fast-glob
-      # under shadcn and the eslint/ts-morph tooling. npm audit reports it
-      # eight times because it names every package in the chain that reaches
-      # it; it is one advisory, build-time only, and nothing shipped depends
-      # on it. npm's suggested "fixes" are downgrades (shadcn 4.21 -> 1.0.0,
-      # eslint-config-next 16.3 -> 14.2.35) and are not fixes.
+      # It sat at `critical` for two successive reasons, both now gone. First
+      # sharp's GHSA-f88m-g3jw-g9cj; sharp is on 0.35.5 and unaffected. Then
+      # braces GHSA-vfj7-8cjw-p6xm, which genuinely had no patched version in
+      # existence. braces 3.0.3 is STILL in the tree and now carries no
+      # advisory in any state — open, fixed or dismissed — so that obstacle
+      # disappeared without the version moving at all. extract-zip left
+      # separately, by its parent dropping it rather than by a patch.
       #
-      # So: re-tighten to --audit-level=high when braces ships a patch or
-      # leaves the tree, NOT when Next.js moves. Check both before assuming a
-      # dependency is stuck — an advisory can also be resolved by its parent
-      # dropping the dependency, which is how extract-zip left this repo.
+      # Verified before tightening rather than assumed: `npm audit` reports
+      # "found 0 vulnerabilities" on this lockfile at every level, so this
+      # raises the floor without newly failing anything today.
       - name: npm security audit
         working-directory: .
-        run: npm audit --audit-level=critical
+        run: npm audit --audit-level=high
 
       # The committed lib/api/schema.d.ts must match a fresh generation from
       # public/openapi.json — API changes that skip `npm run generate:api`
