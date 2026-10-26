@@ -242,9 +242,29 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.43.0',
+            '1.44.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.43 ADDS HAND-AUTHORED MCP TOOLS: PluginMcpToolsInterface, by which a plugin '
+            'SDK 1.44 ADDS INLINE RUNS TO FLOWING TEXT: FlowDocument::paragraph() and heading() '
+            . 'take an optional $runs array, so a plugin can emit bold, italic and linked spans '
+            . 'inside a paragraph instead of one undifferentiated string. THE GAP: the CANVAS '
+            . 'half of the designer has carried inline runs since it shipped (TextRun, with bold '
+            . 'and italic over slices of a text element) and the FLOWING half never did, so a '
+            . 'letter or report — exactly the documents flow mode exists for — printed its '
+            . 'emphasis away. MIXED DIRECTION WAS ALREADY HANDLED and is the constraint rather '
+            . 'than the feature: the renderer isolates opposite-direction runs in <bdi>, and the '
+            . 'obvious implementation (escape the run, wrap it in <strong>) silently drops that, '
+            . 'so a bolded Latin serial inside an Arabic sentence would stop being isolated the '
+            . 'moment somebody bolded it. The isolate now sits INSIDE the mark. THE RUNS MUST '
+            . 'RECONSTRUCT THE TEXT exactly when concatenated, and a mismatch is REFUSED here '
+            . 'rather than repaired: text is what every plain-text consumer reads — {{field}} '
+            . 'interpolation, the outline, the contents entry, an export — so runs that disagree '
+            . 'with it print one thing and export another, permanently and silently, and '
+            . 'repairing it would mean guessing which half the caller meant. AN href IS '
+            . 'SCHEME-ALLOW-LISTED to http, https and mailto, because it is the one value in a '
+            . 'body that is interpreted rather than displayed and the flow HTML is loaded by a '
+            . 'real browser in the render container in order to be printed. Purely additive: a '
+            . 'block without runs renders exactly as it always did. '
+            . 'SDK 1.43 ADDS HAND-AUTHORED MCP TOOLS: PluginMcpToolsInterface, by which a plugin '
             . 'contributes tools it writes itself instead of tools the host derives from its '
             . 'routes. THE GAP: every MCP tool was CRUD-shaped, one per endpoint, because '
             . 'derivation was all there was. Derived tools stay the default and are right for an '

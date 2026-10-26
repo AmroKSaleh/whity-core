@@ -44,6 +44,40 @@ import { useTranslation } from '../i18n';
  * modes worth having separately rather than one mode doing both badly.
  */
 
+/**
+ * Set a block's text, dropping inline runs the new text invalidates (WHIT-681).
+ *
+ * WHY THIS IS NOT `{ ...block, text }`. A block may carry `runs` — inline
+ * bold/italic/link spans — and their contract is that concatenating them
+ * reconstructs `text` exactly. Spreading the block while replacing the text
+ * keeps runs that now describe a string that no longer exists, and the render
+ * service REFUSES such a block rather than guessing which half the author
+ * meant. So the obvious spread turns "someone fixed a typo" into "this
+ * document no longer prints".
+ *
+ * Dropping the runs loses the formatting, which is a real cost and the lesser
+ * one: an unrenderable document is worse than an unformatted paragraph. It is
+ * also honest about where this editor currently stands — it cannot yet SHOW or
+ * author runs, so it must not silently preserve ones it is unable to maintain.
+ * When the editor grows inline formatting, this becomes a re-map of the runs
+ * across the edit instead of a drop, and this comment should go with it.
+ *
+ * Runs that still reconstruct the new text are kept, which covers the case
+ * that matters most: a change event that did not actually change the text.
+ */
+function withText<T extends { text: string; runs?: { text: string }[] }>(block: T, text: string): T {
+  if (block.runs === undefined) {
+    return { ...block, text };
+  }
+  const rebuilt = block.runs.map((run) => run.text).join('');
+  if (rebuilt === text) {
+    return { ...block, text };
+  }
+  const next = { ...block, text };
+  delete next.runs;
+  return next;
+}
+
 export interface FlowEditorProps {
   content: FlowContent;
   onChange: (next: FlowContent) => void;
@@ -251,7 +285,7 @@ function BlockBody({
             aria-label={t('flow.headingText', 'Heading text')}
             data-testid={`flow-input-${index}`}
             placeholder={t('flow.headingPlaceholder', 'Heading')}
-            onChange={(e) => onChange({ ...block, text: e.target.value })}
+            onChange={(e) => onChange(withText(block, e.target.value))}
             className="border-transparent bg-transparent text-lg font-semibold hover:border-input focus-visible:border-ring"
           />
           {/* Numbering and the contents list. Both are honoured by the renderer
@@ -301,7 +335,7 @@ function BlockBody({
             data-testid={`flow-input-${index}`}
             placeholder={t('flow.paragraphPlaceholder', 'Write something…')}
             rows={3}
-            onChange={(e) => onChange({ ...block, text: e.target.value })}
+            onChange={(e) => onChange(withText(block, e.target.value))}
             className="resize-y border-transparent bg-transparent hover:border-input focus-visible:border-ring"
           />
           {/* LOGICAL, not left/right. `flow-align-end` is the end of the

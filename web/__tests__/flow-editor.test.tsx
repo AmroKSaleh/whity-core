@@ -62,6 +62,31 @@ describe('editing blocks', () => {
     expect(emitted()[0]).toEqual({ type: 'paragraph', text: 'The quarter closed early.' });
   });
 
+  it('drops inline runs when an edit invalidates them, rather than emitting an unrenderable block', async () => {
+    // WHIT-681. `runs` must reconstruct `text` exactly, and the render service
+    // REFUSES a block where they disagree. So the obvious `{ ...block, text }`
+    // would turn "someone fixed a typo" into "this document no longer prints".
+    // The formatting is lost, which is the lesser cost and is honest: this
+    // editor cannot yet show or author runs, so it must not silently preserve
+    // ones it cannot maintain.
+    const user = userEvent.setup();
+    render(
+      <Harness
+        initial={{
+          blocks: [
+            { type: 'paragraph', text: 'a bold word', runs: [{ text: 'a ' }, { text: 'bold', bold: true }, { text: ' word' }] },
+          ],
+        }}
+      />
+    );
+
+    await user.type(screen.getByTestId('flow-input-0'), '!');
+
+    const block = emitted()[0] as { text: string; runs?: unknown };
+    expect(block.text).toBe('a bold word!');
+    expect(block.runs).toBeUndefined();
+  });
+
   it('edits a table cell without disturbing its neighbours', async () => {
     const user = userEvent.setup();
     render(<Harness initial={{ blocks: [newFlowBlock('table')] }} />);

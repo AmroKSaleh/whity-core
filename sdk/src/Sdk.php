@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.43).
+ * SDK identity (v1.44).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -731,13 +731,43 @@ namespace Whity\Sdk;
  * A throwing tool costs its caller an error, not the dispatcher.
  *
  * Purely additive. A plugin that does not implement the interface loads exactly
- * as before and its routes are derived exactly as before.)
+ * as before and its routes are derived exactly as before.) ->
+ * 1.44 (INLINE RUNS IN FLOWING TEXT: {@see Render\FlowDocument::paragraph()}
+ * and {@see Render\FlowDocument::heading()} take an optional `$runs` array, so
+ * a plugin can emit bold, italic and linked spans inside a paragraph instead of
+ * one undifferentiated string.
+ *
+ * The gap: the CANVAS half of the designer has carried inline runs since it
+ * shipped — `TextRun`, with bold and italic over slices of a text element — and
+ * the FLOWING half never did. So a letter or a report, the very documents flow
+ * mode exists for, printed its emphasis away.
+ *
+ * MIXED DIRECTION WAS ALREADY HANDLED, and is the constraint here rather than
+ * the feature. The renderer isolates opposite-direction runs in `<bdi>`, and
+ * the obvious implementation — escape the run, wrap it in `<strong>` — silently
+ * drops that, so a bolded Latin serial inside an Arabic sentence would stop
+ * being isolated the moment somebody bolded it. The isolate sits INSIDE the
+ * mark.
+ *
+ * THE RUNS MUST RECONSTRUCT THE TEXT exactly when concatenated, and a mismatch
+ * is refused rather than repaired. `text` is what every plain-text consumer
+ * reads — `{{field}}` interpolation, the outline summary, the contents entry,
+ * an export — so runs that disagree with it would print one thing and export
+ * another, permanently and silently, and repairing it would mean guessing which
+ * half the caller meant.
+ *
+ * AN `href` IS SCHEME-ALLOW-LISTED to http, https and mailto, because it is the
+ * one value in a body that is interpreted rather than displayed, and the flow
+ * HTML is loaded by a real browser in the render container in order to be
+ * printed.
+ *
+ * Purely additive. A block without runs renders exactly as it always did.)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.43.0';
+    public const VERSION = '1.44.0';
 
     /**
      * Static identity only — never instantiated.
