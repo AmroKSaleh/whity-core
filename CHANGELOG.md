@@ -6,11 +6,14 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+## [0.2.16] - 2026-10-24
+
 ### Security
 
 - **The image now runs PHP 8.4.27, which carries the fixes for CVE-2026-109618 and CVE-2026-109619.** Both are rated 9.2 and are unauthenticated remote code execution, and both were reported exploited in the wild when PHP released the fix on 2026-10-21. **Anybody self-hosting Whity should update.** PHP 8.5 is not needed and does not help: the fixes were backported, so 8.5.12, 8.4.27, 8.3.36 and 8.2.35 all carry the same patch.
 - **`session.upload_progress.enabled` is now off, which mitigates CVE-2026-115560.** That one has no patch published at the time of this release and affects fully updated builds including 8.5.12, so moving the base image forward does not resolve it; it also closes the known attack paths for CVE-2026-109619. It has to be an ini setting rather than anything in application code, because PHP runs the upload-progress handler from the SAPI while parsing a multipart body and starts a session itself to do it — so the path is reachable by an unauthenticated POST, on routes unrelated to uploads, on a platform that never calls `session_start()` anywhere. Nothing in Whity reads upload progress. If you run Whity from source or from your own image rather than the published one, set this yourself.
 - **`expose_php` is now off.** PHP announced its exact patch version in `X-Powered-By` on every response, including responses the application never sees — a fatal during boot, a request refused before the kernel runs. On its own that is not a vulnerability; during an advisory it tells anyone asking which exploit to try first and how far behind a deployment is, without them having to probe for it.
+- **The npm tree is clean of known advisories, including two rated critical.** Next.js moves to 16.4.2, which carries the fixes for an unauthenticated remote code execution in the image optimization API when SVG files are served, and a second in `use cache` functions returning typed arrays. Whity sets neither `images.dangerouslyAllowSVG` nor any `use cache` directive, so neither path is reachable in a default build — but if you have turned either on in your own, it was. Storybook moves to 10.6.3 for a preview origin-validation flaw; it is development tooling and is in no deployment. Moderate and high advisories in the transitive tree (`fast-uri`, `ip-address`, `hono`, `body-parser`, `launch-editor`, `postcss-selector-parser` among them) are closed in the same update, and `npm audit` now reports nothing at any level. Whity publishes no frontend artifact, so this reaches you only if you build the `web` workspace yourself.
 
 ### Fixed
 
