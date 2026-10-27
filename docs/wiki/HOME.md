@@ -11,6 +11,7 @@ Welcome to the Whity Core documentation.
 ## System documentation
 
 - **[Architecture](Architecture.md)** — Full system guide: request lifecycle, plugins, RBAC, multi-tenancy, schema, deployment (start here).
+- **[Running headless](Headless.md)** — Your own frontend on the API and MCP: deploying without the bundled admin, `CORS_ALLOWED_ORIGINS` + `FRONTEND_URL`, cookie vs token-mode auth, OpenAPI discovery.
 - **[Permission System](PERMISSION_SYSTEM.md)** — RBAC permissions, registry, role hierarchy, enforcement.
 - **[Tenant Isolation](TENANT_ISOLATION.md)** — Multi-tenancy, `TenantContext`, query scoping.
 - **[Monetization & Metering](Monetization-and-Metering.md)** — Entitlements → plans → subscriptions → payment wall → rate limits: the one runtime access gate, per-tenant enforcement modes, and plan-driven throughput (the operator never walls themselves).

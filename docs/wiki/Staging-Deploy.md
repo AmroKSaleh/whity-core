@@ -13,7 +13,9 @@ manual dispatch with a chosen tag):
 2. writes `.env.staging` on the host from the `STAGING_ENV` secret (mode 0600),
 3. `docker compose pull` **both** release images at the same tag — the API
    `ghcr.io/<repo>:<tag>` and the UI `ghcr.io/<repo>/web:<tag>`,
-4. `docker compose up -d`,
+4. `docker compose --profile web up -d` — the UI tier is opt-in (see
+   [Running without the bundled UI](#running-without-the-bundled-ui)), and
+   staging always runs it,
 5. runs `php public/index.php migrate run` inside the app container (idempotent;
    it does **not** seed — a redeploy never mutates staging data),
 6. polls `GET /api/health` **and** `GET /login` on the host until both return
@@ -75,6 +77,26 @@ This creates the **bootstrap administrator** (system tenant id 0) — at
 staging runs `APP_ENV=staging`, the `*@example.com` demo accounts are **not**
 created; append `--with-fixtures` if this particular staging box is meant to
 carry them (the load-test scripts expect `admin@example.com`).
+
+## Running without the bundled UI
+
+The `web` service in `docker-compose.staging-remote.yml` sits behind the `web`
+compose profile, so it is **off unless requested**. A headless deployment (one
+that brings its own frontend) or a small server that only needs the API and MCP
+skips it and never pulls the Next.js image or spends memory on it.
+
+- **With the bundled admin:** set `COMPOSE_PROFILES=web` in the env file or the
+  shell, or pass `--profile web`. Combine profiles with commas:
+  `COMPOSE_PROFILES=web,render`.
+- **API only:** leave the profile off. Point `FRONTEND_URL` (and any per-link
+  `*_URL` override, see `.env.example`) at your own frontend, and add its origin
+  to `CORS_ALLOWED_ORIGINS`.
+
+**Upgrading an existing deployment:** before this change the UI always started.
+If you run the bundled admin, add `COMPOSE_PROFILES=web` before your next `up`,
+or the UI container is no longer started (an existing one is left running until
+`down` or `up --remove-orphans`). The staging workflow already passes
+`--profile web`.
 
 ## Triggering
 

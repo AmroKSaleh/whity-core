@@ -6,9 +6,14 @@
 # the code baked in, so there is NO source bind mount and NO Caddyfile mount:
 # what runs is exactly what shipped, which is the whole point of a staging deploy.
 #
-# Two tiers, because the product is both: `frankenphp` serves the API and `web`
-# serves the user interface. The release job tags them together, so deploy them
-# together — a stack with only the app is an API nobody can log in to.
+# Two tiers: `frankenphp` serves the API (and MCP) and `web` serves the bundled
+# admin UI. The UI is OPT-IN behind the `web` profile, because a headless
+# deployment brings its own frontend and a small server should not carry a
+# Next.js process it does not use. To run the bundled admin, enable the profile
+# (COMPOSE_PROFILES=web, or `--profile web`); without it you get the API alone,
+# which nobody can log in to through a browser unless you supply a frontend.
+# The release job tags the tiers together, so when you run both, run them at
+# the same tag.
 #
 # A third, OPTIONAL tier sits behind the `render` profile: the document/label
 # PDF renderer (ADR 0012), published as `ghcr.io/<repo>/render` by the same
@@ -21,7 +26,7 @@
 # to the staging host and runs:
 #   WHITY_IMAGE=ghcr.io/<repo>:<tag> WHITY_WEB_IMAGE=ghcr.io/<repo>/web:<tag> \
 #     docker compose -p whity-staging -f docker-compose.staging-remote.yml \
-#     --env-file .env.staging up -d
+#     --env-file .env.staging --profile web up -d
 # then `... exec frankenphp php public/index.php migrate run`, a health poll on
 # the API and a page fetch against the UI.
 #
@@ -122,11 +127,19 @@ services:
   # v0.2.0 shipped. Tagged in lockstep with the app image by the same release
   # job, so overriding both refs to the same version is the normal deploy and
   # mixing versions takes deliberate effort.
+  #
+  # OPT-IN behind the `web` profile (headless, WHIT-696). A deployment that
+  # serves its own frontend — or a small server that only needs the API and MCP
+  # — never pulls or starts the Next.js tier. To run the bundled admin, set
+  # COMPOSE_PROFILES=web (in the env file or the shell), or pass `--profile web`.
+  # Without it, an ordinary `up` is the API alone: no login page.
   web:
     image: ${WHITY_WEB_IMAGE:-ghcr.io/amroksaleh/whity-core/web:latest}
     container_name: whity_staging_web
     restart: unless-stopped
     pull_policy: always
+    profiles:
+      - web
     # `next start` is PID 1 here; an init reaps it properly on `compose down`
     # instead of leaving it to the 10-second SIGKILL timeout.
     init: true
