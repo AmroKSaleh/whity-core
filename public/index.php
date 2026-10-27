@@ -1539,8 +1539,11 @@ $mailer = new \Whity\Core\Mail\LazyMailer(
 );
 $emailVerificationService = new EmailVerificationService($db->getPdo());
 $profileEmailRepository = new ProfileEmailRepository($db->getPdo());
-$verifyUrlBase = (string) ($_ENV['EMAIL_VERIFICATION_URL'] ?? getenv('EMAIL_VERIFICATION_URL')
-    ?: (rtrim((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''), '/') . '/verify-email'));
+// Every link into a frontend page resolves here (FRONTEND_URL, else APP_URL,
+// plus a per-link override), so a headless deployment can point them at its
+// own frontend. See docs/wiki/Headless.md.
+$frontendUrls = \Whity\Core\Http\FrontendUrls::fromEnv();
+$verifyUrlBase = $frontendUrls->linkOrPath(\Whity\Core\Http\FrontendUrls::EMAIL_VERIFICATION);
 $emailVerificationProvider = new TokenEmailVerificationProvider(
     $emailVerificationService,
     $profileEmailRepository,
@@ -1555,12 +1558,11 @@ $emailVerificationProvider = new TokenEmailVerificationProvider(
 // (welcome on registration today; approval/invitation to follow) and sends via
 // the branded EmailLayout, gated per-event on the mail.events.* toggles. Sends
 // are best-effort — a failure can never break the originating request.
-$appUrl = rtrim((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''), '/');
 $emailNotifications = new \Whity\Core\Mail\EmailNotifications(
     $mailer,
     new \Whity\Core\Mail\EmailLayout(),
     $settingsService,
-    $appUrl,
+    $frontendUrls->base(),
     $logger
 );
 $emailNotifications->subscribe($hookManager);
@@ -1656,8 +1658,7 @@ $router->register('GET', '/api/auth/2fa/status', [$twoFactorHandler, 'status'], 
 // endpoints (mirroring the WC-235 email-verification wiring above) plus the
 // tenant-scoped admin approval queues.
 $passwordResetService = new \Whity\Core\Identity\PasswordResetService($db->getPdo());
-$resetUrlBase = (string) ($_ENV['PASSWORD_RESET_URL'] ?? getenv('PASSWORD_RESET_URL')
-    ?: (rtrim((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''), '/') . '/reset-password'));
+$resetUrlBase = $frontendUrls->linkOrPath(\Whity\Core\Http\FrontendUrls::PASSWORD_RESET);
 $passwordResetMailer = new \Whity\Core\Identity\PasswordResetMailer(
     $mailer,
     $resetUrlBase,
@@ -1708,8 +1709,7 @@ $twoFactorRecoveryService = new \Whity\Core\Identity\TwoFactorRecoveryService(
     $passwordResetService,
     $backupCodesService
 );
-$twoFactorRecoveryConfirmUrlBase = (string) ($_ENV['TWO_FACTOR_RECOVERY_URL'] ?? getenv('TWO_FACTOR_RECOVERY_URL')
-    ?: (rtrim((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''), '/') . '/account-recovery'));
+$twoFactorRecoveryConfirmUrlBase = $frontendUrls->linkOrPath(\Whity\Core\Http\FrontendUrls::TWO_FACTOR_RECOVERY);
 $twoFactorRecoveryMailer = new \Whity\Core\Identity\TwoFactorRecoveryMailer(
     $mailer,
     $twoFactorRecoveryConfirmUrlBase,
@@ -1753,8 +1753,7 @@ $invitationService = new \Whity\Core\Identity\InvitationService(
     // the trail recorded the invitation and never the membership it produced (#889).
     $hookManager
 );
-$invitationUrlBase = (string) ($_ENV['INVITATION_ACCEPT_URL'] ?? getenv('INVITATION_ACCEPT_URL')
-    ?: (rtrim((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''), '/') . '/accept-invitation'));
+$invitationUrlBase = $frontendUrls->linkOrPath(\Whity\Core\Http\FrontendUrls::INVITATION_ACCEPT);
 $invitationMailer = new \Whity\Core\Identity\InvitationMailer(
     $mailer,
     $invitationUrlBase,
@@ -2692,7 +2691,8 @@ $externalBillingHandler = new \Whity\Api\ExternalBillingApiHandler(
     $settingsService,
     $roleChecker,
     $db->getPdo(),
-    $appUrl,
+    // The payer returns to a frontend page (/billing, /billing/return).
+    $frontendUrls->base(),
     $logger
 );
 
@@ -3105,8 +3105,8 @@ $documentCollectionRepository = new \Whity\Core\Document\DocumentCollectionRepos
 // (`/api/documents/by-verification/{token}`) runs the UNCHANGED visibility
 // policy and answers 404 exactly as the id route does.
 //
-// The public base URL is the instance's own address (APP_URL, already trimmed
-// into $appUrl further up). An instance that has never been told its address
+// The public base URL is the frontend's address ($frontendUrls: FRONTEND_URL,
+// else APP_URL; DOCUMENT_VERIFY_URL overrides the page). An instance that has never been told its address
 // cannot mint at all — DocumentQrService::isConfigured() is false, minting
 // returns null, and the record panel reports `configured: false` — rather than
 // encoding a relative path into a QR that nothing can follow.
@@ -3116,7 +3116,8 @@ $documentQrService = new \Whity\Core\Document\Qr\DocumentQrService(
     $db->getPdo(),
     $documentQrTokenRepository,
     $documentQrScanRepository,
-    $appUrl
+    $frontendUrls->base(),
+    $frontendUrls->link(\Whity\Core\Http\FrontendUrls::DOCUMENT_VERIFY)
 );
 
 // THE SDK RENDERING SEAM (#1072), registered here rather than beside
@@ -3542,14 +3543,17 @@ $formRenderer = new \Whity\Core\Form\FormRenderer(
     new \Whity\Core\Form\PrefillResolver($db->getPdo())
 );
 
-// The link service (migration 132). $appUrl is the instance's own public origin,
+// The link service (migration 132). $frontendUrls->base() is the public origin,
 // trimmed further up — the same value DocumentQrService is given, so a public
 // form link and a QR verification link cannot disagree about where this
 // deployment lives. An instance that has never been told its address still MINTS
 // (the slug is what makes the endpoint reachable); it simply returns a null
 // `public_url` until somebody sets APP_URL, rather than emitting a relative path
 // nobody can put on a poster.
-$publicFormLink = new \Whity\Core\Form\PublicFormLink($appUrl);
+$publicFormLink = new \Whity\Core\Form\PublicFormLink(
+    $frontendUrls->base(),
+    $frontendUrls->link(\Whity\Core\Http\FrontendUrls::PUBLIC_FORM)
+);
 
 // FILE ATTACHMENTS (migration 134). The staging record for a file uploaded
 // against a `file` field, plus the store that writes the bytes.
@@ -4335,6 +4339,8 @@ $ssoAuthHandler = new \Whity\Api\SsoAuthHandler(
     new \Whity\Core\Tenant\FederatedWorkspaceProvisioner($db->getPdo(), $settingsService, $hookManager),
     // Announces each verified federated sign-in (auth.federated.signed_in).
     $hookManager,
+    // Post-login redirects go to the frontend; the callback above stays on APP_URL.
+    $frontendUrls,
 );
 // Public list of ENABLED providers for the current tenant, so the login page can
 // render "Sign in with …" buttons (display-safe fields only; no secrets).

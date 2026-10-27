@@ -395,7 +395,8 @@ class SeedCommand implements CommandHelp, CliCommand
                 $pdo,
                 $qrTokens,
                 new DocumentQrScanRepository($pdo),
-                rtrim((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''), '/')
+                \Whity\Core\Http\FrontendUrls::fromEnv()->base(),
+                \Whity\Core\Http\FrontendUrls::fromEnv()->link(\Whity\Core\Http\FrontendUrls::DOCUMENT_VERIFY)
             ),
             $qrTokens
         );

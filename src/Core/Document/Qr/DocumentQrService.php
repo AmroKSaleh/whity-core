@@ -92,13 +92,28 @@ final class DocumentQrService
      *        instance that has not been told its own address — and it is handled
      *        by refusing to mint rather than by emitting a relative URL that
      *        would encode into a QR nothing can follow.
+     * @param string|null $verifyUrlBase Full prefix of the verification page
+     *        ({@see \Whity\Core\Http\FrontendUrls::DOCUMENT_VERIFY}), for a
+     *        frontend whose route is not `/verify`. Null keeps
+     *        `$publicBaseUrl/verify`.
      */
     public function __construct(
         private readonly PDO $db,
         private readonly DocumentQrTokenRepository $tokens,
         private readonly DocumentQrScanRepository $scans,
         private readonly string $publicBaseUrl,
+        private readonly ?string $verifyUrlBase = null,
     ) {
+    }
+
+    /** The verification page prefix, or '' when the instance has no address. */
+    private function verifyBase(): string
+    {
+        if ($this->verifyUrlBase !== null) {
+            return rtrim($this->verifyUrlBase, '/');
+        }
+
+        return $this->publicBaseUrl === '' ? '' : $this->publicBaseUrl . '/verify';
     }
 
     /**
@@ -110,7 +125,7 @@ final class DocumentQrService
      */
     public function isConfigured(): bool
     {
-        return $this->publicBaseUrl !== '';
+        return $this->verifyBase() !== '';
     }
 
     /**
@@ -337,7 +352,7 @@ final class DocumentQrService
      */
     public function verificationUrl(string $token): string
     {
-        return $this->publicBaseUrl . '/verify/' . rawurlencode($token);
+        return $this->verifyBase() . '/' . rawurlencode($token);
     }
 
     /**
