@@ -160,7 +160,9 @@ jobs:
             umask 077
             printf '%s\n' "$STAGING_ENV" > .env.staging
 
-            COMPOSE="docker compose -p whity-staging -f docker-compose.staging-remote.yml --env-file .env.staging"
+            # --profile web: the bundled UI is opt-in (WHIT-696), and this deploy
+            # fails unless /login renders, so staging always runs it.
+            COMPOSE="docker compose -p whity-staging -f docker-compose.staging-remote.yml --env-file .env.staging --profile web"
 
             # Compose resolves these out of the environment. Exported once rather
             # than prefixed per invocation so `pull`, `up`, `exec` and `logs`

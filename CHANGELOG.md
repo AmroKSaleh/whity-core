@@ -6,6 +6,10 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+### Changed
+
+- **The bundled web UI is now opt-in in `docker-compose.staging-remote.yml`, behind the `web` compose profile.** A headless deployment brings its own frontend, and a small server that only needs the API and MCP should not pull a Next.js image or keep its process in memory. **If you run the bundled admin from this file, set `COMPOSE_PROFILES=web` (or pass `--profile web`) before your next `up`**, or the UI is no longer started. The core image is unchanged: it has never contained the web UI, which ships as its own image. The staging deploy workflow passes `--profile web` itself. See `docs/wiki/Staging-Deploy.md`.
+
 ## [0.2.16] - 2026-10-24
 
 ### Security
