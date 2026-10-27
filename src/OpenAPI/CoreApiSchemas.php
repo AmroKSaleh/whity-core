@@ -3599,6 +3599,16 @@ final class CoreApiSchemas
             'role' => self::str(),
         ], ['tenant_id', 'tenant_name', 'role']);
 
+        // Token mode (`X-Auth-Mode: token`, WC-ddcd16ad): every endpoint that
+        // issues a session returns the pair in the body instead of setting
+        // cookies. Absent in cookie mode, hence never required.
+        $tokenPair = [
+            'access_token' => self::str(),
+            'refresh_token' => self::str(),
+            'token_type' => self::str(),
+            'expires_in' => self::int(),
+        ];
+
         return [
             'Error' => self::object([
                 'error' => self::str(),
@@ -3673,21 +3683,30 @@ final class CoreApiSchemas
                     'items' => $membershipEntry,
                     'nullable' => true,
                 ],
-            ], []),
+                // Token mode, with requires_tenant_selection: send it back to
+                // POST /api/auth/select-tenant (the cookie flow sets a cookie).
+                'selection_token' => self::str(),
+            ] + $tokenPair, []),
 
             // POST /api/login — 202 (2FA required)
             'Login2faRequiredResponse' => self::object([
                 'requires_2fa' => self::bool(),
+                // Token mode: send it back to POST /api/login/2fa.
+                'temp_token' => self::str(),
             ], ['requires_2fa']),
 
             // POST /api/login/2fa — request body
             'TwoFaLoginRequest' => self::object([
                 'code' => self::str(),
+                // Token mode: the temp_token the 202 returned (cookie mode reads a cookie).
+                'temp_token' => self::str(),
             ], ['code']),
 
             // POST /api/auth/select-tenant — request body
             'SelectTenantRequest' => self::object([
                 'tenant_id' => self::int(),
+                // Token mode: the selection_token login returned (cookie mode reads a cookie).
+                'selection_token' => self::str(),
             ], ['tenant_id']),
 
             // GET /api/auth/select-tenant — the pending selection's choices (WHIT-672)
@@ -3700,7 +3719,7 @@ final class CoreApiSchemas
             // POST /api/auth/select-tenant — 200 response (session issued)
             'SessionUserResponse' => self::object([
                 'user' => $sessionUser,
-            ], ['user']),
+            ] + $tokenPair, ['user']),
 
             // POST /api/auth/switch-tenant — request body (WC-f8164c87)
             'SwitchTenantRequest' => self::object([
@@ -3724,7 +3743,7 @@ final class CoreApiSchemas
             // tenant_id) — a genuinely different shape from GET /api/me above.
             'MeResponse' => self::object([
                 'user' => $selfUser,
-            ], ['user']),
+            ] + $tokenPair, ['user']),
 
             // PATCH /api/me — request body
             'MeUpdateRequest' => self::object([
@@ -3734,9 +3753,10 @@ final class CoreApiSchemas
             ], ['current_password']),
 
             // POST /api/auth/refresh — 200 response (AuthHandler::handleRefresh)
+            // Cookie mode answers {status: success}; token mode the new pair.
             'RefreshResponse' => self::object([
                 'status' => self::str(),
-            ], ['status']),
+            ] + $tokenPair, []),
 
             // POST /api/auth/logout — 200 response (AuthHandler::handleLogout)
             'LogoutResponse' => self::object([

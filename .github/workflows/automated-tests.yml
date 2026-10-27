@@ -1652,6 +1652,14 @@ jobs:
           npm run generate
           git diff --exit-code -- src/schema.d.ts
 
+      # The client's own auth behaviour (cookie and token mode, single-flight
+      # refresh). node:test with type stripping: no runner to install.
+      - name: Type check and unit tests (@amroksaleh/api-client)
+        working-directory: packages/api-client
+        run: |
+          npm run typecheck
+          npm test
+
       # The committed design-token outputs must match the generator (base.json
       # is the single source of truth for styling variables).
       - name: Design-token drift check
