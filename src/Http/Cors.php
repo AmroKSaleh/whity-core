@@ -22,7 +22,10 @@ final class Cors
     private const ALLOWED_METHODS = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
     // X-Requested-With is the CSRF defense header required on the auth POSTs
     // (WC-160); it must be preflight-approved for credentialed CORS clients.
-    private const ALLOWED_HEADERS = 'Content-Type, Authorization, X-Requested-With';
+    // X-Auth-Mode selects token-mode sign-in (AuthHandler::isTokenMode) and
+    // X-Tenant-Id declares a system user's target tenant: without them a
+    // cross-origin (headless) frontend cannot sign in or switch scope.
+    private const ALLOWED_HEADERS = 'Content-Type, Authorization, X-Requested-With, X-Auth-Mode, X-Tenant-Id';
 
     /**
      * Build the CORS response headers for a given request Origin.

@@ -90,9 +90,24 @@ final class PublicFormLink
      *        relative path a poster cannot carry. Minting is NOT refused on it:
      *        the slug is what makes the endpoint reachable, and an operator who
      *        sets APP_URL a week later must not have to re-open every form.
+     * @param string|null $formUrlBase Full prefix of the public form page
+     *        ({@see \Whity\Core\Http\FrontendUrls::PUBLIC_FORM}), for a frontend
+     *        whose route is not `/f`. Null keeps `$publicBaseUrl/f`.
      */
-    public function __construct(private readonly string $publicBaseUrl)
+    public function __construct(
+        private readonly string $publicBaseUrl,
+        private readonly ?string $formUrlBase = null,
+    ) {
+    }
+
+    /** The public form page prefix, or '' when the instance has no address. */
+    private function formBase(): string
     {
+        if ($this->formUrlBase !== null) {
+            return rtrim($this->formUrlBase, '/');
+        }
+
+        return $this->publicBaseUrl === '' ? '' : $this->publicBaseUrl . '/f';
     }
 
     /**
@@ -122,7 +137,7 @@ final class PublicFormLink
      */
     public function isConfigured(): bool
     {
-        return $this->publicBaseUrl !== '';
+        return $this->formBase() !== '';
     }
 
     /**
@@ -144,7 +159,7 @@ final class PublicFormLink
         // an address that renders a form. Pointing it at the API meant the
         // recipient was handed raw JSON — the API is what that page calls,
         // not what a person opens.
-        return $this->publicBaseUrl . '/f/' . rawurlencode($slug);
+        return $this->formBase() . '/' . rawurlencode($slug);
     }
 
     /**

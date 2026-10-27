@@ -84,7 +84,21 @@ final class SsoAuthHandler
          * {@see self::SIGNED_IN_EVENT}). Null in tests that do not watch it.
          */
         private readonly ?\Whity\Core\Hooks\HookManager $hooks = null,
+        /**
+         * Where the browser lands after the callback. `$appUrl` is the
+         * BACKEND's origin (the callback is built on it); the pages live on the
+         * frontend, which a headless deployment serves elsewhere. Null derives
+         * both from `$appUrl`, the pre-headless behaviour.
+         */
+        private readonly ?\Whity\Core\Http\FrontendUrls $frontendUrls = null,
     ) {
+    }
+
+    private function frontendLink(string $link): string
+    {
+        $urls = $this->frontendUrls ?? new \Whity\Core\Http\FrontendUrls(['APP_URL' => $this->appUrl]);
+
+        return $urls->linkOrPath($link);
     }
 
     /**
@@ -456,11 +470,11 @@ final class SsoAuthHandler
         $data = is_array($body) ? $body : [];
 
         if ($result->getStatusCode() === 200 && isset($data['user'])) {
-            return new Response(302, '', ['Location' => rtrim($this->appUrl, '/') . '/dashboard']);
+            return new Response(302, '', ['Location' => $this->frontendLink(\Whity\Core\Http\FrontendUrls::SSO_SUCCESS)]);
         }
         if ($result->getStatusCode() === 200 && ($data['requires_tenant_selection'] ?? false) === true) {
             // The tenant-selection cookie is set; the login UI completes the choice.
-            return new Response(302, '', ['Location' => rtrim($this->appUrl, '/') . '/login?sso=select']);
+            return new Response(302, '', ['Location' => $this->frontendLink(\Whity\Core\Http\FrontendUrls::SSO_LOGIN) . '?sso=select']);
         }
         // No active membership, or anything unexpected.
         return $this->fail('no_membership');
@@ -469,6 +483,6 @@ final class SsoAuthHandler
     /** Bounce to the login page with a generic, non-enumerating SSO marker. */
     private function fail(string $reason): Response
     {
-        return new Response(302, '', ['Location' => rtrim($this->appUrl, '/') . '/login?sso_error=' . $reason]);
+        return new Response(302, '', ['Location' => $this->frontendLink(\Whity\Core\Http\FrontendUrls::SSO_LOGIN) . '?sso_error=' . $reason]);
     }
 }

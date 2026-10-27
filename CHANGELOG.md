@@ -6,6 +6,14 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+### Added
+
+- **Every link the backend builds into a frontend page can now point at a frontend of your own.** Whity serves no pages, but it hands people links to them — verification, reset, recovery and invitation emails, the SSO landing and error redirects, public form links, document QR codes, error alerts — and all but the four email links were `APP_URL` plus a path the bundled admin happens to serve, with no way to change either. A new `FRONTEND_URL` sets where pages live (unset, it is `APP_URL`, so nothing changes for an existing deployment), and each link takes an optional full-URL override: `SSO_SUCCESS_URL`, `SSO_LOGIN_URL`, `PUBLIC_FORM_URL`, `DOCUMENT_VERIFY_URL` and `ERROR_DETAILS_URL`, beside the existing `EMAIL_VERIFICATION_URL`, `PASSWORD_RESET_URL`, `TWO_FACTOR_RECOVERY_URL` and `INVITATION_ACCEPT_URL`. `APP_URL` keeps meaning the backend's own origin, so the SSO callback a provider returns to is unaffected. See `.env.example`.
+
+### Fixed
+
+- **A frontend on another origin could not sign in.** Token-mode sign-in is selected with the `X-Auth-Mode: token` request header and a system user scopes a request with `X-Tenant-Id`, but neither was in the CORS allowed-headers list, so a browser refused the preflight and only same-origin clients (or ones behind a proxy) could use them. Both are now allowed.
+
 ## [0.2.16] - 2026-10-24
 
 ### Security

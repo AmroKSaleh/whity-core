@@ -44,7 +44,12 @@ final class NotifyErrorGroupJob implements JobInterface
         private readonly ErrorGroupRepository $groups,
         private readonly NotificationDispatcher $notifications,
         private readonly ?LoggerInterface $logger = null,
-        private readonly ?string $appUrl = null,
+        /**
+         * Prefix of the error-group page, e.g. https://admin.example/admin/errors
+         * ({@see \Whity\Core\Http\FrontendUrls::ERROR_DETAILS}). Null or empty
+         * omits the Details line.
+         */
+        private readonly ?string $errorDetailsUrl = null,
     ) {
     }
 
@@ -158,9 +163,9 @@ final class NotifyErrorGroupJob implements JobInterface
             'Last seen:   ' . (string) $group['last_seen_at'],
         ];
 
-        if ($this->appUrl !== null && $this->appUrl !== '') {
+        if ($this->errorDetailsUrl !== null && $this->errorDetailsUrl !== '') {
             $lines[] = '';
-            $lines[] = 'Details: ' . rtrim($this->appUrl, '/') . '/admin/errors/' . (string) $group['id'];
+            $lines[] = 'Details: ' . rtrim($this->errorDetailsUrl, '/') . '/' . (string) $group['id'];
         }
 
         // The message and location are already scrubbed — they were scrubbed at
