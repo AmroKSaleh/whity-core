@@ -92,6 +92,30 @@ The `description` field is taken from `schema['summary']` when present. When abs
 
 The result is `"{prefix} {path}"`, e.g. `Get /api/users`.
 
+### Annotations (read-only, destructive, idempotent)
+
+Every derived tool carries MCP `annotations`, so a client can run reads without asking and confirm before destructive calls (WHIT-706). `title` is the route's summary. The hints come from the HTTP method:
+
+| Method | readOnlyHint | destructiveHint | idempotentHint |
+|---|---|---|---|
+| GET | true | — | — |
+| PUT | false | true | true |
+| DELETE | false | true | true |
+| POST, PATCH | false | *unset* | false |
+
+`openWorldHint` is `false` on every tool: they act on this server's own data.
+
+`destructiveHint` is left unset on POST and PATCH on purpose. The spec reads an unset hint as `true`, and a POST here is as often an action (trash, revoke, disable two-factor) as a create, so these keep their confirmation prompt. A route that is genuinely additive declares it:
+
+```php
+'schema' => [
+    'summary'         => 'Add a comment',
+    'mcp_annotations' => ['destructiveHint' => false],
+],
+```
+
+`mcp_annotations` overrides any derived hint, and its `title` replaces the summary. A plugin-authored tool (`PluginMcpToolsInterface`, SDK 1.45) declares `annotations` in its descriptor. Nothing is derived for it, since it has no HTTP method. Unknown keys and non-boolean hints are dropped. Annotations are hints: RBAC, scope and the per-call checks are unchanged.
+
 ### inputSchema construction
 
 `buildInputSchema()` assembles a flat JSON Schema `object` by merging three sources in order:

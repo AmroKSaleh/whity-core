@@ -47,6 +47,7 @@ final class AuthoredToolRegistry implements HostWiredService
      *     name: string,
      *     description: string,
      *     inputSchema: array<string, mixed>,
+     *     annotations: ?array<string, bool|string>,
      *     handler: callable,
      *     requiredRole: ?string,
      *     requiredPermission: ?string,
@@ -122,6 +123,10 @@ final class AuthoredToolRegistry implements HostWiredService
             'name'               => $name,
             'description'        => $description,
             'inputSchema'        => $schema,
+            // WHIT-706: only what the plugin declares. An authored tool has no
+            // HTTP method to derive hints from, and a guessed "read-only" is
+            // worse than none: the spec's defaults are the cautious reading.
+            'annotations'        => ToolAnnotations::sanitize($descriptor['annotations'] ?? null),
             'handler'            => $handler,
             'requiredRole'       => is_string($role) && $role !== '' ? $role : null,
             'requiredPermission' => is_string($permission) && $permission !== '' ? $permission : null,
@@ -195,11 +200,15 @@ final class AuthoredToolRegistry implements HostWiredService
     {
         $out = [];
         foreach ($this->tools as $tool) {
-            $out[] = [
+            $object = [
                 'name'        => $tool['name'],
                 'description' => $tool['description'],
                 'inputSchema' => $tool['inputSchema'],
             ];
+            if ($tool['annotations'] !== null) {
+                $object['annotations'] = $tool['annotations'];
+            }
+            $out[] = $object;
         }
 
         return $out;

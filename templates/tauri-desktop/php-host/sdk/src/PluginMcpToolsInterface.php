@@ -57,6 +57,14 @@ namespace Whity\Sdk;
  *
  * - `open` (bool, optional): state that any authenticated MCP principal may
  *   invoke this tool.
+ * - `annotations` (array, optional, SDK 1.45): MCP tool annotations — `title`
+ *   (string) and the booleans `readOnlyHint`, `destructiveHint`,
+ *   `idempotentHint` and `openWorldHint`. Clients use them to run read-only
+ *   tools without asking and to confirm before destructive ones, so declare
+ *   `readOnlyHint: true` on a tool that only reads. The host derives nothing
+ *   for an authored tool (it has no HTTP method to go on), and omitted hints
+ *   take the spec's cautious defaults. Hints only: they never change who may
+ *   call the tool. Unknown keys and wrong types are dropped.
  *
  * A DESCRIPTOR MUST DECLARE ITS AUDIENCE. `requiredRole`, `requiredPermission`
  * or `open: true` — a tool declaring none of the three is REFUSED at load.
