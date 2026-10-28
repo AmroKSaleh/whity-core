@@ -108,6 +108,9 @@ jobs:
       # the worker pool starts, so the stack comes up with the deterministic
       # accounts the suite expects (admin123 / user123 compose defaults).
       - name: Start the backend stack
+        # MCP on, so mcp-connect.spec.ts can connect an app for real (WHIT-697).
+        env:
+          MCP_ENABLED: 'true'
         run: docker compose -f docker-compose.yml up -d --wait
 
       # `--wait` covers container/healthcheck state, not end-to-end readiness

@@ -26,6 +26,7 @@ export function ConnectSetup({ clientId, connection }: { clientId: McpClientId; 
   const t = useTranslation('admin');
   const { addToast } = useToast();
   const client = mcpClient(clientId);
+  const app = client.id === 'other' ? t('aiPrincipals.connect.app.other', 'Another app') : client.name;
   const setup = client.setup?.(connection);
   if (setup === undefined) return null;
 
@@ -57,16 +58,16 @@ export function ConnectSetup({ clientId, connection }: { clientId: McpClientId; 
           <Button asChild className="gap-2">
             <a href={setup.install.href}>
               <IconExternalLink size={16} />
-              {t('aiPrincipals.connect.oneClick.button', 'Open in {app}', { app: client.name })}
+              {t('aiPrincipals.connect.oneClick.button', 'Open in {app}', { app })}
             </a>
           </Button>
           <p className="text-xs text-muted-foreground">
             {setup.install.verified
-              ? t('aiPrincipals.connect.oneClick.help', '{app} opens and asks you to confirm.', { app: client.name })
+              ? t('aiPrincipals.connect.oneClick.help', '{app} opens and asks you to confirm.', { app })
               : t(
                   'aiPrincipals.connect.oneClick.unverifiedHelp',
                   '{app} opens and asks you to confirm. If nothing happens, use the steps below instead.',
-                  { app: client.name }
+                  { app }
                 )}
           </p>
         </section>
@@ -89,7 +90,7 @@ export function ConnectSetup({ clientId, connection }: { clientId: McpClientId; 
       {setup.fields && (
         <section className="space-y-2">
           <h3 className="text-sm font-semibold">
-            {t('aiPrincipals.connect.fields.title', 'Fill in these settings in {app}', { app: client.name })}
+            {t('aiPrincipals.connect.fields.title', 'Fill in these settings in {app}', { app })}
           </h3>
           {setup.fields.map((field) => (
             <CopyBlock
@@ -115,7 +116,7 @@ export function ConnectSetup({ clientId, connection }: { clientId: McpClientId; 
               ? t(
                   'aiPrincipals.connect.file.help',
                   'Open {path} (create it if it does not exist), paste this in, save, and restart {app}. If the file already lists other servers, add this one beside them.',
-                  { path: setup.file.paths.join(' · '), app: client.name }
+                  { path: setup.file.paths.join(' · '), app }
                 )
               : t(
                   'aiPrincipals.connect.file.helpGeneric',

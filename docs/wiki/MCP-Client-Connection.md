@@ -6,6 +6,77 @@ Related: [MCP-Server](MCP-Server.md) · [MCP-Operator-Runbook](MCP-Operator-Runb
 
 ---
 
+## Connect an AI app (recommended)
+
+Most people should never need the rest of this page. In the admin, open **AI principals** and choose **Connect an AI app**. You need `mcp:tokens:manage`, as for issuing a token any other way.
+
+1. **Which app?** Pick yours from the gallery: Claude Code, Cursor, VS Code, Windsurf, Codex CLI, Gemini CLI, n8n, or *Another app* for anything that speaks MCP over HTTP. Claude and ChatGPT appear as *Coming with sign-in*: they connect only through OAuth, which this server does not offer yet.
+2. **What may it do?** Choose one:
+   - *Everything I can do* issues the three capabilities.
+   - *Read only* adds every `:read` permission.
+   - *Choose areas* gives *No access*, *View* or *View and change* per resource. *View and change* issues `resource:*`.
+
+   Under the choice is the list of actions an app with that scope would get. It is computed by the same filter `tools/list` applies, so it is exact for you. *Choose areas* with nothing selected is refused: a scope with no permission entry is not narrowed at all, so it would quietly mean everything.
+3. **Connect.** You get the setup for that exact app, easiest first:
+   - a one-click install link where the app has one;
+   - the command to paste;
+   - the settings file and where it lives.
+
+   The token appears once, inside this setup. It is never shown again.
+4. **Test.** The page waits until the app first reaches the server and then says **Connected**. That happens on the first call that passes authentication, the MCP switches and the rate limit. If nothing happens after a minute, it suggests what to check.
+
+Before any of this, the wizard checks `GET /api/mcp/connect`. If MCP is off for the server (`MCP_ENABLED`) or for your organization (**Settings → Integrations**), it says which in plain words and won't issue a token that can't work yet.
+
+To **renew** one of your own connections before it expires, choose **Renew** on its row. Pick the app again to get the new setup; the access stays the same. The old token keeps working until the new one first connects, and is revoked then. Renew is offered only on your own connections, because a new token is always issued to the person asking. Renewing a colleague's connection would silently move their app onto your account.
+
+The connections table shows **Last used** for every token. A call refreshes it at most once a minute.
+
+### Where the app connects
+
+The wizard hands out `APP_URL` + `/mcp`.
+- **Headless deployments:** `APP_URL` is the backend itself.
+- **Deployments where the bundled admin serves the public origin:** the web tier forwards `/mcp` to the backend. It forwards the bearer and the body, never the browser's cookies.
+
+If `APP_URL` is unset, the wizard warns and uses the address of the page instead.
+
+### Per-app setup, and what is not yet confirmed
+
+The setups come from `@amroksaleh/features/mcp`, so the desktop shell or your own frontend can offer the same ones. They were checked against each vendor's documentation on 2026-10-28.
+
+| App | Setup | Notes |
+|---|---|---|
+| Claude Code | `claude mcp add --transport http <name> <url> --header "Authorization: Bearer <token>"`, or `.mcp.json` | |
+| Cursor | Install link `cursor://anysphere.cursor-deeplink/mcp/install?name=…&config=<base64>`, or `~/.cursor/mcp.json` | The link is **unconfirmed** for a remote server with headers: Cursor documents it only for local servers. The file always works. |
+| VS Code | Install link `vscode:mcp/install?<json>`, or `.vscode/mcp.json` (top-level key `servers`) | The link is **unconfirmed** for `type: http` with `headers`. |
+| Windsurf | `mcp_config.json` with `serverUrl` | |
+| Codex CLI | `~/.codex/config.toml`, `[mcp_servers.<name>]` with `http_headers` | `codex mcp add` documents only OAuth flags. |
+| Gemini CLI | `gemini mcp add --transport http --header … <name> <url>`, or `~/.gemini/settings.json` with `httpUrl` | `url` there means SSE, which is the wrong transport. |
+| n8n | MCP Client Tool: endpoint, *HTTP Streamable*, *Bearer Auth*, the token | The transport field is **unconfirmed** from n8n's own docs (they still describe SSE only). |
+| Claude, ChatGPT | — | Sign-in (OAuth) only. Claude's static request headers are a limited beta; ChatGPT documents no static bearer. Tracked by WHIT-698. |
+
+Where a link is unconfirmed, the wizard still offers it, but always shows the copy-paste setup underneath it.
+
+### The API behind the wizard
+
+Both endpoints require `mcp:tokens:manage`. Neither is in the OpenAPI catalogue, so neither is an MCP tool: an agent should not walk itself through credential setup.
+
+```bash
+# Where to connect, whether it can work yet, and the preset scopes.
+curl -s https://your-whity-host/api/mcp/connect -H "Authorization: Bearer <your-access-token>"
+# → {"endpoint": "https://your-whity-host/mcp", "serverEnabled": true, "tenantEnabled": true,
+#    "presets": {"everything": [...], "readOnly": [...]}, "areas": [{"area": "users", "permissions": [...]}]}
+
+# The tools a token with this scope would offer you. Refused with 422 exactly where issuing would be.
+curl -s -X POST https://your-whity-host/api/mcp/connect/preview \
+  -H "Authorization: Bearer <your-access-token>" -H "Content-Type: application/json" \
+  -d '{"scope": ["tools:call", "users:read"]}'
+# → {"tools": [{"name": "get_api_v1_users", "description": "List users"}, ...]}
+```
+
+`GET /api/mcp/tokens` returns `last_used_at` for each token: null until its first call.
+
+---
+
 ## Endpoint
 
 ```
@@ -33,7 +104,7 @@ notifications ride POST responses instead.
 
 ## Obtaining a bearer token
 
-MCP tokens are long-lived (90 days) and are issued via the management API using a human-user access token (the cookie or Bearer token your browser session uses).
+The wizard above does this for you. By hand: MCP tokens are long-lived (90 days) and are issued via the management API using a human-user access token (the cookie or Bearer token your browser session uses).
 
 **Issue a token:**
 
@@ -285,12 +356,13 @@ Note: rate limit (`-32000`) and MCP-disabled (`403`) are the only cases that pro
 
 ## MCP client library configuration
 
-Most MCP client libraries expect a server URL and an auth header. A typical configuration targeting Whity Core looks like:
+Use the wizard: it produces the right format for each app (see [Per-app setup](#per-app-setup-and-what-is-not-yet-confirmed)). For a client it does not list, most MCP libraries read this shape:
 
 ```json
 {
   "mcpServers": {
     "whity": {
+      "type": "http",
       "url": "https://your-whity-host/mcp",
       "headers": {
         "Authorization": "Bearer <mcp-token>"
@@ -299,5 +371,3 @@ Most MCP client libraries expect a server URL and an auth header. A typical conf
   }
 }
 ```
-
-Consult your specific client library's documentation for the exact configuration format.
