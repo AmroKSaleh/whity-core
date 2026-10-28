@@ -142,6 +142,26 @@ Call `ToolDeriver::clearCache()` after registering plugin routes to ensure the n
 
 ---
 
+## Discovery mode (`?tools=discover`)
+
+Core alone derives over 300 tools, about 22k tokens of definitions every agent loads before it does anything. Several clients handle far fewer: Cursor is widely reported to drop every tool past 40, and agents reportedly pick tools less reliably past about 50 (WHIT-707).
+
+A client that connects to **`/mcp?tools=discover`** gets three tools in place of the catalogue:
+
+| Tool | Does |
+|---|---|
+| `search_tools` | Finds tools by what they do: `{query, limit?}`, returning name, title, description and whether each reads or deletes |
+| `describe_tool` | Returns one tool's full definition, including its input schema and annotations |
+| `call_tool` | Calls one tool by name: `{name, arguments}` |
+
+The catalogue is unchanged and reached on demand, so the cost stays the same at 50 tools or 5,000.
+
+**Nothing here decides access.** `search_tools` and `describe_tool` read the list through `ToolsListHandler::listFor()`, the same filter `tools/list` applies (exposure, scope, RBAC), so a tool the caller couldn't see in the full list can't be found either. Hidden and unknown names answer alike. `call_tool` hands the call to the real `ToolsCallHandler`, which re-checks everything and audits it, and a real tool called by its own name works too.
+
+The transport picks a separate `Dispatcher` for this URL, so the mode never sits in worker-global state. Resources, prompts, auth, the tenant switch and rate limits are identical. The discovery list never changes, so this dispatcher announces no `list_changed`.
+
+The connect wizard turns tool search on when the access chosen exposes more tools than the app is reported to handle (40 for Cursor), or more than about 60 for any app, and lets the user override it.
+
 ## Authentication
 
 ### Bearer tokens

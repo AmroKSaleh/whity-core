@@ -37,6 +37,11 @@ final class McpTransportHandler
     public function __construct(
         private readonly McpRequestHandlerInterface $dispatcher,
         private readonly bool $enabled = true,
+        // WHIT-707: serves `/mcp?tools=discover`, three discovery tools in
+        // place of the whole catalogue. Its own dispatcher rather than a flag
+        // threaded through every handler, so the mode never sits in state a
+        // persistent worker would carry into the next request.
+        private readonly ?McpRequestHandlerInterface $discoveryDispatcher = null,
     ) {}
 
     /**
@@ -55,11 +60,12 @@ final class McpTransportHandler
             return Response::error('Content-Type must be application/json', 415);
         }
 
-        $bearer  = $this->extractBearer($request);
-        $rawBody = $request->getBody();
+        $bearer     = $this->extractBearer($request);
+        $rawBody    = $request->getBody();
+        $dispatcher = $this->dispatcherFor($request);
 
         try {
-            $rawResponse = $this->dispatcher->handle($rawBody, $bearer);
+            $rawResponse = $dispatcher->handle($rawBody, $bearer);
         } catch (McpRateLimitException $e) {
             return new Response(429, '', ['Retry-After' => (string) $e->getRetryAfterSeconds()]);
         } catch (McpFeatureDisabledException) {
@@ -74,8 +80,8 @@ final class McpTransportHandler
         // finding nowhere to put them would lose the change permanently, so a
         // client that did not offer to read an event stream is simply left alone.
         $notifications = [];
-        if ($acceptsSse && $this->dispatcher instanceof McpNotificationSource) {
-            $notifications = $this->dispatcher->drainNotifications();
+        if ($acceptsSse && $dispatcher instanceof McpNotificationSource) {
+            $notifications = $dispatcher->drainNotifications();
         }
 
         if ($notifications !== []) {
@@ -161,6 +167,25 @@ final class McpTransportHandler
      * Returns null when the header is absent or does not follow the
      * `Bearer <token>` format. Auth validation is the dispatcher's responsibility.
      */
+    /**
+     * The discovery dispatcher when the URL asks for it (`?tools=discover`),
+     * else the full one. An unknown value gets the full catalogue: it is what
+     * every client got before discovery mode existed.
+     */
+    private function dispatcherFor(Request $request): McpRequestHandlerInterface
+    {
+        if ($this->discoveryDispatcher === null) {
+            return $this->dispatcher;
+        }
+        // Request::fromGlobals() keeps only the path, so in production the query
+        // is in $_GET (reset per request by the worker); a Request built with
+        // the query in its path (tests, internal callers) is read too. The same
+        // two sources AuditLogApiHandler reads.
+        parse_str((string) parse_url($request->getPath(), PHP_URL_QUERY), $query);
+        $mode = $query['tools'] ?? $_GET['tools'] ?? null;
+        return $mode === 'discover' ? $this->discoveryDispatcher : $this->dispatcher;
+    }
+
     private function extractBearer(Request $request): ?string
     {
         $header = $request->getHeader('Authorization');

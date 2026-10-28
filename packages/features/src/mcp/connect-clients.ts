@@ -81,7 +81,41 @@ export interface McpClientSpec {
   requiresSignIn?: boolean
   /** The vendor page the format was checked against. */
   docs: string
+  /**
+   * How many tools the app is reported to handle before it drops or ignores
+   * some. Community-reported, not vendor-documented (2026-10): treat as a
+   * guide for {@link recommendsToolSearch}, not a contract.
+   */
+  toolLimit?: number
   setup?: (connection: McpConnection) => McpClientSetup
+}
+
+/**
+ * Past roughly this many tools, agents reportedly choose tools less reliably
+ * and every request carries tens of thousands of tokens of definitions, even
+ * in an app with no hard cap. A rule of thumb, not a limit.
+ */
+export const MCP_TOOL_BUDGET = 60
+
+/**
+ * Whether the connection should use tool search (`?tools=discover`, WHIT-707):
+ * three tools that search, describe and call the catalogue, in place of the
+ * catalogue itself. True when the tools this access would expose exceed what
+ * the app is reported to handle, or the general budget.
+ */
+export function recommendsToolSearch(client: McpClientSpec, toolCount: number): boolean {
+  return toolCount > Math.min(client.toolLimit ?? MCP_TOOL_BUDGET, MCP_TOOL_BUDGET)
+}
+
+/**
+ * The URL an app connects to: the server's MCP endpoint, with tool search
+ * switched on when asked. Keeps any query the endpoint already carries.
+ */
+export function mcpEndpoint(endpoint: string, options: { toolSearch?: boolean } = {}): string {
+  if (options.toolSearch !== true) return endpoint
+  const [base, hash = ''] = endpoint.split('#', 2)
+  const separator = base.includes('?') ? '&' : '?'
+  return `${base}${separator}tools=discover${hash !== '' ? `#${hash}` : ''}`
 }
 
 /**
@@ -148,6 +182,8 @@ export const MCP_CLIENTS: readonly McpClientSpec[] = [
   {
     id: 'cursor',
     name: 'Cursor',
+    // Widely reported in Cursor's forum: tools past 40 are silently dropped.
+    toolLimit: 40,
     docs: 'https://cursor.com/docs/context/mcp/install-links',
     setup: ({ name, url, token }) => {
       const server = mcpServerName(name)
@@ -194,6 +230,7 @@ export const MCP_CLIENTS: readonly McpClientSpec[] = [
   {
     id: 'windsurf',
     name: 'Windsurf',
+    toolLimit: 100,
     docs: 'https://docs.devin.ai/desktop/cascade/mcp',
     setup: ({ name, url, token }) => ({
       file: {

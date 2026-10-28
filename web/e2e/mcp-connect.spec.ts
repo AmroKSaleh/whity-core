@@ -62,16 +62,23 @@ test.describe('Connect an AI app', () => {
       (await dialog.locator('pre code').filter({ hasText: 'mcpServers' }).first().textContent()) ?? '{}'
     ) as { mcpServers: Record<string, { url: string; headers: { Authorization: string } }> };
     const server = Object.values(config.mcpServers)[0];
-    expect(server.url).toMatch(/\/mcp$/);
+    const endpoint = new URL(server.url);
+    expect(endpoint.pathname).toBe('/mcp');
     expect(server.headers.Authorization).toMatch(/^Bearer \S+$/);
+    // WHIT-707: with this much access the wizard switches tool search on, so the
+    // app is handed `/mcp?tools=discover`. Called exactly as handed out.
+    const toolSearch = endpoint.searchParams.get('tools') === 'discover';
 
-    const response = await request.post(`${baseURL}${new URL(server.url).pathname}`, {
+    const response = await request.post(`${baseURL}${endpoint.pathname}${endpoint.search}`, {
       headers: { Authorization: server.headers.Authorization, 'Content-Type': 'application/json' },
       data: { jsonrpc: '2.0', method: 'tools/list', id: 1 },
     });
     expect(response.status(), await response.text()).toBe(200);
-    const body = (await response.json()) as { result?: { tools: unknown[] } };
+    const body = (await response.json()) as { result?: { tools: { name: string }[] } };
     expect(Array.isArray(body.result?.tools)).toBe(true);
+    if (toolSearch) {
+      expect(body.result?.tools.map((tool) => tool.name)).toEqual(['search_tools', 'describe_tool', 'call_tool']);
+    }
 
     await expect(dialog.getByText('Connected', { exact: true })).toBeVisible({ timeout: 15_000 });
     await dialog.getByRole('button', { name: 'Done' }).click();
