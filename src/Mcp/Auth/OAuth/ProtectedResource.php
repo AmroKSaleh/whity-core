@@ -53,6 +53,18 @@ final class ProtectedResource
         return $this->issuer !== null && $this->resource !== null;
     }
 
+    /** The authorization server's issuer, or null when OAuth is off. */
+    public function issuer(): ?string
+    {
+        return $this->enabled() ? $this->issuer : null;
+    }
+
+    /** The MCP endpoint tokens must be issued for (their `aud`), or null when OAuth is off. */
+    public function resource(): ?string
+    {
+        return $this->enabled() ? $this->resource : null;
+    }
+
     /**
      * Where the metadata for this resource lives: the well-known path with the
      * resource's own path appended (RFC 9728 §3.1), which clients try first.

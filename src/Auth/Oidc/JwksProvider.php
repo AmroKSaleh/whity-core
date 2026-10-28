@@ -30,13 +30,23 @@ final class JwksProvider
     private array $cache = [];
 
     /**
+     * Least time between two unknown-kid refreshes of one uri. 0 refreshes on
+     * every miss, which suits a sign-in callback. A public endpoint such as /mcp
+     * sets it, or anyone could send made-up `kid`s and make this server refetch
+     * the issuer's keys on every request (WHIT-709).
+     */
+    private int $minRefreshSeconds;
+
+    /**
      * @param callable(string): array<string, mixed> $fetcher Fetches + decodes a JWKS by uri.
      * @param int                                     $ttlSeconds Cache lifetime (default 1h).
+     * @param int                                     $minRefreshSeconds See {@see $minRefreshSeconds}.
      */
-    public function __construct(callable $fetcher, int $ttlSeconds = 3600)
+    public function __construct(callable $fetcher, int $ttlSeconds = 3600, int $minRefreshSeconds = 0)
     {
         $this->fetcher = \Closure::fromCallable($fetcher);
         $this->ttlSeconds = $ttlSeconds;
+        $this->minRefreshSeconds = $minRefreshSeconds;
     }
 
     /**
@@ -66,6 +76,12 @@ final class JwksProvider
         $jwks = $this->get($jwksUri);
 
         if ($kid === null || $kid === '' || $this->containsKid($jwks, $kid)) {
+            return $jwks;
+        }
+
+        // Fetched too recently to have rotated since: the kid is just unknown.
+        $fetchedAt = $this->cache[$jwksUri]['fetchedAt'] ?? 0;
+        if ($this->minRefreshSeconds > 0 && (time() - $fetchedAt) < $this->minRefreshSeconds) {
             return $jwks;
         }
 

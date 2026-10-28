@@ -4509,6 +4509,20 @@ $mcpRecordTokenUse = static function (\Whity\Mcp\Auth\McpPrincipal $principal) u
 // list_changed.
 // WHIT-709: where an OAuth client signs in (MCP_OAUTH_ISSUER). Off when unset.
 $mcpProtectedResource = ProtectedResource::fromEnv(McpConnectHandler::endpointFor((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: '')));
+// ...and accept the access tokens it issues, mapped to a profile through the
+// SSO links (external_identities) and checked against a live membership.
+$mcpOAuthVerifier = \Whity\Mcp\Auth\OAuth\OAuthAccessTokenVerifier::fromEnv(
+    $mcpProtectedResource,
+    new \Whity\Core\Http\HttpFetcher(),
+    new \Whity\Auth\Oidc\JwksProvider(
+        static fn(string $uri): array => (new \Whity\Core\Http\HttpFetcher())->getJson($uri) ?? [],
+        minRefreshSeconds: 60,
+    ),
+    $db->getPdo(),
+);
+if ($mcpOAuthVerifier !== null) {
+    $tokenValidator->acceptOAuthAccessTokens($mcpOAuthVerifier);
+}
 $mcpDiscovery = new DiscoveryTools($mcpToolsListHandler, $mcpToolsCallHandler, $tokenValidator);
 $mcpTransportHandler = new McpTransportHandler(
     new Dispatcher($mcpHandlers, $tokenValidator, $mcpRateLimiter, $tenantMcpEnabled, $mcpListChangedNotifier, $mcpRecordTokenUse),

@@ -5,6 +5,8 @@ namespace Whity\Auth;
 use PDO;
 use Whity\Auth\Exception\InvalidMembershipException;
 use Whity\Mcp\Auth\McpPrincipal;
+use Whity\Mcp\Auth\OAuth\OAuthAccessTokenVerifier;
+use Whity\Mcp\Auth\OAuth\OAuthTokenRefusedException;
 
 /**
  * Token Validator for validating JWT access and refresh tokens
@@ -34,6 +36,9 @@ class TokenValidator
      * membership in its declared tenant (or system-tenant authority, id 0).
      */
     private ActiveTenantMembershipGuard $membershipGuard;
+
+    /** Access tokens from the configured OAuth authorization server (WHIT-709); null when off. */
+    private ?OAuthAccessTokenVerifier $oauthVerifier = null;
 
     /**
      * @param JwtParser $jwtParser The JWT parser instance for token validation
@@ -335,15 +340,28 @@ class TokenValidator
     /**
      * Validate any bearer token for MCP access.
      *
-     * Tries the dedicated MCP token path first (type='mcp'), then falls back to a
-     * regular session access token (type='access').
+     * Tries the dedicated MCP token path first (type='mcp'), then a regular
+     * session access token (type='access'), then, when configured, an access
+     * token from the OAuth authorization server (WHIT-709).
      *
      * @param string $token Raw bearer token string.
      * @return McpPrincipal|null Validated principal, or null on any failure.
+     * @throws OAuthTokenRefusedException When an OAuth token is valid but cannot be used here.
      */
     public function validateBearerForMcp(string $token): ?McpPrincipal
     {
-        return $this->validateMcpToken($token) ?? $this->validateSessionBearerForMcp($token);
+        return $this->validateMcpToken($token)
+            ?? $this->validateSessionBearerForMcp($token)
+            ?? $this->oauthVerifier?->verify($token);
+    }
+
+    /**
+     * Accept the OAuth authorization server's access tokens at /mcp (WHIT-709).
+     * Called once while the worker boots; the verifier holds configuration only.
+     */
+    public function acceptOAuthAccessTokens(OAuthAccessTokenVerifier $verifier): void
+    {
+        $this->oauthVerifier = $verifier;
     }
 
     /**
