@@ -6,6 +6,7 @@ namespace Whity\Mcp\Transport;
 
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Mcp\Auth\OAuth\ProtectedResource;
 use Whity\Mcp\McpFeatureDisabledException;
 use Whity\Mcp\RateLimit\McpRateLimitException;
 
@@ -42,6 +43,9 @@ final class McpTransportHandler
         // threaded through every handler, so the mode never sits in state a
         // persistent worker would carry into the next request.
         private readonly ?McpRequestHandlerInterface $discoveryDispatcher = null,
+        // WHIT-709: names the Protected Resource Metadata in the 401 challenge,
+        // so an OAuth client learns where to sign in. Null: a bare challenge.
+        private readonly ?ProtectedResource $protectedResource = null,
     ) {}
 
     /**
@@ -110,6 +114,9 @@ final class McpTransportHandler
 
         $status  = $dispatcher instanceof McpHttpStatusSource ? $dispatcher->httpStatus() : 200;
         $headers = ['Content-Type' => 'application/json'];
+        if ($status === 401) {
+            $headers['WWW-Authenticate'] = $this->protectedResource?->challenge() ?? 'Bearer';
+        }
 
         // When the client signals it can consume an SSE stream (long-running
         // tool calls), disable reverse-proxy buffering now so the first event

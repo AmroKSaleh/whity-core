@@ -76,6 +76,10 @@ final class RouteCatalogueCompletenessTest extends TestCase
         // applicable (MCP uses its own JSON-RPC discovery surface, not OpenAPI).
         'GET /mcp',
         'POST /mcp',
+        // WHIT-709: OAuth Protected Resource Metadata (RFC 9728), a fixed
+        // document defined by its RFC rather than an API operation.
+        'GET /.well-known/oauth-protected-resource',
+        'GET /.well-known/oauth-protected-resource/mcp',
         // WC-2686308f: MCP token management — schema to follow in documentation task.
         'DELETE /api/mcp/tokens/{jti}',
         'GET /api/mcp/tokens',

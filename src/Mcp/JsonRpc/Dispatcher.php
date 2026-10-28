@@ -117,6 +117,9 @@ final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSou
                 ? $this->tokenValidator->validateBearerForMcp($bearerToken)
                 : null;
             if ($principal === null) {
+                // HTTP 401, as every MCP authorization revision requires: it is
+                // what tells an OAuth client to go and sign in (WHIT-709).
+                $this->httpStatus = 401;
                 return $this->encode($this->makeError(null, ErrorCode::UNAUTHENTICATED, 'Unauthenticated'));
             }
         }
