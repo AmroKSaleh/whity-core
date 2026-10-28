@@ -183,7 +183,16 @@ Apps such as Claude and ChatGPT connect by pasting the URL and signing in, which
 - The 401 challenge names that metadata: `Bearer resource_metadata="…/.well-known/oauth-protected-resource/mcp", scope="tools:call resources:read prompts:read"`.
 - The web tier forwards both documents when the bundled admin serves the public origin.
 
-**Not yet:** accepting the authorization server's access tokens (part B). It needs decisions on mapping a token's subject to a Whity profile and tenant, and on JWKS signature verification. Until then, apps discover where to sign in but can't complete it.
+The access tokens it issues are accepted on `/mcp` alongside MCP tokens (`OAuthAccessTokenVerifier`):
+
+- **Signature:** firebase/php-jwt against the issuer's JWKS. The JWKS location comes from `MCP_OAUTH_JWKS_URI`, or from the issuer's RFC 8414 metadata, falling back to OIDC discovery; either document's `issuer` must match. Keys are cached and refreshed once when a token names an unknown `kid`. Only asymmetric keys (RSA, EC, OKP) are used.
+- **Claims:** `exp` is required, `iss` must equal the issuer, and `aud` must include `APP_URL/mcp`. A token for another resource is refused.
+- **Who:** `(iss, sub)` is looked up in the global-trust links of `external_identities`, the table single sign-on keeps. So the issuer must also be configured as an operator (system-tenant) identity provider, and each person signs in to Whity with it once. A tenant's own identity provider never answers here.
+- **Which workspace:** the `tenant_id` claim (renamed with `MCP_OAUTH_TENANT_CLAIM`) when present, else the person's only active workspace. An active membership is always required. The system tenant cannot be reached with an OAuth token.
+- **Scope:** `scope` (or `scp`), keeping only `tools:call`, `resources:read` and `prompts:read`.
+- **Answers:** a token that fails verification gets the usual 401, so the app signs in again. A genuine token that can't be used (no linked account, several workspaces and no claim, no MCP scope) gets **403** with a message that says what to fix, because signing in again would not help.
+
+The principal's `principalKind` is `oauth`; RBAC, the per-tenant MCP switch, rate limits and audit apply exactly as for an MCP token.
 
 MCP tokens are 90-day HS256 JWTs with `aud: mcp` and `type: mcp`. They are issued, listed, and revoked through a dedicated REST sub-API:
 

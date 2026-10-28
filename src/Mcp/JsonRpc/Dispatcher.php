@@ -8,6 +8,7 @@ use Whity\Auth\TokenValidator;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Mcp\Auth\McpPrincipal;
 use Whity\Mcp\Auth\McpScope;
+use Whity\Mcp\Auth\OAuth\OAuthTokenRefusedException;
 use Whity\Mcp\McpFeatureDisabledException;
 use Whity\Mcp\Notifications\ListChangedNotifier;
 use Whity\Mcp\Protocol\McpProtocol;
@@ -113,9 +114,17 @@ final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSou
         // caller learns nothing about the request shape.
         $principal = null;
         if ($this->tokenValidator !== null) {
-            $principal = $bearerToken !== null
-                ? $this->tokenValidator->validateBearerForMcp($bearerToken)
-                : null;
+            try {
+                $principal = $bearerToken !== null
+                    ? $this->tokenValidator->validateBearerForMcp($bearerToken)
+                    : null;
+            } catch (OAuthTokenRefusedException $refused) {
+                // A genuine sign-in that cannot be used here (no linked account,
+                // no way to tell which workspace). 403, not 401: a 401 would send
+                // the client to sign in again, which cannot fix it (WHIT-709).
+                $this->httpStatus = 403;
+                return $this->encode($this->makeError(null, ErrorCode::FORBIDDEN, $refused->getMessage()));
+            }
             if ($principal === null) {
                 // HTTP 401, as every MCP authorization revision requires: it is
                 // what tells an OAuth client to go and sign in (WHIT-709).
@@ -147,7 +156,7 @@ final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSou
                 $this->notifyClientKey = $principal->jti;
 
                 // WHIT-697: bookkeeping, so it must never cost the caller the call.
-                if ($this->recordTokenUse !== null && $principal->principalKind !== 'session') {
+                if ($this->recordTokenUse !== null && !in_array($principal->principalKind, ['session', 'oauth'], true)) {
                     try {
                         ($this->recordTokenUse)($principal);
                     } catch (\Throwable $e) {

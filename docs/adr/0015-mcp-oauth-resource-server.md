@@ -22,7 +22,7 @@ Someone has to be that authorization server: issuing tokens, showing the sign-in
 2. **whity-core is only the resource server.**
    - It serves Protected Resource Metadata at `/.well-known/oauth-protected-resource` and at the path-suffixed `/.well-known/oauth-protected-resource/mcp`, which clients try first.
    - It answers an unauthenticated `/mcp` call with `401` and `WWW-Authenticate: Bearer resource_metadata="…", scope="…"`.
-   - It accepts the authorization server's access tokens (part B; see Open).
+   - It accepts the authorization server's access tokens (part B; see Amendment 1).
 3. **The authorization server is configuration** (`MCP_OAUTH_ISSUER`), not a dependency. Unset means OAuth is off and nothing changes. A self-hoster can point it at any OAuth 2.1 server. Core never needs the paid service to work, and stays inside the WHIT-667 freeze.
 4. **Static MCP tokens stay.** They're the right tool for apps that accept a pasted token, and they keep working alongside OAuth.
 5. The metadata's `resource` is `APP_URL` + `/mcp`, the same address the wizard hands out. With `APP_URL` unset the resource is unknown and OAuth stays off rather than guessing. When the bundled admin serves the public origin, the web tier forwards the metadata documents just as it forwards `/mcp`.
@@ -30,9 +30,9 @@ Someone has to be that authorization server: issuing tokens, showing the sign-in
 ## Consequences
 
 - An unauthenticated `/mcp` call is now HTTP 401 for every client, OAuth or not, as each MCP authorization revision requires. It used to be 200 with a JSON-RPC error. A client relying on the old status gets a 401 with the same JSON-RPC body.
-- Claude and ChatGPT can't complete sign-in until part B accepts the issued tokens. Part A only lets them discover where to sign in.
+- With part B (Amendment 1), Claude and ChatGPT can complete sign-in. A person needs a Whity account linked to the authorization server through single sign-on first.
 
-## Open (part B, needs owner decisions)
+## Open (part B, as it stood before Amendment 1)
 
 1. **Identity mapping.** An access token names a subject at the authorization server, and core has to map it to a Whity profile and tenant. Candidates:
    - the existing linked-identity table (issuer + subject), as SSO uses;
@@ -42,6 +42,18 @@ Someone has to be that authorization server: issuing tokens, showing the sign-in
    The tenant needs a source too: a claim, the profile's only tenant, or a per-tenant MCP URL.
 2. **Signature verification.** The JWKS fetch-and-cache with RS256/ES256 can be done by an approved JWT library (the dependency policy requires architect approval, a licence review and a security audit) or in-house on `openssl_verify`.
 3. **Scope.** The authorization server's consent screen should offer the wizard's plain-language presets, mapped onto the `McpScope` vocabulary.
+
+## Amendment 1 (2026-10-28): accepting access tokens (part B)
+
+The owner decided the open questions:
+
+1. **Identity: the token's `(iss, sub)` through the existing linked-identity table**, in the global-trust namespace only. The issuer is operator configuration, which is what global trust means (migration 047); a tenant's own identity provider could claim any issuer, so its links never answer. Core does no linking or provisioning on this path. A person links once by signing in to Whity with the same provider, and a token for an unlinked subject is refused with a message saying so.
+2. **Tenant: a claim if present, else the profile's only tenant, else refused.** The claim is `tenant_id` by default (`MCP_OAUTH_TENANT_CLAIM`). An active membership is required either way, so suspension applies at once. The system tenant (id 0) is refused outright. It needs no membership row, so an outside server naming it would otherwise grant cross-tenant authority to any linked account.
+3. **Signatures: firebase/php-jwt**, already a core dependency for SSO ID tokens, so there is no new library. The JWKS comes from `MCP_OAUTH_JWKS_URI` or the issuer's RFC 8414 or OIDC metadata, cached through the SSO path's `JwksProvider`. Symmetric keys are discarded, and each key's own algorithm binds the token's, so a token cannot choose `none` or HMAC.
+4. **Audience:** `aud` must include the resource (`APP_URL/mcp`), so a token issued for another service is not accepted here.
+5. **Errors:** an invalid token gets 401 and the client signs in again. A genuine token that can't be used gets 403 and a plain message, because signing in again would only produce the same token.
+
+Scope presets on the authorization server's consent screen (Open item 3) belong to Whity-Auth, not core.
 
 ## Alternatives considered
 
