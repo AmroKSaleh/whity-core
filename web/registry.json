@@ -171,6 +171,24 @@
       ]
     },
     {
+      "name": "copy-block",
+      "type": "registry:ui",
+      "title": "Copy Block",
+      "description": "Text to copy elsewhere (a command, a config file, a token) with a copy button.",
+      "dependencies": [
+        "@tabler/icons-react"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/copy-block.tsx",
+          "type": "registry:ui"
+        }
+      ],
+      "registryDependencies": [
+        "@whity/button"
+      ]
+    },
+    {
       "name": "breadcrumb",
       "type": "registry:ui",
       "title": "Breadcrumb",

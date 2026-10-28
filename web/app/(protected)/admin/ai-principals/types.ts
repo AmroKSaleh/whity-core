@@ -16,6 +16,8 @@ export interface AiPrincipal {
   scope: string[];
   expiresAt: string | null;
   createdAt: string | null;
+  /** WHIT-697: null until an app first calls the server with it. */
+  lastUsedAt: string | null;
 }
 
 export interface AiPrincipalPagination {
@@ -31,14 +33,31 @@ export interface AiPrincipalListResponse {
 }
 
 /**
- * The one-time credential returned immediately after a successful
- * POST /api/v1/mcp/tokens. The raw `token` value is never surfaced again
- * by the API; the UI must show it once in a modal.
+ * `GET /api/v1/mcp/connect` (McpConnectHandler::info, WHIT-697): where an app
+ * connects, whether it can yet, and the scope behind each preset.
  */
-export interface NewCredential {
-  jti: string;
-  token: string;
+export interface McpConnectInfo {
+  /** Null when the deployment's APP_URL is unset. */
+  endpoint: string | null;
+  serverEnabled: boolean;
+  tenantEnabled: boolean;
+  presets: {
+    everything: string[];
+    /** Null when no read permission exists to narrow to. */
+    readOnly: string[] | null;
+  };
+  areas: { area: string; permissions: string[] }[];
+}
+
+/** One entry of `POST /api/v1/mcp/connect/preview`. */
+export interface McpPreviewTool {
   name: string;
-  scope: string[];
-  expiresAt: string;
+  description: string;
+}
+
+/** One entry of `GET /api/v1/mcp/tokens` — the caller's own tokens, snake_case. */
+export interface OwnMcpToken {
+  jti: string;
+  name: string;
+  last_used_at: string | null;
 }
