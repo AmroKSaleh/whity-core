@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Mcp\Resources;
 
 use Whity\Core\Router;
+use Whity\Mcp\McpExposure;
 
 /**
  * Derives MCP resource definitions from GET route declarations (WC-30513809).
@@ -50,8 +51,9 @@ final class ResourceDeriver
      *
      * @return array{resources: list<array<string, mixed>>, resourceTemplates: list<array<string, mixed>>}
      */
-    public function deriveResources(): array
+    public function deriveResources(bool $exposedOnly = false): array
     {
+        $include = $this->exposureFilter($exposedOnly);
         $resources         = [];
         $resourceTemplates = [];
 
@@ -61,7 +63,7 @@ final class ResourceDeriver
                 continue;
             }
             $schema = $decl['schema'] ?? null;
-            if (!is_array($schema) || $schema === []) {
+            if (!is_array($schema) || $schema === [] || !$include($decl)) {
                 continue;
             }
             $path = $this->versionedPath((string) ($decl['path'] ?? ''));
@@ -75,7 +77,7 @@ final class ResourceDeriver
                     continue;
                 }
                 $schema = $route['schema'] ?? null;
-                if (!is_array($schema) || $schema === []) {
+                if (!is_array($schema) || $schema === [] || !$include($route)) {
                     continue;
                 }
                 $this->addToResources($route['path'], $schema, $resources, $resourceTemplates);
@@ -94,8 +96,9 @@ final class ResourceDeriver
      *
      * @return array<string, array{requiredRole: ?string, requiredPermission: ?string}>
      */
-    public function buildAccessMap(): array
+    public function buildAccessMap(bool $exposedOnly = false): array
     {
+        $include = $this->exposureFilter($exposedOnly);
         $accessMap     = [];
 
         // Static declarations: unversioned paths — apply version prefix.
@@ -104,7 +107,7 @@ final class ResourceDeriver
                 continue;
             }
             $schema = $decl['schema'] ?? null;
-            if (!is_array($schema) || $schema === []) {
+            if (!is_array($schema) || $schema === [] || !$include($decl)) {
                 continue;
             }
             $path = $this->versionedPath((string) ($decl['path'] ?? ''));
@@ -123,7 +126,7 @@ final class ResourceDeriver
                     continue;
                 }
                 $schema = $route['schema'] ?? null;
-                if (!is_array($schema) || $schema === []) {
+                if (!is_array($schema) || $schema === [] || !$include($route)) {
                     continue;
                 }
                 $uri = self::URI_SCHEME . $this->cleanPathConstraints($route['path']);
@@ -136,6 +139,33 @@ final class ResourceDeriver
         }
 
         return $accessMap;
+    }
+
+    /**
+     * Whether the route with this (versioned) path pattern is on the resource
+     * surface — what resources/read asks before serving an UNGATED route,
+     * since the Router it matches against knows nothing about opt-ins
+     * declared in the static schemas.
+     */
+    public function exposesRoute(string $routePath): bool
+    {
+        return isset($this->buildAccessMap(true)[self::URI_SCHEME . $this->cleanPathConstraints($routePath)]);
+    }
+
+    /**
+     * The per-route predicate for $exposedOnly: everything when false, else
+     * the agent surface of ADR-0006 §4 (WHIT-695) — gated on the declaration
+     * or on the live Router route, or opted in by its schema.
+     *
+     * @return \Closure(array<string, mixed>): bool
+     */
+    private function exposureFilter(bool $exposedOnly): \Closure
+    {
+        if (!$exposedOnly) {
+            return static fn (array $route): bool => true;
+        }
+        $gated = McpExposure::gatedRouterRoutes($this->router);
+        return fn (array $route): bool => McpExposure::exposes($route, $gated, $this->router);
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────

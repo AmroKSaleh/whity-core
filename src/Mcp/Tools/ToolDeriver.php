@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Mcp\Tools;
 
 use Whity\Core\Router;
+use Whity\Mcp\McpExposure;
 
 /**
  * Derives MCP tool definitions from route declarations (WC-001754c6).
@@ -45,6 +46,9 @@ final class ToolDeriver
     /** @var array<string, array{requiredRole: ?string, requiredPermission: ?string}>|null */
     private static ?array $accessMapCache = null;
 
+    /** @var array<string, true>|null */
+    private static ?array $exposedCache = null;
+
     /**
      * Clear the worker-boot caches.
      *
@@ -56,6 +60,7 @@ final class ToolDeriver
         self::$declarationsCache = null;
         self::$toolsCache        = null;
         self::$accessMapCache    = null;
+        self::$exposedCache      = null;
     }
 
     /** @var \Closure(string): void */
@@ -199,6 +204,39 @@ final class ToolDeriver
         }
         ['parameters' => $pathParams] = $this->sanitizePath((string) ($decl['path'] ?? ''));
         return $this->buildInputSchema($pathParams, (array) ($decl['schema'] ?? []));
+    }
+
+    /**
+     * Whether a derived tool is offered to agents (ADR-0006 §4, WHIT-695):
+     * its route is gated — on the declaration or on the live Router route,
+     * which is the gate tools/call enforces — or its schema opts in. Every
+     * route is still DERIVED; tools/list and tools/call consult this before
+     * showing or running one.
+     */
+    public function isExposed(string $toolName): bool
+    {
+        if (self::$exposedCache === null) {
+            $gated   = McpExposure::gatedRouterRoutes($this->router);
+            $exposed = [];
+            foreach ($this->mergedDeclarations() as $decl) {
+                if (McpExposure::exposes($decl, $gated, $this->router)) {
+                    $exposed[$this->toolName($decl)] = true;
+                }
+            }
+            self::$exposedCache = $exposed;
+        }
+
+        return isset(self::$exposedCache[$toolName]);
+    }
+
+    /** @param array<string, mixed> $decl */
+    private function toolName(array $decl): string
+    {
+        $schema = is_array($decl['schema'] ?? null) ? $decl['schema'] : [];
+        ['path' => $cleanPath] = $this->sanitizePath((string) ($decl['path'] ?? ''));
+        return is_string($schema['operationId'] ?? null)
+            ? $schema['operationId']
+            : $this->operationId((string) ($decl['method'] ?? ''), $cleanPath);
     }
 
     /**

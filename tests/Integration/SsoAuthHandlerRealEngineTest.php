@@ -45,6 +45,9 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
     private PDO $pdo;
     private JwtParser $jwtParser;
     private SsoAuthHandler $handler;
+
+    /** @var \Closure(?\Whity\Core\Http\FrontendUrls): SsoAuthHandler */
+    private \Closure $makeHandler;
     private string $privatePem;
     /** @var array<string, mixed> */
     private array $jwks;
@@ -109,7 +112,8 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
             new \Whity\Core\Settings\GlobalSettingsRepository($this->pdo),
             new \Whity\Core\Settings\TenantSettingsRepository($this->pdo)
         );
-        $this->handler = new SsoAuthHandler(
+        $this->hooks = new \Whity\Core\Hooks\HookManager();
+        $this->makeHandler = fn (?\Whity\Core\Http\FrontendUrls $frontendUrls = null): SsoAuthHandler => new SsoAuthHandler(
             $engine,
             new IdentityProviderRepository($this->pdo),
             $emailRepo,
@@ -123,8 +127,10 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
             // Present but switched OFF (the default), so every test below that
             // does not turn it on sees the pre-existing behaviour.
             new \Whity\Core\Tenant\FederatedWorkspaceProvisioner($this->pdo, $this->settings),
-            $this->hooks = new \Whity\Core\Hooks\HookManager(),
+            $this->hooks,
+            $frontendUrls,
         );
+        $this->handler = ($this->makeHandler)();
 
         $this->seed();
         $_GET = [];
@@ -327,6 +333,34 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
         $res = $this->handler->start(new Request('GET', '/x', [], ''), ['provider' => 'nope']);
         self::assertSame(302, $res->getStatusCode());
         self::assertStringContainsString('/login?sso_error=provider_unavailable', $this->location($res));
+    }
+
+    // ── headless frontend (WHIT-693) ──────────────────────────────────────────
+
+    public function testHeadlessFrontendReceivesTheRedirectsWhileTheCallbackStaysOnTheBackend(): void
+    {
+        $this->handler = ($this->makeHandler)(new \Whity\Core\Http\FrontendUrls([
+            'APP_URL' => self::APP_URL,
+            'FRONTEND_URL' => 'https://portal.example',
+            'SSO_SUCCESS_URL' => 'https://portal.example/home',
+        ]));
+
+        // The provider is sent back to the BACKEND's callback, never the frontend.
+        $start = $this->handler->start(new Request('GET', '/api/v1/auth/sso/google/start', [], ''), ['provider' => 'google']);
+        self::assertStringContainsString(
+            'redirect_uri=' . rawurlencode(self::APP_URL . '/api/v1/auth/sso/google/callback'),
+            $this->location($start)
+        );
+
+        // A failure bounces to the frontend's login page...
+        $bounce = $this->handler->start(new Request('GET', '/x', [], ''), ['provider' => 'nope']);
+        self::assertSame('https://portal.example/login?sso_error=provider_unavailable', $this->location($bounce));
+
+        // ...and a success lands on the overridden page.
+        $this->linkIdentity();
+        $this->primeFlow();
+        $_GET = ['code' => 'authcode', 'state' => 'state-1'];
+        self::assertSame('https://portal.example/home', $this->location($this->runCallback()));
     }
 
     // ── callback ────────────────────────────────────────────────────────────────

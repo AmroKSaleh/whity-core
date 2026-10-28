@@ -93,7 +93,7 @@ final class CoreJobs
                         new \Whity\Core\Audit\AuditLogger($pdo, $logger)
                     ),
                     $logger,
-                    is_string($_ENV['WHITY_PUBLIC_URL'] ?? null) ? (string) $_ENV['WHITY_PUBLIC_URL'] : null
+                    \Whity\Core\Http\FrontendUrls::fromEnv()->link(\Whity\Core\Http\FrontendUrls::ERROR_DETAILS)
                 ),
                 false
             );

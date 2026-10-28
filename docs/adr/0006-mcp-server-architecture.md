@@ -80,6 +80,9 @@ request.
 }
 ```
 
+> **Amended (WHIT-695):** scope is enforced, and holds capabilities as well as
+> permissions. See [Amendment 1](#amendment-1-2026-10-28-whit-695).
+
 **Phase B migration path:** When `profiles` is stable, `user_id` becomes `profile_id` and
 `tenant_id` becomes `active_tenant_id`. Existing `mcp` tokens issued before Phase B can be
 revoked in bulk via epoch bump or jti revocation. A new token version claim (`tv: 2`) will
@@ -111,6 +114,9 @@ Tools are derived automatically from `Router::getRoutes()` at worker boot. Deriv
 
 Routes with no `requiredPermission` are **excluded** — they represent public or infrastructure
 endpoints that AI agents should not call directly.
+
+> **Amended (WHIT-695):** a `requiredRole` also counts as a gate, and an ungated route may opt
+> in with `schema['mcp'] = true`. See [Amendment 1](#amendment-1-2026-10-28-whit-695).
 
 Routes with a `requiredPermission` but no `schema` declaration produce a tool with
 `inputSchema: { type: "object", properties: {} }` (untyped). The SDK lint task (Phase C,
@@ -200,6 +206,61 @@ never enumerate tools it cannot call.
 `ping` and `notifications/cancelled` are handled per the MCP lifecycle spec.
 
 ---
+
+## Amendment 1 (2026-10-28, WHIT-695)
+
+Two parts of this decision were not what the code did. Headless deployments put MCP in front of
+teams that build products on it, so the code now does what this ADR promised, and the ADR says
+precisely what that is.
+
+### Scopes are enforced
+
+The `scope` claim was stored and displayed but never checked. It now holds two kinds of entry
+(`src/Mcp/Auth/McpScope.php`):
+
+| Entry | Meaning |
+|---|---|
+| `tools:call`, `resources:read`, `prompts:read` | **Capabilities.** Each opens one family of MCP methods: `tools/*`, `resources/*`, `prompts/*`. The Dispatcher refuses a method outside them with `-32003`. |
+| A permission name (`users:read`) or a whole resource (`users:*`) | **Narrowing.** The token reaches only tools, resources and permission-gated prompts gated by one of them. Ungated and role-only items are out of reach. |
+
+Rules:
+
+- **Scopes narrow RBAC and never widen it.** Every scope check runs in addition to `RoleChecker`.
+  A scope naming `users:delete` does nothing for a principal whose role lacks it.
+- **No permission entries means the principal's full RBAC.**
+- **No capability means every family.** This keeps tokens issued before enforcement working.
+  New ones cannot be issued that way: `POST /api/mcp/tokens` requires at least one capability
+  and refuses unknown permission names.
+- **The `tools:`, `resources:` and `prompts:` prefixes are reserved.** Any entry under one means
+  that family's capability. Earlier tokens carry spellings such as `tools:list`, and folding them
+  in keeps them from being read as permission names that would narrow the token to nothing.
+- **Session bearers** (a human's access token used for MCP) hold every capability and no
+  narrowing.
+
+### Which routes agents see
+
+§4 said routes without a `requiredPermission` are excluded. The code listed them anyway. It was
+not an open door: the Dispatcher requires a valid bearer and those handlers authenticate the
+caller. But a model reads `tools/list` to decide what it may attempt, and the list included
+login, refresh, two-factor disable, password change and payment webhooks.
+
+The rule is now (`src/Mcp/McpExposure.php`): a route is offered to agents, as a tool, a listed
+resource, or a `resources/read` target, when **either**
+
+- a `requiredPermission` or `requiredRole` gates it (on its declaration or on the live Router
+  route, which is the gate `tools/call` enforces), **or**
+- its schema sets `'mcp' => true`.
+
+Opt in only when the handler authorizes the caller itself, because the flag takes the missing
+route-level gate on trust. Core's opt-ins are listed, with that reasoning, in
+`CoreApiSchemas::AGENT_CALLABLE_UNGATED`: the caller's own notifications, inbox and audit
+trail, the data-type lifecycle (per-type permissions), and document-route actions (only a
+recipient may act). Everything else that is ungated stays off: session and credential
+machinery, public endpoints and webhooks. A hidden tool called by name answers "Unknown tool",
+the same as one that does not exist.
+
+Plugin routes follow the same rule. A plugin route with no gate is no longer a tool unless its
+schema opts in.
 
 ## Alternatives Considered
 

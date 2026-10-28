@@ -15,6 +15,8 @@ use Whity\Mcp\JsonRpc\ErrorCode;
 use Whity\Mcp\JsonRpc\McpException;
 use Whity\Mcp\JsonRpc\MethodHandler;
 use Whity\Sdk\Http\Request;
+use Whity\Mcp\Auth\McpScope;
+use Whity\Mcp\McpExposure;
 
 /**
  * MCP resources/read handler (WC-30513809).
@@ -36,6 +38,10 @@ final class ResourcesReadHandler implements MethodHandler
         private readonly RoleChecker           $roleChecker,
         private readonly TokenValidator        $tokenValidator,
         private readonly ?AuditLoggerInterface $auditLogger = null,
+        // Knows which UNGATED routes opted onto the resource surface (their
+        // opt-in lives in the static schemas, not on the Router). Without it
+        // only an opt-in carried on the matched route itself counts.
+        private readonly ?ResourceDeriver      $resourceDeriver = null,
     ) {}
 
     /**
@@ -115,6 +121,19 @@ final class ResourcesReadHandler implements MethodHandler
         $requiredPermission = $matched['requiredPermission'] ?? null;
         $requiredRole       = $matched['requiredRole'] ?? null;
 
+        // ADR-0006 §4 (WHIT-695): an ungated route is readable only when it is
+        // on the resource surface. Without this, any GET route the Router
+        // knows — /me/emails, /health — answered here, listed or not.
+        if (!$this->exposed($matched)) {
+            throw new McpException(ErrorCode::RESOURCE_NOT_FOUND, "Resource not found: {$uri}");
+        }
+
+        // WHIT-695: the token's permission narrowing, on top of RBAC below.
+        $gate = is_string($requiredPermission) && $requiredPermission !== '' ? $requiredPermission : null;
+        if (!McpScope::of($principal)->allowsPermission($gate)) {
+            throw new McpException(ErrorCode::FORBIDDEN, 'Forbidden');
+        }
+
         if (is_string($requiredPermission) && $requiredPermission !== '') {
             if (!$this->roleChecker->hasPermissionForProfile($principal->userId, $requiredPermission, $tenantId)) {
                 throw new McpException(ErrorCode::FORBIDDEN, 'Forbidden');
@@ -153,6 +172,16 @@ final class ResourcesReadHandler implements MethodHandler
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    /** @param array<string, mixed> $matched */
+    private function exposed(array $matched): bool
+    {
+        if (McpExposure::exposes($matched)) {
+            return true;
+        }
+        $path = $matched['path'] ?? null;
+        return $this->resourceDeriver !== null && is_string($path) && $this->resourceDeriver->exposesRoute($path);
+    }
 
     private function buildRequest(string $path, McpPrincipal $principal): Request
     {

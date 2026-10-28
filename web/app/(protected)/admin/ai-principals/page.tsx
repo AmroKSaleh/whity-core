@@ -15,19 +15,20 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@amroksaleh/ui/dropdown-menu';
-import { IconMenu2, IconPlus } from '@tabler/icons-react';
+import { IconMenu2, IconPlugConnected } from '@tabler/icons-react';
 import { useTranslation } from '@amroksaleh/features/i18n';
 import { useDateDisplay } from '@amroksaleh/features/datetime';
-import { CreateAiPrincipalModal } from './create-modal';
-import { CredentialModal } from './credential-modal';
+import { ConnectWizard } from './connect-wizard';
 import { RevokeAiPrincipalModal } from './revoke-modal';
-import type { AiPrincipal, AiPrincipalListResponse, NewCredential } from './types';
+import type { AiPrincipal, AiPrincipalListResponse } from './types';
 
 /**
  * AI Principals admin page (WC-0208ce4d).
  *
  * Lists all active MCP bearer credentials issued within the current tenant.
- * Admins can create new credentials (shown once) and revoke existing ones.
+ * Admins connect a new AI app through the guided wizard (WHIT-697), which
+ * issues the credential and shows it once inside that app's setup, and can
+ * revoke existing ones.
  * Mirrors the loading / empty / error patterns of the other admin pages.
  */
 export default function AiPrincipalsPage() {
@@ -38,8 +39,7 @@ export default function AiPrincipalsPage() {
   const dates = useDateDisplay();
   const canManage = hasPermission(MCP_TOKENS_MANAGE);
 
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [pendingCredential, setPendingCredential] = useState<NewCredential | null>(null);
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [isRevokeModalOpen, setIsRevokeModalOpen] = useState(false);
   const [selectedPrincipal, setSelectedPrincipal] = useState<AiPrincipal | null>(null);
 
@@ -101,6 +101,14 @@ export default function AiPrincipalsPage() {
         withTime: false,
         enableSorting: true,
       },
+      // WHIT-697: the quickest answer to "is this app still connected?"
+      {
+        id: 'lastUsedAt',
+        header: t('aiPrincipals.table.lastUsed', 'Last used'),
+        value: (row) => row.lastUsedAt,
+        withTime: true,
+        enableSorting: true,
+      },
     ]),
   ];
 
@@ -136,11 +144,11 @@ export default function AiPrincipalsPage() {
         action={
           canManage ? (
             <Button
-              onClick={() => setIsCreateModalOpen(true)}
+              onClick={() => setIsWizardOpen(true)}
               className="gap-2"
             >
-              <IconPlus size={18} />
-              {t('aiPrincipals.header.create', 'Create Credential')}
+              <IconPlugConnected size={18} />
+              {t('aiPrincipals.header.connect', 'Connect an AI app')}
             </Button>
           ) : undefined
         }
@@ -159,32 +167,16 @@ export default function AiPrincipalsPage() {
           title: t('aiPrincipals.empty.title', 'No active credentials'),
           description: t(
             'aiPrincipals.empty.description',
-            'No AI principal tokens have been issued yet. Create one to let an AI client authenticate via MCP.'
+            'No AI app is connected yet. Use "Connect an AI app" to let one work with your data.'
           ),
         }}
       />
 
-      {isCreateModalOpen && (
-        <CreateAiPrincipalModal
-          isOpen={isCreateModalOpen}
-          onOpenChange={setIsCreateModalOpen}
-          onSuccess={(credential) => {
-            setIsCreateModalOpen(false);
-            setPendingCredential(credential);
-            refetch();
-          }}
-        />
-      )}
-
-      {pendingCredential && (
-        <CredentialModal
-          isOpen={true}
-          onOpenChange={(open) => {
-            if (!open) setPendingCredential(null);
-          }}
-          credential={pendingCredential}
-        />
-      )}
+      <ConnectWizard
+        isOpen={isWizardOpen}
+        onOpenChange={setIsWizardOpen}
+        onConnected={refetch}
+      />
 
       {selectedPrincipal && (
         <RevokeAiPrincipalModal

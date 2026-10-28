@@ -51,6 +51,17 @@ export interface TextRun {
   text: string;
   bold?: boolean;
   italic?: boolean;
+  /**
+   * An absolute http, https or mailto URL this run links to (WHIT-681).
+   *
+   * The scheme is ALLOW-LISTED by the render service rather than merely
+   * escaped, because an href is the one value in a body that is interpreted
+   * rather than displayed, and the flow HTML is loaded by a real browser in
+   * the render container in order to be printed. `javascript:` there is script
+   * execution, not a broken link. Relative URLs are refused as well: there is
+   * nothing for them to be relative to on paper.
+   */
+  href?: string;
 }
 
 export interface TextStyle {

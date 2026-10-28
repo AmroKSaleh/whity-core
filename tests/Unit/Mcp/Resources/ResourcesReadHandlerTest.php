@@ -55,13 +55,13 @@ final class ResourcesReadHandlerTest extends TestCase
             return Response::json(['secure' => true]);
         };
 
-        $this->router->registerUnversioned('GET', '/api/things', $capture);
+        $this->router->registerUnversioned('GET', '/api/things', $capture, null, null, null, ['mcp' => true]);
         $this->router->registerUnversioned('GET', '/api/things/{id:\d+}', $capture, null, null, 'things:read');
         $this->router->registerUnversioned('GET', '/api/admin-only', $capturePermission, 'admin');
         $this->router->registerUnversioned('GET', '/api/perm-only', $capturePermission, null, null, 'stuff:read');
         $this->router->registerUnversioned('GET', '/api/bad', static function (): Response {
             return Response::error('Something failed', 500);
-        });
+        }, null, null, null, ['mcp' => true]);
 
         $this->roleChecker    = $this->createMock(RoleChecker::class);
         $this->tokenValidator = $this->createMock(TokenValidator::class);
@@ -81,6 +81,57 @@ final class ResourcesReadHandlerTest extends TestCase
     protected function tearDown(): void
     {
         TenantContext::reset();
+    }
+
+    // ── Agent surface and scope (WHIT-695) ────────────────────────────────────
+
+    /** @param list<string> $scope */
+    private function handlerFor(array $scope, ?ResourceDeriver $deriver = null): ResourcesReadHandler
+    {
+        $validator = $this->createMock(TokenValidator::class);
+        $principal = new McpPrincipal(self::USER_ID, self::USER_ID, self::TENANT_ID, 'user', $scope, 'jti-scope');
+        $validator->method('validateMcpToken')->willReturn($principal);
+        $validator->method('validateBearerForMcp')->willReturn($principal);
+
+        return new ResourcesReadHandler($this->router, $this->roleChecker, $validator, resourceDeriver: $deriver);
+    }
+
+    public function testUngatedRouteWithoutTheOptIn_isNotFound(): void
+    {
+        // Session machinery: ungated, and nothing opts it in.
+        $this->router->registerUnversioned('GET', '/api/me/emails', static fn (): Response => Response::json(['secret' => true]));
+
+        $this->expectException(McpException::class);
+        $this->expectExceptionCode(ErrorCode::RESOURCE_NOT_FOUND);
+
+        ($this->handlerFor(['resources:read']))(['uri' => 'whity-api:///api/me/emails'], self::BEARER);
+    }
+
+    public function testUngatedRouteOptedInByItsStaticDeclaration_isReadable(): void
+    {
+        // Core routes carry their schema (and the opt-in) on the static
+        // declaration, not on the Router route the read resolves to.
+        $this->router->registerUnversioned('GET', '/api/me/inbox', static fn (): Response => Response::json(['items' => []]));
+        $deriver = new ResourceDeriver(
+            [['method' => 'GET', 'path' => '/api/me/inbox', 'schema' => ['summary' => 'Inbox', 'mcp' => true]]],
+            $this->router,
+        );
+
+        $result = ($this->handlerFor(['resources:read'], $deriver))(['uri' => 'whity-api:///api/me/inbox'], self::BEARER);
+
+        self::assertIsArray($result);
+        self::assertArrayHasKey('contents', $result);
+    }
+
+    public function testNarrowedScope_forbidsAReadOutsideIt(): void
+    {
+        $this->roleChecker->method('hasPermissionForProfile')->willReturn(true);
+
+        $this->expectException(McpException::class);
+        $this->expectExceptionCode(ErrorCode::FORBIDDEN);
+
+        // RBAC would allow things:read; the token is narrowed to stuff:read.
+        ($this->handlerFor(['resources:read', 'stuff:read']))(['uri' => 'whity-api:///api/things/5'], self::BEARER);
     }
 
     // ── Param validation ──────────────────────────────────────────────────────
@@ -297,7 +348,7 @@ final class ResourcesReadHandlerTest extends TestCase
         $this->router->registerUnversioned('GET', '/api/audit-rr', function () use (&$capturedUserId): Response {
             $capturedUserId = AuditContext::getActorUserId();
             return Response::json(['ok' => true]);
-        });
+        }, null, null, null, ['mcp' => true]);
 
         $handler = new ResourcesReadHandler($this->router, $this->roleChecker, $this->tokenValidator);
         ($handler)(['uri' => ResourceDeriver::URI_SCHEME . '/api/audit-rr'], self::BEARER);
@@ -311,7 +362,7 @@ final class ResourcesReadHandlerTest extends TestCase
     {
         $this->router->registerUnversioned('GET', '/api/throws-rr', static function (): never {
             throw new \RuntimeException('Boom');
-        });
+        }, null, null, null, ['mcp' => true]);
 
         /** @var MockObject&AuditLoggerInterface $audit */
         $audit = $this->createMock(AuditLoggerInterface::class);

@@ -243,6 +243,68 @@ final class McpTokenServiceTest extends TestCase
         self::assertSame(self::PROFILE_ID, $principal->userId, 'userId must equal profileId for new-style MCP tokens');
     }
 
+    // ── McpTokenService::recordUse() (WHIT-697) ──────────────────────────────
+
+    public function testRecordUse_isListedAsLastUsed(): void
+    {
+        $jti = $this->issueJti('connected app');
+        self::assertNull($this->listed($jti)['last_used_at'], 'a token never used has no last use');
+
+        $this->service->recordUse($jti, self::TENANT_ID, new \DateTimeImmutable('2026-10-28 09:00:00'));
+
+        self::assertSame('2026-10-28 09:00:00', $this->listed($jti)['last_used_at']);
+    }
+
+    public function testRecordUse_writesAtMostOncePerResolution(): void
+    {
+        $jti = $this->issueJti('busy agent');
+        $this->service->recordUse($jti, self::TENANT_ID, new \DateTimeImmutable('2026-10-28 09:00:00'));
+
+        $this->service->recordUse($jti, self::TENANT_ID, new \DateTimeImmutable('2026-10-28 09:00:59'));
+        self::assertSame('2026-10-28 09:00:00', $this->listed($jti)['last_used_at'], 'within a minute: no write');
+
+        $this->service->recordUse($jti, self::TENANT_ID, new \DateTimeImmutable('2026-10-28 09:01:01'));
+        self::assertSame('2026-10-28 09:01:01', $this->listed($jti)['last_used_at'], 'past a minute: written');
+    }
+
+    public function testRecordUse_touchesOnlyThatToken(): void
+    {
+        $used   = $this->issueJti('used');
+        $unused = $this->issueJti('unused');
+
+        $this->service->recordUse($used, self::TENANT_ID);
+
+        self::assertNotNull($this->listed($used)['last_used_at']);
+        self::assertNull($this->listed($unused)['last_used_at']);
+    }
+
+    public function testRecordUse_isScopedToTheTokensTenant(): void
+    {
+        $jti = $this->issueJti('tenant bound');
+
+        $this->service->recordUse($jti, self::TENANT_ID + 1);
+
+        self::assertNull($this->listed($jti)['last_used_at'], 'a jti presented under another tenant writes nothing');
+    }
+
+    private function issueJti(string $name): string
+    {
+        $claims = $this->jwtParser->parse($this->service->issue(self::PROFILE_ID, self::TENANT_ID, $name, ['tools:call']));
+        self::assertIsArray($claims);
+        return (string) $claims['jti'];
+    }
+
+    /** @return array<string, mixed> */
+    private function listed(string $jti): array
+    {
+        foreach ($this->service->listForUser(self::PROFILE_ID, self::TENANT_ID) as $row) {
+            if ($row['jti'] === $jti) {
+                return $row;
+            }
+        }
+        self::fail("token {$jti} is not listed");
+    }
+
     // ── Cross-profile ownership (security) ───────────────────────────────────
 
     public function testTokenIssuedForProfileA_cannotBeListedByProfileB(): void

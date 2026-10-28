@@ -9,6 +9,7 @@ use Whity\Auth\TokenValidator;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Mcp\Auth\McpPrincipal;
 use Whity\Mcp\JsonRpc\MethodHandler;
+use Whity\Mcp\Auth\McpScope;
 
 /**
  * MCP tools/list handler (WC-001754c6, filtered WC-e8c4d228).
@@ -40,13 +41,31 @@ final class ToolsListHandler implements MethodHandler
         $principal = $bearerToken !== null
             ? $this->tokenValidator->validateBearerForMcp($bearerToken)
             : null;
-        $tenantId = TenantContext::getTenantId();
 
+        return ['tools' => $this->listFor($principal, TenantContext::getTenantId())];
+    }
+
+    /**
+     * The tools a principal would see, by the exact filter tools/list applies.
+     *
+     * Public so the connect wizard's scope preview (WHIT-697) answers "what
+     * could an app with this scope do?" from this code rather than from a
+     * second copy of it, which would agree today and drift later.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function listFor(?McpPrincipal $principal, ?int $tenantId): array
+    {
         $accessMap = $this->toolDeriver->buildAccessMap();
         $derived   = $this->toolDeriver->deriveTools();
         $tools     = [];
         foreach ($derived as $tool) {
             $name   = (string) ($tool['name'] ?? '');
+            // ADR-0006 §4 (WHIT-695): ungated routes stay off the list unless
+            // their schema opts in.
+            if (!$this->toolDeriver->isExposed($name)) {
+                continue;
+            }
             $access = $accessMap[$name] ?? ['requiredRole' => null, 'requiredPermission' => null];
             if ($this->callerCanUse($access, $principal, $tenantId)) {
                 $tools[] = $tool;
@@ -75,7 +94,7 @@ final class ToolsListHandler implements MethodHandler
             }
         }
 
-        return ['tools' => $tools];
+        return $tools;
     }
 
     /** @param array<string, mixed> $access */
@@ -84,6 +103,12 @@ final class ToolsListHandler implements MethodHandler
         $requiredPermission = is_string($access['requiredPermission'] ?? null) ? $access['requiredPermission'] : null;
         $requiredRole       = is_string($access['requiredRole'] ?? null) ? $access['requiredRole'] : null;
 
+        // WHIT-695: a token that names permissions reaches only items gated by
+        // one of them. Applied before the open-item shortcut, which is exactly
+        // what narrowing removes.
+        if ($principal !== null && !McpScope::of($principal)->allowsPermission($requiredPermission)) {
+            return false;
+        }
         if ($requiredPermission === null && $requiredRole === null) {
             return true;
         }

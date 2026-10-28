@@ -27,6 +27,19 @@ on:
     # a critical advisory is in front of a human before the working day.
     - cron: '0 6 * * *'
   workflow_dispatch:
+    inputs:
+      # A drill. Until this existed there was no way to ask "can this job still
+      # reach a human?" short of waiting for a real advisory — and the answer,
+      # for the whole life of this workflow, was no: every alert it ever tried
+      # to send was refused at the edge (see the step below). The delivery path
+      # was the one part of an alerting system that nothing exercised.
+      #
+      # It deliberately drives the SAME step, not a copy of it. A test that
+      # posts through its own separate code proves only that the copy works.
+      test_alert:
+        description: 'Send a test alert to prove the path to a human still works'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -38,7 +51,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -46,11 +59,18 @@ jobs:
       # No `npm ci`. This reads the committed lockfile against the live advisory
       # database, which is the whole point: the question is not "does it build"
       # but "has the world's opinion of these exact versions changed".
-      - name: npm audit (critical)
+      # `high`, not `critical`. This sat at `critical` only because braces
+      # (GHSA-vfj7-8cjw-p6xm) had no patched version in existence and would
+      # have failed every run. Both lockfiles now report "found 0
+      # vulnerabilities" at every level — braces no longer carries an advisory
+      # in any state, and extract-zip left the tree when its parent dropped it
+      # — so the floor returns to the one security-scan.yml and the Go-Live
+      # checklist have always named.
+      - name: npm audit (high and above)
         id: audit
         run: |
           set +e
-          npm audit --audit-level=critical > audit.txt 2>&1
+          npm audit --audit-level=high > audit.txt 2>&1
           echo "exit=$?" >> "$GITHUB_OUTPUT"
           cat audit.txt
           set -e
@@ -59,7 +79,22 @@ jobs:
         id: composer
         run: |
           set +e
-          docker run --rm -v "$PWD":/app -w /app composer:2 audit --no-interaction > composer-audit.txt 2>&1
+          # Pulled FIRST and quietly. Without this the layer-download progress
+          # goes into composer-audit.txt along with the result, and the alert
+          # body below — which takes the first 800 bytes of that file — is
+          # nothing but layer ids.
+          docker pull -q composer:2 > /dev/null 2>&1
+          # `--locked` AUDITS composer.lock. Without it, composer looks for an
+          # installed vendor/ that a bare checkout does not have, refuses with
+          # "No installed packages found. Please run composer install before
+          # running audit", and exits 1. This step has therefore never audited
+          # anything: it reported that same refusal as a critical advisory
+          # every single day since it was written. Because it failed daily and
+          # unconditionally, a REAL npm advisory produced exactly the same red
+          # as every other morning — which is how the October PHP and Next.js
+          # criticals sat here unnoticed while this job dutifully "alarmed".
+          docker run --rm -v "$PWD":/app -w /app composer:2 \
+            audit --locked --no-interaction > composer-audit.txt 2>&1
           echo "exit=$?" >> "$GITHUB_OUTPUT"
           cat composer-audit.txt
           set -e
@@ -67,8 +102,13 @@ jobs:
       # Alerting goes through the external watchdog so every alarm in this
       # project arrives on one channel. A missing secret must not silently
       # swallow the alert — the step says so out loud and the job still fails.
+      #
+      # A FAILURE TO DELIVER IS ITSELF AN ERROR, not a warning. It used to be a
+      # warning, which is how this went unnoticed: warnings do not fail a job,
+      # and the job was failing anyway for its own reasons, so the line saying
+      # nobody had been told was just one more grey note in a red run.
       - name: Raise the alarm
-        if: steps.audit.outputs.exit != '0' || steps.composer.outputs.exit != '0'
+        if: steps.audit.outputs.exit != '0' || steps.composer.outputs.exit != '0' || inputs.test_alert
         env:
           WATCHDOG_URL: ${{ secrets.WATCHDOG_URL }}
           WATCHDOG_SECRET: ${{ secrets.WATCHDOG_SECRET }}
@@ -76,24 +116,67 @@ jobs:
           SUMMARY="npm exit=${{ steps.audit.outputs.exit }}, composer exit=${{ steps.composer.outputs.exit }}"
           DETAIL=$(head -c 1500 audit.txt; echo; head -c 800 composer-audit.txt)
 
-          if [ -z "$WATCHDOG_URL" ] || [ -z "$WATCHDOG_SECRET" ]; then
-            echo "::warning::WATCHDOG_URL/WATCHDOG_SECRET are not set — nobody is being told about this."
+          # A drill only when nothing is actually wrong. If a real advisory is
+          # present the run reports it as a real one, whatever box was ticked.
+          if [ "${{ inputs.test_alert }}" = "true" ] \
+             && [ "${{ steps.audit.outputs.exit }}" = "0" ] \
+             && [ "${{ steps.composer.outputs.exit }}" = "0" ]; then
+            DRILL=yes
+            HEADLINE="TEST — a drill, not an advisory. If you are reading this, the dependency advisory watch can still reach you."
           else
-            printf '%s' "$DETAIL" | python3 -c "
-          import json,os,sys,urllib.request
+            DRILL=no
+            HEADLINE="A high or critical advisory now affects the committed lockfile."
+          fi
+
+          DELIVERED=no
+          if [ -z "$WATCHDOG_URL" ] || [ -z "$WATCHDOG_SECRET" ]; then
+            echo "::error::WATCHDOG_URL/WATCHDOG_SECRET are not set — nobody is being told about this."
+          elif printf '%s' "$DETAIL" | python3 -c "
+          import json,os,sys,urllib.error,urllib.request
           body = json.dumps({
               'source': 'dependency advisory watch',
-              'text': 'A critical advisory now affects the committed lockfile.\n\n$SUMMARY\n\n' + sys.stdin.read()[:2500],
+              'text': '$HEADLINE\n\n$SUMMARY\n\n' + sys.stdin.read()[:2500],
           }).encode()
           req = urllib.request.Request(
               os.environ['WATCHDOG_URL'].rstrip('/') + '/alert',
               data=body,
               headers={'content-type': 'application/json',
+                       # WITHOUT THIS THE ALERT IS REFUSED AT THE EDGE. Cloudflare
+                       # sits in front of the watchdog and its bot rules answer
+                       # urllib's default 'Python-urllib/3.x' with a 403 before the
+                       # Worker is ever reached. Every alert this job raised was
+                       # dropped there. Verified by replaying the same request under
+                       # three user-agents: python-urllib got 403, curl and this one
+                       # got 401 from the Worker itself, which is the Worker
+                       # answering. The Worker has no 403 of its own — it returns
+                       # 401 for a bad token — so a 403 here always means the edge,
+                       # never the credentials.
+                       'user-agent': 'whity-dependency-advisory-watch/1',
                        'authorization': 'Bearer ' + os.environ['WATCHDOG_SECRET']},
           )
-          print(urllib.request.urlopen(req, timeout=20).status)
-          " || echo "::warning::could not reach the watchdog; the job failure below is the only signal"
+          try:
+              print('the watchdog accepted the alert (HTTP %d)' % urllib.request.urlopen(req, timeout=20).status)
+          except urllib.error.HTTPError as error:
+              # The body, not just the code: the Worker explains itself in it,
+              # and 401-vs-403 is the difference between a wrong secret and a
+              # blocked request. Nothing here can carry the secret.
+              print('the watchdog REFUSED the alert: HTTP %d %s'
+                    % (error.code, error.read()[:300].decode('utf-8', 'replace')))
+              sys.exit(1)
+          except Exception as error:
+              print('the watchdog was unreachable: %r' % (error,))
+              sys.exit(1)
+          "; then
+            DELIVERED=yes
+          else
+            echo "::error::the alert was NOT delivered — the reason is immediately above. Nobody has been told."
           fi
 
-          echo "::error::A critical advisory affects the committed lockfile. $SUMMARY"
+          if [ "$DRILL" = yes ]; then
+            [ "$DELIVERED" = yes ] || exit 1
+            echo "Delivery verified end to end. No advisory affects the lockfile."
+            exit 0
+          fi
+
+          echo "::error::A high or critical advisory affects the committed lockfile. $SUMMARY"
           exit 1

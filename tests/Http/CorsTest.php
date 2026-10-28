@@ -63,6 +63,24 @@ class CorsTest extends TestCase
         $this->assertArrayHasKey('Access-Control-Allow-Headers', $headers);
     }
 
+    /**
+     * A cross-origin headless frontend signs in with X-Auth-Mode: token and a
+     * system user scopes requests with X-Tenant-Id; both must pass preflight.
+     */
+    public function testHeadlessClientHeadersArePreflightApproved(): void
+    {
+        $headers = Cors::headers('https://app.example.com', ['https://app.example.com']);
+
+        $allowed = array_map(
+            static fn (string $h): string => strtolower(trim($h)),
+            explode(',', $headers['Access-Control-Allow-Headers'])
+        );
+
+        foreach (['content-type', 'authorization', 'x-requested-with', 'x-auth-mode', 'x-tenant-id'] as $required) {
+            $this->assertContains($required, $allowed);
+        }
+    }
+
     public function testWildcardIsNeverEmitted(): void
     {
         $headers = Cors::headers('https://app.example.com', ['https://app.example.com']);

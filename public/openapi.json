@@ -2,7 +2,7 @@
     "openapi": "3.0.0",
     "info": {
         "title": "Whity Core API",
-        "version": "0.2.16",
+        "version": "0.2.17",
         "description": "Request bodies are declared, not implied: where an operation accepts one, it is described here. An operation with no `requestBody` accepts none \u2014 a reviewed contract, not a gap in this document. The exception is an operation marked `x-whity-undocumented: true`: that one carries no authored contract at all, its summary and responses are generated defaults, and it may well take a body. Every CORE operation in the published `public/openapi.json` is authored, so the marker appears there only on plugin routes that declare no schema of their own; a document served live by a running instance may mark core routes too."
     },
     "servers": [
@@ -43341,6 +43341,9 @@
                 "properties": {
                     "requires_2fa": {
                         "type": "boolean"
+                    },
+                    "temp_token": {
+                        "type": "string"
                     }
                 },
                 "required": [
@@ -43415,6 +43418,21 @@
                             ]
                         },
                         "nullable": true
+                    },
+                    "selection_token": {
+                        "type": "string"
+                    },
+                    "access_token": {
+                        "type": "string"
+                    },
+                    "refresh_token": {
+                        "type": "string"
+                    },
+                    "token_type": {
+                        "type": "string"
+                    },
+                    "expires_in": {
+                        "type": "integer"
                     }
                 }
             },
@@ -43641,6 +43659,18 @@
                             "email",
                             "role"
                         ]
+                    },
+                    "access_token": {
+                        "type": "string"
+                    },
+                    "refresh_token": {
+                        "type": "string"
+                    },
+                    "token_type": {
+                        "type": "string"
+                    },
+                    "expires_in": {
+                        "type": "integer"
                     }
                 },
                 "required": [
@@ -46962,11 +46992,20 @@
                 "properties": {
                     "status": {
                         "type": "string"
+                    },
+                    "access_token": {
+                        "type": "string"
+                    },
+                    "refresh_token": {
+                        "type": "string"
+                    },
+                    "token_type": {
+                        "type": "string"
+                    },
+                    "expires_in": {
+                        "type": "integer"
                     }
-                },
-                "required": [
-                    "status"
-                ]
+                }
             },
             "RelationCreateRequest": {
                 "type": "object",
@@ -48006,6 +48045,9 @@
                 "properties": {
                     "tenant_id": {
                         "type": "integer"
+                    },
+                    "selection_token": {
+                        "type": "string"
                     }
                 },
                 "required": [
@@ -48087,6 +48129,18 @@
                             "role",
                             "tenant_id"
                         ]
+                    },
+                    "access_token": {
+                        "type": "string"
+                    },
+                    "refresh_token": {
+                        "type": "string"
+                    },
+                    "token_type": {
+                        "type": "string"
+                    },
+                    "expires_in": {
+                        "type": "integer"
                     }
                 },
                 "required": [
@@ -50120,6 +50174,9 @@
                 "type": "object",
                 "properties": {
                     "code": {
+                        "type": "string"
+                    },
+                    "temp_token": {
                         "type": "string"
                     }
                 },

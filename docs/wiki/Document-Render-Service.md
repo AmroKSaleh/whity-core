@@ -100,7 +100,7 @@ WHITY_IMAGE=ghcr.io/<repo>:v0.3.0 \
 WHITY_WEB_IMAGE=ghcr.io/<repo>/web:v0.3.0 \
 WHITY_RENDER_IMAGE=ghcr.io/<repo>/render:v0.3.0 \
 RENDER_SHARED_SECRET=<at least 32 chars> \
-  docker compose -f docker-compose.staging-remote.yml --profile render up -d
+  docker compose -f docker-compose.staging-remote.yml --profile web --profile render up -d
 
 # Local build from a checkout (docker-compose.yml):
 docker compose --profile render up -d --build

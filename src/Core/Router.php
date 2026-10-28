@@ -221,7 +221,7 @@ class Router
      * parameters are percent-DECODED — see the note inside.
      *
      * @param Request $request Request object
-     * @return array{handler: callable, params: array<string, string>, requiredRole: ?string, requiredPermission: ?string, namespacePrefix: ?string, schema: array<string, mixed>|null}|null Array if matched, null otherwise
+     * @return array{handler: callable, params: array<string, string>, requiredRole: ?string, requiredPermission: ?string, namespacePrefix: ?string, schema: array<string, mixed>|null, path: string}|null Array if matched, null otherwise
      */
     public function match(Request $request): ?array
     {
@@ -297,6 +297,11 @@ class Router
                     'requiredPermission' => $route['requiredPermission'] ?? null,
                     'namespacePrefix' => $route['namespacePrefix'] ?? null,
                     'schema' => $route['schema'] ?? null,
+                    // The registered pattern ('/api/v1/things/{id:\d+}'), for
+                    // callers that look the route up elsewhere by it — MCP's
+                    // resources/read asks the ResourceDeriver whether it is
+                    // exposed (WHIT-695).
+                    'path' => $route['path'],
                 ];
             }
         }

@@ -558,7 +558,7 @@ class TokenValidatorTest extends TestCase
         $this->assertSame(42, $result->userId, 'userId == profileId post-cutover');
         $this->assertSame(7, $result->tenantId);
         $this->assertSame('session', $result->principalKind);
-        $this->assertSame(['tools:list', 'tools:call', 'resources:read', 'prompts:list'], $result->scope);
+        $this->assertSame(\Whity\Mcp\Auth\McpScope::CAPABILITIES, $result->scope, 'a session bearer holds every capability and no narrowing');
         $this->assertNotEmpty($result->jti);
     }
 
