@@ -308,24 +308,30 @@ final class ToolsCallHandlerTest extends TestCase
 
     // ── Argument schema validation (WC-b570dccd) ─────────────────────────────
 
-    public function testInvoke_throwsInvalidParams_whenRequiredArgMissing(): void
+    // WHIT-710: a bad argument is a tool execution error the model can read
+    // and fix, not a protocol error a client may never show it.
+
+    public function testInvoke_returnsToolError_whenRequiredArgMissing(): void
     {
         // POST /api/things declares 'name' as required in its request schema
-        $this->expectException(McpException::class);
-        $this->expectExceptionCode(ErrorCode::INVALID_PARAMS);
+        $result = ($this->handler)(['name' => 'post_api_things', 'arguments' => []], self::BEARER);
 
-        ($this->handler)(['name' => 'post_api_things', 'arguments' => []], self::BEARER);
+        self::assertTrue($result['isError']);
+        self::assertStringContainsString('Invalid arguments for post_api_things: Missing required argument: name.', $result['content'][0]['text']);
+        self::assertStringContainsString('name (string, required)', $result['content'][0]['text'], 'the expected arguments are listed');
+        self::assertNull($this->lastRequest, 'the route handler never runs');
     }
 
-    public function testInvoke_throwsInvalidParams_whenIntegerPathArgIsNonNumericString(): void
+    public function testInvoke_returnsToolError_whenIntegerPathArgIsNonNumericString(): void
     {
         // PATCH /api/things/{id:\d+} declares 'id' as type integer (from path constraint)
         $this->roleChecker->method('hasPermissionForProfile')->willReturn(true);
 
-        $this->expectException(McpException::class);
-        $this->expectExceptionCode(ErrorCode::INVALID_PARAMS);
+        $result = ($this->handler)(['name' => 'patch_api_things_id', 'arguments' => ['id' => 'not-a-number']], self::BEARER);
 
-        ($this->handler)(['name' => 'patch_api_things_id', 'arguments' => ['id' => 'not-a-number']], self::BEARER);
+        self::assertTrue($result['isError']);
+        self::assertStringContainsString("Argument 'id' must be an integer", $result['content'][0]['text']);
+        self::assertNull($this->lastRequest);
     }
 
     public function testInvoke_coercesDigitString_toIntegerForPathParam(): void
@@ -343,13 +349,49 @@ final class ToolsCallHandlerTest extends TestCase
         self::assertStringContainsString('/42', $this->lastRequest->getPath());
     }
 
-    public function testInvoke_throwsInvalidParams_whenArrayPassedForScalarField(): void
+    public function testInvoke_returnsToolError_whenArrayPassedForScalarField(): void
     {
-        $this->expectException(McpException::class);
-        $this->expectExceptionCode(ErrorCode::INVALID_PARAMS);
-
         // POST /api/things: 'name' is type string — passing an array is invalid
-        ($this->handler)(['name' => 'post_api_things', 'arguments' => ['name' => ['evil']]], self::BEARER);
+        $result = ($this->handler)(['name' => 'post_api_things', 'arguments' => ['name' => ['evil']]], self::BEARER);
+
+        self::assertTrue($result['isError']);
+        self::assertStringContainsString("Argument 'name' must be a string, got array", $result['content'][0]['text']);
+        self::assertNull($this->lastRequest);
+    }
+
+    public function testInvoke_authoredToolArgumentsAreToolErrorsToo(): void
+    {
+        $ran = false;
+        $registry = new \Whity\Mcp\Tools\AuthoredToolRegistry();
+        self::assertNull($registry->register([
+            'name'        => 'close_period',
+            'description' => 'Close a period.',
+            'inputSchema' => ['type' => 'object', 'required' => ['period_id'], 'properties' => ['period_id' => ['type' => 'integer']]],
+            'handler'     => static function () use (&$ran): array {
+                $ran = true;
+                return [];
+            },
+            'open'        => true,
+        ], 'Periods'));
+        $handler = new ToolsCallHandler($this->toolDeriver, $this->router, $this->roleChecker, $this->tokenValidator, authoredTools: $registry);
+
+        $result = ($handler)(['name' => 'close_period', 'arguments' => ['period_id' => 'last']], self::BEARER);
+
+        self::assertTrue($result['isError']);
+        self::assertSame(
+            "Invalid arguments for close_period: Argument 'period_id' must be an integer. Expected: period_id (integer, required).",
+            $result['content'][0]['text'],
+        );
+        self::assertFalse($ran);
+    }
+
+    public function testInvoke_unknownToolStaysAProtocolError(): void
+    {
+        // The spec keeps an unknown tool a protocol error at the top level.
+        $this->expectException(McpException::class);
+        $this->expectExceptionCode(ErrorCode::METHOD_NOT_FOUND);
+
+        ($this->handler)(['name' => 'no_such_tool', 'arguments' => []], self::BEARER);
     }
 
     // ── Error result wrapping ─────────────────────────────────────────────────

@@ -287,6 +287,19 @@ held between requests, which keeps the no-session design §2 chose.
 - No `outputSchema` is declared until route response schemas are verified against real responses
   (WHIT-120). Results still carry `structuredContent`.
 
+## Amendment 3 (2026-10-28, WHIT-710)
+
+§5 step 2 and the "Invalid arguments" row change. Arguments that fail the inputSchema are now a
+tool execution error, `isError: true` with a text such as `Invalid arguments for post_api_users:
+Missing required argument: email. Expected: email (string, required), name (string).`, not
+JSON-RPC -32602. The spec puts input validation errors there so the model can correct itself:
+clients pass tool errors to the model, while they may drop protocol errors. The route handler
+still never runs, and the call is still audited.
+
+An unknown tool stays -32601 at the top level, as the spec says. Under discovery mode,
+`call_tool` with an unknown name is a tool error that points at `search_tools`, because there the
+name is an argument the model chose.
+
 ## Alternatives Considered
 
 - **Adopt the HTTP+SSE transport (MCP 2024-11-05)** — two separate endpoints (`POST /mcp` +

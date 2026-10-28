@@ -228,7 +228,17 @@ final class DiscoveryTools
         }
         $toolArguments = is_array($arguments['arguments'] ?? null) ? $arguments['arguments'] : [];
 
-        return ($this->toolsCall)(['name' => $name, 'arguments' => $toolArguments], $bearerToken);
+        try {
+            return ($this->toolsCall)(['name' => $name, 'arguments' => $toolArguments], $bearerToken);
+        } catch (McpException $e) {
+            // At the top level an unknown tool is a protocol error. Here the name
+            // is an argument the model chose, so it is the model's to fix, and
+            // the error has to reach it (WHIT-710).
+            if ($e->errorCode === ErrorCode::METHOD_NOT_FOUND) {
+                return self::error("No tool named '{$name}' is available. Use search_tools to find one.");
+            }
+            throw $e;
+        }
     }
 
     /** @return list<array<string, mixed>> */
