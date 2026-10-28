@@ -111,6 +111,13 @@ const RUNNERS: { name: string; owns: (file: string) => boolean }[] = [
     name: 'watchdog node --test',
     owns: (file) => file.startsWith('ops/watchdog/test/'),
   },
+  {
+    // `npm test` in packages/api-client (node --test with type stripping),
+    // run by the `Type check and unit tests (@amroksaleh/api-client)` step of
+    // the frontend job. Added with that step, for the same reason as above.
+    name: 'api-client node --test',
+    owns: (file) => file.startsWith('packages/api-client/test/'),
+  },
 ];
 
 describe('test-file reachability', () => {
