@@ -35,13 +35,16 @@ function json(body: unknown, status = 200): Response {
 }
 
 /** A fake API. `used` flips the issued token to "last used" for the poll. */
-function api(info: McpConnectInfo = INFO) {
+function api(info: McpConnectInfo = INFO, toolCount: number | null = null) {
   const state = { used: false, previews: [] as string[][], issued: [] as unknown[], revoked: [] as string[], polls: 0 };
   mockApiClient.mockImplementation(async (path: string, init?: RequestInit) => {
     if (path === '/api/v1/mcp/connect') return json(info);
     if (path === '/api/v1/mcp/connect/preview') {
       const scope = (JSON.parse(String(init?.body)) as { scope: string[] }).scope;
       state.previews.push(scope);
+      if (toolCount !== null) {
+        return json({ tools: Array.from({ length: toolCount }, (_, i) => ({ name: `tool_${i}`, description: `Tool ${i}` })) });
+      }
       return json({
         tools: scope.includes('users:read') && !scope.includes('users:*')
           ? [{ name: 'get_api_users', description: 'List users' }]
@@ -127,6 +130,34 @@ describe('ConnectWizard', () => {
     expect(await screen.findByText('The old key has been turned off.', {}, { timeout: 5000 })).toBeInTheDocument();
     expect(state.revoked).toEqual(['old-jti']);
   }, 15_000);
+
+  it('turns on tool search when the access is more than the app handles, and the user can turn it off', async () => {
+    api(INFO, 50);
+    const user = userEvent.setup();
+    renderWizard();
+
+    await user.click(await screen.findByRole('button', { name: 'Cursor' }));
+    const toolSearch = await screen.findByRole('checkbox', { name: /search for actions/ });
+    // Cursor is reported to drop tools past 40; this access exposes 50.
+    expect(toolSearch).toBeChecked();
+    expect(screen.getByText('Recommended')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Create connection' }));
+    expect(await screen.findByText(/"url": "https:\/\/api\.acme\.test\/mcp\?tools=discover"/)).toBeInTheDocument();
+  });
+
+  it('connects to the plain endpoint when tool search is off', async () => {
+    api(INFO, 50);
+    const user = userEvent.setup();
+    renderWizard();
+
+    await user.click(await screen.findByRole('button', { name: 'Cursor' }));
+    await user.click(await screen.findByRole('checkbox', { name: /search for actions/ }));
+    await user.click(screen.getByRole('button', { name: 'Create connection' }));
+
+    expect(await screen.findByText(/"url": "https:\/\/api\.acme\.test\/mcp"/)).toBeInTheDocument();
+    expect(screen.queryByText(/tools=discover/)).not.toBeInTheDocument();
+  });
 
   it('offers sign-in-only apps as coming, not as choices', async () => {
     api();

@@ -39,6 +39,10 @@ The wizard hands out `APP_URL` + `/mcp`.
 
 If `APP_URL` is unset, the wizard warns and uses the address of the page instead.
 
+### Tool search for large catalogues
+
+Adding `?tools=discover` to the endpoint (`https://your-whity-host/mcp?tools=discover`) gives the app three tools, `search_tools`, `describe_tool` and `call_tool`, that reach the whole catalogue on demand. Use it for apps that slow down or drop tools when given hundreds, Cursor above all. The wizard adds it for you when it's recommended. See MCP-Server, *Discovery mode*.
+
 ### Per-app setup, and what is not yet confirmed
 
 The setups come from `@amroksaleh/features/mcp`, so the desktop shell or your own frontend can offer the same ones. They were checked against each vendor's documentation on 2026-10-28.

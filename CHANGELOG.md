@@ -8,6 +8,7 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ### Added
 
+- **MCP discovery mode: three tools instead of hundreds.** An app that connects to `/mcp?tools=discover` gets `search_tools`, `describe_tool` and `call_tool` in place of the full catalogue (over 300 tools, about 22k tokens, in core alone), which several apps cannot hold: Cursor is widely reported to drop every tool past 40. The catalogue is reached on demand, through the same visibility filter and the same call handler as before, so access, auditing and rate limits are unchanged. The "Connect an AI app" wizard switches it on when the access chosen exposes more tools than the app handles, and lets you turn it off.
 - **MCP tools now say which ones only read and which ones delete.** Every derived tool carries MCP `annotations`: GET tools are `readOnlyHint`, DELETE and PUT tools are `destructiveHint` and `idempotentHint`, and every tool has a `title` from its summary and `openWorldHint: false`. Clients such as Claude Code, Cursor and VS Code use these to run reads without asking and to confirm before destructive calls. POST and PATCH keep the spec's cautious default, because many are actions rather than creates; a route can declare otherwise with `'mcp_annotations'` in its schema. **Plugin SDK 1.45:** an authored MCP tool can declare `annotations`, and a plugin route can declare `mcp_annotations`. Both are hints only; nothing about who may call a tool changes.
 
 ## [0.2.17] - 2026-10-28

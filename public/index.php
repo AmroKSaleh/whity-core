@@ -355,6 +355,7 @@ use Whity\Mcp\Tools\AuthoredToolRegistry;
 use Whity\Mcp\Tools\ToolDeriver;
 use Whity\Mcp\Tools\ToolsCallHandler;
 use Whity\Mcp\Tools\ToolsListHandler;
+use Whity\Mcp\Tools\Discovery\DiscoveryTools;
 use Whity\Mcp\Transport\McpTransportHandler;
 use Whity\OpenAPI\CoreApiSchemas;
 
@@ -4481,24 +4482,42 @@ $mcpListChangedNotifier = new ListChangedNotifier(
 $authoredMcpTools = new AuthoredToolRegistry();
 $mcpToolsListHandler = new ToolsListHandler($toolDeriver, $roleChecker, $tokenValidator, $authoredMcpTools);
 $mcpServerEnabled = (bool) filter_var($_ENV['MCP_ENABLED'] ?? 'false', FILTER_VALIDATE_BOOLEAN);
+$mcpToolsCallHandler = new ToolsCallHandler($toolDeriver, $router, $roleChecker, $tokenValidator, auditLogger: $auditLogger, authoredTools: $authoredMcpTools);
+$mcpHandlers = [
+    'initialize'              => new InitializeHandler(listChanged: true),
+    'ping'                    => new PingHandler(),
+    'notifications/cancelled' => new CancelledNotificationHandler(),
+    'tools/list'              => $mcpToolsListHandler,
+    'tools/call'              => $mcpToolsCallHandler,
+    'resources/list'          => new ResourcesListHandler($resourceDeriver, $roleChecker, $tokenValidator),
+    'resources/read'          => new ResourcesReadHandler($router, $roleChecker, $tokenValidator, auditLogger: $auditLogger, resourceDeriver: $resourceDeriver),
+    'prompts/list'            => new PromptsListHandler($promptRegistry, $roleChecker, $tokenValidator),
+    'prompts/get'             => new PromptsGetHandler($promptRegistry, $roleChecker, $tokenValidator),
+];
+// WHIT-697: "last used", which the connect wizard waits on.
+$mcpRecordTokenUse = static function (\Whity\Mcp\Auth\McpPrincipal $principal) use ($mcpTokenService): void {
+    $mcpTokenService->recordUse($principal->jti, $principal->tenantId);
+};
+// WHIT-707: /mcp?tools=discover answers tools/list with three discovery tools
+// that search, describe and call the real catalogue through the handlers
+// above. Everything else -- auth, the tenant switch, rate limits, resources,
+// prompts -- is the same. Its tool list never changes, so it announces no
+// list_changed.
+$mcpDiscovery = new DiscoveryTools($mcpToolsListHandler, $mcpToolsCallHandler, $tokenValidator);
 $mcpTransportHandler = new McpTransportHandler(
-    new Dispatcher([
-        'initialize'              => new InitializeHandler(listChanged: true),
-        'ping'                    => new PingHandler(),
-        'notifications/cancelled' => new CancelledNotificationHandler(),
-        'tools/list'              => $mcpToolsListHandler,
-        'tools/call'              => new ToolsCallHandler($toolDeriver, $router, $roleChecker, $tokenValidator, auditLogger: $auditLogger, authoredTools: $authoredMcpTools),
-        'resources/list'          => new ResourcesListHandler($resourceDeriver, $roleChecker, $tokenValidator),
-        'resources/read'          => new ResourcesReadHandler($router, $roleChecker, $tokenValidator, auditLogger: $auditLogger, resourceDeriver: $resourceDeriver),
-        'prompts/list'            => new PromptsListHandler($promptRegistry, $roleChecker, $tokenValidator),
-        'prompts/get'             => new PromptsGetHandler($promptRegistry, $roleChecker, $tokenValidator),
-    ], $tokenValidator, $mcpRateLimiter, $tenantMcpEnabled, $mcpListChangedNotifier,
-        // WHIT-697: "last used", which the connect wizard waits on.
-        static function (\Whity\Mcp\Auth\McpPrincipal $principal) use ($mcpTokenService): void {
-            $mcpTokenService->recordUse($principal->jti, $principal->tenantId);
-        },
-    ),
+    new Dispatcher($mcpHandlers, $tokenValidator, $mcpRateLimiter, $tenantMcpEnabled, $mcpListChangedNotifier, $mcpRecordTokenUse),
     enabled: $mcpServerEnabled,
+    discoveryDispatcher: new Dispatcher(
+        array_merge($mcpHandlers, [
+            'initialize' => new InitializeHandler(listChanged: false),
+            'tools/list' => $mcpDiscovery->listHandler(),
+            'tools/call' => $mcpDiscovery->callHandler(),
+        ]),
+        $tokenValidator,
+        $mcpRateLimiter,
+        $tenantMcpEnabled,
+        recordTokenUse: $mcpRecordTokenUse,
+    ),
 );
 $router->registerUnversioned('POST', '/mcp', [$mcpTransportHandler, 'handlePost']);
 $router->registerUnversioned('GET',  '/mcp', [$mcpTransportHandler, 'handleGet']);

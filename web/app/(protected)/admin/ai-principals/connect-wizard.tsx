@@ -18,6 +18,7 @@ import { Badge } from '@amroksaleh/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@amroksaleh/ui/alert';
 import { RadioGroup, RadioGroupItem } from '@amroksaleh/ui/radio-group';
 import { Spinner } from '@amroksaleh/ui/spinner';
+import { Checkbox } from '@amroksaleh/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -28,7 +29,13 @@ import {
 import { IconAlertCircle, IconCircleCheck, IconPlugConnected } from '@tabler/icons-react';
 import { useTranslation } from '@amroksaleh/features/i18n';
 import { titleCase } from '@amroksaleh/features/roles';
-import { MCP_CLIENTS, mcpClient, type McpClientId } from '@amroksaleh/features/mcp';
+import {
+  MCP_CLIENTS,
+  mcpClient,
+  mcpEndpoint,
+  recommendsToolSearch,
+  type McpClientId,
+} from '@amroksaleh/features/mcp';
 import { ConnectSetup } from './connect-setup';
 import type { McpConnectInfo, McpPreviewTool, OwnMcpToken } from './types';
 
@@ -51,6 +58,8 @@ interface Issued {
   jti: string;
   token: string;
   name: string;
+  /** WHIT-707: connect through tool search (`?tools=discover`). */
+  toolSearch: boolean;
 }
 
 const CAPABILITIES = ['tools:call', 'resources:read', 'prompts:read'];
@@ -94,6 +103,8 @@ export function ConnectWizard({
   const [connected, setConnected] = useState(false);
   const [waitedLong, setWaitedLong] = useState(false);
   const [oldRevoked, setOldRevoked] = useState<boolean | null>(null);
+  // null = follow the recommendation; true/false = the user chose.
+  const [toolSearchChoice, setToolSearchChoice] = useState<boolean | null>(null);
 
   // ── Pre-flight: where to connect, and whether it can work at all ──────────
   useEffect(() => {
@@ -201,6 +212,7 @@ export function ConnectWizard({
     setConnected(false);
     setWaitedLong(false);
     setOldRevoked(null);
+    setToolSearchChoice(null);
   };
 
   const close = (open: boolean) => {
@@ -231,8 +243,10 @@ export function ConnectWizard({
         const body = (await response.json().catch(() => ({}))) as { message?: string };
         throw new Error(body.message ?? t('aiPrincipals.connect.createError', 'Could not create the connection'));
       }
-      const body = (await response.json()) as Issued;
-      setIssued({ jti: body.jti, token: body.token, name: body.name });
+      const body = (await response.json()) as Omit<Issued, 'toolSearch'>;
+      // A renewal skips the access step, so there is no tool count to judge
+      // by. Tool search reaches a catalogue of any size, so it is the safe one.
+      setIssued({ jti: body.jti, token: body.token, name: body.name, toolSearch: renew !== null ? true : toolSearch });
       setStep('connect');
       onConnected();
     } catch (error) {
@@ -246,6 +260,9 @@ export function ConnectWizard({
   };
 
   const client = clientId !== null ? mcpClient(clientId) : null;
+  const recommendedToolSearch =
+    client !== null && previewTools !== null && recommendsToolSearch(client, previewTools.length);
+  const toolSearch = toolSearchChoice ?? recommendedToolSearch;
   const otherLabel = t('aiPrincipals.connect.app.other', 'Another app');
   // A product name is not translated; "other" is not a product.
   const appName = client === null ? '' : client.id === 'other' ? otherLabel : client.name;
@@ -356,6 +373,39 @@ export function ConnectWizard({
 
             <PreviewPanel scope={scope} tools={previewTools} loading={previewLoading} />
 
+            {previewTools !== null && previewTools.length > 0 && (
+              <label htmlFor="mcp-tool-search" className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3">
+                <Checkbox
+                  id="mcp-tool-search"
+                  checked={toolSearch}
+                  onCheckedChange={(checked) => setToolSearchChoice(checked === true)}
+                  className="mt-0.5"
+                />
+                <span className="space-y-0.5">
+                  <span className="block text-sm font-medium">
+                    {t('aiPrincipals.connect.toolSearch.label', 'Let the app search for actions instead of loading them all')}
+                    {recommendedToolSearch && (
+                      <Badge variant="secondary" className="ms-2">
+                        {t('aiPrincipals.connect.toolSearch.recommended', 'Recommended')}
+                      </Badge>
+                    )}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">
+                    {recommendedToolSearch
+                      ? t(
+                          'aiPrincipals.connect.toolSearch.helpRecommended',
+                          '{app} works best with fewer actions than this. It will get three: search, describe and use, which reach all {count} on demand.',
+                          { app: appName, count: previewTools.length }
+                        )
+                      : t(
+                          'aiPrincipals.connect.toolSearch.help',
+                          'The app gets three actions (search, describe and use) that reach the others on demand. Useful when an app slows down or ignores some actions.'
+                        )}
+                  </span>
+                </span>
+              </label>
+            )}
+
             <div className="space-y-1">
               <label htmlFor="mcp-connection-name" className="text-sm font-medium">
                 {t('aiPrincipals.connect.name.label', 'Name this connection')}
@@ -370,7 +420,10 @@ export function ConnectWizard({
 
         {step === 'connect' && issued !== null && clientId !== null && (
           <div className="space-y-5">
-            <ConnectSetup clientId={clientId} connection={{ name: issued.name, url: endpoint, token: issued.token }} />
+            <ConnectSetup
+              clientId={clientId}
+              connection={{ name: issued.name, url: mcpEndpoint(endpoint, { toolSearch: issued.toolSearch }), token: issued.token }}
+            />
             <ConnectionStatus connected={connected} waitedLong={waitedLong} app={appName} />
             {renew !== null && oldRevoked === true && (
               <p className="text-sm text-muted-foreground">
