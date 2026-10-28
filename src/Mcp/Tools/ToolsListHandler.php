@@ -41,8 +41,21 @@ final class ToolsListHandler implements MethodHandler
         $principal = $bearerToken !== null
             ? $this->tokenValidator->validateBearerForMcp($bearerToken)
             : null;
-        $tenantId = TenantContext::getTenantId();
 
+        return ['tools' => $this->listFor($principal, TenantContext::getTenantId())];
+    }
+
+    /**
+     * The tools a principal would see, by the exact filter tools/list applies.
+     *
+     * Public so the connect wizard's scope preview (WHIT-697) answers "what
+     * could an app with this scope do?" from this code rather than from a
+     * second copy of it, which would agree today and drift later.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function listFor(?McpPrincipal $principal, ?int $tenantId): array
+    {
         $accessMap = $this->toolDeriver->buildAccessMap();
         $derived   = $this->toolDeriver->deriveTools();
         $tools     = [];
@@ -81,7 +94,7 @@ final class ToolsListHandler implements MethodHandler
             }
         }
 
-        return ['tools' => $tools];
+        return $tools;
     }
 
     /** @param array<string, mixed> $access */

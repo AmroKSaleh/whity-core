@@ -153,7 +153,7 @@ final class AiPrincipalsApiHandler
             $countRow = $countStmt->fetch(PDO::FETCH_ASSOC);
             $total    = $countRow !== false ? (int) ($countRow['cnt'] ?? 0) : 0;
 
-            $listSql  = 'SELECT t.id, t.jti, t.profile_id, t.tenant_id, t.name, t.principal_kind, t.scope, t.expires_at, t.created_at
+            $listSql  = 'SELECT t.id, t.jti, t.profile_id, t.tenant_id, t.name, t.principal_kind, t.scope, t.expires_at, t.created_at, t.last_used_at
                  FROM   mcp_tokens t
                  ' . $where . '
                  ' . $q->orderBy() . '
@@ -266,6 +266,7 @@ final class AiPrincipalsApiHandler
             'scope'         => $scope,
             'expiresAt'     => isset($row['expires_at']) ? (string) $row['expires_at'] : null,
             'createdAt'     => isset($row['created_at']) ? (string) $row['created_at'] : null,
+            'lastUsedAt'    => isset($row['last_used_at']) ? (string) $row['last_used_at'] : null,
         ];
     }
 }

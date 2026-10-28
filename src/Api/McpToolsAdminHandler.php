@@ -68,6 +68,11 @@ final class McpToolsAdminHandler
             $data = [];
             foreach ($tools as $tool) {
                 $name   = (string) ($tool['name'] ?? '');
+                // ADR-0006 §4 (WHIT-695): this page shows what an MCP client
+                // can be offered, and tools/list no longer offers these.
+                if (!$this->toolDeriver->isExposed($name)) {
+                    continue;
+                }
                 $access = $accessMap[$name] ?? ['requiredRole' => null, 'requiredPermission' => null];
                 $data[] = [
                     'name'               => $name,
