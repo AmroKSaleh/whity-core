@@ -39,11 +39,11 @@ final class ResourcesListHandlerTest extends TestCase
         $router = new Router('');
 
         // Static: no path params → static resources
-        $router->registerUnversioned('GET', '/api/open',   fn () => null, null,    null, null,         ['summary' => 'Open resource']);
+        $router->registerUnversioned('GET', '/api/open',   fn () => null, null,    null, null,         ['summary' => 'Open resource', 'mcp' => true]);
         $router->registerUnversioned('GET', '/api/perm',   fn () => null, null,    null, 'items:read', ['summary' => 'Permission resource']);
         $router->registerUnversioned('GET', '/api/role',   fn () => null, 'admin', null, null,         ['summary' => 'Role resource']);
         // Template: has path params → resource templates
-        $router->registerUnversioned('GET', '/api/open/{id:\d+}',  fn () => null, null,    null, null,         ['summary' => 'Open template']);
+        $router->registerUnversioned('GET', '/api/open/{id:\d+}',  fn () => null, null,    null, null,         ['summary' => 'Open template', 'mcp' => true]);
         $router->registerUnversioned('GET', '/api/perm/{id:\d+}',  fn () => null, null,    null, 'items:read', ['summary' => 'Permission template']);
 
         $this->resourceDeriver = new ResourceDeriver([], $router);
@@ -213,7 +213,7 @@ final class ResourcesListHandlerTest extends TestCase
     public function testInvoke_filtersStaticDeclarations_byPermission(): void
     {
         $deriver = new ResourceDeriver([
-            ['method' => 'GET', 'path' => '/api/public', 'schema' => ['summary' => 'Public'], 'requiredRole' => null, 'requiredPermission' => null],
+            ['method' => 'GET', 'path' => '/api/public', 'schema' => ['summary' => 'Public', 'mcp' => true], 'requiredRole' => null, 'requiredPermission' => null],
             ['method' => 'GET', 'path' => '/api/private', 'schema' => ['summary' => 'Private'], 'requiredRole' => null, 'requiredPermission' => 'private:read'],
         ]);
         $handler = new ResourcesListHandler($deriver, $this->roleChecker, $this->tokenValidator);

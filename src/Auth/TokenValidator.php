@@ -327,7 +327,7 @@ class TokenValidator
             userId: $resolvedId,
             tenantId: $tenantId,
             principalKind: 'session',
-            scope: ['tools:list', 'tools:call', 'resources:read', 'prompts:list'],
+            scope: \Whity\Mcp\Auth\McpScope::CAPABILITIES,
             jti: $jti,
         );
     }

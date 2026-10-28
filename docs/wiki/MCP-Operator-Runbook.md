@@ -31,6 +31,43 @@ curl -s -X POST https://your-whity-host/api/mcp/tokens \
 
 The response body contains the raw `token` string. Store it securely — it is only returned once.
 
+### Choosing a scope
+
+A token's `scope` decides what it can do. It never grants more than the issuing user's role
+allows (ADR-0006, Amendment 1).
+
+**Capabilities.** Name at least one; issuance refuses a scope without any.
+
+| Capability | Opens |
+|---|---|
+| `tools:call` | `tools/list`, `tools/call` |
+| `resources:read` | `resources/list`, `resources/templates/list`, `resources/read` |
+| `prompts:read` | `prompts/list`, `prompts/get` |
+
+A method outside the token's capabilities answers `-32003 Forbidden`.
+
+**Narrowing (optional).** Add permission names to restrict the token to what they gate:
+
+```json
+{"name": "inbox-triage", "scope": ["tools:call", "documents:read", "documents:route"]}
+{"name": "user-sync",    "scope": ["tools:call", "resources:read", "users:*"]}
+```
+
+- `users:*` covers every permission of the `users` resource.
+- A narrowed token loses everything no named permission gates: role-only tools and the opted-in
+  self-service tools (inbox, notifications).
+- An unknown permission name is refused at issuance with `422`, so a typo cannot silently narrow
+  a token to nothing.
+
+Prefer a narrowed token for any automation that does one job. If it leaks, it can do that job
+and nothing else.
+
+**Older tokens.** Tokens issued before scopes were enforced keep working:
+- One with no recognized capability keeps every family.
+- Spellings such as `tools:list` or `prompts:get` count as their family's capability.
+
+Reissue a token to narrow it; a scope cannot be edited in place.
+
 ### List active tokens for a user
 
 ```bash
@@ -111,7 +148,8 @@ Notes:
 | Condition | Signal | Action |
 | --- | --- | --- |
 | High `mcp.tools.call` volume from a single `actor_user_id` | Possible runaway agent | Review the token, consider revocation |
-| Repeated `FORBIDDEN` errors from the same `actor_user_id` | Agent attempting over-privileged calls | Review token scope and role assignment |
+| Repeated `FORBIDDEN` errors from the same `actor_user_id` | Agent attempting over-privileged calls, or calls outside its token's scope | Review the token's scope (capabilities and narrowing) and the user's role |
+| An agent says a tool does not exist that the REST API has | The route has no permission or role gate, so it is not offered to agents | Expected for session, credential and public routes. For a self-authorizing route, opt it in (`'mcp' => true`, ADR-0006 Amendment 1) |
 | Sustained 429 responses | Rate limit too low or excessive agent traffic | Raise limits or revoke token |
 | `mcp.tools.call` from an unexpected `tenant_id` | Token leak or misconfiguration | Immediately revoke the affected token |
 

@@ -9,6 +9,8 @@ use Tests\Support\SchemaFromMigrations;
 use Whity\Auth\JwtParser;
 use Whity\Auth\TokenValidator;
 use Whity\Core\Request;
+use Whity\Core\Response;
+use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Mcp\Auth\McpTokenHandler;
 use Whity\Mcp\Auth\McpTokenService;
 
@@ -107,6 +109,56 @@ final class McpTokenHandlerTest extends TestCase
         // WC-idcut-E: no legacy tenant_id claim — only active_tenant_id.
         self::assertArrayNotHasKey('tenant_id', $claims, 'Issued MCP token must not carry tenant_id');
         self::assertArrayHasKey('active_tenant_id', $claims, 'Issued MCP token must carry active_tenant_id');
+    }
+
+    // ── Scope validation (WHIT-695) ─────────────────────────────────────────
+
+    private function createWithScope(string $scopeJson, ?PermissionRegistry $registry = null): Response
+    {
+        $handler = new McpTokenHandler(
+            new TokenValidator($this->jwtParser, $this->pdo),
+            new McpTokenService($this->pdo, $this->jwtParser),
+            $registry,
+        );
+        $_COOKIE['access_token'] = $this->mintAccessToken();
+
+        return $handler->create(new Request(
+            'POST',
+            '/api/mcp/tokens',
+            ['Content-Type' => 'application/json'],
+            '{"name":"scoped","scope":' . $scopeJson . '}',
+        ));
+    }
+
+    public function testCreate_returns422_whenScopeNamesNoCapability(): void
+    {
+        $response = $this->createWithScope('["users:read"]', new PermissionRegistry());
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertStringContainsString('at least one of', $response->getBody());
+    }
+
+    public function testCreate_returns422_forAnUnknownPermission(): void
+    {
+        $response = $this->createWithScope('["tools:call","users:raed"]', new PermissionRegistry());
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertStringContainsString('users:raed', $response->getBody());
+    }
+
+    public function testCreate_acceptsKnownPermissionsAndResourceWildcards(): void
+    {
+        $response = $this->createWithScope('["tools:call","users:read","roles:*"]', new PermissionRegistry());
+
+        self::assertSame(201, $response->getStatusCode());
+        $body = json_decode($response->getBody(), true);
+        self::assertSame(['tools:call', 'users:read', 'roles:*'], $body['scope'] ?? null);
+    }
+
+    public function testCreate_withoutARegistry_acceptsOnlyCapabilities(): void
+    {
+        self::assertSame(201, $this->createWithScope('["tools:call"]')->getStatusCode());
+        self::assertSame(422, $this->createWithScope('["tools:call","users:read"]')->getStatusCode());
     }
 
     // ── GET /api/mcp/tokens ───────────────────────────────────────────────────

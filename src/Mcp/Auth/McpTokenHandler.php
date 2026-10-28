@@ -7,6 +7,7 @@ namespace Whity\Mcp\Auth;
 use Whity\Auth\TokenValidator;
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Core\RBAC\PermissionRegistry;
 
 /**
  * HTTP handler for MCP token management endpoints (WC-2686308f).
@@ -27,6 +28,9 @@ final class McpTokenHandler
     public function __construct(
         private readonly TokenValidator $tokenValidator,
         private readonly McpTokenService $mcpTokenService,
+        // Validates permission entries in a requested scope (WHIT-695). Without
+        // it no permission name is known, so only capability scopes are issued.
+        private readonly ?PermissionRegistry $permissionRegistry = null,
     ) {}
 
     /**
@@ -63,6 +67,17 @@ final class McpTokenHandler
             if (!is_string($s) || $s === '') {
                 return Response::error('each scope entry must be a non-empty string', 422);
             }
+        }
+        /** @var list<string> $scope */
+        $scope = array_values(array_unique($scope));
+
+        // WHIT-695: scopes are enforced now, so a typo is no longer harmless —
+        // an unknown name would narrow the token to nothing, and a scope with
+        // no capability would open every method family.
+        $known  = $this->permissionRegistry !== null ? array_keys($this->permissionRegistry->getAll()) : [];
+        $errors = McpScope::issuanceErrors($scope, $known);
+        if ($errors !== []) {
+            return Response::error(implode('; ', $errors), 422);
         }
 
         $identity = $this->requireProfileIdentity($claims);

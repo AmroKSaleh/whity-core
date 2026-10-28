@@ -58,6 +58,11 @@ Response (`201 Created`):
 
 Store the `token` value. It is only returned once; it cannot be retrieved after issuance but can be revoked by `jti`.
 
+`scope` must name at least one capability: `tools:call`, `resources:read` or `prompts:read`.
+You may add permission names (`users:read`, or `users:*`) to restrict the token further. Scopes
+never grant more than your own role allows. See the operator runbook's
+[Choosing a scope](MCP-Operator-Runbook.md#choosing-a-scope).
+
 **List active tokens:**
 
 ```bash

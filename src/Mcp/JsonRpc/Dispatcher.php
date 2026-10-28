@@ -6,6 +6,8 @@ namespace Whity\Mcp\JsonRpc;
 
 use Whity\Auth\TokenValidator;
 use Whity\Core\Tenant\TenantContext;
+use Whity\Mcp\Auth\McpPrincipal;
+use Whity\Mcp\Auth\McpScope;
 use Whity\Mcp\McpFeatureDisabledException;
 use Whity\Mcp\Notifications\ListChangedNotifier;
 use Whity\Mcp\RateLimit\McpRateLimiter;
@@ -125,14 +127,14 @@ final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSou
             }
 
             if (is_array($decoded)) {
-                return $this->handleBatch($decoded, $bearerToken);
+                return $this->handleBatch($decoded, $bearerToken, $principal);
             }
 
             if (!$decoded instanceof \stdClass) {
                 return $this->encode($this->makeError(null, ErrorCode::INVALID_REQUEST, 'Invalid Request'));
             }
 
-            $response = $this->dispatch($this->toArrayDeep($decoded), $bearerToken);
+            $response = $this->dispatch($this->toArrayDeep($decoded), $bearerToken, $principal);
             return $response !== null ? $this->encode($response) : '';
         } finally {
             TenantContext::reset();
@@ -158,7 +160,7 @@ final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSou
     // ── Batch ─────────────────────────────────────────────────────────────────
 
     /** @param mixed[] $items */
-    private function handleBatch(array $items, ?string $bearerToken): string
+    private function handleBatch(array $items, ?string $bearerToken, ?McpPrincipal $principal): string
     {
         if ($items === []) {
             return $this->encode($this->makeError(null, ErrorCode::INVALID_REQUEST, 'Invalid Request'));
@@ -170,7 +172,7 @@ final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSou
                 $responses[] = $this->makeError(null, ErrorCode::INVALID_REQUEST, 'Invalid Request');
                 continue;
             }
-            $response = $this->dispatch($this->toArrayDeep($item), $bearerToken);
+            $response = $this->dispatch($this->toArrayDeep($item), $bearerToken, $principal);
             if ($response !== null) {
                 $responses[] = $response;
             }
@@ -190,9 +192,11 @@ final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSou
      * for a notification (which produces no response).
      *
      * @param array<string, mixed> $request
+     * @param McpPrincipal|null    $principal The caller validated in handle(); null only
+     *                                        when this dispatcher runs without auth.
      * @return array<string, mixed>|null
      */
-    private function dispatch(array $request, ?string $bearerToken): ?array
+    private function dispatch(array $request, ?string $bearerToken, ?McpPrincipal $principal): ?array
     {
         $isNotification = !array_key_exists('id', $request);
         $id             = $request['id'] ?? null;
@@ -212,6 +216,14 @@ final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSou
 
         if (!isset($this->handlers[$method])) {
             return $isNotification ? null : $this->makeError($id, ErrorCode::METHOD_NOT_FOUND, 'Method not found');
+        }
+
+        // WHIT-695: the token's capability scopes decide which method families
+        // it may use at all. Checked once here rather than in each handler, so
+        // a new handler cannot forget it. Permission narrowing is per item and
+        // lives in the handlers, next to the RBAC check it narrows.
+        if ($principal !== null && !McpScope::of($principal)->allowsMethod($method)) {
+            return $isNotification ? null : $this->makeError($id, ErrorCode::FORBIDDEN, 'Forbidden');
         }
 
         $params = isset($request['params']) ? (array) $request['params'] : null;

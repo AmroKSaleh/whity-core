@@ -72,21 +72,24 @@ final class ToolsCallHandlerTest extends TestCase
         });
 
         $declarations = [
-            ['method' => 'GET',    'path' => '/api/things',          'schema' => ['summary' => 'List things']],
+            ['method' => 'GET',    'path' => '/api/things',          'schema' => ['summary' => 'List things', 'mcp' => true]],
             ['method' => 'PATCH',  'path' => '/api/things/{id:\d+}', 'schema' => ['summary' => 'Update thing']],
             ['method' => 'DELETE', 'path' => '/api/things/{id:\d+}', 'schema' => ['summary' => 'Delete thing']],
             ['method' => 'POST',   'path' => '/api/things',          'schema' => [
                 'summary' => 'Create thing',
+                'mcp'     => true,
                 'request' => [
                     'type'       => 'object',
                     'required'   => ['name'],
                     'properties' => ['name' => ['type' => 'string']],
                 ],
             ]],
-            ['method' => 'GET',    'path' => '/api/bad',             'schema' => ['summary' => 'Bad route']],
+            ['method' => 'GET',    'path' => '/api/bad',             'schema' => ['summary' => 'Bad route', 'mcp' => true]],
         ];
 
-        $this->toolDeriver = new ToolDeriver($declarations);
+        // The Router is passed so the deriver sees the gates registered there,
+        // as it does in production: the declarations carry only schemas.
+        $this->toolDeriver = new ToolDeriver($declarations, [], $this->router);
 
         $this->roleChecker    = $this->createMock(RoleChecker::class);
         $this->tokenValidator = $this->createMock(TokenValidator::class);
@@ -433,7 +436,7 @@ final class ToolsCallHandlerTest extends TestCase
             return Response::json(['ok' => true]);
         });
 
-        $declarations = [['method' => 'GET', 'path' => '/api/audit-check', 'schema' => ['summary' => 'Audit check']]];
+        $declarations = [['method' => 'GET', 'path' => '/api/audit-check', 'schema' => ['summary' => 'Audit check', 'mcp' => true]]];
         $deriver = new ToolDeriver($declarations);
 
         $handler = new ToolsCallHandler($deriver, $this->router, $this->roleChecker, $this->tokenValidator);
@@ -449,7 +452,7 @@ final class ToolsCallHandlerTest extends TestCase
         $this->router->registerUnversioned('GET', '/api/throws', static function (): never {
             throw new \RuntimeException('Boom');
         });
-        $declarations = [['method' => 'GET', 'path' => '/api/throws', 'schema' => ['summary' => 'Throws']]];
+        $declarations = [['method' => 'GET', 'path' => '/api/throws', 'schema' => ['summary' => 'Throws', 'mcp' => true]]];
         $deriver = new ToolDeriver($declarations);
 
         /** @var MockObject&AuditLoggerInterface $audit */

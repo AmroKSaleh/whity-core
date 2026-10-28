@@ -200,6 +200,9 @@ final class RequestSchemaContractTest extends TestCase
             'responses',
             'summary',
             'tags',
+            // Not the generator's: McpExposure reads it to offer an ungated
+            // route to agents (ADR-0006 Amendment 1).
+            'mcp',
         ];
 
         $ignored = [];

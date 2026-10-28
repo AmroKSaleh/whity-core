@@ -16,6 +16,7 @@ use Throwable;
 use Whity\Mcp\JsonRpc\McpException;
 use Whity\Mcp\JsonRpc\MethodHandler;
 use Whity\Core\Request;
+use Whity\Mcp\Auth\McpScope;
 
 /**
  * MCP tools/call handler (WC-2e6944d5, WC-b570dccd).
@@ -87,6 +88,9 @@ final class ToolsCallHandler implements MethodHandler
             throw new McpException(ErrorCode::UNAUTHENTICATED, 'No tenant context');
         }
 
+        if (!McpScope::of($principal)->allowsPermission($tool['requiredPermission'])) {
+            throw new McpException(ErrorCode::FORBIDDEN, 'Forbidden');
+        }
         if ($tool['requiredPermission'] !== null) {
             if (!$this->roleChecker->hasPermissionForProfile($principal->userId, $tool['requiredPermission'], $tenantId)) {
                 throw new McpException(ErrorCode::FORBIDDEN, 'Forbidden');
@@ -191,6 +195,12 @@ final class ToolsCallHandler implements MethodHandler
         // Checking authored first would let a plugin shadow a published
         // operation by naming a tool after it.
         $declaration = $this->toolDeriver->findDeclarationByName($toolName);
+        // A tool tools/list would not show is not callable by name either
+        // (ADR-0006 §4, WHIT-695). Answered as unknown, not forbidden: there is
+        // nothing here for this caller, whoever they are.
+        if ($declaration !== null && !$this->toolDeriver->isExposed($toolName)) {
+            throw new McpException(ErrorCode::METHOD_NOT_FOUND, "Unknown tool: {$toolName}");
+        }
         if ($declaration === null) {
             $authored = $this->authoredTools?->get($toolName);
             if ($authored !== null) {
@@ -314,6 +324,12 @@ final class ToolsCallHandler implements MethodHandler
 
         $requiredPermission = $matched['requiredPermission'] ?? null;
         $requiredRole       = $matched['requiredRole'] ?? null;
+
+        // WHIT-695: the token's permission narrowing, on top of RBAC below.
+        $gate = is_string($requiredPermission) && $requiredPermission !== '' ? $requiredPermission : null;
+        if (!McpScope::of($principal)->allowsPermission($gate)) {
+            throw new McpException(ErrorCode::FORBIDDEN, 'Forbidden');
+        }
 
         if (is_string($requiredPermission) && $requiredPermission !== '') {
             if (!$this->roleChecker->hasPermissionForProfile($principal->userId, $requiredPermission, $tenantId)) {
