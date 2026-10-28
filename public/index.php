@@ -343,6 +343,7 @@ use Whity\Mcp\Notifications\CatalogSignature;
 use Whity\Mcp\Notifications\ListChangedNotifier;
 use Whity\Mcp\RateLimit\McpRateLimiter;
 use Whity\Mcp\Lifecycle\InitializeHandler;
+use Whity\Mcp\Lifecycle\DiscoverHandler;
 use Whity\Mcp\Lifecycle\PingHandler;
 use Whity\Mcp\Prompts\CorePrompts;
 use Whity\Mcp\Prompts\PromptRegistry;
@@ -4485,6 +4486,8 @@ $mcpServerEnabled = (bool) filter_var($_ENV['MCP_ENABLED'] ?? 'false', FILTER_VA
 $mcpToolsCallHandler = new ToolsCallHandler($toolDeriver, $router, $roleChecker, $tokenValidator, auditLogger: $auditLogger, authoredTools: $authoredMcpTools);
 $mcpHandlers = [
     'initialize'              => new InitializeHandler(listChanged: true),
+    // WHIT-708: required of every 2026-07-28 server.
+    'server/discover'         => new DiscoverHandler(),
     'ping'                    => new PingHandler(),
     'notifications/cancelled' => new CancelledNotificationHandler(),
     'tools/list'              => $mcpToolsListHandler,
@@ -4510,6 +4513,9 @@ $mcpTransportHandler = new McpTransportHandler(
     discoveryDispatcher: new Dispatcher(
         array_merge($mcpHandlers, [
             'initialize' => new InitializeHandler(listChanged: false),
+            'server/discover' => new DiscoverHandler(
+                'This server offers its actions through search_tools: search for what you need, describe_tool to see its arguments, then call_tool.',
+            ),
             'tools/list' => $mcpDiscovery->listHandler(),
             'tools/call' => $mcpDiscovery->callHandler(),
         ]),

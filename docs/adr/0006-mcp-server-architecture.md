@@ -262,6 +262,31 @@ the same as one that does not exist.
 Plugin routes follow the same rule. A plugin route with no gate is no longer a tool unless its
 schema opts in.
 
+## Amendment 2 (2026-10-28, WHIT-706, WHIT-707, WHIT-708)
+
+Three changes to how agents meet the server. None of them changes who may do what.
+
+**Tool annotations (WHIT-706).** Derived tools carry MCP annotations from their HTTP method.
+GET is read-only, and PUT and DELETE are destructive and idempotent. POST and PATCH leave
+`destructiveHint` unset, the spec's cautious default, because many POSTs here are actions. A
+route may override them with `mcp_annotations`.
+
+**Discovery mode (WHIT-707).** `/mcp?tools=discover` offers three tools (`search_tools`,
+`describe_tool`, `call_tool`) in place of the catalogue, for clients that cannot hold hundreds
+of tools. The transport selects a second Dispatcher with the same handlers except tools/list and
+tools/call. Those two read through the same visibility filter and call handler, so §4's rules
+and the per-call checks apply unchanged.
+
+**Protocol versions (WHIT-708).** §2's single version becomes 2025-03-26 through 2026-07-28 on
+one endpoint. Each request's version is read from that request: from `_meta` (2026, with
+header-to-body checks), else from the `MCP-Protocol-Version` header, else 2025-03-26. It is never
+held between requests, which keeps the no-session design §2 chose.
+- `subscriptions/listen` is deliberately not implemented. It pins a worker for the life of a
+  stream, the same reason GET is 405.
+- 2026 clients rely on `ttlMs` freshness hints instead of change notifications.
+- No `outputSchema` is declared until route response schemas are verified against real responses
+  (WHIT-120). Results still carry `structuredContent`.
+
 ## Alternatives Considered
 
 - **Adopt the HTTP+SSE transport (MCP 2024-11-05)** — two separate endpoints (`POST /mcp` +

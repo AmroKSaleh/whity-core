@@ -30,7 +30,7 @@ final class NotifyingDispatcherDouble implements McpRequestHandlerInterface, Mcp
         private readonly array $notifications,
     ) {}
 
-    public function handle(string $rawBody, ?string $bearerToken): string
+    public function handle(string $rawBody, ?string $bearerToken, array $headers = []): string
     {
         return $this->response;
     }

@@ -18,4 +18,9 @@ final class ErrorCode
     public const int UNAUTHENTICATED   = -32001;
     public const int RESOURCE_NOT_FOUND = -32002;
     public const int FORBIDDEN         = -32003;
+
+    // MCP 2026-07-28 protocol errors, from the range the spec reserves for itself
+    // (-32020 to -32099). Only ever sent to a request speaking that version.
+    public const int HEADER_MISMATCH              = -32020;
+    public const int UNSUPPORTED_PROTOCOL_VERSION = -32022;
 }

@@ -64,8 +64,18 @@ final class McpTransportHandler
         $rawBody    = $request->getBody();
         $dispatcher = $this->dispatcherFor($request);
 
+        // WHIT-708: the headers 2026-07-28 mirrors from the body, for the
+        // dispatcher to check against it. Earlier versions send only the first.
+        $mcpHeaders = [];
+        foreach (['MCP-Protocol-Version', 'Mcp-Method', 'Mcp-Name'] as $name) {
+            $value = $request->getHeader($name);
+            if ($value !== null) {
+                $mcpHeaders[strtolower($name)] = trim($value);
+            }
+        }
+
         try {
-            $rawResponse = $dispatcher->handle($rawBody, $bearer);
+            $rawResponse = $dispatcher->handle($rawBody, $bearer, $mcpHeaders);
         } catch (McpRateLimitException $e) {
             return new Response(429, '', ['Retry-After' => (string) $e->getRetryAfterSeconds()]);
         } catch (McpFeatureDisabledException) {
@@ -92,6 +102,13 @@ final class McpTransportHandler
             ]);
         }
 
+        // A notification has no response: the spec's answer is 202 with no
+        // body (every version since 2025-03-26).
+        if ($rawResponse === '') {
+            return new Response(202, '', []);
+        }
+
+        $status  = $dispatcher instanceof McpHttpStatusSource ? $dispatcher->httpStatus() : 200;
         $headers = ['Content-Type' => 'application/json'];
 
         // When the client signals it can consume an SSE stream (long-running
@@ -101,7 +118,7 @@ final class McpTransportHandler
             $headers['X-Accel-Buffering'] = 'no';
         }
 
-        return new Response(200, $rawResponse, $headers);
+        return new Response($status, $rawResponse, $headers);
     }
 
     /**

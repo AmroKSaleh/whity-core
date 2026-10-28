@@ -10,7 +10,9 @@ use Whity\Mcp\Auth\McpPrincipal;
 use Whity\Mcp\Auth\McpScope;
 use Whity\Mcp\McpFeatureDisabledException;
 use Whity\Mcp\Notifications\ListChangedNotifier;
+use Whity\Mcp\Protocol\McpProtocol;
 use Whity\Mcp\RateLimit\McpRateLimiter;
+use Whity\Mcp\Transport\McpHttpStatusSource;
 use Whity\Mcp\Transport\McpNotificationSource;
 use Whity\Mcp\Transport\McpRequestHandlerInterface;
 
@@ -31,8 +33,22 @@ use Whity\Mcp\Transport\McpRequestHandlerInterface;
  * principal's tenant ID and reset in a finally block, guaranteeing no tenant
  * bleed across FrankenPHP persistent-worker requests.
  */
-final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSource
+final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSource, McpHttpStatusSource
 {
+    /**
+     * HTTP status for the response being built (WHIT-708). Reset at the top of
+     * every handle(), like the notification state below, because the
+     * dispatcher outlives the request on a persistent worker.
+     */
+    private int $httpStatus = 200;
+
+    /**
+     * The request's MCP headers, lower-cased, for the 2026-07-28 checks.
+     *
+     * @var array<string, string>
+     */
+    private array $headers = [];
+
     /**
      * Client identity (token jti) of the request currently being handled, or
      * null when the request was unauthenticated or auth is disabled.
@@ -83,13 +99,15 @@ final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSou
         private readonly ?\Closure $recordTokenUse          = null,
     ) {}
 
-    public function handle(string $rawBody, ?string $bearerToken): string
+    public function handle(string $rawBody, ?string $bearerToken, array $headers = []): string
     {
         // Cleared first, before any path that can throw or return early: these
-        // two survive the request on a worker singleton, and a stale client key
+        // survive the request on a worker singleton, and a stale client key
         // would push the previous caller's notifications to this one.
         $this->notifyClientKey  = null;
         $this->notifySuppressed = false;
+        $this->httpStatus       = 200;
+        $this->headers          = array_change_key_case($headers, CASE_LOWER);
 
         // Auth check: validated before JSON parsing so that an unauthenticated
         // caller learns nothing about the request shape.
@@ -142,6 +160,14 @@ final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSou
             }
 
             if (is_array($decoded)) {
+                // Batching was removed in 2025-06-18. A client that negotiated
+                // a later version and batches anyway gets a clear refusal
+                // rather than an answer it cannot have expected.
+                $declared = $this->headers['mcp-protocol-version'] ?? McpProtocol::ASSUMED;
+                if (McpProtocol::atLeast($declared, '2025-06-18')) {
+                    $this->httpStatus = 400;
+                    return $this->encode($this->makeError(null, ErrorCode::INVALID_REQUEST, 'Batching is not part of protocol version ' . $declared));
+                }
                 return $this->handleBatch($decoded, $bearerToken, $principal);
             }
 
@@ -225,11 +251,34 @@ final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSou
             return $isNotification ? null : $this->makeError($id, ErrorCode::INVALID_REQUEST, 'Invalid Request');
         }
 
+        $params = isset($request['params']) ? (array) $request['params'] : null;
+
+        // WHIT-708: which protocol version this request speaks, read from the
+        // request itself. Never remembered between requests.
+        try {
+            $version = $this->resolveVersion($method, $params);
+        } catch (McpException $e) {
+            $this->httpStatus = 400;
+            return $isNotification ? null : $this->makeError($id, $e->errorCode, $e->getMessage(), $e->data);
+        }
+        $modern = McpProtocol::isModern($version);
+
         if ($method === 'initialize') {
             $this->notifySuppressed = true;
         }
+        if ($modern) {
+            // No standing notification stream for 2026 clients (see McpProtocol):
+            // nothing is queued for them, and nothing they did is marked seen.
+            $this->notifyClientKey = null;
+        }
 
-        if (!isset($this->handlers[$method])) {
+        // The handshake and the methods 2026-07-28 removed do not exist for a
+        // modern request; it is told so the way that version expects (404).
+        $removedForModern = $modern && in_array($method, ['initialize', 'ping', 'logging/setLevel'], true);
+        if ($removedForModern || !isset($this->handlers[$method])) {
+            if ($modern) {
+                $this->httpStatus = 404;
+            }
             return $isNotification ? null : $this->makeError($id, ErrorCode::METHOD_NOT_FOUND, 'Method not found');
         }
 
@@ -241,17 +290,24 @@ final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSou
             return $isNotification ? null : $this->makeError($id, ErrorCode::FORBIDDEN, 'Forbidden');
         }
 
-        $params = isset($request['params']) ? (array) $request['params'] : null;
+        // Every handler sees the version in params._meta, where 2026 clients put
+        // it themselves; earlier ones get it written there from the header.
+        $params ??= [];
+        $meta = is_array($params['_meta'] ?? null) ? $params['_meta'] : [];
+        $meta[McpProtocol::META_VERSION] = $version;
+        $params['_meta'] = $meta;
 
         try {
             $result = ($this->handlers[$method])($params, $bearerToken);
         } catch (McpException $e) {
-            return $isNotification ? null : $this->makeError($id, $e->errorCode, $e->getMessage());
+            // 2026-07-28 moved resource-not-found onto Invalid Params.
+            $code = $modern && $e->errorCode === ErrorCode::RESOURCE_NOT_FOUND ? ErrorCode::INVALID_PARAMS : $e->errorCode;
+            return $isNotification ? null : $this->makeError($id, $code, $e->getMessage(), $e->data);
         } catch (\Throwable) {
             return $isNotification ? null : $this->makeError($id, ErrorCode::INTERNAL_ERROR, 'Internal error');
         }
 
-        return $isNotification ? null : $this->makeSuccess($id, $result);
+        return $isNotification ? null : $this->makeSuccess($id, McpProtocol::adaptResult($method, $result, $version));
     }
 
     // ── Server-initiated notifications (#952) ─────────────────────────────────
@@ -292,12 +348,114 @@ final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSou
         return ['jsonrpc' => '2.0', 'id' => $id, 'result' => $result];
     }
 
+    public function httpStatus(): int
+    {
+        return $this->httpStatus;
+    }
+
+    /**
+     * The protocol version a request speaks (WHIT-708).
+     *
+     * A version in `params._meta` makes it a 2026-07-28 request, which must
+     * name a version this server speaks and whose headers must agree with its
+     * body: the spec requires both so that a gateway routing on the headers
+     * and this server reading the body cannot be told two different things.
+     * Otherwise the `MCP-Protocol-Version` header names a legacy version, or,
+     * absent (2025-03-26 clients never send it), 2025-03-26 is assumed.
+     *
+     * @param array<string, mixed>|null $params
+     * @throws McpException UNSUPPORTED_PROTOCOL_VERSION or HEADER_MISMATCH.
+     */
+    private function resolveVersion(string $method, ?array $params): string
+    {
+        $meta     = is_array($params['_meta'] ?? null) ? $params['_meta'] : [];
+        $declared = $meta[McpProtocol::META_VERSION] ?? null;
+        $header   = $this->headers['mcp-protocol-version'] ?? null;
+
+        if ($declared === null) {
+            if ($header === null) {
+                return McpProtocol::ASSUMED;
+            }
+            if (in_array($header, McpProtocol::LEGACY, true)) {
+                return $header;
+            }
+            if (McpProtocol::isModern($header)) {
+                throw new McpException(
+                    ErrorCode::HEADER_MISMATCH,
+                    "Header mismatch: MCP-Protocol-Version is {$header} but the request carries no protocol version in _meta",
+                );
+            }
+            throw self::unsupported($header);
+        }
+
+        if (!is_string($declared) || !McpProtocol::isModern($declared)) {
+            // A legacy version is negotiated by initialize, never declared per
+            // request, so anything but a modern version here is unsupported.
+            throw self::unsupported(is_string($declared) ? $declared : '');
+        }
+
+        if ($header !== $declared) {
+            throw self::mismatch('MCP-Protocol-Version', $header, $declared);
+        }
+        $headerMethod = $this->headers['mcp-method'] ?? null;
+        if ($headerMethod !== $method) {
+            throw self::mismatch('Mcp-Method', $headerMethod, $method);
+        }
+        $nameField = match ($method) {
+            'tools/call', 'prompts/get' => 'name',
+            'resources/read'            => 'uri',
+            default                     => null,
+        };
+        if ($nameField !== null) {
+            $expected   = is_string($params[$nameField] ?? null) ? $params[$nameField] : null;
+            $headerName = self::decodeHeaderValue($this->headers['mcp-name'] ?? null);
+            if ($expected === null || $headerName !== $expected) {
+                throw self::mismatch('Mcp-Name', $headerName, $expected);
+            }
+        }
+
+        return $declared;
+    }
+
+    private static function unsupported(string $requested): McpException
+    {
+        return new McpException(
+            ErrorCode::UNSUPPORTED_PROTOCOL_VERSION,
+            'Unsupported protocol version',
+            ['supported' => McpProtocol::supported(), 'requested' => $requested],
+        );
+    }
+
+    private static function mismatch(string $header, ?string $got, ?string $expected): McpException
+    {
+        return new McpException(
+            ErrorCode::HEADER_MISMATCH,
+            $got === null
+                ? "Header mismatch: the {$header} header is required"
+                : "Header mismatch: {$header} header value '{$got}' does not match body value '" . ($expected ?? '') . "'",
+        );
+    }
+
+    /** A header value, with the spec's `=?base64?...?=` sentinel decoded. */
+    private static function decodeHeaderValue(?string $value): ?string
+    {
+        if ($value !== null && preg_match('/^=\?base64\?(.*)\?=$/s', $value, $m) === 1) {
+            $decoded = base64_decode($m[1], true);
+            return $decoded === false ? null : $decoded;
+        }
+        return $value;
+    }
+
     /**
      * @return array<string, mixed>
      */
-    private function makeError(mixed $id, int $code, string $message): array
+    private function makeError(mixed $id, int $code, string $message, mixed $data = null): array
     {
-        return ['jsonrpc' => '2.0', 'id' => $id, 'error' => ['code' => $code, 'message' => $message]];
+        $error = ['code' => $code, 'message' => $message];
+        if ($data !== null) {
+            $error['data'] = $data;
+        }
+        return ['jsonrpc' => '2.0', 'id' => $id, 'error' => $error];
     }
 
     /** @param array<string, mixed> $data */

@@ -52,6 +52,25 @@ describe('/mcp proxy', () => {
     expect(await response.text()).toBe('{"jsonrpc":"2.0","id":1,"result":{}}');
   });
 
+  it('forwards the MCP request headers a 2026-07-28 client must send, and the query', async () => {
+    const calls = capture(new Response('{}', { status: 200 }));
+
+    await POST(
+      new Request('http://web.test/mcp?tools=discover', {
+        method: 'POST',
+        headers: { 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/call', 'Mcp-Name': 'get_api_users' },
+        body: PING,
+      })
+    );
+
+    // The backend refuses a 2026 request whose headers it cannot see (HeaderMismatch).
+    const headers = new Headers(calls[0].init.headers);
+    expect(headers.get('mcp-protocol-version')).toBe('2026-07-28');
+    expect(headers.get('mcp-method')).toBe('tools/call');
+    expect(headers.get('mcp-name')).toBe('get_api_users');
+    expect(calls[0].url).toBe(`${BACKEND}/mcp?tools=discover`);
+  });
+
   it('never forwards the browser session cookie', async () => {
     const calls = capture(new Response('{}', { status: 200 }));
 

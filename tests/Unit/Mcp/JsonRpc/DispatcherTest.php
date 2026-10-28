@@ -190,7 +190,9 @@ final class DispatcherTest extends TestCase
         $r   = $this->decode($dispatcher->handle($raw, 'tok123'));
 
         self::assertSame('tok123', $r['result']['bearer']);
-        self::assertSame(['x' => 1], $r['result']['params']);
+        // WHIT-708: the request's protocol version rides along in params._meta;
+        // no header and no _meta means 2025-03-26.
+        self::assertSame(['x' => 1, '_meta' => ['io.modelcontextprotocol/protocolVersion' => '2025-03-26']], $r['result']['params']);
     }
 
     public function testHandlePassesNullBearerWhenAbsent(): void

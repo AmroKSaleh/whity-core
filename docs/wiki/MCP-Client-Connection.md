@@ -156,14 +156,15 @@ curl -s -X DELETE https://your-whity-host/api/mcp/tokens/<jti> \
 
 ## Protocol
 
-The endpoint implements [MCP 2025-03-26](https://modelcontextprotocol.io/) over JSON-RPC 2.0.
+The endpoint speaks every [MCP](https://modelcontextprotocol.io/) version from **2025-03-26** to **2026-07-28** over JSON-RPC 2.0. Legacy clients negotiate with `initialize`. A 2026-07-28 client sends its version in each request's `_meta` with the matching headers, and can call `server/discover` first. See MCP-Server, *Protocol*, for what each version adds.
 
 ### Available methods
 
 | Method | Description |
 | --- | --- |
-| `initialize` | Begin an MCP session; negotiate protocol version and capabilities |
-| `ping` | Check server reachability (returns an empty result) |
+| `initialize` | Legacy versions only: negotiate protocol version and capabilities |
+| `server/discover` | Supported versions, capabilities and server identity (required by 2026-07-28) |
+| `ping` | Legacy versions only: check server reachability (returns an empty result) |
 | `tools/list` | List tools the caller is permitted to use |
 | `tools/call` | Invoke a tool by name |
 | `resources/list` | List static resources and resource templates |
