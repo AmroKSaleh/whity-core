@@ -8,9 +8,11 @@ import { createAuthedApi } from './support/api';
  * calling /mcp with the token the wizard issued.
  *
  * The CI stack starts with MCP_ENABLED=true (e2e.yml); the tenant switch is
- * turned on for this spec and restored afterwards. The app's request goes to the
- * address the wizard handed out, APP_URL + /mcp, which on this stack is the Next
- * server — so this also proves the web tier forwards /mcp.
+ * turned on for this spec and restored afterwards. The app's request goes to
+ * /mcp on the Next server under test, so this also proves the web tier forwards
+ * /mcp. Not to the exact URL the wizard printed: that is APP_URL + /mcp, and on
+ * this stack APP_URL names :3000 while Playwright serves the frontend on its own
+ * port (E2E_PORT, 3010), so the printed host is not listening here.
  */
 
 const CONNECTION_NAME = `e2e-connect-${Date.now()}`;
@@ -40,7 +42,7 @@ test.describe('Connect an AI app', () => {
     await api.dispose();
   });
 
-  test('issues a connection, hands out working setup, and sees the app connect', async ({ page, request }) => {
+  test('issues a connection, hands out working setup, and sees the app connect', async ({ page, request, baseURL }) => {
     await page.goto('/admin/ai-principals');
     await page.getByRole('button', { name: 'Connect an AI app' }).click();
 
@@ -63,7 +65,7 @@ test.describe('Connect an AI app', () => {
     expect(server.url).toMatch(/\/mcp$/);
     expect(server.headers.Authorization).toMatch(/^Bearer \S+$/);
 
-    const response = await request.post(server.url, {
+    const response = await request.post(`${baseURL}${new URL(server.url).pathname}`, {
       headers: { Authorization: server.headers.Authorization, 'Content-Type': 'application/json' },
       data: { jsonrpc: '2.0', method: 'tools/list', id: 1 },
     });
