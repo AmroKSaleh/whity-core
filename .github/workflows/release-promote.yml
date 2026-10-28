@@ -32,6 +32,23 @@ jobs:
       pull-requests: write
 
     steps:
+      # Who opens this job's PR decides whether its CI runs on its own. GitHub
+      # creates the pull_request runs of a PR opened with github.token in an
+      # approval-required state, so every bot-opened release PR sat at
+      # "action_required" until a person approved its runs by hand.
+      # A GitHub App installation token -- or, failing that, a personal access
+      # token in RELEASE_TOKEN -- opens it as an identity whose runs start
+      # unattended. With neither configured the job still works and says, in
+      # its summary, what will need approving. Setup: CONTRIBUTING.md,
+      # "The release token".
+      - name: Mint the release token
+        id: app-token
+        if: vars.RELEASE_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
       - name: Checkout develop
         uses: actions/checkout@v7
         with:
@@ -66,7 +83,8 @@ jobs:
       - name: Open the release PR to main
         if: steps.decide.outputs.go == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RELEASE_TOKEN || github.token }}
+          TOKEN_KIND: ${{ steps.app-token.outputs.token != '' && 'app' || secrets.RELEASE_TOKEN != '' && 'pat' || 'builtin' }}
         run: |
           VERSION="${{ steps.decide.outputs.version }}"
 
@@ -77,7 +95,7 @@ jobs:
             exit 0
           fi
 
-          gh pr create \
+          URL=$(gh pr create \
             --base main \
             --head develop \
             --title "release: ${VERSION} to main" \
@@ -91,4 +109,15 @@ jobs:
 
           ### Merge with a MERGE COMMIT, not a squash
 
-          Squashing would collapse this into one commit that exists nowhere on \`develop\`, leaving the two branches permanently divergent and turning every future release into a conflict."
+          Squashing would collapse this into one commit that exists nowhere on \`develop\`, leaving the two branches permanently divergent and turning every future release into a conflict.")
+          echo "Opened ${URL}"
+          if [ "$TOKEN_KIND" = "builtin" ]; then
+            echo "::warning::The develop to main release PR was opened with github.token, so GitHub holds its CI for approval. Approve the runs on ${URL}, or configure the release token (CONTRIBUTING.md, 'The release token')."
+            {
+              echo "### CI on ${URL} is waiting for approval"
+              echo ""
+              echo "This PR was opened with github.token, and GitHub holds the workflow runs of such PRs until someone with write access approves them: open the PR and choose **Approve workflows to run**."
+              echo ""
+              echo "Configure the release token (CONTRIBUTING.md, *The release token*) and release PRs start their CI on their own."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
