@@ -21,6 +21,11 @@ const FORWARDED_REQUEST_HEADERS = [
   'content-type',
   'accept',
   'mcp-protocol-version',
+  // MCP 2026-07-28 mirrors the method and target in headers and the backend
+  // checks them against the body (WHIT-708); dropped here, every such request
+  // would be refused as a header mismatch.
+  'mcp-method',
+  'mcp-name',
   'mcp-session-id',
   'last-event-id',
 ];
