@@ -229,6 +229,9 @@ final class AiPrincipalsApiHandlerRealEngineTest extends TestCase
         $this->assertArrayHasKey('scope', $entry);
         $this->assertArrayHasKey('expiresAt', $entry);
         $this->assertArrayHasKey('createdAt', $entry);
+        // WHIT-697: never used yet, so null rather than a made-up time.
+        $this->assertArrayHasKey('lastUsedAt', $entry);
+        $this->assertNull($entry['lastUsedAt']);
         $this->assertIsArray($entry['scope']);
         $this->assertSame('jti-x', $entry['jti']);
         $this->assertSame('Shape Test', $entry['name']);

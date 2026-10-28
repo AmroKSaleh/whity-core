@@ -28,6 +28,9 @@ final class McpTokenService
     /** MCP token lifetime: 90 days. */
     public const int TOKEN_LIFETIME_SECONDS = 7_776_000;
 
+    /** How stale last_used_at may get before a call refreshes it. */
+    public const int LAST_USED_RESOLUTION_SECONDS = 60;
+
     public function __construct(
         private readonly PDO $db,
         private readonly JwtParser $jwtParser,
@@ -85,7 +88,7 @@ final class McpTokenService
     public function listForUser(int $profileId, int $tenantId): array
     {
         $stmt = $this->db->prepare("
-            SELECT t.jti, t.name, t.principal_kind, t.scope, t.expires_at, t.created_at
+            SELECT t.jti, t.name, t.principal_kind, t.scope, t.expires_at, t.created_at, t.last_used_at
             FROM   mcp_tokens t
             WHERE  t.profile_id = ?
               AND  t.tenant_id = ?
@@ -107,6 +110,32 @@ final class McpTokenService
             $row['scope'] = is_array($decoded) ? $decoded : [];
             return $row;
         }, $rows));
+    }
+
+    /**
+     * Record that a token reached the server (WHIT-697).
+     *
+     * Throttled to one write per token per {@see self::LAST_USED_RESOLUTION_SECONDS}:
+     * the column answers "is this app connected / still in use", which a
+     * minute's precision answers as well as a millisecond's, and an agent can
+     * make dozens of calls a minute. The cutoff is computed here rather than in
+     * SQL so the statement is the same on PostgreSQL and SQLite.
+     */
+    public function recordUse(string $jti, int $tenantId, ?\DateTimeImmutable $now = null): void
+    {
+        $now ??= new \DateTimeImmutable();
+        $stmt = $this->db->prepare('
+            UPDATE mcp_tokens SET last_used_at = ?
+            WHERE  jti = ?
+              AND  tenant_id = ?
+              AND  (last_used_at IS NULL OR last_used_at < ?)
+        ');
+        $stmt->execute([
+            $now->format('Y-m-d H:i:s'),
+            $jti,
+            $tenantId,
+            $now->modify('-' . self::LAST_USED_RESOLUTION_SECONDS . ' seconds')->format('Y-m-d H:i:s'),
+        ]);
     }
 
     /**

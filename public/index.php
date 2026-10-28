@@ -334,6 +334,7 @@ use Whity\Core\RateLimit\RateLimitMiddleware;
 use Whity\Core\RateLimit\RateLimitRule;
 use Whity\Core\Settings\SettingsRegistry;
 use Whity\Mcp\Auth\McpTokenHandler;
+use Whity\Mcp\Connect\McpConnectHandler;
 use Whity\Mcp\Auth\McpTokenService;
 use Whity\Mcp\JsonRpc\Dispatcher;
 use Whity\Mcp\Lifecycle\CancelledNotificationHandler;
@@ -4400,7 +4401,8 @@ $router->register('DELETE', '/api/relations/{id:\d+}', [$relationsHandler, 'dele
 // WC-2686308f: MCP token management endpoints (issue / list / revoke).
 // WC-149b2fc9: create and revoke are gated by mcp:tokens:manage so an admin
 // controls who may mint AI credentials. List is read-only and ungated.
-$mcpTokenHandler = new McpTokenHandler($tokenValidator, new McpTokenService($db->getPdo(), $jwtParser), $permissionRegistry);
+$mcpTokenService = new McpTokenService($db->getPdo(), $jwtParser);
+$mcpTokenHandler = new McpTokenHandler($tokenValidator, $mcpTokenService, $permissionRegistry);
 $router->register('POST',   '/api/mcp/tokens',       [$mcpTokenHandler, 'create'], null, null, CorePermissions::MCP_TOKENS_MANAGE);
 $router->register('GET',    '/api/mcp/tokens',       [$mcpTokenHandler, 'list']);
 $router->register('DELETE', '/api/mcp/tokens/{jti}', [$mcpTokenHandler, 'revoke'], null, null, CorePermissions::MCP_TOKENS_MANAGE);
@@ -4477,22 +4479,42 @@ $mcpListChangedNotifier = new ListChangedNotifier(
 // ONE registry — a second instance would answer tools/list from a different set
 // than tools/call dispatches from.
 $authoredMcpTools = new AuthoredToolRegistry();
+$mcpToolsListHandler = new ToolsListHandler($toolDeriver, $roleChecker, $tokenValidator, $authoredMcpTools);
+$mcpServerEnabled = (bool) filter_var($_ENV['MCP_ENABLED'] ?? 'false', FILTER_VALIDATE_BOOLEAN);
 $mcpTransportHandler = new McpTransportHandler(
     new Dispatcher([
         'initialize'              => new InitializeHandler(listChanged: true),
         'ping'                    => new PingHandler(),
         'notifications/cancelled' => new CancelledNotificationHandler(),
-        'tools/list'              => new ToolsListHandler($toolDeriver, $roleChecker, $tokenValidator, $authoredMcpTools),
+        'tools/list'              => $mcpToolsListHandler,
         'tools/call'              => new ToolsCallHandler($toolDeriver, $router, $roleChecker, $tokenValidator, auditLogger: $auditLogger, authoredTools: $authoredMcpTools),
         'resources/list'          => new ResourcesListHandler($resourceDeriver, $roleChecker, $tokenValidator),
         'resources/read'          => new ResourcesReadHandler($router, $roleChecker, $tokenValidator, auditLogger: $auditLogger, resourceDeriver: $resourceDeriver),
         'prompts/list'            => new PromptsListHandler($promptRegistry, $roleChecker, $tokenValidator),
         'prompts/get'             => new PromptsGetHandler($promptRegistry, $roleChecker, $tokenValidator),
-    ], $tokenValidator, $mcpRateLimiter, $tenantMcpEnabled, $mcpListChangedNotifier),
-    enabled: (bool) filter_var($_ENV['MCP_ENABLED'] ?? 'false', FILTER_VALIDATE_BOOLEAN),
+    ], $tokenValidator, $mcpRateLimiter, $tenantMcpEnabled, $mcpListChangedNotifier,
+        // WHIT-697: "last used", which the connect wizard waits on.
+        static function (\Whity\Mcp\Auth\McpPrincipal $principal) use ($mcpTokenService): void {
+            $mcpTokenService->recordUse($principal->jti, $principal->tenantId);
+        },
+    ),
+    enabled: $mcpServerEnabled,
 );
 $router->registerUnversioned('POST', '/mcp', [$mcpTransportHandler, 'handlePost']);
 $router->registerUnversioned('GET',  '/mcp', [$mcpTransportHandler, 'handleGet']);
+
+// WHIT-697: the "Connect an AI app" wizard. Gated like token issuance, which
+// is where the wizard ends. The preview runs the tools/list filter itself.
+$mcpConnectHandler = new McpConnectHandler(
+    $tokenValidator,
+    $mcpToolsListHandler,
+    $permissionRegistry,
+    $tenantMcpEnabled,
+    $mcpServerEnabled,
+    McpConnectHandler::endpointFor((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: '')),
+);
+$router->register('GET',  '/api/mcp/connect',         [$mcpConnectHandler, 'info'],    null, null, CorePermissions::MCP_TOKENS_MANAGE);
+$router->register('POST', '/api/mcp/connect/preview', [$mcpConnectHandler, 'preview'], null, null, CorePermissions::MCP_TOKENS_MANAGE);
 
 // Load plugins AFTER every core route (WC-169): the Router refuses duplicate
 // method+path registrations (first wins), so core routes can never be

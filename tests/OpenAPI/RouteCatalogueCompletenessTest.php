@@ -85,6 +85,11 @@ final class RouteCatalogueCompletenessTest extends TestCase
         'DELETE /api/admin/mcp/tokens/{jti}',
         'GET /api/admin/mcp/tokens',
         'GET /api/admin/mcp/tools',
+        // WHIT-697: the connect wizard's setup and scope preview. Kept beside
+        // the token routes it ends in: a declared route becomes an MCP tool,
+        // and an agent has no business walking itself through credential setup.
+        'GET /api/mcp/connect',
+        'POST /api/mcp/connect/preview',
         // WC-email: operator-only email settings — SMTP write-only password +
         // live send-test. OpenAPI schema to follow in a documentation task.
         'GET /api/settings/mail/status',

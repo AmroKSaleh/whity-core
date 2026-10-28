@@ -68,6 +68,11 @@ final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSou
      *                                                            client made the call so the transport can
      *                                                            drain any owed `list_changed` notifications
      *                                                            (#952); null disables the signal entirely.
+     * @param (\Closure(McpPrincipal): void)|null $recordTokenUse When provided, called with the principal of a
+     *                                                            dedicated MCP token once it has passed every
+     *                                                            gate, so "last used" can show an app is
+     *                                                            connected (WHIT-697). Session bearers are
+     *                                                            not recorded: they are not a connection.
      */
     public function __construct(
         private readonly array $handlers,
@@ -75,6 +80,7 @@ final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSou
         private readonly ?McpRateLimiter $rateLimiter       = null,
         private readonly ?\Closure $tenantMcpEnabled        = null,
         private readonly ?ListChangedNotifier $listChangedNotifier = null,
+        private readonly ?\Closure $recordTokenUse          = null,
     ) {}
 
     public function handle(string $rawBody, ?string $bearerToken): string
@@ -118,6 +124,15 @@ final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSou
                 // rate limiter, so an unauthenticated caller cannot make the server
                 // write notification bookkeeping on its behalf.
                 $this->notifyClientKey = $principal->jti;
+
+                // WHIT-697: bookkeeping, so it must never cost the caller the call.
+                if ($this->recordTokenUse !== null && $principal->principalKind !== 'session') {
+                    try {
+                        ($this->recordTokenUse)($principal);
+                    } catch (\Throwable $e) {
+                        error_log('[mcp] recording token use failed (tenant ' . $principal->tenantId . '): ' . $e->getMessage());
+                    }
+                }
             }
 
             try {
