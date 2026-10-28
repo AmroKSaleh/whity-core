@@ -32,7 +32,7 @@ import type { AiPrincipal, AiPrincipalListResponse } from './types';
  * Mirrors the loading / empty / error patterns of the other admin pages.
  */
 export default function AiPrincipalsPage() {
-  const { apiClient } = useAuth();
+  const { apiClient, user } = useAuth();
   const { addToast } = useToast();
   const { hasPermission } = useCapabilities();
   const t = useTranslation('admin');
@@ -40,6 +40,7 @@ export default function AiPrincipalsPage() {
   const canManage = hasPermission(MCP_TOKENS_MANAGE);
 
   const [isWizardOpen, setIsWizardOpen] = useState(false);
+  const [renewing, setRenewing] = useState<AiPrincipal | null>(null);
   const [isRevokeModalOpen, setIsRevokeModalOpen] = useState(false);
   const [selectedPrincipal, setSelectedPrincipal] = useState<AiPrincipal | null>(null);
 
@@ -122,6 +123,14 @@ export default function AiPrincipalsPage() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          {/* Renewing issues a new token as the caller, so it is offered only
+              on the caller's own connections: renewing a colleague's would
+              silently move their app onto the admin's account. */}
+          {user !== null && principal.userId === user.id && (
+            <DropdownMenuItem onClick={() => setRenewing(principal)}>
+              {t('aiPrincipals.action.renew', 'Renew')}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem
             className="text-destructive focus:text-destructive"
             onClick={() => handleRevokeClick(principal)}
@@ -173,9 +182,13 @@ export default function AiPrincipalsPage() {
       />
 
       <ConnectWizard
-        isOpen={isWizardOpen}
-        onOpenChange={setIsWizardOpen}
+        isOpen={isWizardOpen || renewing !== null}
+        onOpenChange={(open) => {
+          setIsWizardOpen(open);
+          if (!open) setRenewing(null);
+        }}
         onConnected={refetch}
+        renew={renewing === null ? null : { jti: renewing.jti, name: renewing.name, scope: renewing.scope }}
       />
 
       {selectedPrincipal && (

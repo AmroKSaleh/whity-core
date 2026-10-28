@@ -81,7 +81,7 @@ export default defineConfig({
       // silently never executes. `document-library` (#1006) is here for exactly
       // that reason — it was written against an earlier version of this list and
       // would otherwise have been dropped by the rewrite that added the others.
-      testMatch: /(navigation|roles|users|ous-tenants|ous-hub|stats|settings-2fa|profile|website-settings|branding|global-settings|sso|email-settings|document-designer|document-record|document-library|rtl-direction|user-groups)\.spec\.ts/,
+      testMatch: /(navigation|roles|users|ous-tenants|ous-hub|stats|settings-2fa|profile|website-settings|branding|global-settings|sso|email-settings|mcp-connect|document-designer|document-record|document-library|rtl-direction|user-groups)\.spec\.ts/,
       dependencies: ['setup'],
       use: { ...devices['Desktop Chrome'], storageState: adminStatePath },
     },

@@ -36,7 +36,7 @@ function json(body: unknown, status = 200): Response {
 
 /** A fake API. `used` flips the issued token to "last used" for the poll. */
 function api(info: McpConnectInfo = INFO) {
-  const state = { used: false, previews: [] as string[][], issued: [] as unknown[] };
+  const state = { used: false, previews: [] as string[][], issued: [] as unknown[], revoked: [] as string[], polls: 0 };
   mockApiClient.mockImplementation(async (path: string, init?: RequestInit) => {
     if (path === '/api/v1/mcp/connect') return json(info);
     if (path === '/api/v1/mcp/connect/preview') {
@@ -55,7 +55,12 @@ function api(info: McpConnectInfo = INFO) {
       state.issued.push(JSON.parse(String(init.body)));
       return json({ jti: 'j-1', token: TOKEN, name: 'Claude Code', scope: [], expires_at: '2027-01-26T00:00:00Z' }, 201);
     }
+    if (path.startsWith('/api/v1/mcp/tokens/') && init?.method === 'DELETE') {
+      state.revoked.push(decodeURIComponent(path.slice('/api/v1/mcp/tokens/'.length)));
+      return { ok: true, status: 204, json: async () => ({}) } as Response;
+    }
     if (path === '/api/v1/mcp/tokens') {
+      state.polls += 1;
       return json({ tokens: [{ jti: 'j-1', name: 'Claude Code', last_used_at: state.used ? '2026-10-28 10:00:00' : null }] });
     }
     throw new Error(`unexpected request ${path}`);
@@ -63,9 +68,9 @@ function api(info: McpConnectInfo = INFO) {
   return state;
 }
 
-function renderWizard() {
+function renderWizard(renew: { jti: string; name: string; scope: string[] } | null = null) {
   const onConnected = jest.fn();
-  render(<ConnectWizard isOpen onOpenChange={jest.fn()} onConnected={onConnected} />);
+  render(<ConnectWizard isOpen onOpenChange={jest.fn()} onConnected={onConnected} renew={renew} />);
   return { onConnected };
 }
 
@@ -100,6 +105,27 @@ describe('ConnectWizard', () => {
 
     state.used = true;
     expect(await screen.findByText('Connected', {}, { timeout: 5000 })).toBeInTheDocument();
+  }, 15_000);
+
+  it('renews with the same name and scope, and revokes the old key only once the new one connects', async () => {
+    const state = api();
+    const user = userEvent.setup();
+    renderWizard({ jti: 'old-jti', name: 'Work laptop', scope: ['tools:call', 'users:read'] });
+
+    expect(await screen.findByText('Renew Work laptop')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Cursor' }));
+
+    await waitFor(() => expect(state.issued).toEqual([{ name: 'Work laptop', scope: ['tools:call', 'users:read'] }]));
+    expect(state.previews).toEqual([]);
+    expect(await screen.findByText('Waiting for Cursor to connect…')).toBeInTheDocument();
+    // Let a poll see the new key still unused: nothing may be revoked yet.
+    await waitFor(() => expect(state.polls).toBeGreaterThan(0), { timeout: 5000 });
+    expect(state.revoked).toEqual([]);
+    expect(screen.queryByText('Connected')).not.toBeInTheDocument();
+
+    state.used = true;
+    expect(await screen.findByText('The old key has been turned off.', {}, { timeout: 5000 })).toBeInTheDocument();
+    expect(state.revoked).toEqual(['old-jti']);
   }, 15_000);
 
   it('offers sign-in-only apps as coming, not as choices', async () => {

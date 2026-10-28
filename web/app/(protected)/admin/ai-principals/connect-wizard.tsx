@@ -63,11 +63,19 @@ export function ConnectWizard({
   isOpen,
   onOpenChange,
   onConnected,
+  renew = null,
 }: {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Called once a connection is issued, so the list can refresh. */
+  /** Called once a connection is issued (or the old one revoked), so the list can refresh. */
   onConnected: () => void;
+  /**
+   * Renew an existing connection of the caller's: same name and scope, a new
+   * token. The old token keeps working until the new one first connects, and
+   * is revoked then — so the app is never left without a working key while
+   * the user is still pasting the new setup.
+   */
+  renew?: { jti: string; name: string; scope: string[] } | null;
 }) {
   const { apiClient } = useAuth();
   const { addToast } = useToast();
@@ -85,6 +93,7 @@ export function ConnectWizard({
   const [issued, setIssued] = useState<Issued | null>(null);
   const [connected, setConnected] = useState(false);
   const [waitedLong, setWaitedLong] = useState(false);
+  const [oldRevoked, setOldRevoked] = useState<boolean | null>(null);
 
   // ── Pre-flight: where to connect, and whether it can work at all ──────────
   useEffect(() => {
@@ -166,13 +175,20 @@ export function ConnectWizard({
         const body = (await response.json()) as { tokens: OwnMcpToken[] };
         if (body.tokens.some((token) => token.jti === issued.jti && token.last_used_at !== null)) {
           setConnected(true);
+          if (renew !== null) {
+            const revoked = await apiClient(`/api/v1/mcp/tokens/${encodeURIComponent(renew.jti)}`, { method: 'DELETE' })
+              .then((r) => r.ok)
+              .catch(() => false);
+            setOldRevoked(revoked);
+            onConnected();
+          }
         }
       } catch {
         // A missed poll is retried on the next tick.
       }
     }, POLL_MS);
     return () => clearInterval(interval);
-  }, [step, issued, connected, apiClient]);
+  }, [step, issued, connected, apiClient, renew, onConnected]);
 
   const reset = () => {
     setStep('app');
@@ -184,6 +200,7 @@ export function ConnectWizard({
     setIssued(null);
     setConnected(false);
     setWaitedLong(false);
+    setOldRevoked(null);
   };
 
   const close = (open: boolean) => {
@@ -193,17 +210,22 @@ export function ConnectWizard({
 
   const chooseApp = (id: McpClientId) => {
     setClientId(id);
+    if (renew !== null) {
+      // The access was chosen when the connection was made; renewing keeps it.
+      void create(id, renew.name, renew.scope);
+      return;
+    }
     setName(mcpClient(id).name);
     setStep('access');
   };
 
-  const create = async () => {
-    if (scope === null || clientId === null) return;
+  const create = async (id: McpClientId | null = clientId, issueName: string = name, issueScope: string[] | null = scope) => {
+    if (issueScope === null || id === null) return;
     setSubmitting(true);
     try {
       const response = await apiClient('/api/v1/mcp/tokens', {
         method: 'POST',
-        body: JSON.stringify({ name: name.trim() || mcpClient(clientId).name, scope }),
+        body: JSON.stringify({ name: issueName.trim() || mcpClient(id).name, scope: issueScope }),
       });
       if (!response.ok) {
         const body = (await response.json().catch(() => ({}))) as { message?: string };
@@ -224,22 +246,33 @@ export function ConnectWizard({
   };
 
   const client = clientId !== null ? mcpClient(clientId) : null;
+  const otherLabel = t('aiPrincipals.connect.app.other', 'Another app');
+  // A product name is not translated; "other" is not a product.
+  const appName = client === null ? '' : client.id === 'other' ? otherLabel : client.name;
 
   return (
     <Dialog open={isOpen} onOpenChange={close}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {step === 'app' && t('aiPrincipals.connect.app.title', 'Connect an AI app')}
-            {step === 'access' && t('aiPrincipals.connect.access.title', 'What may {app} do?', { app: client?.name ?? '' })}
-            {step === 'connect' && t('aiPrincipals.connect.setup.title', 'Connect {app}', { app: client?.name ?? '' })}
+            {step === 'app' &&
+              (renew !== null
+                ? t('aiPrincipals.connect.renew.title', 'Renew {name}', { name: renew.name })
+                : t('aiPrincipals.connect.app.title', 'Connect an AI app'))}
+            {step === 'access' && t('aiPrincipals.connect.access.title', 'What may {app} do?', { app: appName })}
+            {step === 'connect' && t('aiPrincipals.connect.setup.title', 'Connect {app}', { app: appName })}
           </DialogTitle>
           <DialogDescription>
             {step === 'app' &&
-              t(
-                'aiPrincipals.connect.app.description',
-                'Let an AI app work with your data here, using your account. Pick the app you use.'
-              )}
+              (renew !== null
+                ? t(
+                    'aiPrincipals.connect.renew.description',
+                    'Pick the app this connection is for to get its new setup. It keeps the same access. The old key keeps working until the new one connects, and is turned off then.'
+                  )
+                : t(
+                    'aiPrincipals.connect.app.description',
+                    'Let an AI app work with your data here, using your account. Pick the app you use.'
+                  ))}
             {step === 'access' &&
               t(
                 'aiPrincipals.connect.access.description',
@@ -247,7 +280,7 @@ export function ConnectWizard({
               )}
             {step === 'connect' &&
               t('aiPrincipals.connect.setup.description', 'Follow these steps in {app}. This page will tell you when it is connected.', {
-                app: client?.name ?? '',
+                app: appName,
               })}
           </DialogDescription>
         </DialogHeader>
@@ -260,11 +293,11 @@ export function ConnectWizard({
               <button
                 key={c.id}
                 type="button"
-                disabled={c.requiresSignIn === true}
+                disabled={c.requiresSignIn === true || submitting}
                 onClick={() => chooseApp(c.id)}
                 className="flex min-h-16 flex-col items-start justify-center gap-1 rounded-lg border border-border bg-background px-3 py-2 text-start text-sm font-medium transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-background"
               >
-                <span>{c.id === 'other' ? t('aiPrincipals.connect.app.other', 'Another app') : c.name}</span>
+                <span>{c.id === 'other' ? otherLabel : c.name}</span>
                 {c.requiresSignIn === true && (
                   <Badge variant="secondary">{t('aiPrincipals.connect.app.comingSoon', 'Coming with sign-in')}</Badge>
                 )}
@@ -338,7 +371,20 @@ export function ConnectWizard({
         {step === 'connect' && issued !== null && clientId !== null && (
           <div className="space-y-5">
             <ConnectSetup clientId={clientId} connection={{ name: issued.name, url: endpoint, token: issued.token }} />
-            <ConnectionStatus connected={connected} waitedLong={waitedLong} app={client?.name ?? ''} />
+            <ConnectionStatus connected={connected} waitedLong={waitedLong} app={appName} />
+            {renew !== null && oldRevoked === true && (
+              <p className="text-sm text-muted-foreground">
+                {t('aiPrincipals.connect.renew.revoked', 'The old key has been turned off.')}
+              </p>
+            )}
+            {renew !== null && oldRevoked === false && (
+              <Alert variant="warning">
+                <IconAlertCircle />
+                <AlertDescription>
+                  {t('aiPrincipals.connect.renew.revokeFailed', 'The new key works, but the old one could not be turned off. Revoke it from the list.')}
+                </AlertDescription>
+              </Alert>
+            )}
           </div>
         )}
 
@@ -348,7 +394,7 @@ export function ConnectWizard({
               <Button type="button" variant="outline" onClick={() => setStep('app')} disabled={submitting}>
                 {t('aiPrincipals.connect.back', 'Back')}
               </Button>
-              <Button type="button" onClick={create} disabled={submitting || scope === null || blocked || info === null}>
+              <Button type="button" onClick={() => void create()} disabled={submitting || scope === null || blocked || info === null}>
                 {submitting
                   ? t('aiPrincipals.connect.creating', 'Creating…')
                   : t('aiPrincipals.connect.create', 'Create connection')}
@@ -412,7 +458,7 @@ function Preflight({ info, infoError }: { info: McpConnectInfo | null; infoError
         <IconAlertCircle />
         <AlertTitle>{t('aiPrincipals.connect.preflight.tenantOffTitle', 'AI apps are turned off for this organization')}</AlertTitle>
         <AlertDescription>
-          {t('aiPrincipals.connect.preflight.tenantOff', 'Turn on the Model Context Protocol endpoint under Settings, Integrations, then come back.')}{' '}
+          {t('aiPrincipals.connect.preflight.tenantOff', 'Turn on the Model Context Protocol endpoint under Settings, Integrations, then come back. If it is already on, the plan for this organization does not include AI apps.')}{' '}
           <Link href="/admin/settings" className="underline">
             {t('aiPrincipals.connect.preflight.openSettings', 'Open settings')}
           </Link>
