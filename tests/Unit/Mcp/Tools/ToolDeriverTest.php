@@ -344,7 +344,7 @@ final class ToolDeriverTest extends TestCase
     public function testToolsListHandler_returnsToolsWrappedInList(): void
     {
         $deriver = new ToolDeriver([
-            ['method' => 'GET', 'path' => '/api/users', 'schema' => ['summary' => 'List users'], 'requiredRole' => null, 'requiredPermission' => null],
+            ['method' => 'GET', 'path' => '/api/users', 'schema' => ['summary' => 'List users', 'mcp' => true], 'requiredRole' => null, 'requiredPermission' => null],
         ]);
         $roleChecker    = $this->createMock(\Whity\Auth\RoleChecker::class);
         $tokenValidator = $this->createMock(\Whity\Auth\TokenValidator::class);

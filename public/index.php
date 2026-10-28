@@ -4400,7 +4400,7 @@ $router->register('DELETE', '/api/relations/{id:\d+}', [$relationsHandler, 'dele
 // WC-2686308f: MCP token management endpoints (issue / list / revoke).
 // WC-149b2fc9: create and revoke are gated by mcp:tokens:manage so an admin
 // controls who may mint AI credentials. List is read-only and ungated.
-$mcpTokenHandler = new McpTokenHandler($tokenValidator, new McpTokenService($db->getPdo(), $jwtParser));
+$mcpTokenHandler = new McpTokenHandler($tokenValidator, new McpTokenService($db->getPdo(), $jwtParser), $permissionRegistry);
 $router->register('POST',   '/api/mcp/tokens',       [$mcpTokenHandler, 'create'], null, null, CorePermissions::MCP_TOKENS_MANAGE);
 $router->register('GET',    '/api/mcp/tokens',       [$mcpTokenHandler, 'list']);
 $router->register('DELETE', '/api/mcp/tokens/{jti}', [$mcpTokenHandler, 'revoke'], null, null, CorePermissions::MCP_TOKENS_MANAGE);
@@ -4485,7 +4485,7 @@ $mcpTransportHandler = new McpTransportHandler(
         'tools/list'              => new ToolsListHandler($toolDeriver, $roleChecker, $tokenValidator, $authoredMcpTools),
         'tools/call'              => new ToolsCallHandler($toolDeriver, $router, $roleChecker, $tokenValidator, auditLogger: $auditLogger, authoredTools: $authoredMcpTools),
         'resources/list'          => new ResourcesListHandler($resourceDeriver, $roleChecker, $tokenValidator),
-        'resources/read'          => new ResourcesReadHandler($router, $roleChecker, $tokenValidator, auditLogger: $auditLogger),
+        'resources/read'          => new ResourcesReadHandler($router, $roleChecker, $tokenValidator, auditLogger: $auditLogger, resourceDeriver: $resourceDeriver),
         'prompts/list'            => new PromptsListHandler($promptRegistry, $roleChecker, $tokenValidator),
         'prompts/get'             => new PromptsGetHandler($promptRegistry, $roleChecker, $tokenValidator),
     ], $tokenValidator, $mcpRateLimiter, $tenantMcpEnabled, $mcpListChangedNotifier),

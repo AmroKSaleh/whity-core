@@ -40,7 +40,7 @@ final class ToolsListHandlerTest extends TestCase
 
         $router = new Router('');
 
-        $router->registerUnversioned('GET', '/api/open',   fn () => null, null, null, null,          ['summary' => 'Open tool']);
+        $router->registerUnversioned('GET', '/api/open',   fn () => null, null, null, null,          ['summary' => 'Open tool', 'mcp' => true]);
         $router->registerUnversioned('GET', '/api/perm',   fn () => null, null, null, 'things:read', ['summary' => 'Permission tool']);
         $router->registerUnversioned('GET', '/api/role',   fn () => null, 'admin', null, null,       ['summary' => 'Role tool']);
 
@@ -217,7 +217,7 @@ final class ToolsListHandlerTest extends TestCase
     public function testInvoke_filtersStaticDeclarations_byPermission(): void
     {
         $deriver = new ToolDeriver([
-            ['method' => 'GET', 'path' => '/api/open-static', 'schema' => ['summary' => 'Open static'], 'requiredRole' => null, 'requiredPermission' => null],
+            ['method' => 'GET', 'path' => '/api/open-static', 'schema' => ['summary' => 'Open static', 'mcp' => true], 'requiredRole' => null, 'requiredPermission' => null],
             ['method' => 'POST', 'path' => '/api/secure-static', 'schema' => ['summary' => 'Secure static'], 'requiredRole' => null, 'requiredPermission' => 'secure:write'],
         ]);
         $handler = new ToolsListHandler($deriver, $this->roleChecker, $this->tokenValidator);

@@ -10,6 +10,7 @@ use Whity\Core\Tenant\TenantContext;
 use Whity\Mcp\JsonRpc\ErrorCode;
 use Whity\Mcp\JsonRpc\McpException;
 use Whity\Mcp\JsonRpc\MethodHandler;
+use Whity\Mcp\Auth\McpScope;
 
 /**
  * MCP prompts/get handler (WC-7755fc38).
@@ -59,6 +60,9 @@ final class PromptsGetHandler implements MethodHandler
             $tenantId = TenantContext::getTenantId();
             if ($tenantId === null) {
                 throw new McpException(ErrorCode::UNAUTHENTICATED, 'No tenant context');
+            }
+            if (!McpScope::of($principal)->allowsPermission($prompt->requiredPermission)) {
+                throw new McpException(ErrorCode::FORBIDDEN, 'Forbidden');
             }
             if ($prompt->requiredPermission !== null) {
                 if (!$this->roleChecker->hasPermissionForProfile($principal->userId, $prompt->requiredPermission, $tenantId)) {

@@ -93,7 +93,7 @@ final class CoreApiSchemas
      */
     public static function routes(): array
     {
-        return array_merge(
+        return self::markAgentCallable(array_merge(
             self::authRoutes(),
             self::userRoutes(),
             self::roleRoutes(),
@@ -145,7 +145,66 @@ final class CoreApiSchemas
             self::resourceRoleGrantRoutes(),
             self::licensingRoutes(),
             self::externalBillingRoutes()
-        );
+        ));
+    }
+
+    /**
+     * Ungated routes offered to MCP agents anyway (ADR-0006 §4, WHIT-695).
+     *
+     * A route with no requiredPermission and no requiredRole is kept off the
+     * agent surface — that is the session and credential machinery, public
+     * endpoints and webhooks. These are the exceptions: each handler identifies
+     * and authorizes the caller itself (the caller's own notifications and
+     * inbox, per-type permissions on data types, "only a recipient may act" on
+     * a document route), and each is something an agent working for a person
+     * has reason to do. Adding one means checking that its handler really does
+     * authorize — the flag takes the missing route gate on trust.
+     */
+    private const AGENT_CALLABLE_UNGATED = [
+        'GET /api/me',
+        'GET /api/me/capabilities',
+        'POST /api/me/permitted-actions',
+        'GET /api/me/audit-logs',
+        'GET /api/me/notifications',
+        'GET /api/me/notifications/unread-count',
+        'POST /api/me/notifications/read-all',
+        'POST /api/me/notifications/{id:\d+}/read',
+        'GET /api/me/notification-preferences',
+        'PUT /api/me/notification-preferences',
+        'GET /api/me/inbox/sources',
+        'GET /api/me/inbox',
+        'GET /api/data-types',
+        'GET /api/data-types/{type}/{id}',
+        'POST /api/data-types/{type}/{id}/trash',
+        'POST /api/data-types/{type}/{id}/restore',
+        'POST /api/data-types/{type}/{id}/retire',
+        'DELETE /api/data-types/{type}/{id}',
+        'POST /api/data-types/{type}/bulk',
+        'POST /api/documents/{id:\d+}/routes/{routeId:\d+}/actions',
+    ];
+
+    /**
+     * Set `schema['mcp'] = true` on the {@see self::AGENT_CALLABLE_UNGATED}
+     * routes. Throws when an entry matches no route, so a renamed path fails
+     * loudly instead of silently dropping off the agent surface.
+     *
+     * @param list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>, unversioned?: bool}> $routes
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>, unversioned?: bool}>
+     */
+    private static function markAgentCallable(array $routes): array
+    {
+        $pending = array_fill_keys(self::AGENT_CALLABLE_UNGATED, true);
+        foreach ($routes as $i => $route) {
+            $key = $route['method'] . ' ' . $route['path'];
+            if (isset($pending[$key])) {
+                $routes[$i]['schema']['mcp'] = true;
+                unset($pending[$key]);
+            }
+        }
+        if ($pending !== []) {
+            throw new \LogicException('AGENT_CALLABLE_UNGATED names no route: ' . implode(', ', array_keys($pending)));
+        }
+        return $routes;
     }
 
     /**

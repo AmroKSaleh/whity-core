@@ -151,7 +151,7 @@ Token JTIs are tracked in the `mcp_tokens` table. Revocation inserts the JTI int
 | `userId` | `int` | User the token was issued to |
 | `tenantId` | `int` | Tenant the token is scoped to |
 | `principalKind` | `string` | Principal kind (`user` for current phase) |
-| `scope` | `string[]` | Granted scopes, e.g. `['tools:call']` |
+| `scope` | `string[]` | Granted scopes, e.g. `['tools:call']`. Interpreted by `McpScope`: capabilities open method families, permission names narrow RBAC (ADR-0006, Amendment 1) |
 | `jti` | `string` | JWT ID — unique revocation handle |
 
 `McpPrincipal` is immutable and carries no static/global state, making it worker-safe by construction.

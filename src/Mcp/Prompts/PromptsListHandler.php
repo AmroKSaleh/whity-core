@@ -9,6 +9,7 @@ use Whity\Auth\TokenValidator;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Mcp\Auth\McpPrincipal;
 use Whity\Mcp\JsonRpc\MethodHandler;
+use Whity\Mcp\Auth\McpScope;
 
 /**
  * MCP prompts/list handler (WC-7755fc38).
@@ -66,6 +67,11 @@ final class PromptsListHandler implements MethodHandler
             return true;
         }
         if ($principal === null || $tenantId === null) {
+            return false;
+        }
+        // WHIT-695: narrowing covers protected prompts. Open ones are fixed
+        // text and return no data, so they stay listed.
+        if (!McpScope::of($principal)->allowsPermission($prompt->requiredPermission)) {
             return false;
         }
         if ($prompt->requiredPermission !== null) {

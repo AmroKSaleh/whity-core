@@ -194,12 +194,69 @@ final class ToolsCallRbacRealEngineTest extends TestCase
         self::assertContains('ping_widgets', $readerNames);
         self::assertContains('list_widgets', $readerNames);
         self::assertNotContains('create_widgets', $readerNames, 'write tool must be hidden from a :read principal');
+        self::assertNotContains('widgets_session', $readerNames, 'an ungated route without the opt-in is not a tool');
 
         $writerNames = $this->listToolNames($this->mcpTokenFor('writer@a.test', self::TENANT_A));
         self::assertContains('create_widgets', $writerNames, 'write tool visible once :write is granted');
         // A :write grant does not imply :read — the read tool stays hidden,
         // confirming list filtering is per-tool, not all-or-nothing.
         self::assertNotContains('list_widgets', $writerNames);
+    }
+
+    // ── Token scopes (WHIT-695): narrow RBAC, never widen it ───────────────────
+
+    public function testScopeNarrowsToolsList(): void
+    {
+        // The writer's role grants widgets:write. A token scoped to widgets:read
+        // must not see the write tool RBAC alone would allow — nor the opted-in
+        // open tool, which no named permission gates.
+        $narrowed = $this->listToolNames($this->mcpTokenFor('writer@a.test', self::TENANT_A, ['tools:call', 'widgets:read']));
+        self::assertNotContains('create_widgets', $narrowed);
+        self::assertNotContains('ping_widgets', $narrowed);
+
+        $writeScoped = $this->listToolNames($this->mcpTokenFor('writer@a.test', self::TENANT_A, ['tools:call', 'widgets:write']));
+        self::assertContains('create_widgets', $writeScoped);
+        self::assertNotContains('ping_widgets', $writeScoped);
+
+        $wildcard = $this->listToolNames($this->mcpTokenFor('writer@a.test', self::TENANT_A, ['tools:call', 'widgets:*']));
+        self::assertContains('create_widgets', $wildcard);
+    }
+
+    public function testScopeNarrowsToolsCall(): void
+    {
+        $narrowed = $this->mcpTokenFor('writer@a.test', self::TENANT_A, ['tools:call', 'widgets:read']);
+
+        self::assertSame(ErrorCode::FORBIDDEN, $this->callTool($narrowed, 'create_widgets', ['name' => 'x'])['error']['code'] ?? null);
+        self::assertSame(ErrorCode::FORBIDDEN, $this->callTool($narrowed, 'ping_widgets', [])['error']['code'] ?? null);
+
+        $writeScoped = $this->mcpTokenFor('writer@a.test', self::TENANT_A, ['tools:call', 'widgets:write']);
+        self::assertArrayHasKey('result', $this->callTool($writeScoped, 'create_widgets', ['name' => 'x']));
+    }
+
+    public function testScopeNeverWidensRbac(): void
+    {
+        // The reader's role lacks widgets:write; naming it in the scope must not
+        // grant it.
+        $token = $this->mcpTokenFor('reader@a.test', self::TENANT_A, ['tools:call', 'widgets:write']);
+
+        self::assertNotContains('create_widgets', $this->listToolNames($token));
+        self::assertSame(ErrorCode::FORBIDDEN, $this->callTool($token, 'create_widgets', ['name' => 'x'])['error']['code'] ?? null);
+    }
+
+    public function testTokenWithoutTheToolsCapabilityCannotUseTools(): void
+    {
+        $token = $this->mcpTokenFor('writer@a.test', self::TENANT_A, ['resources:read']);
+
+        $payload = (string) json_encode(['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/list', 'params' => []], JSON_THROW_ON_ERROR);
+        self::assertSame(ErrorCode::FORBIDDEN, $this->decode($this->dispatcher->handle($payload, $token))['error']['code'] ?? null);
+        self::assertSame(ErrorCode::FORBIDDEN, $this->callTool($token, 'create_widgets', ['name' => 'x'])['error']['code'] ?? null);
+    }
+
+    public function testUngatedToolWithoutOptInIsNotCallable(): void
+    {
+        $token = $this->mcpTokenFor('writer@a.test', self::TENANT_A);
+
+        self::assertSame(ErrorCode::METHOD_NOT_FOUND, $this->callTool($token, 'widgets_session', [])['error']['code'] ?? null);
     }
 
     public function testToolsList_listAndCallAgree_forSamePrincipal(): void
@@ -271,11 +328,12 @@ final class ToolsCallRbacRealEngineTest extends TestCase
      * own memberships — so the cross-tenant tests can mint a token claiming a tenant
      * the profile does not belong to.
      */
-    private function mcpTokenFor(string $email, int $tenantId): string
+    /** @param list<string> $scope */
+    private function mcpTokenFor(string $email, int $tenantId, array $scope = ['tools:list', 'tools:call']): string
     {
         $profileId = $this->profileIds[$email] ?? throw new \RuntimeException("Unseeded profile for: {$email}");
 
-        return $this->tokens->issue($profileId, $tenantId, 'test', ['tools:list', 'tools:call']);
+        return $this->tokens->issue($profileId, $tenantId, 'test', $scope);
     }
 
     /**
@@ -347,10 +405,17 @@ final class ToolsCallRbacRealEngineTest extends TestCase
                 'properties' => ['name' => ['type' => 'string']],
             ],
         ]);
-        // Open tool — no required role or permission.
+        // Open tool — no required role or permission, opted onto the agent
+        // surface (ADR-0006 §4: the handler would authorize the caller itself).
         $router->registerUnversioned('GET', '/api/widgets/ping', $ok, null, null, null, [
             'operationId' => 'ping_widgets',
             'summary'     => 'Ping the widgets service',
+            'mcp'         => true,
+        ]);
+        // Ungated and NOT opted in: derived, but never offered to an agent.
+        $router->registerUnversioned('POST', '/api/widgets/session', $ok, null, null, null, [
+            'operationId' => 'widgets_session',
+            'summary'     => 'Session machinery an agent must not see',
         ]);
 
         return $router;

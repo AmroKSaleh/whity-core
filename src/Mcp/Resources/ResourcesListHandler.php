@@ -9,6 +9,7 @@ use Whity\Auth\TokenValidator;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Mcp\Auth\McpPrincipal;
 use Whity\Mcp\JsonRpc\MethodHandler;
+use Whity\Mcp\Auth\McpScope;
 
 /**
  * MCP resources/list handler (WC-30513809, filtered WC-e8c4d228).
@@ -39,8 +40,10 @@ final class ResourcesListHandler implements MethodHandler
             : null;
         $tenantId = TenantContext::getTenantId();
 
-        $accessMap = $this->resourceDeriver->buildAccessMap();
-        $all       = $this->resourceDeriver->deriveResources();
+        // Only the agent surface (ADR-0006 §4, WHIT-695): gated routes and
+        // ungated ones that opted in.
+        $accessMap = $this->resourceDeriver->buildAccessMap(exposedOnly: true);
+        $all       = $this->resourceDeriver->deriveResources(exposedOnly: true);
 
         $resources = array_values(array_filter(
             $all['resources'],
@@ -69,6 +72,12 @@ final class ResourcesListHandler implements MethodHandler
         $requiredPermission = is_string($access['requiredPermission'] ?? null) ? $access['requiredPermission'] : null;
         $requiredRole       = is_string($access['requiredRole'] ?? null) ? $access['requiredRole'] : null;
 
+        // WHIT-695: a token that names permissions reaches only items gated by
+        // one of them. Applied before the open-item shortcut, which is exactly
+        // what narrowing removes.
+        if ($principal !== null && !McpScope::of($principal)->allowsPermission($requiredPermission)) {
+            return false;
+        }
         if ($requiredPermission === null && $requiredRole === null) {
             return true;
         }
