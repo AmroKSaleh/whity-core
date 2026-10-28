@@ -14,12 +14,14 @@
   ],
   "scripts": {
     "generate": "openapi-typescript ../../public/openapi.json -o src/schema.d.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "test": "node --experimental-strip-types --test \"test/*.test.ts\""
   },
   "dependencies": {
     "openapi-fetch": "^0.17.0"
   },
   "devDependencies": {
+    "@types/node": "^26.6.5",
     "openapi-typescript": "^7.13.0",
     "typescript": "^5"
   },
