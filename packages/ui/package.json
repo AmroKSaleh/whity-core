@@ -27,6 +27,7 @@
     "./collapsible": "./src/collapsible.tsx",
     "./color-card": "./src/color-card.tsx",
     "./color-picker": "./src/color-picker.tsx",
+    "./copy-block": "./src/copy-block.tsx",
     "./command-palette": "./src/command-palette.tsx",
     "./data-table": "./src/data-table.tsx",
     "./date-picker": "./src/date-picker.tsx",
