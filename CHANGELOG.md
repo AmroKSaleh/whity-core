@@ -13,6 +13,7 @@ uses tag-based releases (see the `v*` tags in the repository).
 ### Changed
 
 - **The bundled web UI is now opt-in in `docker-compose.staging-remote.yml`, behind the `web` compose profile.** A headless deployment brings its own frontend, and a small server that only needs the API and MCP should not pull a Next.js image or keep its process in memory. **If you run the bundled admin from this file, set `COMPOSE_PROFILES=web` (or pass `--profile web`) before your next `up`**, or the UI is no longer started. The core image is unchanged: it has never contained the web UI, which ships as its own image. The staging deploy workflow passes `--profile web` itself. See `docs/wiki/Staging-Deploy.md`.
+- **The OpenAPI spec now describes token-mode sign-in.** A client that sends `X-Auth-Mode: token` gets its session in the response body instead of in cookies, but the spec only described the cookie flow, so generated clients had no type for the token pair, the 2FA `temp_token` or the tenant-selection `selection_token`. Those fields are now documented as optional on the login, 2FA, select-tenant, switch-tenant, refresh and `PATCH /me` shapes, and `RefreshResponse.status` is no longer required (token mode never sends it). `@amroksaleh/api-client` uses them for its new token mode.
 
 ### Fixed
 

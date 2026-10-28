@@ -6729,6 +6729,7 @@ export interface components {
         };
         Login2faRequiredResponse: {
             requires_2fa: boolean;
+            temp_token?: string;
         };
         LoginRequest: {
             email: string;
@@ -6747,6 +6748,11 @@ export interface components {
                 tenant_name: string;
                 role: string;
             }[] | null;
+            selection_token?: string;
+            access_token?: string;
+            refresh_token?: string;
+            token_type?: string;
+            expires_in?: number;
         };
         LogoutResponse: {
             status: string;
@@ -6804,6 +6810,10 @@ export interface components {
                 email: string;
                 role: string;
             };
+            access_token?: string;
+            refresh_token?: string;
+            token_type?: string;
+            expires_in?: number;
         };
         MeUpdateRequest: {
             email?: string;
@@ -7613,7 +7623,11 @@ export interface components {
             denial: components["schemas"]["RecordSectionDenial"];
         };
         RefreshResponse: {
-            status: string;
+            status?: string;
+            access_token?: string;
+            refresh_token?: string;
+            token_type?: string;
+            expires_in?: number;
         };
         RelationCreateRequest: {
             from: components["schemas"]["RelationRef"];
@@ -7872,6 +7886,7 @@ export interface components {
         };
         SelectTenantRequest: {
             tenant_id: number;
+            selection_token?: string;
         };
         SelfSubscription: {
             tenant_id: number;
@@ -7891,6 +7906,10 @@ export interface components {
                 role: string;
                 tenant_id: number;
             };
+            access_token?: string;
+            refresh_token?: string;
+            token_type?: string;
+            expires_in?: number;
         };
         SettingsRegistryEntry: {
             key: string;
@@ -8407,6 +8426,7 @@ export interface components {
         };
         TwoFaLoginRequest: {
             code: string;
+            temp_token?: string;
         };
         TwoFaRegenerateCodesResponse: {
             backup_codes: string[];
