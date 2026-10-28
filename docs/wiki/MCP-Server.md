@@ -305,6 +305,16 @@ Fixed-window semantics: the TTL is set once on the first call in the window and 
 
 Arguments are redacted before storage: any key whose name contains `password`, `secret`, `token`, `code`, `hash`, `backup_code`, or `two_factor_secret` is stripped. This matches the redaction logic in `AuditLogger` (defense-in-depth).
 
+### Argument errors
+
+Arguments that fail the tool's inputSchema come back as a tool result with `isError: true`, not as JSON-RPC -32602, because MCP classes input validation errors as tool execution errors so the model can correct its call (WHIT-710). The text names the problem and lists the expected arguments:
+
+```
+Invalid arguments for post_api_users: Missing required argument: email. Expected: email (string, required), name (string).
+```
+
+The route handler never runs and the call is audited as before. An unknown tool name is still -32601 at the top level. Under discovery mode, `call_tool` with an unknown name returns a tool error pointing at `search_tools`.
+
 ### Application error containment
 
 When a route handler throws inside `ToolsCallHandler::executeResolved()`, the exception is caught and `isError: true` content with the message `"Internal error"` is returned as an MCP result — the caller knows the tool failed but learns nothing about the underlying cause.

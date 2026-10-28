@@ -348,12 +348,12 @@ The response is a JSON array of the non-notification results, in the same order 
 | `-32700` | `PARSE_ERROR` | 200 | Request body is not valid JSON |
 | `-32600` | `INVALID_REQUEST` | 200 | Request object is structurally invalid |
 | `-32601` | `METHOD_NOT_FOUND` | 200 | Unknown method name or unknown tool |
-| `-32602` | `INVALID_PARAMS` | 200 | Method-specific parameter validation failed |
+| `-32602` | `INVALID_PARAMS` | 200 | Method-specific parameter validation failed. Bad **tool arguments** are not this: they come back as a tool result with `isError: true` so the model can fix its call |
 | `-32603` | `INTERNAL_ERROR` | 200 | Unhandled server error (no details exposed) |
 | `-32000` | `RATE_LIMITED` | 429 | Call budget exhausted; retry after `Retry-After` seconds |
-| `-32001` | `UNAUTHENTICATED` | 200 | Bearer token absent or invalid |
+| `-32001` | `UNAUTHENTICATED` | 401 | Bearer token absent or invalid; `WWW-Authenticate` says where to sign in when OAuth is on |
 | `-32002` | `RESOURCE_NOT_FOUND` | 200 | Referenced resource URI not found |
-| `-32003` | `FORBIDDEN` | 200 | Caller lacks the required role or permission |
+| `-32003` | `FORBIDDEN` | 200 | Caller lacks the required role or permission. 403 when a genuine OAuth token can't be used here, with a message saying why |
 
 Note: rate limit (`-32000`) and MCP-disabled (`403`) are the only cases that produce a non-200 HTTP status code. All other errors use HTTP 200 with a JSON-RPC error object in the body.
 

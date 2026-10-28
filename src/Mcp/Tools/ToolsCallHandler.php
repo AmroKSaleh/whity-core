@@ -33,10 +33,12 @@ use Whity\Mcp\Auth\McpScope;
  *      the same component HTTP uses, so MCP can never diverge from HTTP authz.
  *   7. Invokes the route handler and wraps its Response in the MCP result shape.
  *
- * Protocol errors (unknown tool, forbidden, invalid params) are thrown as
+ * Protocol errors (unknown tool, forbidden, a missing tool name) are thrown as
  * McpException so the Dispatcher returns the correct JSON-RPC error codes.
- * Application errors (4xx/5xx from the handler) are returned as isError:true
- * content per the MCP specification.
+ * Arguments that fail the inputSchema and application errors (4xx/5xx from the
+ * handler) are returned as isError:true results, as the spec requires: clients
+ * show those to the model so it can correct its call, while a protocol error
+ * often never reaches it (WHIT-710).
  */
 final class ToolsCallHandler implements MethodHandler
 {
@@ -69,8 +71,8 @@ final class ToolsCallHandler implements MethodHandler
      *
      * @param array<string, mixed> $arguments
      * @param array{name: string, description: string, inputSchema: array<string, mixed>, handler: callable, requiredRole: ?string, requiredPermission: ?string, plugin: string} $tool
-     * @return array{content: list<array{type: string, text: string}>}
-     * @throws McpException On RBAC failure or invalid arguments.
+     * @return array{content: list<array{type: string, text: string}>, isError?: bool}
+     * @throws McpException On RBAC failure.
      */
     private function executeAuthored(
         string $toolName,
@@ -81,7 +83,10 @@ final class ToolsCallHandler implements MethodHandler
         // The SAME validator, against the SAME schema tools/list advertised, so
         // a handler can never be handed arguments the published schema said
         // were impossible.
-        $this->schemaValidator->validate($tool['inputSchema'], $arguments);
+        $invalid = $this->validateArguments($toolName, $tool['inputSchema'], $arguments);
+        if ($invalid !== null) {
+            return $invalid;
+        }
 
         $tenantId = TenantContext::getTenantId();
         if ($tenantId === null) {
@@ -150,6 +155,56 @@ final class ToolsCallHandler implements MethodHandler
             'text' => json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
                 ?: '{}',
         ]]];
+    }
+
+    /**
+     * Check and coerce arguments; on failure, the tool error the model sees.
+     *
+     * A tool execution error, not a protocol error (MCP server/tools, Error
+     * Handling): it is the model's mistake to fix, and clients pass these to the
+     * model while they may drop a JSON-RPC error. The expected arguments are
+     * listed so one retry can get it right instead of a guess per field. The
+     * tool is one this caller can already see, so its schema is no secret.
+     *
+     * @param array<string, mixed>  $schema
+     * @param array<string, mixed> &$arguments
+     * @return array{content: list<array{type: string, text: string}>, isError: true}|null
+     */
+    private function validateArguments(string $toolName, array $schema, array &$arguments): ?array
+    {
+        try {
+            $this->schemaValidator->validate($schema, $arguments);
+            return null;
+        } catch (McpException $e) {
+            if ($e->errorCode !== ErrorCode::INVALID_PARAMS) {
+                throw $e;
+            }
+        }
+
+        $text = "Invalid arguments for {$toolName}: {$e->getMessage()}.";
+        $expected = self::describeArguments($schema);
+        if ($expected !== '') {
+            $text .= " Expected: {$expected}.";
+        }
+
+        return ['content' => [['type' => 'text', 'text' => $text]], 'isError' => true];
+    }
+
+    /**
+     * "id (integer, required), name (string)" from an inputSchema.
+     *
+     * @param array<string, mixed> $schema
+     */
+    private static function describeArguments(array $schema): string
+    {
+        $properties = is_array($schema['properties'] ?? null) ? $schema['properties'] : [];
+        $required   = is_array($schema['required'] ?? null) ? $schema['required'] : [];
+        $parts = [];
+        foreach ($properties as $name => $property) {
+            $type = is_array($property) && is_string($property['type'] ?? null) ? $property['type'] : 'any';
+            $parts[] = $name . ' (' . $type . (in_array($name, $required, true) ? ', required' : '') . ')';
+        }
+        return implode(', ', $parts);
     }
 
     private function warn(string $message): void
@@ -288,7 +343,10 @@ final class ToolsCallHandler implements MethodHandler
         //     so validation can never diverge from the advertised spec.
         $inputSchema = $this->toolDeriver->getToolInputSchema($toolName);
         if (is_array($inputSchema)) {
-            $this->schemaValidator->validate($inputSchema, $arguments);
+            $invalid = $this->validateArguments($toolName, $inputSchema, $arguments);
+            if ($invalid !== null) {
+                return $invalid;
+            }
         }
 
         $method  = strtoupper((string) ($declaration['method'] ?? 'GET'));

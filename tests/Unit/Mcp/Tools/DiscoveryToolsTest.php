@@ -184,6 +184,27 @@ final class DiscoveryToolsTest extends TestCase
         self::assertSame(['list users []'], $this->called);
     }
 
+    public function testCallToolTellsTheModelToSearchForAnUnknownName(): void
+    {
+        // WHIT-710: the name is an argument the model chose, so the error is a
+        // tool result it can read, not a protocol error it may never see.
+        $result = $this->call('call_tool', ['name' => 'delete_everything', 'arguments' => []]);
+
+        self::assertTrue($result['isError']);
+        self::assertStringContainsString('Use search_tools', $result['content'][0]['text']);
+    }
+
+    public function testCallToolReportsBadArgumentsAsAToolError(): void
+    {
+        $this->grantAll();
+
+        $result = $this->call('call_tool', ['name' => 'delete_api_users_id', 'arguments' => []]);
+
+        self::assertTrue($result['isError']);
+        self::assertStringContainsString('Missing required argument: id', $result['content'][0]['text']);
+        self::assertSame([], $this->called);
+    }
+
     public function testCallToolRefusesToCallADiscoveryTool(): void
     {
         $result = $this->call('call_tool', ['name' => 'call_tool', 'arguments' => []]);
