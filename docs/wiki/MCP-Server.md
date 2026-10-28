@@ -319,21 +319,46 @@ Built-in prompts are registered via `CorePrompts::register()` (`src/Mcp/Prompts/
 
 ## Protocol
 
-The `initialize` response declares the server's capabilities and protocol version:
+The endpoint serves every MCP version from **2025-03-26** to **2026-07-28** (WHIT-708). Both eras share one endpoint and need no per-connection memory. `McpProtocol` (`src/Mcp/Protocol/McpProtocol.php`) holds the version list and what each version changes.
+
+### Which version a request speaks
+
+The Dispatcher reads it from each request, never from an earlier one:
+
+1. A version in `params._meta["io.modelcontextprotocol/protocolVersion"]` makes it a **2026-07-28** request. It must be a version this server speaks, and its headers must match the body: `MCP-Protocol-Version`, `Mcp-Method`, and `Mcp-Name` for `tools/call`, `prompts/get` and `resources/read` (a `=?base64?…?=` value is decoded first). Otherwise the request gets HTTP 400 with `HeaderMismatch` (-32020) or `UnsupportedProtocolVersion` (-32022, `data.supported` lists the versions).
+2. Otherwise the `MCP-Protocol-Version` header names a legacy version (2025-06-18 or 2025-11-25), as negotiated by `initialize`.
+3. A request with neither speaks 2025-03-26, whose clients send no header.
+
+The version is then written into the request's `params._meta`, where every handler can read it.
+
+### Legacy versions: `initialize`
+
+`initialize` answers with the client's requested version when the server speaks it, else the newest legacy version (2025-11-25):
 
 ```json
 {
-  "protocolVersion": "2025-03-26",
+  "protocolVersion": "2025-06-18",
   "capabilities": {
     "tools":     { "listChanged": true },
     "resources": { "subscribe": false, "listChanged": true },
     "prompts":   { "listChanged": true }
   },
-  "serverInfo": { "name": "whity-core", "version": "1.0" }
+  "serverInfo": { "name": "whity-core", "version": "<CoreVersion>" }
 }
 ```
 
-Batch requests are supported: a JSON array of request objects returns a JSON array of responses. Notifications (objects without an `id` member) are processed but produce no response.
+Batches work only on 2025-03-26, since 2025-06-18 removed them. A batch sent with a later version header gets 400. A notification gets `202 Accepted` with no body.
+
+### What each version adds to a response
+
+| From | Added |
+|---|---|
+| 2025-06-18 | Tools carry a top-level `title` (also kept in `annotations.title`). A `tools/call` result whose text is a JSON object also carries it as `structuredContent`; the text block stays. |
+| 2026-07-28 | Every result has `resultType: "complete"` and `_meta["io.modelcontextprotocol/serverInfo"]`. List results and `resources/read` carry `ttlMs: 60000` and `cacheScope: "private"`. `structuredContent` may be any JSON value. Resource-not-found is -32602. `initialize`, `ping` and `logging/setLevel` don't exist (404). `server/discover` returns the supported versions, capabilities and identity. |
+
+**No `outputSchema` is declared.** A declared schema obliges every result to conform, and the route response schemas aren't yet checked against what handlers return (WHIT-120). Clients that validate would reject correct data.
+
+**No `subscriptions/listen`.** It holds a response stream open indefinitely, and under FrankenPHP that pins a worker; this is also why GET `/mcp` answers 405. A 2026 client is therefore offered no `listChanged`, gets no `list_changed` pushes, and refreshes lists using `ttlMs`. Legacy clients keep their notifications on POST responses, as before.
 
 ---
 

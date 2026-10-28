@@ -13,7 +13,7 @@ namespace Whity\Mcp\Transport;
  */
 final class NullMcpDispatcher implements McpRequestHandlerInterface
 {
-    public function handle(string $rawBody, ?string $bearerToken): string
+    public function handle(string $rawBody, ?string $bearerToken, array $headers = []): string
     {
         return (string) json_encode([
             'jsonrpc' => '2.0',
