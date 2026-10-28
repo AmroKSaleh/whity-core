@@ -177,8 +177,13 @@ final class McpTransportHandler
         if ($this->discoveryDispatcher === null) {
             return $this->dispatcher;
         }
+        // Request::fromGlobals() keeps only the path, so in production the query
+        // is in $_GET (reset per request by the worker); a Request built with
+        // the query in its path (tests, internal callers) is read too. The same
+        // two sources AuditLogApiHandler reads.
         parse_str((string) parse_url($request->getPath(), PHP_URL_QUERY), $query);
-        return ($query['tools'] ?? null) === 'discover' ? $this->discoveryDispatcher : $this->dispatcher;
+        $mode = $query['tools'] ?? $_GET['tools'] ?? null;
+        return $mode === 'discover' ? $this->discoveryDispatcher : $this->dispatcher;
     }
 
     private function extractBearer(Request $request): ?string

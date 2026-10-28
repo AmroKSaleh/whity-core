@@ -220,6 +220,32 @@ final class DiscoveryToolsTest extends TestCase
         self::assertContains('get_api_users', $names($transport->handlePost($request('/mcp?tools=everything'))));
     }
 
+    public function testTheTransportReadsTheModeFromTheQueryProductionPutsIn_GET(): void
+    {
+        // Request::fromGlobals() keeps only the path; the query string is in $_GET.
+        $transport = new McpTransportHandler(
+            new Dispatcher(['tools/list' => $this->toolsList], $this->tokenValidator),
+            discoveryDispatcher: new Dispatcher(['tools/list' => $this->discovery()->listHandler()], $this->tokenValidator),
+        );
+        $this->grantAll();
+        TenantContext::reset();
+
+        $_GET['tools'] = 'discover';
+        try {
+            $response = $transport->handlePost(new Request('POST', '/mcp', [
+                'Content-Type'  => 'application/json',
+                'Authorization' => 'Bearer ' . self::BEARER,
+            ], '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'));
+        } finally {
+            unset($_GET['tools']);
+        }
+
+        self::assertSame(
+            ['search_tools', 'describe_tool', 'call_tool'],
+            array_column(json_decode($response->getBody(), true)['result']['tools'], 'name'),
+        );
+    }
+
     private function discovery(): DiscoveryTools
     {
         return new DiscoveryTools($this->toolsList, $this->toolsCall, $this->tokenValidator);
