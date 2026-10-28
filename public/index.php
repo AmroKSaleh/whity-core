@@ -334,6 +334,7 @@ use Whity\Core\RateLimit\RateLimitMiddleware;
 use Whity\Core\RateLimit\RateLimitRule;
 use Whity\Core\Settings\SettingsRegistry;
 use Whity\Mcp\Auth\McpTokenHandler;
+use Whity\Mcp\Auth\OAuth\ProtectedResource;
 use Whity\Mcp\Connect\McpConnectHandler;
 use Whity\Mcp\Auth\McpTokenService;
 use Whity\Mcp\JsonRpc\Dispatcher;
@@ -4506,6 +4507,8 @@ $mcpRecordTokenUse = static function (\Whity\Mcp\Auth\McpPrincipal $principal) u
 // above. Everything else -- auth, the tenant switch, rate limits, resources,
 // prompts -- is the same. Its tool list never changes, so it announces no
 // list_changed.
+// WHIT-709: where an OAuth client signs in (MCP_OAUTH_ISSUER). Off when unset.
+$mcpProtectedResource = ProtectedResource::fromEnv(McpConnectHandler::endpointFor((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: '')));
 $mcpDiscovery = new DiscoveryTools($mcpToolsListHandler, $mcpToolsCallHandler, $tokenValidator);
 $mcpTransportHandler = new McpTransportHandler(
     new Dispatcher($mcpHandlers, $tokenValidator, $mcpRateLimiter, $tenantMcpEnabled, $mcpListChangedNotifier, $mcpRecordTokenUse),
@@ -4524,7 +4527,10 @@ $mcpTransportHandler = new McpTransportHandler(
         $tenantMcpEnabled,
         recordTokenUse: $mcpRecordTokenUse,
     ),
+    protectedResource: $mcpProtectedResource,
 );
+$router->registerUnversioned('GET', '/.well-known/oauth-protected-resource', [$mcpProtectedResource, 'metadata']);
+$router->registerUnversioned('GET', '/.well-known/oauth-protected-resource/mcp', [$mcpProtectedResource, 'metadata']);
 $router->registerUnversioned('POST', '/mcp', [$mcpTransportHandler, 'handlePost']);
 $router->registerUnversioned('GET',  '/mcp', [$mcpTransportHandler, 'handleGet']);
 

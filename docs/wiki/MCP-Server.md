@@ -172,7 +172,18 @@ Every call to `POST /mcp` must carry an MCP bearer token:
 Authorization: Bearer <mcp-token>
 ```
 
-The `Dispatcher` checks auth before JSON parsing, so an unauthenticated caller learns nothing about the request shape (`UNAUTHENTICATED` error code `-32001` is returned immediately).
+The `Dispatcher` checks auth before JSON parsing, so an unauthenticated caller learns nothing about the request shape. It gets HTTP **401** with `WWW-Authenticate` and the `UNAUTHENTICATED` (-32001) JSON-RPC error.
+
+### OAuth sign-in (ADR-0015)
+
+Apps such as Claude and ChatGPT connect by pasting the URL and signing in, which needs OAuth. whity-core is the **protected resource**; the authorization server is configuration:
+
+- `MCP_OAUTH_ISSUER` names it (default plan: Whity-Auth). Unset means OAuth is off.
+- With it set (and `APP_URL` known), `/.well-known/oauth-protected-resource` and `/.well-known/oauth-protected-resource/mcp` serve RFC 9728 metadata. Fields: `resource` = `APP_URL/mcp`, `authorization_servers` = the issuer, `scopes_supported` = the MCP capabilities, `bearer_methods_supported` = `header`.
+- The 401 challenge names that metadata: `Bearer resource_metadata="…/.well-known/oauth-protected-resource/mcp", scope="tools:call resources:read prompts:read"`.
+- The web tier forwards both documents when the bundled admin serves the public origin.
+
+**Not yet:** accepting the authorization server's access tokens (part B). It needs decisions on mapping a token's subject to a Whity profile and tenant, and on JWKS signature verification. Until then, apps discover where to sign in but can't complete it.
 
 MCP tokens are 90-day HS256 JWTs with `aud: mcp` and `type: mcp`. They are issued, listed, and revoked through a dedicated REST sub-API:
 
