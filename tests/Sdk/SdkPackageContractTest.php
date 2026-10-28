@@ -242,9 +242,15 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.44.0',
+            '1.45.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.44 ADDS INLINE RUNS TO FLOWING TEXT: FlowDocument::paragraph() and heading() '
+            'SDK 1.45 ADDS MCP TOOL ANNOTATIONS: an authored tool descriptor may declare '
+            . '`annotations` (title, readOnlyHint, destructiveHint, idempotentHint, openWorldHint) '
+            . 'and a route schema may declare `mcp_annotations` to override the hints the host '
+            . 'derives from the HTTP method. Clients read them to run reads without asking and to '
+            . 'confirm destructive calls; enforcement is unchanged and malformed entries are '
+            . 'dropped. Purely additive: an older host ignores both keys. '
+            . 'SDK 1.44 ADDS INLINE RUNS TO FLOWING TEXT: FlowDocument::paragraph() and heading() '
             . 'take an optional $runs array, so a plugin can emit bold, italic and linked spans '
             . 'inside a paragraph instead of one undifferentiated string. THE GAP: the CANVAS '
             . 'half of the designer has carried inline runs since it shipped (TextRun, with bold '

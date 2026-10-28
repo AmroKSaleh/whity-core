@@ -6,6 +6,10 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+### Added
+
+- **MCP tools now say which ones only read and which ones delete.** Every derived tool carries MCP `annotations`: GET tools are `readOnlyHint`, DELETE and PUT tools are `destructiveHint` and `idempotentHint`, and every tool has a `title` from its summary and `openWorldHint: false`. Clients such as Claude Code, Cursor and VS Code use these to run reads without asking and to confirm before destructive calls. POST and PATCH keep the spec's cautious default, because many are actions rather than creates; a route can declare otherwise with `'mcp_annotations'` in its schema. **Plugin SDK 1.45:** an authored MCP tool can declare `annotations`, and a plugin route can declare `mcp_annotations`. Both are hints only; nothing about who may call a tool changes.
+
 ## [0.2.17] - 2026-10-28
 
 ### Added

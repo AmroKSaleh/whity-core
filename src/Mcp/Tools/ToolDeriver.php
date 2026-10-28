@@ -337,6 +337,9 @@ final class ToolDeriver
             'name'        => $name,
             'description' => $description,
             'inputSchema' => $inputSchema,
+            // WHIT-706: read-only / destructive hints from the method, so a
+            // client can run reads unasked and confirm before deletes.
+            'annotations' => ToolAnnotations::forRoute($method, $schema, $description),
         ];
     }
 
