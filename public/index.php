@@ -3090,6 +3090,7 @@ $documentEmbedRegistry = new \Whity\Core\Document\Embed\DocumentEmbedRegistry();
 $documentEmbedLabels = new \Whity\Core\Document\Embed\EmbedLabels($serverLabels);
 $documentEmbedRegistry->addRecordProvider(new \Whity\Core\Document\Embed\IssuedDocumentRecordProvider($documentRepository, $documentVisibilityPolicy, $documentEmbedLabels));
 $documentEmbedRegistry->addChartSource(new \Whity\Core\Document\Embed\IssuedDocumentsByMonthChartSource($documentRepository, $documentVisibilityPolicy, null, $documentEmbedLabels));
+\Whity\register_service(\Whity\Core\Document\Embed\DocumentEmbedRegistry::class, $documentEmbedRegistry);
 $documentEmbedsHandler = new \Whity\Api\DocumentEmbedsApiHandler($documentEmbedRegistry, $roleChecker);
 $router->register('GET', '/api/document-embeds',                                        [$documentEmbedsHandler, 'catalogue'], null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET', '/api/document-embeds/records/{type:[a-z0-9._-]+}/{id:[A-Za-z0-9._-]+}', [$documentEmbedsHandler, 'record'], null, null, CorePermissions::DOCUMENTS_READ);

@@ -4,13 +4,19 @@ declare(strict_types=1);
 
 namespace Whity\Core\Document\Embed;
 
+use Whity\Core\Container\HostWiredService;
+
 /**
  * The record types and chart sources the editor's live blocks can use (M3).
  * Core registers issued documents; plugins add their own (invoices, orders) by
  * registering a provider at boot. A key registered twice is a boot error, not a
  * silent replacement, so a plugin cannot take over another's records.
+ *
+ * Host-wired: the populated instance is registered in public/index.php and
+ * BaseCommand::setupKernel(), so a plugin resolving it never gets an empty one
+ * whose blocks would all read as unknown types.
  */
-final class DocumentEmbedRegistry
+final class DocumentEmbedRegistry implements HostWiredService
 {
     /** @var array<string, DocumentRecordProvider> */
     private array $records = [];
