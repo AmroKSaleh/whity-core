@@ -68,7 +68,7 @@ tiny_http = "0.12"
 # Safe extraction of a downloaded plugin package (src/plugins/installer.rs,
 # WC-desktop-plugins) — a pure-Rust zip reader, no system libzip dependency,
 # matching this template's "just works out of the box" bar.
-zip = "2"
+zip = "4"
 
 # SHA-256 verification of a downloaded plugin package against the server-
 # declared checksum, before anything touches disk.
