@@ -1,0 +1,27 @@
+<!-- @dsCard group="Templates · Agent approvals" height=882 width=1280 subtitle="Inbox of agent proposals with today’s activity" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Approvals</title><style>html,body{height:100%} #root{min-height:100%} </style></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  function nav(active, counts) { counts = counts || {}; function it(icon, label) { return { icon: icon, label: label, active: label === active, count: counts[label] }; }
+    return [{ items: [it('dashboard', 'Dashboard'), it('inbox', 'Inbox'), it('approval', 'Approvals')] },
+      { label: 'People', items: [it('users', 'Users'), it('role', 'Roles'), it('delegation', 'Delegations')] },
+      { label: 'AI', items: [it('ai-principal', 'AI principals'), it('tool', 'MCP tools'), it('activity', 'Agent activity')] },
+      { label: 'Documents', items: [it('document', 'Library'), it('routing', 'Routing')] },
+      { label: 'Platform', items: [it('tenant', 'Tenants'), it('plugin', 'Plugins'), it('branding', 'Branding'), it('audit', 'Audit log')] }]; }
+  var topBar = h(React.Fragment, null, h(W.IconButton, { icon: 'notification', label: 'Notifications' }), h(W.IconButton, { icon: 'help', label: 'Help' }));
+  ReactDOM.createRoot(document.getElementById('root')).render(h(W.AppShell, { tenant: 'Example Bakery', user: 'Rana Haddad', role: 'Owner', nav: nav('Approvals', { Inbox: 2, Approvals: 3 }), topActions: topBar },
+    h(W.PageHeader, { breadcrumb: [{ label: 'Example Bakery' }, { label: 'Approvals' }], title: 'Approvals', description: 'Agents ask here before they do anything you set to “Ask first”.', actions: h(W.Button, { variant: 'outline', icon: 'scope' }, 'Agent scopes') }),
+    h(W.Tabs, { items: [{ value: 'w', label: 'Waiting', count: 3 }, { value: 'd', label: 'Decided' }, { value: 'a', label: 'All activity' }] }),
+    h('div', { className: 'wy-split' },
+      h('div', { className: 'wy-queue' },
+        h('div', { className: 'wy-queue__pos' }, h('span', null, '1 of 3 waiting · oldest first'), h('span', { className: 'wy-row' }, h(W.Button, { variant: 'ghost', size: 'sm', icon: 'chevron-left' }, 'Previous'), h(W.Button, { variant: 'ghost', size: 'sm', iconEnd: 'chevron-right' }, 'Next'))),
+        h(W.ActionProposal, { agent: 'Billing assistant', onBehalfOf: 'Rana', title: 'Send payment reminders to 12 customers', summary: 'These invoices are more than 14 days overdue. Each customer gets your standard reminder by email.', changes: [{ label: 'Invoices', after: '12 overdue · JOD 4,860' }, { label: 'Status', before: 'Overdue', after: 'Reminder sent' }, { label: 'Next reminder', after: '3 Nov 2026' }], scope: ['invoice:read', 'invoice:remind'] }),
+        h('div', { className: 'wy-queue__stack' }), h('div', { className: 'wy-queue__stack' })),
+      h(W.Card, { title: 'Today', description: 'What agents read, asked and did' }, h(W.AgentActivity, { items: [{ kind: 'read', actor: 'Billing assistant', text: 'Read 48 open invoices', time: '13:58', tool: 'invoices.list' }, { kind: 'propose', actor: 'Billing assistant', text: 'Asked to send 12 reminders', time: '13:59', tool: 'invoices.remind' }, { kind: 'approve', actorKind: 'person', actor: 'Rana Haddad', text: 'Approved INV-1042 as paid', time: '11:20' }, { kind: 'act', actor: 'Billing assistant', text: 'Marked INV-1042 paid', time: '11:20', tool: 'invoices.update' }] })))));
+</script>
+</body>
+</html>

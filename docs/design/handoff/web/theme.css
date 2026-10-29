@@ -1,0 +1,41 @@
+/* Whity brand additions for Tailwind v4 (design system v2.0). Import after @whity/tokens/css (today @amroksaleh/tokens/css),
+   which defines the CSS variables. Adds utilities for the plane, the float shadow, the selected tint, the status text and tint
+   colours, the chart palette, the mark and the blueprint: shadow-plane, shadow-float, bg-primary-tint, text-success-text… */
+@theme inline {
+  --color-primary-tint: var(--primary-tint);
+  --color-primary-tint-foreground: var(--primary-tint-foreground);
+  --color-success-text: var(--success-text);
+  --color-success-tint: var(--success-tint);
+  --color-warning-text: var(--warning-text);
+  --color-warning-tint: var(--warning-tint);
+  --color-error: var(--error);
+  --color-error-foreground: var(--error-foreground);
+  --color-error-text: var(--error-text);
+  --color-error-tint: var(--error-tint);
+  --color-info-text: var(--info-text);
+  --color-info-tint: var(--info-tint);
+  --color-divider: var(--divider);
+  --color-table-header: var(--table-header);
+  --color-chart-6: var(--chart-6);
+  --color-mark-sheet: var(--mark-sheet);
+  --color-blueprint: var(--blueprint);
+  --color-blueprint-line: var(--blueprint-line);
+  --color-blueprint-line-strong: var(--blueprint-line-strong);
+  --color-plane-deep: var(--plane-deep);
+  --shadow-plane: var(--plane-rest);
+  --shadow-plane-hover: var(--plane-hover);
+  --shadow-plane-primary: var(--plane-primary-rest);
+  --shadow-plane-primary-hover: var(--plane-primary-hover);
+  --shadow-float: var(--shadow-float);
+  --radius-control-sm: 7px;
+  --radius-control: 9px;
+  --radius-control-lg: 10px;
+  --radius-card: 12px;
+  --radius-dialog: 16px;
+  --font-arabic: var(--font-arabic);
+  --font-display: var(--font-display);
+  --ease-out-whity: cubic-bezier(0.2, 0, 0, 1);
+}
+/* The main button: lifts 1px up-right while its plane grows from 3 to 5px (decision 4.3). */
+@utility plane-lift { transition: box-shadow 120ms cubic-bezier(0.2, 0, 0, 1), translate 120ms cubic-bezier(0.2, 0, 0, 1); &:hover { translate: 1px -1px; } }
+@utility bg-blueprint-grid { background-color: var(--blueprint); background-image: linear-gradient(var(--blueprint-line) 1px, transparent 1px), linear-gradient(90deg, var(--blueprint-line) 1px, transparent 1px), linear-gradient(var(--blueprint-line-strong) 1px, transparent 1px), linear-gradient(90deg, var(--blueprint-line-strong) 1px, transparent 1px); background-size: 16px 16px, 16px 16px, 80px 80px, 80px 80px; }

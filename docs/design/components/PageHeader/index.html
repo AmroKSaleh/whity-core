@@ -1,0 +1,12 @@
+<!-- @dsCard group="Navigation" height=130 -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../bundle.css"><script src="../../preview-runtime/react.production.min.js"></script><script src="../../preview-runtime/react-dom.production.min.js"></script><script src="../bundle.js"></script><script>(function(){var t=(location.hash.match(/theme=(dark|light)/)||[])[1]||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);})();</script><style>body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font-sans);width:960px;min-height:130px}</style><meta charset="utf-8"><title>PageHeader</title><style>.wy-stack{max-width:none}</style></head>
+<body>
+<div id="root" class="wy-stack"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h(W.PageHeader, { breadcrumb: [{ label: 'Admin' }, { label: 'AI principals' }], title: 'AI principals', description: 'Credentials issued to AI clients that call Whity through MCP.', actions: h(W.Button, { icon: 'plus' }, 'Issue credential') }));
+</script>
+</body>
+</html>

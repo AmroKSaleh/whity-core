@@ -1,0 +1,86 @@
+<!-- @dsCard group="Document editor" height=720 width=1280 subtitle="Ask an agent, writing, a suggested section, a rewrite and an agent comment" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Agents in the editor</title><style>html,body{height:100%} #root{height:100%} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} #root{padding:24px;box-sizing:border-box;height:auto}</style></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement, F = React.Fragment;
+  function I(n, s) { return h(W.Icon, { name: n, size: s || 16 }); }
+  function tb(icon, label, on, sc) { return h(W.IconButton, { icon: icon, label: label, size: 'sm', shortcut: sc, className: on ? 'is-on' : undefined, tooltip: 'bottom' }); }
+  function sep() { return h('span', { className: 'wy-edx__sep', 'aria-hidden': 'true' }); }
+  function mf(label, sample, preview) { return h('span', { className: 'wy-mf' + (preview ? ' is-preview' : ''), contentEditable: false, 'data-field': label }, preview ? sample : label); }
+  function blk(type, kids, extra) { extra = extra || {}; return h('div', { className: 'wy-blk wy-blk--' + type + (extra.cls ? ' ' + extra.cls : ''), 'data-type': type }, extra.gutter ? h('div', { className: 'wy-blk__gutter' }, h('button', { className: 'wy-blk__g', 'aria-label': 'Add a block below' }, I('plus')), h('button', { className: 'wy-blk__g wy-blk__g--drag', 'aria-label': 'Drag to move, click for options' }, I('drag'))) : null, extra.toolbar || null, kids); }
+  function head(o) { o = o || {};
+    return h('div', { className: 'wy-edx__head' },
+      h(W.IconButton, { icon: 'chevron-left', label: o.back || 'Back to templates', tooltip: 'bottom' }),
+      h('span', { className: 'wy-edx__doc', 'aria-hidden': 'true' }, I(o.icon || 'template')),
+      h('div', { className: 'wy-edx__titles' }, h('input', { className: 'wy-edx__title', defaultValue: o.title || 'Payment reminder', 'aria-label': 'Document title', size: 22 }),
+        h('div', { className: 'wy-edx__meta' }, o.where || 'Templates · Letters', h('span', null, '·'), I('check', 12), o.saved || 'Saved 14:02')),
+      h('div', { className: 'wy-edx__acts' },
+        h('button', { className: 'wy-edx__mode' + (o.mode === 'suggest' ? ' is-suggest' : ''), 'aria-haspopup': 'menu' }, I(o.mode === 'suggest' ? 'suggest' : o.mode === 'view' ? 'view' : 'edit', 14), o.mode === 'suggest' ? 'Suggesting' : o.mode === 'view' ? 'Viewing' : 'Editing', I('chevron-down', 14)),
+        h('span', { className: 'wy-edx__count' }, h(W.IconButton, { icon: 'comment', label: 'Comments and suggestions', tooltip: 'bottom' }), h('b', null, o.count || '3')),
+        h(W.Button, { variant: 'outline', size: 'sm', icon: 'download' }, 'PDF'),
+        o.main === false ? null : h(W.Button, { size: 'sm', icon: 'check' }, o.mainLabel || 'Publish')));
+  }
+  function bar(o) { o = o || {};
+    return h('div', { className: 'wy-edx__bar' + (o.readonly ? ' is-readonly' : ''), role: 'toolbar', 'aria-label': 'Formatting' },
+      tb('undo', 'Undo', false, '⌘Z'), tb('redo', 'Redo', false, '⇧⌘Z'), sep(),
+      h('button', { className: 'wy-edx__drop wy-edx__style', 'aria-haspopup': 'menu' }, o.style || 'Normal text', I('chevron-down', 14)), sep(),
+      tb('bold', 'Bold', o.bold, '⌘B'), tb('italic', 'Italic', false, '⌘I'), tb('underline', 'Underline', false, '⌘U'), tb('strike', 'Strikethrough', false, '⇧⌘X'), sep(),
+      tb('link', 'Link', false, '⌘K'), tb('highlight', 'Highlight'), sep(),
+      tb('list-bullet', 'Bulleted list', false, '⇧⌘8'), tb('list-numbered', 'Numbered list', false, '⇧⌘7'), tb('list-todo', 'Checklist', false, '⇧⌘9'), sep(),
+      h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu' }, I('plus', 14), 'Insert', I('chevron-down', 14)),
+      h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu' }, I('field', 14), 'Field', I('chevron-down', 14)),
+      tb('comment-add', 'Comment', false, '⌥⌘M'), sep(),
+      h('button', { className: 'wy-edx__ask' }, I('robot', 14), 'Ask an agent'),
+      h('span', { className: 'wy-edx__grow' }),
+      o.page ? h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu', 'aria-label': 'Zoom' }, o.zoom || '75%', I('chevron-down', 14)) : null,
+      h(W.ToggleGroup, { size: 'sm', label: 'View', required: true, defaultValue: o.page ? 'page' : 'continuous', options: [{ value: 'continuous', label: 'Continuous', icon: 'continuous', iconOnly: true }, { value: 'page', label: 'Page view', icon: 'page', iconOnly: true }] }),
+      tb('outline', 'Outline', o.outline !== false));
+  }
+  function outline(items) { return h('nav', { className: 'wy-edx__outline', 'aria-label': 'Outline' }, h('div', { className: 'wy-edx__outline-h' }, 'Outline'), items.map(function (it, i) { return h('a', { key: i, href: '#', className: 'l' + it[0] + (it[2] ? ' is-on' : '') }, it[1]); })); }
+  function status(t) { return h('div', { className: 'wy-edx__status' }, t.map(function (x, i) { return x === '|' ? h('span', { key: i, className: 'wy-edx__grow' }) : h('span', { key: i }, x); })); }
+  function rcard(top, o) {
+    return h('div', { className: 'wy-rc' + (o.agent ? ' is-agent' : '') + (o.active ? ' is-active' : ''), style: { top: top } },
+      h('div', { className: 'wy-rc__who' }, o.agent ? h(W.ActorChip, { kind: 'agent', name: o.agent, onBehalfOf: o.for }) : h(F, null, h(W.Avatar, { name: o.name, size: 24 }), h('span', { className: 'wy-rc__name' }, o.name)),
+        o.agent ? null : h('span', { className: 'wy-rc__time' }, o.time),
+        h('span', { className: 'wy-rc__acts' }, o.sug ? h(F, null, h(W.IconButton, { icon: 'check', label: 'Accept', size: 'sm' }), h(W.IconButton, { icon: 'close', label: 'Reject', size: 'sm' })) : h(W.IconButton, { icon: 'check', label: 'Resolve', size: 'sm' }))),
+      o.what ? h('div', { className: 'wy-rc__what' }, o.what) : null,
+      o.text ? h('div', null, o.text) : null,
+      o.reply ? h('div', { className: 'wy-rc__reply' }, 'Reply or add others with @') : null);
+  }
+  function cap(t, m) { return h('p', { className: 'cap', style: { margin: m || '0 0 10px' } }, t); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 24, alignItems: 'start' } },
+    h('article', { className: 'wy-edx__sheet', style: { maxWidth: 'none', margin: 0, padding: '24px 40px 32px 56px' } },
+      cap('Ask an agent (the / menu, the toolbar, or @ in a comment)'),
+      h('div', { className: 'wy-ask' },
+        h('div', { className: 'wy-ask__row' }, h('button', { className: 'wy-ask__agent', 'aria-haspopup': 'listbox' }, h(W.Avatar, { kind: 'agent', name: 'Billing assistant', size: 20 }), 'Billing assistant', I('chevron-down', 14)), h('span', { className: 'wy-ask__ctx' }, I('document', 12), 'This document'), h('span', { className: 'wy-ask__ctx' }, I('invoice', 12), 'Overdue invoices')),
+        h('div', { className: 'wy-ask__input' }, 'Write a short, polite paragraph for customers whose invoices are more than 30 days overdue', h('span', { className: 'wy-caret' })),
+        h('div', { className: 'wy-ask__note' }, I('scope', 12), 'Reads invoice:read · writes as suggestions, for Rana', h('span', { className: 'wy-edx__grow' }), h(W.Button, { variant: 'outline', size: 'sm', icon: 'send' }, 'Ask'))),
+      cap('Writing: the run shows in place, Stop is always there', '24px 0 10px'),
+      h('div', { className: 'wy-blk is-suggested', style: { margin: '0 -13px' } }, h('div', { className: 'wy-blk__by' }, h(W.AgentRunStatus, { compact: true, status: 'running', agent: 'Billing assistant', title: 'Reading 3 overdue invoices' }), h('span', { style: { marginInlineStart: 'auto' } }, h(W.Button, { variant: 'ghost', size: 'sm' }, 'Stop'))),
+        h('p', { style: { margin: 0, fontSize: 16, lineHeight: 1.5 } }, 'Our records show that some of your invoices are now more than 30 days overdue. We would be grateful if you could arrange', h('span', { className: 'wy-stream' }))),
+      cap('Done: a suggested section, nothing lands until a person accepts (E.4)', '24px 0 10px'),
+      h('div', { className: 'wy-blk is-suggested', style: { margin: '0 -13px' } }, h('div', { className: 'wy-blk__by' }, h(W.ActorChip, { kind: 'agent', name: 'Billing assistant', onBehalfOf: 'Rana' }), 'suggests 2 blocks · 14:06'),
+        h('h4', { style: { margin: '0 0 6px', fontSize: 18, fontWeight: 600 } }, 'Invoices more than 30 days overdue'),
+        h('p', { style: { margin: 0, fontSize: 16, lineHeight: 1.5 } }, 'Our records show that ', mf('Overdue count', ''), ' of your invoices, totalling ', mf('Overdue total', ''), ', are now more than 30 days overdue. Please arrange payment within 14 days, or call us if anything is unclear.'),
+        h('div', { className: 'wy-blk__acts' }, h(W.Button, { variant: 'outline', size: 'sm', icon: 'check' }, 'Accept'), h(W.Button, { variant: 'ghost', size: 'sm' }, 'Reject'), h(W.Button, { variant: 'ghost', size: 'sm', icon: 'sync' }, 'Try again'), h(W.Button, { variant: 'ghost', size: 'sm', icon: 'edit' }, 'Change the request')))),
+    h('article', { className: 'wy-edx__sheet', style: { maxWidth: 'none', margin: 0, padding: '24px 40px 32px' } },
+      cap('Rewrite a selection: the agent’s version arrives as a suggestion'),
+      h('p', { style: { margin: '0 0 12px', fontSize: 16, lineHeight: 1.6 } }, h('del', { className: 'wy-sug-del' }, 'Failure to pay will result in legal action being taken against you.'), ' ', h('ins', { className: 'wy-sug-ins' }, 'If we don’t hear from you by the due date, we may need to pass this to our legal team.')),
+      h('div', { className: 'wy-rc wy-rc--static is-agent', style: { maxWidth: 380 } }, h('div', { className: 'wy-rc__who' }, h(W.ActorChip, { kind: 'agent', name: 'Billing assistant', onBehalfOf: 'Rana' }), h('span', { className: 'wy-rc__acts' }, h(W.IconButton, { icon: 'check', label: 'Accept', size: 'sm' }), h(W.IconButton, { icon: 'close', label: 'Reject', size: 'sm' }))),
+        h('div', { className: 'wy-rc__what' }, 'Rewrote one sentence: ', h('b', null, '“friendlier, same meaning”')), h('div', { className: 'wy-rc__time' }, 'Asked by Rana · 14:09 · Uses document:edit')),
+      cap('An agent comment that offers a fix', '24px 0 10px'),
+      h('p', { style: { margin: '0 0 12px', fontSize: 16, lineHeight: 1.6 } }, 'Invoice INV-1042 was due on ', h('mark', { className: 'wy-cmt is-active' }, '14 October'), '.'),
+      h('div', { className: 'wy-rc wy-rc--static is-agent', style: { maxWidth: 380 } }, h('div', { className: 'wy-rc__who' }, h(W.ActorChip, { kind: 'agent', name: 'Billing assistant', onBehalfOf: 'Rana' }), h('span', { className: 'wy-rc__acts' }, h(W.IconButton, { icon: 'check', label: 'Resolve', size: 'sm' }))),
+        h('div', null, 'This date is typed in, so every letter will say 14 October. Use the ', mf('Due date', ''), ' field instead?'),
+        h('div', { className: 'wy-rc__foot', style: { justifyContent: 'flex-start' } }, h(W.Button, { variant: 'outline', size: 'sm' }, 'Suggest the fix'), h(W.Button, { variant: 'ghost', size: 'sm' }, 'Dismiss'))),
+      cap('Where agents are named', '24px 0 10px'),
+      h('ul', { style: { margin: 0, paddingInlineStart: 18, fontSize: 14, lineHeight: 1.6, color: 'var(--muted-foreground)' } },
+        h('li', null, 'Every suggestion and comment: the actor chip, the person it acts for, the permission it used.'),
+        h('li', null, 'The document history and the audit log: “Billing assistant for Rana suggested 2 blocks”.'),
+        h('li', null, 'A printed document an agent made or sent says so in its footer (stage 6).')))));
+</script>
+</body>
+</html>

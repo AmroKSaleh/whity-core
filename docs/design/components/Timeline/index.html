@@ -1,0 +1,14 @@
+<!-- @dsCard group="Data" height=550 subtitle="Record history: people, agents and the system" -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../bundle.css"><script src="../../preview-runtime/react.production.min.js"></script><script src="../../preview-runtime/react-dom.production.min.js"></script><script src="../bundle.js"></script><script>(function(){var t=(location.hash.match(/theme=(dark|light)/)||[])[1]||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);})();</script><style>body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font-sans);width:960px;min-height:550px}</style><meta charset="utf-8"><title>Timeline</title><style>#root{padding:16px 24px} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px 32px;align-items:start} .ar{font-family:var(--font-arabic)} </style></head>
+<body>
+<div id="root" class=""></div>
+<script>
+  var W = window.Whity, h = React.createElement; 
+  function cap(t) { return h('p', { className: 'cap' }, t); }
+  function col() { return h.apply(null, ['div', { style: { display: 'grid', gap: 12, alignContent: 'start' } }].concat([].slice.call(arguments))); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { style: { maxWidth: 640 } }, h(W.Timeline, { label: 'INV-1042 history', items: [{"day": "Today, 28 Oct"}, {"kind": "send", "actor": "Billing assistant", "actorKind": "agent", "onBehalfOf": "Rana", "text": "Emailed the invoice to Example Clinic", "time": "14:02", "undo": {"text": "Email to clinic@example.jo", "remainingLabel": "28 min", "remaining": 28, "total": 30}}, {"kind": "approve", "actor": "Rana Haddad", "text": "Approved sending the invoice", "time": "14:01"}, {"kind": "propose", "actor": "Billing assistant", "actorKind": "agent", "onBehalfOf": "Rana", "text": "Asked to email the invoice", "time": "13:59"}, {"day": "27 Oct"}, {"kind": "document", "actor": "Whity", "actorKind": "system", "text": "Issued through JoFotara", "time": "16:40"}, {"kind": "edit", "actor": "Omar Saleh", "text": "Changed 2 fields", "time": "16:31", "changes": [{"label": "Due date", "before": "3 Nov 2026", "after": "10 Nov 2026"}, {"label": "Delivery", "before": "JOD 5.000", "after": "JOD 7.500"}]}, {"kind": "comment", "actor": "Omar Saleh", "text": "Added a note", "time": "16:30", "note": "The clinic asked for 14 days; Rana agreed on the phone."}, {"kind": "create", "actor": "Omar Saleh", "text": "Created the invoice from QUO-0318", "time": "16:25"}] })));
+</script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+<!-- @dsCard group="Templates · Account" height=720 width=1280 subtitle="Whity’s console (left) and the same page in a tenant’s brand (right)" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Sign in</title><style>html,body{height:100%} </style></head>
+<body>
+<div id="root" class=""></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  function tenantLogo(name) { return h('span', { className: 'wy-tenant-logo' }, h('span', { className: 'wy-tenant-logo__tile', 'aria-hidden': 'true' }, name.charAt(0)), name); }
+  function lang() { return h('div', { className: 'wy-auth__lang' }, h('b', null, 'English'), h('span', { lang: 'ar' }, 'العربية')); }
+  ReactDOM.createRoot(document.getElementById('root')).render((function () { function signin(brand, product, sub, builtOn) { return h('div', { className: 'wy-auth' }, lang(),
+    h('div', { className: 'wy-auth__card' },
+      h('div', { className: 'wy-auth__brand' }, brand),
+      h('h1', { className: 'wy-auth__title' }, 'Sign in to ' + product), h('p', { className: 'wy-auth__sub' }, sub),
+      h(W.Button, { variant: 'outline', icon: 'google' }, 'Continue with Google'),
+      h('div', { className: 'wy-auth__or' }, 'or with email'),
+      h(W.Input, { label: 'Email', type: 'email', placeholder: 'you@company.jo' }),
+      h('div', { className: 'wy-field' }, h('div', { className: 'wy-auth__row' }, h('label', { className: 'wy-field__label', htmlFor: 'pw' }, 'Password'), h('a', { className: 'wy-link', href: '#' }, 'Forgot password?')), h('input', { id: 'pw', type: 'password', className: 'wy-input', defaultValue: 'password' })),
+      h(W.Button, { size: 'lg' }, 'Sign in'),
+      h('p', { className: 'wy-auth__foot' }, 'No account? Ask your workspace owner for an invitation.')),
+    builtOn ? h('div', { className: 'wy-auth__builton' }, h(W.BuiltOnWhity, null)) : null); }
+    return h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', minHeight: '100vh' } },
+      h('div', null, signin(h(W.Lockup, { height: 28 }), 'Whity', 'The console for this Whity deployment.', false)),
+      h('div', { className: 'wy-theme-partner', style: { borderInlineStart: '1px solid var(--border)' } }, signin(tenantLogo('Example Office'), 'Example Office', 'Quotes, invoices and customers for Example Bakery.', true))); })());
+</script>
+</body>
+</html>

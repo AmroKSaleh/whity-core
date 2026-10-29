@@ -1,0 +1,212 @@
+/* Whity — generated from tokens.json (v3, decision register 28 Oct 2026) */
+:root, [data-theme="light"] {
+  --background: oklch(0.95 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.5 0.16 255);
+  --primary-foreground: #ffffff;
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.52 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --brand: oklch(0.5 0.16 255);
+  --brand-foreground: #ffffff;
+  --destructive: #cc2827;
+  --success: #0a7e3a;
+  --success-foreground: #ffffff;
+  --warning: #f2b036;
+  --warning-foreground: #1a1206;
+  --error: #cc2827;
+  --error-foreground: #ffffff;
+  --info: #555555;
+  --info-foreground: #ffffff;
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.66 0 0);
+  --ring: oklch(0.5 0.16 255);
+  --chart-1: oklch(0.5 0.16 255);
+  --chart-2: #f7a224;
+  --chart-3: #91dbf2;
+  --chart-4: #9d2398;
+  --chart-5: #35aa76;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: #ebf3fc;
+  --sidebar-primary-foreground: oklch(0.5 0.16 255);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.5 0.16 255);
+  --overlay: oklch(0 0 0 / 0.45);
+  --mark-sheet: #ffffff;
+  --blueprint: oklch(0.5 0.16 255);
+  --blueprint-line: oklch(1 0 0 / 0.12);
+  --blueprint-line-strong: oklch(1 0 0 / 0.24);
+  --plane-deep: oklch(0.3 0.1 255);
+  --divider: oklch(0.94 0 0);
+  --table-header: oklch(0.975 0 0);
+  --success-text: #087736;
+  --success-tint: #e0fae4;
+  --warning-text: #9a5505;
+  --warning-tint: #fef4df;
+  --error-text: #c2181d;
+  --error-tint: #fceeec;
+  --info-text: #555555;
+  --info-tint: #f0f0f0;
+  --destructive-foreground: #ffffff;
+  --primary-tint: #ebf3fc;
+  --primary-tint-foreground: oklch(0.5 0.16 255);
+  --chart-6: #3a3a3a;
+  --plane-rest: -3px 3px 0 0 oklch(0.5 0.16 255);
+  --plane-hover: -5px 5px 0 0 oklch(0.5 0.16 255);
+  --plane-primary-rest: -3px 3px 0 0 oklch(0.3 0.1 255);
+  --plane-primary-hover: -5px 5px 0 0 oklch(0.3 0.1 255);
+  --shadow-float: 0 8px 24px -6px oklch(0 0 0 / 0.18), 0 2px 6px -2px oklch(0 0 0 / 0.10);
+}
+[data-theme="dark"] {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.7 0.15 255);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --brand: oklch(0.7 0.15 255);
+  --brand-foreground: oklch(0.205 0 0);
+  --destructive: #f66d67;
+  --success: #5ac576;
+  --success-foreground: #0a0a0a;
+  --warning: #f7b83d;
+  --warning-foreground: #0a0a0a;
+  --error: #f66d67;
+  --error-foreground: #0a0a0a;
+  --info: #aeaeae;
+  --info-foreground: #0a0a0a;
+  --border: oklch(1 0 0 / 0.1);
+  --input: oklch(0.52 0 0);
+  --ring: oklch(0.7 0.15 255);
+  --chart-1: oklch(0.7 0.15 255);
+  --chart-2: #f7a224;
+  --chart-3: #91dbf2;
+  --chart-4: #d25bcb;
+  --chart-5: #53c48e;
+  --sidebar: oklch(0.17 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: #182e4b;
+  --sidebar-primary-foreground: #59a0f9;
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 0.1);
+  --sidebar-ring: oklch(0.7 0.15 255);
+  --overlay: oklch(0 0 0 / 0.45);
+  --mark-sheet: #ffffff;
+  --blueprint: oklch(0.5 0.16 255);
+  --blueprint-line: oklch(1 0 0 / 0.12);
+  --blueprint-line-strong: oklch(1 0 0 / 0.24);
+  --plane-deep: oklch(0.42 0.13 255);
+  --divider: oklch(1 0 0 / 0.07);
+  --table-header: oklch(0.23 0 0);
+  --success-text: #5ac576;
+  --success-tint: #14361d;
+  --warning-text: #f7b83d;
+  --warning-tint: #432f07;
+  --error-text: #f66d67;
+  --error-tint: #4f1a18;
+  --info-text: #aeaeae;
+  --info-tint: #262626;
+  --destructive-foreground: #0a0a0a;
+  --primary-tint: #182e4b;
+  --primary-tint-foreground: #59a0f9;
+  --chart-6: #858585;
+  --plane-rest: -3px 3px 0 0 oklch(0.7 0.15 255);
+  --plane-hover: -5px 5px 0 0 oklch(0.7 0.15 255);
+  --plane-primary-rest: -3px 3px 0 0 oklch(0.42 0.13 255);
+  --plane-primary-hover: -5px 5px 0 0 oklch(0.42 0.13 255);
+  --shadow-float: 0 8px 24px -6px oklch(0 0 0 / 0.55), 0 2px 6px -2px oklch(0 0 0 / 0.35);
+}
+:root {
+  --space-0: 0px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius: 0.5625rem;
+  --radius-control-sm: 7px;
+  --radius-control: 9px;
+  --radius-control-lg: 10px;
+  --radius-sm: 4px;
+  --radius-md: 7px;
+  --radius-card: 12px;
+  --radius-dialog: 16px;
+  --radius-full: 999px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --plane-offset: 0.1875rem;
+  --plane-lift: 0.3125rem;
+  --logo-min-mark: 16px;
+  --logo-min-horizontal: 20px;
+  --logo-min-stacked: 48px;
+  --mark-cut-switch: 24px;
+  --control-h-sm: 28px;
+  --control-h: 36px;
+  --control-h-lg: 40px;
+  --row-h: 44px;
+  --icon: 16px;
+  --sidebar-w: 240px;
+  --sidebar-w-collapsed: 56px;
+  --content-max: 1280px;
+  --form-max: 720px;
+  --gutter: 24px;
+  --logo-clear-space: 25%;
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 250ms;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --font-sans: 'Noto Sans', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-heading: 'Noto Sans', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-arabic: 'Noto Sans Arabic', 'Noto Sans', sans-serif;
+  --font-display: 'Readex Pro', 'Noto Sans', sans-serif;
+}
+.display { font-family: var(--font-display); font-size: 3.0625rem; line-height: 1.1; font-weight: 600; letter-spacing: -0.02em; }
+.display-h1 { font-family: var(--font-display); font-size: 2.4375rem; line-height: 1.1; font-weight: 600; letter-spacing: -0.02em; }
+.display-h2 { font-family: var(--font-display); font-size: 1.9375rem; line-height: 1.25; font-weight: 600; letter-spacing: -0.01em; }
+.display-h3 { font-family: var(--font-display); font-size: 1.5625rem; line-height: 1.25; font-weight: 600; letter-spacing: -0.01em; }
+.display-h4 { font-family: var(--font-display); font-size: 1.25rem; line-height: 1.25; font-weight: 600; letter-spacing: -0.01em; }
+.title-page { font-family: var(--font-sans); font-size: 1.5rem; line-height: 1.25; font-weight: 600; }
+.title-section { font-family: var(--font-sans); font-size: 1.25rem; line-height: 1.25; font-weight: 600; }
+.title-card { font-family: var(--font-sans); font-size: 1.125rem; line-height: 1.25; font-weight: 600; }
+.stat { font-family: var(--font-sans); font-size: 1.5rem; line-height: 1.2; font-weight: 600; }
+.text-lg { font-family: var(--font-sans); font-size: 1rem; line-height: 1.5; font-weight: 400; }
+.text { font-family: var(--font-sans); font-size: 0.875rem; line-height: 1.5; font-weight: 400; }
+.label { font-family: var(--font-sans); font-size: 0.875rem; line-height: 1.25; font-weight: 500; }
+.caption { font-family: var(--font-sans); font-size: 0.75rem; line-height: 1.5; font-weight: 400; }
+.micro { font-family: var(--font-sans); font-size: 0.6875rem; line-height: 1.25; font-weight: 500; }
+.arabic-text { font-family: var(--font-arabic); font-size: 0.875rem; line-height: 1.7; font-weight: 400; }
+.arabic-title { font-family: var(--font-arabic); font-size: 1.5rem; line-height: 1.5; font-weight: 600; }
+.mono { font-family: var(--font-mono); font-size: 0.8125rem; line-height: 1.5; font-weight: 400; }
+.mono-sm { font-family: var(--font-mono); font-size: 0.75rem; line-height: 1.5; font-weight: 500; }
+@font-face { font-family: 'Noto Sans'; src: url('fonts/noto-sans-latin-400.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Noto Sans'; src: url('fonts/noto-sans-latin-500.woff2') format('woff2'); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Noto Sans'; src: url('fonts/noto-sans-latin-600.woff2') format('woff2'); font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Noto Sans Arabic'; src: url('fonts/noto-sans-arabic-400.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Noto Sans Arabic'; src: url('fonts/noto-sans-arabic-500.woff2') format('woff2'); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Noto Sans Arabic'; src: url('fonts/noto-sans-arabic-600.woff2') format('woff2'); font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Geist Mono'; src: url('fonts/geist-mono-400.woff2') format('woff2'); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Geist Mono'; src: url('fonts/geist-mono-500.woff2') format('woff2'); font-weight: 500; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Readex Pro'; src: url('fonts/readex-pro-latin-600.woff2') format('woff2'); font-weight: 600; font-style: normal; font-display: swap; }
+@font-face { font-family: 'Readex Pro'; src: url('fonts/readex-pro-arabic-600.woff2') format('woff2'); font-weight: 600; font-style: normal; font-display: swap; unicode-range: U+0600-06FF,U+0750-077F,U+0870-088E,U+0890-0891,U+0897-08E1,U+08E3-08FF,U+200C-200E,U+2010-2011,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FE74,U+FE76-FEFC; }

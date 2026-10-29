@@ -1,0 +1,12 @@
+<!-- @dsCard group="Forms" height=127 -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Switch</title></head>
+<body>
+<div id="root" class="wy-stack"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h(React.Fragment, null, h(W.Switch, { label: 'Allow sign-up with Google', defaultChecked: true }), h(W.Switch, { label: 'Require two-step verification' }), h(W.Checkbox, { label: 'Send me a copy of every approval', defaultChecked: true })));
+</script>
+</body>
+</html>

@@ -1,0 +1,69 @@
+<!-- @dsCard group="Document editor" height=650 width=1280 subtitle="The continuous sheet on screen and the page view on paper, in both languages" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Editor typography</title><style>html,body{height:100%} #root{height:100%} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} #root{padding:24px;box-sizing:border-box;height:auto} .tspec{width:100%;border-collapse:collapse;font-size:12px;margin-top:18px} .tspec td{padding:5px 8px;border-bottom:1px solid var(--border)} .tspec td:first-child{color:var(--muted-foreground);width:110px} .tspec td:last-child{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground)}</style></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement, F = React.Fragment;
+  function I(n, s) { return h(W.Icon, { name: n, size: s || 16 }); }
+  function tb(icon, label, on, sc) { return h(W.IconButton, { icon: icon, label: label, size: 'sm', shortcut: sc, className: on ? 'is-on' : undefined, tooltip: 'bottom' }); }
+  function sep() { return h('span', { className: 'wy-edx__sep', 'aria-hidden': 'true' }); }
+  function mf(label, sample, preview) { return h('span', { className: 'wy-mf' + (preview ? ' is-preview' : ''), contentEditable: false, 'data-field': label }, preview ? sample : label); }
+  function blk(type, kids, extra) { extra = extra || {}; return h('div', { className: 'wy-blk wy-blk--' + type + (extra.cls ? ' ' + extra.cls : ''), 'data-type': type }, extra.gutter ? h('div', { className: 'wy-blk__gutter' }, h('button', { className: 'wy-blk__g', 'aria-label': 'Add a block below' }, I('plus')), h('button', { className: 'wy-blk__g wy-blk__g--drag', 'aria-label': 'Drag to move, click for options' }, I('drag'))) : null, extra.toolbar || null, kids); }
+  function head(o) { o = o || {};
+    return h('div', { className: 'wy-edx__head' },
+      h(W.IconButton, { icon: 'chevron-left', label: o.back || 'Back to templates', tooltip: 'bottom' }),
+      h('span', { className: 'wy-edx__doc', 'aria-hidden': 'true' }, I(o.icon || 'template')),
+      h('div', { className: 'wy-edx__titles' }, h('input', { className: 'wy-edx__title', defaultValue: o.title || 'Payment reminder', 'aria-label': 'Document title', size: 22 }),
+        h('div', { className: 'wy-edx__meta' }, o.where || 'Templates · Letters', h('span', null, '·'), I('check', 12), o.saved || 'Saved 14:02')),
+      h('div', { className: 'wy-edx__acts' },
+        h('button', { className: 'wy-edx__mode' + (o.mode === 'suggest' ? ' is-suggest' : ''), 'aria-haspopup': 'menu' }, I(o.mode === 'suggest' ? 'suggest' : o.mode === 'view' ? 'view' : 'edit', 14), o.mode === 'suggest' ? 'Suggesting' : o.mode === 'view' ? 'Viewing' : 'Editing', I('chevron-down', 14)),
+        h('span', { className: 'wy-edx__count' }, h(W.IconButton, { icon: 'comment', label: 'Comments and suggestions', tooltip: 'bottom' }), h('b', null, o.count || '3')),
+        h(W.Button, { variant: 'outline', size: 'sm', icon: 'download' }, 'PDF'),
+        o.main === false ? null : h(W.Button, { size: 'sm', icon: 'check' }, o.mainLabel || 'Publish')));
+  }
+  function bar(o) { o = o || {};
+    return h('div', { className: 'wy-edx__bar' + (o.readonly ? ' is-readonly' : ''), role: 'toolbar', 'aria-label': 'Formatting' },
+      tb('undo', 'Undo', false, '⌘Z'), tb('redo', 'Redo', false, '⇧⌘Z'), sep(),
+      h('button', { className: 'wy-edx__drop wy-edx__style', 'aria-haspopup': 'menu' }, o.style || 'Normal text', I('chevron-down', 14)), sep(),
+      tb('bold', 'Bold', o.bold, '⌘B'), tb('italic', 'Italic', false, '⌘I'), tb('underline', 'Underline', false, '⌘U'), tb('strike', 'Strikethrough', false, '⇧⌘X'), sep(),
+      tb('link', 'Link', false, '⌘K'), tb('highlight', 'Highlight'), sep(),
+      tb('list-bullet', 'Bulleted list', false, '⇧⌘8'), tb('list-numbered', 'Numbered list', false, '⇧⌘7'), tb('list-todo', 'Checklist', false, '⇧⌘9'), sep(),
+      h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu' }, I('plus', 14), 'Insert', I('chevron-down', 14)),
+      h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu' }, I('field', 14), 'Field', I('chevron-down', 14)),
+      tb('comment-add', 'Comment', false, '⌥⌘M'), sep(),
+      h('button', { className: 'wy-edx__ask' }, I('robot', 14), 'Ask an agent'),
+      h('span', { className: 'wy-edx__grow' }),
+      o.page ? h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu', 'aria-label': 'Zoom' }, o.zoom || '75%', I('chevron-down', 14)) : null,
+      h(W.ToggleGroup, { size: 'sm', label: 'View', required: true, defaultValue: o.page ? 'page' : 'continuous', options: [{ value: 'continuous', label: 'Continuous', icon: 'continuous', iconOnly: true }, { value: 'page', label: 'Page view', icon: 'page', iconOnly: true }] }),
+      tb('outline', 'Outline', o.outline !== false));
+  }
+  function outline(items) { return h('nav', { className: 'wy-edx__outline', 'aria-label': 'Outline' }, h('div', { className: 'wy-edx__outline-h' }, 'Outline'), items.map(function (it, i) { return h('a', { key: i, href: '#', className: 'l' + it[0] + (it[2] ? ' is-on' : '') }, it[1]); })); }
+  function status(t) { return h('div', { className: 'wy-edx__status' }, t.map(function (x, i) { return x === '|' ? h('span', { key: i, className: 'wy-edx__grow' }) : h('span', { key: i }, x); })); }
+  function rcard(top, o) {
+    return h('div', { className: 'wy-rc' + (o.agent ? ' is-agent' : '') + (o.active ? ' is-active' : ''), style: { top: top } },
+      h('div', { className: 'wy-rc__who' }, o.agent ? h(W.ActorChip, { kind: 'agent', name: o.agent, onBehalfOf: o.for }) : h(F, null, h(W.Avatar, { name: o.name, size: 24 }), h('span', { className: 'wy-rc__name' }, o.name)),
+        o.agent ? null : h('span', { className: 'wy-rc__time' }, o.time),
+        h('span', { className: 'wy-rc__acts' }, o.sug ? h(F, null, h(W.IconButton, { icon: 'check', label: 'Accept', size: 'sm' }), h(W.IconButton, { icon: 'close', label: 'Reject', size: 'sm' })) : h(W.IconButton, { icon: 'check', label: 'Resolve', size: 'sm' }))),
+      o.what ? h('div', { className: 'wy-rc__what' }, o.what) : null,
+      o.text ? h('div', null, o.text) : null,
+      o.reply ? h('div', { className: 'wy-rc__reply' }, 'Reply or add others with @') : null);
+  }
+  function cap(t) { return h('p', { className: 'cap', style: { margin: '0 0 16px' } }, t); }
+  function rows(r) { return h('table', { className: 'tspec' }, h('tbody', null, r.map(function (x, i) { return h('tr', { key: i }, h('td', null, x[0]), h('td', null, x[1]), h('td', null, x[2])); }))); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 24, alignItems: 'start' } },
+    h('article', { className: 'wy-edx__sheet', style: { maxWidth: 'none', margin: 0, padding: '24px 40px 28px' } }, cap('On screen: the continuous sheet'),
+      h('h1', { className: 'wy-edx__doctitle', style: { fontSize: '1.9375rem' } }, 'Payment terms'),
+      blk('h1', h('h2', null, 'How to pay')), blk('h2', h('h3', null, 'Bank transfer')), blk('p', h('p', null, 'Pay by bank transfer to Example Bank, with the invoice number as the reference. Payments take two working days.')),
+      h('div', { dir: 'rtl', lang: 'ar', style: { fontFamily: 'var(--font-arabic)', marginTop: 10 } }, blk('h2', h('h3', null, 'التحويل البنكي')), h('div', { className: 'wy-blk', style: { lineHeight: 1.7 } }, h('p', { style: { margin: 0 } }, 'ادفع بتحويل بنكي إلى ', h('bdi', null, 'Example Bank'), ' مع رقم الفاتورة مرجعاً. تستغرق الدفعات يومَي عمل.'))),
+      rows([['Title', 'Readex Pro 600 · 31 / 1.15', 'brand H2, −1%'], ['Heading 1', 'Noto Sans 600 · 24 / 1.25', 'title-page'], ['Heading 2', 'Noto Sans 600 · 20 / 1.3', 'title-section'], ['Heading 3', 'Noto Sans 600 · 18 / 1.35', 'title-card'], ['Body', 'Noto Sans 400 · 16 / 1.5 (Arabic 1.7)', 'text-lg'], ['Measure', '616px text, at most 68 characters', 'sheet 760, sides 72']])),
+    h('article', { className: 'wy-edx__sheet', style: { maxWidth: 'none', margin: 0, padding: '24px 40px 28px' } }, cap('On paper: the page view at 100% (stage 6)'),
+      h('div', { className: 'wy-page wy-theme-partner', style: { width: '100%', height: 'auto', padding: 0, boxShadow: 'none', background: 'none' } },
+        h('h1', { className: 'wy-page__title' }, 'Payment terms'),
+        blk('h1', h('h2', null, 'How to pay')), blk('h2', h('h3', null, 'Bank transfer')), blk('p', h('p', null, 'Pay by bank transfer to Example Bank, with the invoice number as the reference. Payments take two working days.')),
+        h('div', { dir: 'rtl', lang: 'ar', style: { fontFamily: 'var(--font-arabic)', marginTop: 8 } }, blk('h2', h('h3', null, 'التحويل البنكي')), h('div', { className: 'wy-blk', style: { lineHeight: 1.7 } }, h('p', { style: { margin: 0 } }, 'ادفع بتحويل بنكي إلى ', h('bdi', null, 'Example Bank'), ' مع رقم الفاتورة مرجعاً. تستغرق الدفعات يومَي عمل.')))),
+      rows([['Title', 'Readex Pro 600 · 22 pt', 'doc-accent (tenant)'], ['Heading 1', 'Noto Sans 600 · 14 pt', 'ink'], ['Heading 2', 'Noto Sans 600 · 12 pt', 'ink'], ['Heading 3', 'Noto Sans 600 · 10.5 pt', 'ink'], ['Body', 'Noto Sans 400 · 9.5 pt / 1.5 (Arabic 1.7)', 'labels 8.5 pt'], ['Measure', '178 mm on A4 (16 mm margins)', 'stage 6']]))));
+</script>
+</body>
+</html>

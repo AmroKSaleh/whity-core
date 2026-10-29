@@ -1,0 +1,17 @@
+<!-- @dsCard group="Data" height=310 subtitle="Shares of one total; six slices at most" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Donut chart</title><style>#root{padding:16px 24px} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px 32px;align-items:start} .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;align-items:start} .ar{font-family:var(--font-arabic)} .panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-card);padding:16px}</style></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  function cap(t) { return h('p', { className: 'cap' }, t); }
+  function col() { return h.apply(null, ['div', { style: { display: 'grid', gap: 12, alignContent: 'start' } }].concat([].slice.call(arguments))); }
+  var fmt = function (v) { return 'JOD ' + Math.round(v).toLocaleString('en-US'); };
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'grid2' },
+    h('div', { className: 'panel' }, h(W.DonutChart, { title: 'Revenue by product', subtitle: 'October', format: fmt, totalLabel: 'October', data: [{ label: 'Bread', value: 1820 }, { label: 'Pastries', value: 1140 }, { label: 'Cakes', value: 860 }, { label: 'Catering', value: 620 }, { label: 'Coffee', value: 310 }, { label: 'Gift boxes', value: 70 }, { label: 'Delivery fees', value: 40 }] })),
+    h('div', { className: 'panel' }, h(W.DonutChart, { title: 'Invoices by status', data: [{ label: 'Paid', value: 135 }, { label: 'Unpaid', value: 23 }, { label: 'Overdue', value: 12 }], totalLabel: 'invoices' }))));
+</script>
+</body>
+</html>

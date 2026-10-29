@@ -1,0 +1,84 @@
+<!-- @dsCard group="Document editor" height=820 width=1280 subtitle="A4 pages with the letterhead, merge fields previewed with a record" -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../bundle.css"><script src="../../preview-runtime/react.production.min.js"></script><script src="../../preview-runtime/react-dom.production.min.js"></script><script src="../bundle.js"></script><script>(function(){var t=(location.hash.match(/theme=(dark|light)/)||[])[1]||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);})();</script><style>body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font-sans);width:1280px;min-height:820px}</style><meta charset="utf-8"><title>Page view</title><style>html,body{height:100%} #root{height:100%} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} </style></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement, F = React.Fragment;
+  function I(n, s) { return h(W.Icon, { name: n, size: s || 16 }); }
+  function tb(icon, label, on, sc) { return h(W.IconButton, { icon: icon, label: label, size: 'sm', shortcut: sc, className: on ? 'is-on' : undefined, tooltip: 'bottom' }); }
+  function sep() { return h('span', { className: 'wy-edx__sep', 'aria-hidden': 'true' }); }
+  function mf(label, sample, preview) { return h('span', { className: 'wy-mf' + (preview ? ' is-preview' : ''), contentEditable: false, 'data-field': label }, preview ? sample : label); }
+  function blk(type, kids, extra) { extra = extra || {}; return h('div', { className: 'wy-blk wy-blk--' + type + (extra.cls ? ' ' + extra.cls : ''), 'data-type': type }, extra.gutter ? h('div', { className: 'wy-blk__gutter' }, h('button', { className: 'wy-blk__g', 'aria-label': 'Add a block below' }, I('plus')), h('button', { className: 'wy-blk__g wy-blk__g--drag', 'aria-label': 'Drag to move, click for options' }, I('drag'))) : null, extra.toolbar || null, kids); }
+  function head(o) { o = o || {};
+    return h('div', { className: 'wy-edx__head' },
+      h(W.IconButton, { icon: 'chevron-left', label: o.back || 'Back to templates', tooltip: 'bottom' }),
+      h('span', { className: 'wy-edx__doc', 'aria-hidden': 'true' }, I(o.icon || 'template')),
+      h('div', { className: 'wy-edx__titles' }, h('input', { className: 'wy-edx__title', defaultValue: o.title || 'Payment reminder', 'aria-label': 'Document title', size: 22 }),
+        h('div', { className: 'wy-edx__meta' }, o.where || 'Templates · Letters', h('span', null, '·'), I('check', 12), o.saved || 'Saved 14:02')),
+      h('div', { className: 'wy-edx__acts' },
+        h('button', { className: 'wy-edx__mode' + (o.mode === 'suggest' ? ' is-suggest' : ''), 'aria-haspopup': 'menu' }, I(o.mode === 'suggest' ? 'suggest' : o.mode === 'view' ? 'view' : 'edit', 14), o.mode === 'suggest' ? 'Suggesting' : o.mode === 'view' ? 'Viewing' : 'Editing', I('chevron-down', 14)),
+        h('span', { className: 'wy-edx__count' }, h(W.IconButton, { icon: 'comment', label: 'Comments and suggestions', tooltip: 'bottom' }), h('b', null, o.count || '3')),
+        h(W.Button, { variant: 'outline', size: 'sm', icon: 'download' }, 'PDF'),
+        o.main === false ? null : h(W.Button, { size: 'sm', icon: 'check' }, o.mainLabel || 'Publish')));
+  }
+  function bar(o) { o = o || {};
+    return h('div', { className: 'wy-edx__bar' + (o.readonly ? ' is-readonly' : ''), role: 'toolbar', 'aria-label': 'Formatting' },
+      tb('undo', 'Undo', false, '⌘Z'), tb('redo', 'Redo', false, '⇧⌘Z'), sep(),
+      h('button', { className: 'wy-edx__drop wy-edx__style', 'aria-haspopup': 'menu' }, o.style || 'Normal text', I('chevron-down', 14)), sep(),
+      tb('bold', 'Bold', o.bold, '⌘B'), tb('italic', 'Italic', false, '⌘I'), tb('underline', 'Underline', false, '⌘U'), tb('strike', 'Strikethrough', false, '⇧⌘X'), sep(),
+      tb('link', 'Link', false, '⌘K'), tb('highlight', 'Highlight'), sep(),
+      tb('list-bullet', 'Bulleted list', false, '⇧⌘8'), tb('list-numbered', 'Numbered list', false, '⇧⌘7'), tb('list-todo', 'Checklist', false, '⇧⌘9'), sep(),
+      h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu' }, I('plus', 14), 'Insert', I('chevron-down', 14)),
+      h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu' }, I('field', 14), 'Field', I('chevron-down', 14)),
+      tb('comment-add', 'Comment', false, '⌥⌘M'), sep(),
+      h('button', { className: 'wy-edx__ask' }, I('robot', 14), 'Ask an agent'),
+      h('span', { className: 'wy-edx__grow' }),
+      o.page ? h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu', 'aria-label': 'Zoom' }, o.zoom || '75%', I('chevron-down', 14)) : null,
+      h(W.ToggleGroup, { size: 'sm', label: 'View', required: true, defaultValue: o.page ? 'page' : 'continuous', options: [{ value: 'continuous', label: 'Continuous', icon: 'continuous', iconOnly: true }, { value: 'page', label: 'Page view', icon: 'page', iconOnly: true }] }),
+      tb('outline', 'Outline', o.outline !== false));
+  }
+  function outline(items) { return h('nav', { className: 'wy-edx__outline', 'aria-label': 'Outline' }, h('div', { className: 'wy-edx__outline-h' }, 'Outline'), items.map(function (it, i) { return h('a', { key: i, href: '#', className: 'l' + it[0] + (it[2] ? ' is-on' : '') }, it[1]); })); }
+  function status(t) { return h('div', { className: 'wy-edx__status' }, t.map(function (x, i) { return x === '|' ? h('span', { key: i, className: 'wy-edx__grow' }) : h('span', { key: i }, x); })); }
+  function rcard(top, o) {
+    return h('div', { className: 'wy-rc' + (o.agent ? ' is-agent' : '') + (o.active ? ' is-active' : ''), style: { top: top } },
+      h('div', { className: 'wy-rc__who' }, o.agent ? h(W.ActorChip, { kind: 'agent', name: o.agent, onBehalfOf: o.for }) : h(F, null, h(W.Avatar, { name: o.name, size: 24 }), h('span', { className: 'wy-rc__name' }, o.name)),
+        o.agent ? null : h('span', { className: 'wy-rc__time' }, o.time),
+        h('span', { className: 'wy-rc__acts' }, o.sug ? h(F, null, h(W.IconButton, { icon: 'check', label: 'Accept', size: 'sm' }), h(W.IconButton, { icon: 'close', label: 'Reject', size: 'sm' })) : h(W.IconButton, { icon: 'check', label: 'Resolve', size: 'sm' }))),
+      o.what ? h('div', { className: 'wy-rc__what' }, o.what) : null,
+      o.text ? h('div', null, o.text) : null,
+      o.reply ? h('div', { className: 'wy-rc__reply' }, 'Reply or add others with @') : null);
+  }
+  function docBody(o) { o = o || {}; var p = o.preview;
+    return h(F, null,
+      blk('p', h('p', null, 'Dear ', mf('Customer name', 'Example Clinic', p), ',')),
+      blk('p', h('p', null, 'Invoice ', mf('Invoice number', 'INV-1042', p), ' for ', mf('Invoice total', 'JOD 301.600', p), ' was due on ', mf('Due date', '14 Oct 2026', p), '. ', p ? 'Please pay within 30 days of this letter.' : h(F, null, h('mark', { className: 'wy-cmt' + (o.activeCmt ? ' is-active' : '') }, 'Please pay within '), h('del', { className: 'wy-sug-del' }, '30 days'), h('ins', { className: 'wy-sug-ins' }, '14 days'), ' of this letter.')), { gutter: true, cls: o.hover ? 'is-hover' : '' }),
+      blk('callout', h('div', null, I('info'), h('p', null, 'Pay by bank transfer to ', h('b', null, 'Example Bank'), ', IBAN ', mf('Company IBAN', 'JO94 CBJO 0010 0000 0000 0131 0003 02', p), ', with the invoice number as the reference.'))),
+      blk('h2', h('h3', null, 'Open invoices')),
+      blk('table', h('table', null, h('thead', null, h('tr', null, h('th', null, 'Invoice'), h('th', null, 'Due'), h('th', { className: 'is-num' }, 'Amount'))),
+        h('tbody', null, h('tr', null, h('td', null, 'INV-1042'), h('td', null, '14 Oct 2026'), h('td', { className: 'is-num' }, 'JOD 301.600')), h('tr', null, h('td', null, 'INV-1051'), h('td', null, '21 Oct 2026'), h('td', { className: 'is-num' }, 'JOD 96.000'))))),
+      o.agentBlock === false ? null : h('div', { className: 'wy-blk wy-blk--p is-suggested' }, h('div', { className: 'wy-blk__by' }, h(W.ActorChip, { kind: 'agent', name: 'Billing assistant', onBehalfOf: 'Rana' }), 'suggests a paragraph'), h('p', null, 'If you have already paid, thank you, and please ignore this letter. Payments can take two working days to reach us.')),
+      blk('p', h('p', null, 'Kind regards,')),
+      blk('p', h('p', null, mf('Sender name', 'Rana Haddad', p), h('br'), mf('Company name', 'Example Bakery', p))));
+  }
+
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'wy-edx', style: { height: '100%' } },
+    head({ count: '3' }), bar({ page: true, outline: false, zoom: '75%', readonly: true }),
+    h('div', { className: 'wy-edx__body no-outline' },
+      h('div', { className: 'wy-edx__canvas', style: { paddingTop: 20 } },
+        h('div', { className: 'wy-edx__previewbar' }, I('view', 14), h('span', null, 'Previewing with '), h('b', null, 'INV-1042 · Example Clinic'), h(W.Button, { variant: 'ghost', size: 'sm' }, 'Change record'), h(W.Button, { variant: 'ghost', size: 'sm' }, 'Show fields')),
+        h('div', { className: 'wy-edx__zoomwrap wy-theme-partner', style: { '--zoom': 0.75 } }, h('div', { className: 'wy-edx__pages' },
+          h('div', { className: 'wy-page show-margins' }, h('div', { className: 'wy-page__margin' }),
+            h('div', { className: 'wy-page__lh' }, h('div', { style: { display: 'grid', gap: 6 } }, h(W.TenantLogo, { name: 'Example Bakery', size: 32 }), h('span', null, 'Mecca Street 112, Amman · Tax no. 0123456'), h('span', null, '+962 6 555 0100 · accounts@bakery.example.jo')),
+              h('div', { className: 'wy-page__lhend' }, h('h1', { className: 'wy-page__title' }, 'Payment reminder'), h('b', null, 'Ref INV-1042'), h('span', null, '29 October 2026'))),
+            docBody({ preview: true, agentBlock: false }),
+            h('div', { className: 'wy-page__foot' }, h('span', null, 'Page 1 of 2 · INV-1042'), h('span', null, 'Example Bakery'))),
+          h('div', { className: 'wy-page', style: { height: 260 } }, h('div', { className: 'wy-page__run' }, h(W.TenantLogo, { name: 'Example Bakery', size: 20 }), h('span', null, 'Payment reminder · continued')))))),
+      h('aside', { className: 'wy-edx__rail', 'aria-label': 'Comments and suggestions' },
+        h('div', { className: 'wy-edx__railhead' }, h('span', null, '2 suggestions · 1 comment')),
+        h('p', { className: 'wy-edx__railnote' }, 'Comments and suggestions are hidden while previewing, so the pages look as they will print. Show fields to see them again.'))),
+    status(['214 words', 'Page 1 of 2', 'A4 · margins 16 mm', '|', 'Previewing INV-1042: as it will print, read-only'])));
+</script>
+</body>
+</html>

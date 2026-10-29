@@ -1,0 +1,18 @@
+<!-- @dsCard group="Forms" height=400 subtitle="Hint, error, counter, read-only and disabled" -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../bundle.css"><script src="../../preview-runtime/react.production.min.js"></script><script src="../../preview-runtime/react-dom.production.min.js"></script><script src="../bundle.js"></script><script>(function(){var t=(location.hash.match(/theme=(dark|light)/)||[])[1]||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);})();</script><style>body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font-sans);width:960px;min-height:400px}</style><meta charset="utf-8"><title>Text fields</title><style>#root{padding:16px 24px} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px 32px;align-items:start} .ar{font-family:var(--font-arabic)} </style></head>
+<body>
+<div id="root" class=""></div>
+<script>
+  var W = window.Whity, h = React.createElement; 
+  function cap(t) { return h('p', { className: 'cap' }, t); }
+  function col() { return h.apply(null, ['div', { style: { display: 'grid', gap: 12, alignContent: 'start' } }].concat([].slice.call(arguments))); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'grid2' },
+  col(h(W.Input, { label: 'Customer name', defaultValue: 'Example Clinic', required: true }), h(W.Input, { label: 'Email', defaultValue: 'clinic@example', errorText: 'Enter an email address like name@company.jo.' }),
+      h(W.Input, { label: 'Customer no.', defaultValue: 'C-0031', readOnly: true, helperText: 'Set by Whity; it can’t be changed.' }), h(W.Input, { label: 'Tax no.', placeholder: '[000000000]', disabled: true, helperText: 'Turn on tax invoices to edit this.' })),
+  col(h(W.Textarea, { label: 'Note on the invoice', maxLength: 240, rows: 4, defaultValue: 'Delivered to the back entrance before 10:00. Please call 30 minutes ahead.' , helperText: 'Printed under the totals.' }),
+      h(W.Textarea, { label: 'Reason for the credit note', maxLength: 120, rows: 3, required: true, errorText: 'Say why, so the customer and JoFotara see it.' }))));
+</script>
+</body>
+</html>
