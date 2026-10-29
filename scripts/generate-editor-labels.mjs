@@ -25,7 +25,7 @@ const lines = [
   '// Do not edit by hand: change the English default in labels.ts and regenerate.',
   "'use client';",
   '',
-  "import type { EditorLabels } from '@amroksaleh/ui/editor/labels';",
+  "import type { EditorLabels } from '@whity-org/ui/editor/labels';",
   "import { useTranslation } from '../i18n';",
   '',
   '/** The editor\'s strings in the reader\'s language (`documents` domain, `blockEditor.*`). */',

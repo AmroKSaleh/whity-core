@@ -1,5 +1,5 @@
-import type { Block, DocumentKind, WhityDocument } from '@amroksaleh/ui/editor/contract';
-import type { DocumentEditorAdapter, LoadedDocument, SaveResult } from '@amroksaleh/features/document-editor';
+import type { Block, DocumentKind, WhityDocument } from '@whity-org/ui/editor/contract';
+import type { DocumentEditorAdapter, LoadedDocument, SaveResult } from '@whity-org/features/document-editor';
 import { api } from '@/lib/api/client';
 import type { components } from '@/lib/api/schema';
 

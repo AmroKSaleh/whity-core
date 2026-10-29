@@ -2,9 +2,9 @@
 
 import * as React from 'react';
 
-import { Button } from '@amroksaleh/ui/button';
-import { DocEditor, type SaveState } from '@amroksaleh/ui/editor/doc-editor';
-import type { EditorMode, WhityDocument } from '@amroksaleh/ui/editor/contract';
+import { Button } from '@whity-org/ui/button';
+import { DocEditor, type SaveState } from '@whity-org/ui/editor/doc-editor';
+import type { EditorMode, WhityDocument } from '@whity-org/ui/editor/contract';
 import { useTranslation } from '../i18n';
 import { useEditorLabels } from './editor-labels';
 import type { DocumentEditorAdapter } from './types';

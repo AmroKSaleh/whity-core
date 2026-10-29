@@ -30,8 +30,8 @@
 import React from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { RoleRecordScreen } from '@amroksaleh/features/roles';
-import type { Permission, RoleWithPermissions, RolesAdapter } from '@amroksaleh/features/roles';
+import { RoleRecordScreen } from '@whity-org/features/roles';
+import type { Permission, RoleWithPermissions, RolesAdapter } from '@whity-org/features/roles';
 import { createRolesAdapter } from '@/lib/roles-adapter';
 
 /** English-fallback translator: returns the caller-supplied source string. */

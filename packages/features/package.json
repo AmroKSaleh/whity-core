@@ -1,6 +1,6 @@
 {
-  "name": "@amroksaleh/features",
-  "version": "0.2.0",
+  "name": "@whity-org/features",
+  "version": "0.3.0",
   "description": "Client-safe, data-source-agnostic feature UI extracted from web/ — reusable by non-Next clients (Tauri/Vite SPA, Flutter). Formalizes the app-shell nav contract and the adapter-injection pattern feature pages follow.",
   "license": "MIT",
   "type": "module",
@@ -32,7 +32,7 @@
     "zod": ">=4"
   },
   "dependencies": {
-    "@amroksaleh/ui": "^0.4.0",
+    "@whity-org/ui": "^0.5.0",
     "@tabler/icons-react": "^3.49.0"
   },
   "devDependencies": {

@@ -6,9 +6,9 @@ import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
-import { Button } from '@amroksaleh/ui/button';
-import { Skeleton } from '@amroksaleh/ui/skeleton';
-import { ErrorState } from '@amroksaleh/ui/empty-state';
+import { Button } from '@whity-org/ui/button';
+import { Skeleton } from '@whity-org/ui/skeleton';
+import { ErrorState } from '@whity-org/ui/empty-state';
 import {
   IconBinaryTree2,
   IconList,
@@ -16,7 +16,7 @@ import {
   IconShieldLock,
   IconUsersGroup,
 } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 import { CreatePersonModal } from './create-person-modal';
 import { EditPersonModal } from './edit-person-modal';
 import { DeletePersonModal } from './delete-person-modal';

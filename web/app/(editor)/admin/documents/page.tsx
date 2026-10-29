@@ -3,8 +3,8 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ScreenTooSmall, useViewportAtLeast } from '@/components/ui/screen-too-small';
-import { Button } from '@amroksaleh/ui/button';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { Button } from '@whity-org/ui/button';
+import { useTranslation } from '@whity-org/features/i18n';
 import { DocumentDesigner } from '@/components/documents/document-designer';
 
 /**

@@ -5,13 +5,13 @@ import { api } from '@/lib/api/client';
 import type { components } from '@/lib/api/schema';
 import { useToast } from '@/lib/toast-context';
 import { useCapabilities } from '@/hooks/useCapabilities';
-import { useRichTranslation, useTranslation } from '@amroksaleh/features/i18n';
+import { useRichTranslation, useTranslation } from '@whity-org/features/i18n';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Button } from '@amroksaleh/ui/button';
-import { Badge } from '@amroksaleh/ui/badge';
+import { Button } from '@whity-org/ui/button';
+import { Badge } from '@whity-org/ui/badge';
 import { PermissionButton } from '@/components/rbac/permission-button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@amroksaleh/ui/card';
-import { AccessDenied } from '@amroksaleh/ui/access-denied';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@whity-org/ui/card';
+import { AccessDenied } from '@whity-org/ui/access-denied';
 import {
   IconBuildingStore,
   IconSearch,

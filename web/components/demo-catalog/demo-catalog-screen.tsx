@@ -4,8 +4,8 @@ import { useState } from 'react';
 import type { PluginFeature } from '@/lib/plugin-features';
 import { demoCatalogAdapter } from '@/lib/demo-catalog-adapter';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { DemoCatalogList, DemoCatalogDetail } from '@amroksaleh/features/demo-catalog';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { DemoCatalogList, DemoCatalogDetail } from '@whity-org/features/demo-catalog';
+import { useTranslation } from '@whity-org/features/i18n';
 
 /**
  * web/'s bespoke screen for the DemoCatalog plugin's `screen: 'custom'`
@@ -16,7 +16,7 @@ import { useTranslation } from '@amroksaleh/features/i18n';
  * (list vs. detail-for-id vs. detail-for-new) and wires web's
  * `demoCatalogAdapter` into the extracted, data-source-agnostic
  * `DemoCatalogList`/`DemoCatalogDetail` components
- * (@amroksaleh/features/demo-catalog). Those components themselves have zero
+ * (@whity-org/features/demo-catalog). Those components themselves have zero
  * Next.js dependency and zero opinion about where the data comes from — the
  * exact same components render, unmodified, in the Vite SPA harness
  * (packages/spa-harness) against an in-memory adapter instead.

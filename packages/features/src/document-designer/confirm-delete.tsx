@@ -7,7 +7,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '@amroksaleh/ui/alert-dialog';
+} from '@whity-org/ui/alert-dialog';
 import { useTranslation } from '../i18n';
 
 /**

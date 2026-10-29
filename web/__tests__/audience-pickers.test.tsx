@@ -1,5 +1,5 @@
 /**
- * #1015 — the two `@amroksaleh/ui` audience controls, on their own.
+ * #1015 — the two `@whity-org/ui` audience controls, on their own.
  *
  * These are kit primitives, so they are tested through their PROPS and their
  * rendered output only. Each case pins a claim the component's docblock makes
@@ -23,11 +23,11 @@ import {
   AudienceGroupPicker,
   type AudienceGroupOption,
   type AudienceGroupPreview,
-} from '@amroksaleh/ui/audience-group-picker';
+} from '@whity-org/ui/audience-group-picker';
 import {
   AudiencePeoplePicker,
   type AudiencePersonOption,
-} from '@amroksaleh/ui/audience-people-picker';
+} from '@whity-org/ui/audience-people-picker';
 
 const GROUPS: AudienceGroupOption[] = [
   { id: 1, name: 'Instructors', description: 'Everyone holding the instructor role.' },

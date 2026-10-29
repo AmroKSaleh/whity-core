@@ -10,17 +10,17 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
-import { Button } from '@amroksaleh/ui/button';
-import { Badge } from '@amroksaleh/ui/badge';
-import { Skeleton } from '@amroksaleh/ui/skeleton';
-import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
+import { Button } from '@whity-org/ui/button';
+import { Badge } from '@whity-org/ui/badge';
+import { Skeleton } from '@whity-org/ui/skeleton';
+import { Alert, AlertDescription } from '@whity-org/ui/alert';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@amroksaleh/ui/select';
+} from '@whity-org/ui/select';
 import {
   IconEdit,
   IconPlus,
@@ -28,7 +28,7 @@ import {
   IconUsers,
   IconX,
 } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 import type { OU } from './types';
 import type { OuAction } from './ou-view';
 

@@ -9,7 +9,7 @@
  * answer. This route is that answer.
  *
  * It began as a hand-built prototype and is now a CONSUMER of the record-page
- * shell (@amroksaleh/features/record, #882) — the same shell `/admin/users/[id]`
+ * shell (@whity-org/features/record, #882) — the same shell `/admin/users/[id]`
  * mounts. The block-DESCRIBED version, which lets a plugin's records get the
  * same treatment without host edits, is #883.
  *
@@ -17,15 +17,15 @@
  * the dynamic segment, the cookie-authenticated `webRolesAdapter`, the
  * capability check, the composed translator, the toast notifier, and the router
  * — and hands them to the data-source-agnostic `RoleRecordScreen`
- * (@amroksaleh/features/roles). A desktop shell mounts the same component with
+ * (@whity-org/features/roles). A desktop shell mounts the same component with
  * its own adapter and its own navigation.
  */
 
 import { useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { RoleRecordScreen } from '@amroksaleh/features/roles';
+import { RoleRecordScreen } from '@whity-org/features/roles';
 import { webRolesAdapter } from '@/lib/roles-adapter';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 import { useToast } from '@/lib/toast-context';
 
 /**
@@ -55,7 +55,7 @@ export default function Page() {
   // `common` — restoring Arabic/RTL parity for the chrome instead of shipping an
   // English label onto an RTL admin page.
   //
-  // @i18n-dynamic-ignore: this composite forwards a runtime key to the admin/common domains; the literal keys are declared in the @i18n-keys blocks of the @amroksaleh/features/roles component files that call t().
+  // @i18n-dynamic-ignore: this composite forwards a runtime key to the admin/common domains; the literal keys are declared in the @i18n-keys blocks of the @whity-org/features/roles component files that call t().
   const tAdmin = useTranslation('admin');
   const tCommon = useTranslation('common');
   const t = useCallback(

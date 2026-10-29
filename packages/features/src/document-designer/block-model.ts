@@ -1,12 +1,12 @@
-import type { DocBlock } from '@amroksaleh/ui/documents/blocks';
-import type { DocElement } from '@amroksaleh/ui/documents/types';
+import type { DocBlock } from '@whity-org/ui/documents/blocks';
+import type { DocElement } from '@whity-org/ui/documents/types';
 
 export type {
   BlockScope,
   DocBlock,
   FlattenDiagnostics,
   FlattenResult,
-} from '@amroksaleh/ui/documents/blocks';
+} from '@whity-org/ui/documents/blocks';
 export {
   BLOCK_SCOPES,
   MAX_BLOCK_DEPTH,
@@ -16,7 +16,7 @@ export {
   makeBlockFromElements,
   resolveInstance,
   wouldCycle,
-} from '@amroksaleh/ui/documents/blocks';
+} from '@whity-org/ui/documents/blocks';
 
 /**
  * The PURE model half for reusable document/label-designer blocks: row
@@ -27,7 +27,7 @@ export {
  * block MODEL
  * (`DocBlock`, `BlockScope`) and the pure resolution helpers (`blocksById`,
  * `makeBlockFromElements`, `resolveInstance`) live in
- * `@amroksaleh/ui/documents/blocks` (re-exported above) so the rendering path
+ * `@whity-org/ui/documents/blocks` (re-exported above) so the rendering path
  * (`element-layer.tsx`) can depend on them without pulling in this module's
  * API-backed persistence.
  *

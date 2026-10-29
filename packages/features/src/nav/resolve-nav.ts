@@ -1,4 +1,4 @@
-import type { AppSidebarNavGroup } from "@amroksaleh/ui/app-sidebar"
+import type { AppSidebarNavGroup } from "@whity-org/ui/app-sidebar"
 
 import { identityTranslate, type NavConfig, type NavTranslate } from "./types"
 

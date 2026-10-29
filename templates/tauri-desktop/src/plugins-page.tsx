@@ -2,8 +2,8 @@ import * as React from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@amroksaleh/ui/card"
-import { Badge } from "@amroksaleh/ui/badge"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@whity-org/ui/card"
+import { Badge } from "@whity-org/ui/badge"
 
 /** Mirrors `db::plugin_sync_repo::PluginSyncStatus` (camelCase over the IPC wire). */
 interface PluginSyncStatus {

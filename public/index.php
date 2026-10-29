@@ -3323,7 +3323,7 @@ $router->register('POST', '/api/documents/{id:\d+}/render',                     
 // gets the same 404 the id route gives them. Holding the paper is not reach.
 $router->register('GET',    '/api/documents/by-verification/{token}',                  [$documentQrHandler, 'resolveToken'], null, null, CorePermissions::DOCUMENTS_READ);
 // The record page's panel: the live code, its URL (so the client draws the
-// symbol with the barcode renderer already in @amroksaleh/ui) and the scan
+// symbol with the barcode renderer already in @whity-org/ui) and the scan
 // trail. Read gate matches the region's declaration in
 // DocumentsApiHandler::recordSections() — #975's rule that a region's dedicated
 // route carries the same gate as the region.

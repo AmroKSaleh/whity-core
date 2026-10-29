@@ -10,15 +10,15 @@ import { useCapabilities } from '@/hooks/useCapabilities';
 import { LANGUAGES_MANAGE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
-import { Button } from '@amroksaleh/ui/button';
-import { Switch } from '@amroksaleh/ui/switch';
-import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
-import { AccessDenied } from '@amroksaleh/ui/access-denied';
+import { Button } from '@whity-org/ui/button';
+import { Switch } from '@whity-org/ui/switch';
+import { Alert, AlertDescription } from '@whity-org/ui/alert';
+import { AccessDenied } from '@whity-org/ui/access-denied';
 import {
   useI18nAvailability,
   useRichTranslation,
   useTranslation,
-} from '@amroksaleh/features/i18n';
+} from '@whity-org/features/i18n';
 import { IconPlus } from '@tabler/icons-react';
 import { CreateLanguageModal } from './create-modal';
 import { errorMessage } from './shared';

@@ -5,9 +5,9 @@ import {
   flattenBlock,
   makeBlockFromElements,
   wouldCycle,
-} from '@amroksaleh/ui/documents/blocks';
-import type { DocBlock } from '@amroksaleh/ui/documents/blocks';
-import type { DocElement } from '@amroksaleh/ui/documents/types';
+} from '@whity-org/ui/documents/blocks';
+import type { DocBlock } from '@whity-org/ui/documents/blocks';
+import type { DocElement } from '@whity-org/ui/documents/types';
 
 /**
  * Blocks inside blocks (#1186 slice 3).

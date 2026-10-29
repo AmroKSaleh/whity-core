@@ -21,10 +21,10 @@
 import * as React from 'react';
 import type { components } from '@/lib/api/schema';
 import type { useToast } from '@/lib/toast-context';
-import { Badge } from '@amroksaleh/ui/badge';
+import { Badge } from '@whity-org/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Switch } from '@amroksaleh/ui/switch';
-import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
+import { Switch } from '@whity-org/ui/switch';
+import { useTranslation, type TranslateFn } from '@whity-org/features/i18n';
 
 // Granular RBAC for the Website Settings console (mirrors the backend catalogue):
 //   read   → may view the effective/editable set (else Access Denied)

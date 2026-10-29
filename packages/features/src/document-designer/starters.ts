@@ -1,5 +1,5 @@
-import type { DocElement, DocTemplate, PageSpec, Placeholder, TextStyle } from '@amroksaleh/ui/documents/types';
-import type { DocBlock } from '@amroksaleh/ui/documents/blocks';
+import type { DocElement, DocTemplate, PageSpec, Placeholder, TextStyle } from '@whity-org/ui/documents/types';
+import type { DocBlock } from '@whity-org/ui/documents/blocks';
 import { DEFAULT_TEXT_STYLE, blankTemplate, newPageId } from './presets';
 
 /**

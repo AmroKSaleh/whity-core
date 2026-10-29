@@ -37,7 +37,7 @@ const addToast = jest.fn();
 jest.mock('@/lib/toast-context', () => ({ useToast: () => ({ addToast }) }));
 jest.mock('@/lib/direction-context', () => ({ useDirection: () => ({ dir: 'ltr' }) }));
 
-jest.mock('@amroksaleh/ui/route-flow/editor', () => ({
+jest.mock('@whity-org/ui/route-flow/editor', () => ({
   __esModule: true,
   RouteFlowEditor: ({
     graph,

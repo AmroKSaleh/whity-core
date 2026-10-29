@@ -1,4 +1,4 @@
-import type { WhityDocument } from '@amroksaleh/ui/editor/contract';
+import type { WhityDocument } from '@whity-org/ui/editor/contract';
 
 /** A document as the server keeps it: the contract's document plus its draft version. */
 export interface LoadedDocument {

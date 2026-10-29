@@ -1,7 +1,7 @@
 /**
  * web/'s DemoCatalogAdapter implementation (multi-client feature-extraction
  * pilot) — wires the data-source-agnostic `DemoCatalogList`/`DemoCatalogDetail`
- * components (@amroksaleh/features/demo-catalog) to the DemoCatalog plugin's
+ * components (@whity-org/features/demo-catalog) to the DemoCatalog plugin's
  * REST API via web's own cookie-authenticated `apiClient` (silent token
  * refresh on 401, same as every other authenticated fetch in this app — see
  * `lib/plugin-features.ts` for the same pattern).
@@ -17,7 +17,7 @@ import type {
   DemoCatalogAdapter,
   DemoCatalogItem,
   DemoCatalogItemInput,
-} from '@amroksaleh/features/demo-catalog';
+} from '@whity-org/features/demo-catalog';
 
 function isItemResponse(body: unknown): body is { data: DemoCatalogItem } {
   return typeof body === 'object' && body !== null && 'data' in body;

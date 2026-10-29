@@ -42,7 +42,7 @@ jest.mock('@/lib/direction-context', () => ({ useDirection: () => ({ dir: 'ltr' 
 // The canvas, reduced to the one thing the host consumes from it: which stage is
 // selected. `appendStep` is passed through unchanged — the screen imports it
 // from the same module and this file never adds a stage.
-jest.mock('@amroksaleh/ui/route-flow/editor', () => ({
+jest.mock('@whity-org/ui/route-flow/editor', () => ({
   __esModule: true,
   RouteFlowEditor: ({
     graph,
