@@ -1,5 +1,5 @@
 /**
- * Whity document editor — the contract (design system 2.2, decisions E.1–E.39).
+ * Whity document editor — the contract (design system 2.2, decisions E.1–E.43).
  *
  * The design system defines the editor; the Whity team builds it (E.1).
  * This file is the shared vocabulary between the editor, Whity Render,
@@ -25,7 +25,8 @@ export type Actor =
 
 /* ----------------------------------------------------------- Document */
 
-export type DocumentKind = 'template' | 'letter' | 'report' | 'note' | 'wiki';
+/** E.43: 'label' is a sheet of identical labels, printed one per record or CSV row; page view only. */
+export type DocumentKind = 'template' | 'letter' | 'report' | 'note' | 'wiki' | 'label';
 
 export interface WhityDocument {
   id: DocId;
@@ -39,6 +40,8 @@ export interface WhityDocument {
   fullWidth?: boolean;
   /** Page setup for the page view and Whity Render (stage 6). */
   page?: { size: 'A4' | 'A5' | 'Letter'; marginMm: 16; letterhead: boolean };
+  /** E.43: label sheets only (A4 or Letter). Each label holds the document's blocks. */
+  labels?: LabelGrid;
   /** For templates: the record type its fields come from, e.g. "invoice". */
   recordType?: string;
   blocks: Block[];
@@ -55,10 +58,12 @@ export interface WhityDocument {
 /* ------------------------------------------------------------- Inline */
 
 /** Rich text inside a block: a list of runs. */
-export type Inline = Text | FieldRef | HardBreak;
+export type Inline = Text | FieldRef | HardBreak | MathRef;
 
 export interface Text { type: 'text'; text: string; marks?: Mark[] }
 export interface HardBreak { type: 'break' }
+/** E.42: an inline formula in TeX, rendered with KaTeX; one character for the caret. */
+export interface MathRef { type: 'math'; tex: string }
 
 /** E.26: a merge field. One character for the caret; shows its label while editing, its value in preview. */
 export interface FieldRef {
@@ -99,6 +104,7 @@ export type Block =
   | ToggleBlock | ColumnsBlock | DividerBlock | PageBreakBlock
   | TableBlock | ImageBlock | FileBlock
   | RecordBlock | ChartBlock | SignatureBlock
+  | BarcodeBlock | QrBlock | MathBlock
   | SavedBlockRef | PluginBlock;
 
 export interface ParagraphBlock extends BlockBase { type: 'paragraph'; content: Inline[] }
@@ -141,6 +147,37 @@ export interface SignatureBlock extends BlockBase {
   date: Inline[];
   stamp: boolean;
 }
+
+/** E.40: ink only; the value is typed text or a merge field. Sized in mm in the page view. */
+export interface BarcodeBlock extends BlockBase {
+  type: 'barcode';
+  symbology: 'code128' | 'ean13' | 'code39';
+  value: (Text | FieldRef)[];
+  showText: boolean;
+  widthMm?: number;
+  heightMm?: number;
+}
+/** E.41: a value or field as a QR. Not the document's verification QR (6.7), which stays automatic. */
+export interface QrBlock extends BlockBase {
+  type: 'qr';
+  value: (Text | FieldRef)[];
+  caption?: Inline[];
+  sizeMm?: number;
+}
+/** E.42: a display formula in TeX, rendered with KaTeX on screen and in print. */
+export interface MathBlock extends BlockBase { type: 'math'; tex: string }
+
+/** E.43: the grid of a label sheet. A certificate is a one-label sheet (columns 1, rows 1). */
+export interface LabelGrid {
+  columns: number;
+  rows: number;
+  size: { widthMm: number; heightMm: number };
+  gapMm: number;
+}
+/** E.43: what Print fills the labels from: one label per record, or per row of an uploaded CSV. */
+export type LabelPrintSource =
+  | { kind: 'records'; records: RecordRef[] }
+  | { kind: 'csv'; fileId: string; columns: Record<string, string> /* CSV column -> field path */ };
 
 /** E.21: a saved block in a document. Synced ones point at the library; copies are ordinary blocks. */
 export interface SavedBlockRef extends BlockBase {
@@ -284,6 +321,7 @@ export interface DocEditorProps {
   onChange(doc: WhityDocument): void;  // debounced; drafts autosave
   onPublish?(doc: WhityDocument): Promise<void>;          // E.9, templates only
   onExportPdf?(doc: WhityDocument): Promise<void>;        // Whity Render
+  onPrintLabels?(doc: WhityDocument, source: LabelPrintSource): Promise<void>;  // E.43, label sheets only
   onAskAgent?(req: AgentRequest): AsyncIterable<AgentResult>;  // streams (part 7)
   onDecide?(d: SuggestionDecision): void;
   onSaveBlock?(b: Omit<SavedBlock, 'id' | 'version' | 'usedIn'>): Promise<SavedBlock>;

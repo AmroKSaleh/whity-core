@@ -1,6 +1,6 @@
 # Document editor
 
-One editor for everything people write in Whity: templates Whity Render prints, letters, reports, notes and wiki pages. It takes blocks and speed from Notion and Gutenberg, and pages, comments and suggestions from Google Docs. Agents write in it as suggestions only. The design system defines it (decisions E.1–E.39, the Document editor cards, `handoff/editor/`); the Whity team builds it (E.1).
+One editor for everything people write in Whity: templates Whity Render prints, letters, reports, notes and wiki pages. It takes blocks and speed from Notion and Gutenberg, and pages, comments and suggestions from Google Docs. Agents write in it as suggestions only. The design system defines it (decisions E.1–E.43, the Document editor cards, `handoff/editor/`); the Whity team builds it (E.1).
 
 ## The shell
 
@@ -22,13 +22,15 @@ Under 1280px the outline closes; under 1024px the rail becomes a drawer; under 7
 
 ## Blocks
 
-Text, Heading 1–3, Quote, Code · Bulleted, Numbered, Checklist · Callout (Note, Important) · Toggle, Columns, Divider, Page break · Table, Image, File · Record and Chart (live), Signature and stamp (E.13–E.16). Tables are document tables; data comes in as live Record and Chart blocks, frozen in each PDF at render time.
+Text, Heading 1–3, Quote, Code · Bulleted, Numbered, Checklist · Callout (Note, Important) · Toggle, Columns, Divider, Page break · Table, Image, File · Record and Chart (live), Signature and stamp (E.13–E.16) · Barcode, QR code, Maths (E.40–E.42). Tables are document tables; data comes in as live Record and Chart blocks, frozen in each PDF at render time.
 
 **Block chrome:** hovering a block shows + and a drag handle in the margin; the handle drags or opens the block menu (Turn into, Comment, Duplicate, Move, Delete). Selecting a table, image, callout or embed shows its own toolbar above it (E.8).
 
 **Plugin blocks:** plugins add blocks through the block registry. Verified and first-party plugins render natively with the Whity SDK; others in a sandboxed frame. A block needs a print view to be used in templates. A disabled plugin leaves a placeholder that keeps the data and blocks publishing. Each plugin gets its own group in the / menu (E.17–E.20).
 
 **Saved blocks:** select several blocks and Save as block, Synced (edit once, every document updates) or Copy, for Only me or the workspace; synced blocks can leave parts to fill per document (E.21–E.24). A published template picks up a synced block's change at its next publish (E.38).
+
+**Label sheets:** a document kind of its own, a sheet of identical labels in a fixed grid, each holding the same blocks and fields. Print fills one label per record or per row of an uploaded CSV. It opens in the page view only; a certificate is a one-label sheet (E.43).
 
 ## Writing
 

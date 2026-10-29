@@ -12,7 +12,7 @@ Surveyed on `develop` at `0c525285` (29 Oct 2026). Paths are relative to the rep
 - **The server has none of the collaboration and agent pieces**: no document versions, no optimistic concurrency, no comments, no suggestions, no realtime channel, no generic file upload, no agent identity, no proposals and no per-permission modes. An agent today *is* a person's token, and the audit log can't tell the two apart.
 - **What fits well:** the permission registry, the tenant-isolation guards, route-derived MCP tools, the event outbox, the render service's JSON-in/PDF-out protocol and its deterministic paginator, which the editor's page view can reuse, and the plugin system's interfaces, which can be extended with block definitions.
 - **Estimate:** about 39–51 engineer-weeks for M1–M8 including the server work, or 10–13 months for one engineer (see [Estimates](#dependencies-risks-and-estimates)).
-- **The owner answered every question on 29 Oct 2026** (see [Owner's answers](#owners-answers-29-oct-2026)). The editor replaces both modes of the current designer. Four blocks and one page kind are proposed as register additions, waiting for approval.
+- **The owner answered every question on 29 Oct 2026** (see [Owner's answers](#owners-answers-29-oct-2026)). The editor replaces both modes of the current designer. Three blocks and a label sheet kind were added to the register as E.40–E.43, approved the same day, with the matching contract types.
 
 ## 1. Foundation status (section 12, "Changes whity-core needs")
 
@@ -272,7 +272,7 @@ The 13 templates, amount in words and JoFotara (the rest of item 12) aren't in t
 
 | Q | Answer | What it changes |
 | --- | --- | --- |
-| 1 | **Replace both modes.** The new editor replaces the flow mode and the canvas mode. Barcode, QR code and Maths become blocks, and labels and certificates become a label sheet layout with CSV batch printing. | Proposed register additions below. M3 gains three blocks. M4 gains the label sheet kind, CSV batch and a migration of existing templates and starters into the new model. `ScreenTooSmall` and the old designer are deleted once nothing uses them (no-legacy rule). |
+| 1 | **Replace both modes.** The new editor replaces the flow mode and the canvas mode. Barcode, QR code and Maths become blocks, and labels and certificates become a label sheet layout with CSV batch printing. | Register additions E.40–E.43 below. M3 gains three blocks. M4 gains the label sheet kind, CSV batch and a migration of existing templates and starters into the new model. `ScreenTooSmall` and the old designer are deleted once nothing uses them (no-legacy rule). |
 | 2 | **Evolve `document_blocks`** into `saved_blocks`. | Edit migration 059 (plus 075 and 117). `global` and `system` stay for blocks Whity ships; the Save dialog offers Only me and Everyone in the workspace. |
 | 3 | **No Whity-paid model API for now.** In local mode the request goes to the person's own AI client (Claude Code or similar) connected over MCP. What the hosted website does is undecided. | No built-in agent runtime and no model-provider billing. "Ask an agent" writes an agent request to a queue. The person's MCP client picks it up with `document_agent_requests_next`, works with the tools in 3.4, and reports progress with `document_agent_request_update`, which feeds `AgentRunStatus` through the changes feed. The picker lists only agents connected for that person. When none is connected, the sheet says how to connect one rather than failing. The hosted website's behaviour stays open and doesn't block M6. ("Local mode" isn't yet a named concept in the code; it means a Whity the person's own AI client can reach over MCP.) |
 | 4 | **Draft inside, published outside.** | As proposed: `document_read` returns the draft for requests started in the editor and the published version everywhere else. |
@@ -295,9 +295,15 @@ The 13 templates, amount in words and JoFotara (the rest of item 12) aren't in t
 
 Section 18's shorter block menu is left as is: the card is the detailed spec, and the build follows the card (Copy link to block included).
 
-### Proposed register additions (Q1), waiting for approval
+### Register additions (Q1), approved 29 Oct 2026
 
-These are drafts for the owner. The register isn't changed until they're approved, and nothing depending on them is built before then. Numbers continue the editor series.
+Approved by the owner and added to `00-decision-register.md` as drafted below. Section 18, `handoff/editor/README.md` (TipTap mapping) and the Blocks card (`components/EditorBlocks/README.md`) now list them.
+
+Still open, as the register's rule for later changes asks:
+
+- they have no cards or screenshots yet;
+- the guideline PDF hasn't been republished;
+- the version (2.2) hasn't been bumped.
 
 | # | Decision | Proposed value |
 | --- | --- | --- |
@@ -306,7 +312,12 @@ These are drafts for the owner. The register isn't changed until they're approve
 | E.42 | Maths block | A block (and an inline `math` node) for formulas in TeX, rendered with KaTeX on screen and in print. Group "Basic". |
 | E.43 | Label sheets | A document kind `label`: a sheet (A4, Letter) divided into a fixed grid of labels, each one the same blocks with fields; Print fills one label per record or per row of an uploaded CSV. It opens in the page view and never in the continuous view. Replaces the canvas mode's labels and certificates; a certificate is a one-label sheet. |
 
-The contract needs matching additions when these are approved: `BarcodeBlock`, `QrBlock`, `MathBlock` and an inline `MathRef` in `Block` and `Inline`, `'label'` in `DocumentKind`, and a `labels: { size, columns, rows, gapMm }` page setting.
+Added to `handoff/editor/whity-document.ts`, which type-checks under `strict`:
+
+- `BarcodeBlock`, `QrBlock` and `MathBlock` in `Block`, and an inline `MathRef` in `Inline`;
+- `'label'` in `DocumentKind`;
+- `WhityDocument.labels: LabelGrid` (columns, rows, label size in mm, gap);
+- `LabelPrintSource` (records, or a CSV with a column-to-field map) and `DocEditorProps.onPrintLabels`.
 
 ## Questions for the owner
 

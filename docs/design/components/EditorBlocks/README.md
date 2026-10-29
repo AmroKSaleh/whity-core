@@ -4,12 +4,12 @@ Everything in a document is a block (decision E.2). One catalogue serves templat
 
 | Group | Blocks |
 | --- | --- |
-| Text | Text · Heading 1, 2, 3 · Quote · Code |
+| Text | Text · Heading 1, 2, 3 · Quote · Code · Maths (TeX, also inline; E.42) |
 | Lists | Bulleted · Numbered · Checklist (nest with Tab, up to 3 levels) |
 | Callouts | Note (grey) · Important (warning tint) |
 | Structure | Toggle (holds blocks) · Columns (2) · Divider · Page break |
 | Media | Table · Image (half, wide, full; caption) · File |
-| Whity | Record (a live invoice, customer or any record) · Chart (live) · Signature and stamp |
+| Whity | Record (a live invoice, customer or any record) · Chart (live) · Signature and stamp · Barcode · QR code (E.40, E.41) |
 
 Inline, inside any text: bold, italic, underline, strikethrough, code, link, highlight, merge fields, comments and suggestions (parts 4 and 6).
 
