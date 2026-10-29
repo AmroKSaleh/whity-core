@@ -529,7 +529,7 @@ export function RouteActPanel({
             ? t('routing.act.decision.heading', 'Your decision on this route')
             : t('routing.act.heading', 'Your action on this route')}
           {isDecision && (
-            <Badge variant="warning-solid" data-slot="route-act-decision-badge">
+            <Badge variant="warning" data-slot="route-act-decision-badge">
               {t('routing.act.decision.badge', 'Decision')}
             </Badge>
           )}
@@ -923,7 +923,7 @@ function VerdictButton({
     <div className="flex flex-col">
       <span className="inline-flex" title={reason ?? undefined}>
         <Button
-          variant={verdict === 'approved' ? 'success-solid' : 'destructive'}
+          variant={verdict === 'approved' ? 'default' : 'destructive'}
           disabled={disabled}
           aria-disabled={disabled}
           onClick={disabled ? undefined : onClick}

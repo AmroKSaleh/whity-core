@@ -92,7 +92,7 @@ export const PluginStoreCard: Story = {
             </div>
           </div>
           <CardAction>
-            <Badge variant="purple-solid" className="text-[10px]">Verified</Badge>
+            <Badge variant="secondary" className="text-[10px]">Verified</Badge>
           </CardAction>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -110,7 +110,7 @@ export const PluginStoreCard: Story = {
         </CardContent>
         <CardFooter className="border-t border-border/40 pt-3 flex items-center justify-between">
           <span className="text-xs font-semibold text-foreground">Free Tier Included</span>
-          <Button size="sm" variant="purple-solid">
+          <Button size="sm" variant="outline">
             <IconDownload data-icon="inline-start" />
             Install Plugin
           </Button>
@@ -129,7 +129,7 @@ export const PluginStoreCard: Story = {
             </div>
           </div>
           <CardAction>
-            <Badge variant="info-solid" className="text-[10px]">Installed</Badge>
+            <Badge variant="info" className="text-[10px]">Installed</Badge>
           </CardAction>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -170,7 +170,7 @@ export const FeatureInstallCard: Story = {
           </div>
         </div>
         <CardAction>
-          <Badge variant="success-solid">Ready to Enable</Badge>
+          <Badge variant="success">Ready to Enable</Badge>
         </CardAction>
       </CardHeader>
 
@@ -200,7 +200,7 @@ export const FeatureInstallCard: Story = {
 
       <CardFooter className="border-t border-border/40 pt-4 flex items-center justify-between">
         <span className="text-xs font-medium text-muted-foreground">No restart required</span>
-        <Button size="default" variant="success-solid">
+        <Button size="default" variant="default">
           <IconCheck data-icon="inline-start" />
           Enable Feature Module
         </Button>
@@ -234,7 +234,7 @@ export const InteractiveWithInputFieldCard: Story = {
       </CardContent>
       <CardFooter className="border-t border-border/40 pt-3 flex items-center justify-between">
         <span className="text-[11px] text-muted-foreground">Expires in 90 days</span>
-        <Button size="sm" variant="purple-solid">
+        <Button size="sm" variant="outline">
           Regenerate Key
         </Button>
       </CardFooter>
@@ -252,7 +252,7 @@ export const InformationalCard: Story = {
           </CardTitle>
           <CardDescription>Last 30 days telemetry</CardDescription>
           <CardAction>
-            <Badge variant="purple-solid">+14.2%</Badge>
+            <Badge variant="secondary">+14.2%</Badge>
           </CardAction>
         </CardHeader>
         <CardContent>
@@ -268,7 +268,7 @@ export const InformationalCard: Story = {
           </CardTitle>
           <CardDescription>Tenant billing telemetry</CardDescription>
           <CardAction>
-            <Badge variant="info-solid">Healthy</Badge>
+            <Badge variant="info">Healthy</Badge>
           </CardAction>
         </CardHeader>
         <CardContent>
@@ -284,7 +284,7 @@ export const InformationalCard: Story = {
           </CardTitle>
           <CardDescription>All services operational</CardDescription>
           <CardAction>
-            <Badge variant="success-solid">99.99%</Badge>
+            <Badge variant="success">99.99%</Badge>
           </CardAction>
         </CardHeader>
         <CardContent>
@@ -343,7 +343,7 @@ export const BorderStylesAndStates: Story = {
           </CardTitle>
           <CardDescription>Selected state with primary ring focus</CardDescription>
           <CardAction>
-            <Badge variant="purple-solid">Selected</Badge>
+            <Badge variant="secondary">Selected</Badge>
           </CardAction>
         </CardHeader>
         <CardContent>
@@ -365,7 +365,7 @@ export const ColorVariants: Story = {
           <CardDescription>Subtle purple brand accent tint</CardDescription>
         </CardHeader>
         <CardContent>
-          <Badge variant="purple-solid">AI Engine Active</Badge>
+          <Badge variant="secondary">AI Engine Active</Badge>
         </CardContent>
       </Card>
 
@@ -375,7 +375,7 @@ export const ColorVariants: Story = {
           <CardDescription>Subtle blue informational tint</CardDescription>
         </CardHeader>
         <CardContent>
-          <Badge variant="info-solid">Syncing Data</Badge>
+          <Badge variant="info">Syncing Data</Badge>
         </CardContent>
       </Card>
 
@@ -385,7 +385,7 @@ export const ColorVariants: Story = {
           <CardDescription>Subtle emerald success tint</CardDescription>
         </CardHeader>
         <CardContent>
-          <Badge variant="success-solid">Operational</Badge>
+          <Badge variant="success">Operational</Badge>
         </CardContent>
       </Card>
 
@@ -395,7 +395,7 @@ export const ColorVariants: Story = {
           <CardDescription>Subtle amber warning tint</CardDescription>
         </CardHeader>
         <CardContent>
-          <Badge variant="warning-solid">High Load</Badge>
+          <Badge variant="warning">High Load</Badge>
         </CardContent>
       </Card>
 
@@ -405,7 +405,7 @@ export const ColorVariants: Story = {
           <CardDescription>Subtle red error tint</CardDescription>
         </CardHeader>
         <CardContent>
-          <Badge variant="destructive-solid">2 Failures</Badge>
+          <Badge variant="destructive">2 Failures</Badge>
         </CardContent>
       </Card>
 

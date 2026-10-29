@@ -55,7 +55,7 @@ export interface AccessDeniedProps extends Omit<React.ComponentProps<"div">, "ti
   onSearch?: (query: string) => void
   /** Optional pre-populated or filtered search results list. */
   searchResults?: SearchResultItem[]
-  /** Primary action (rendered with a matching color solid larger button). */
+  /** Primary action (the one filled, large button on the plane). */
   primaryAction?: ActionConfig | React.ReactNode
   /** Secondary action (rendered as a larger outline button). */
   secondaryAction?: ActionConfig | React.ReactNode
@@ -69,56 +69,43 @@ const VARIANT_CONFIGS: Record<
     title: string
     defaultIcon: React.ReactNode
     iconWrapper: string
-    buttonVariant: "destructive-solid" | "warning-solid" | "info-solid" | "success-solid" | "purple-solid"
   }
 > = {
   forbidden: {
     title: "Access Denied",
     defaultIcon: <IconAlertCircle />,
-    iconWrapper:
-      "bg-red-500/10 text-red-600 dark:bg-red-950/40 dark:text-red-400 border border-red-500/20 shadow-2xs",
-    buttonVariant: "destructive-solid",
+    iconWrapper: "bg-error-tint text-error-text",
   },
   unauthorized: {
     title: "Authentication Required",
     defaultIcon: <IconLock />,
-    iconWrapper:
-      "bg-amber-500/10 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-500/20 shadow-2xs",
-    buttonVariant: "warning-solid",
+    iconWrapper: "bg-warning-tint text-warning-text",
   },
   "not-found": {
     title: "Page Not Found",
     defaultIcon: <IconSearch />,
-    iconWrapper:
-      "bg-blue-500/10 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400 border border-blue-500/20 shadow-2xs",
-    buttonVariant: "info-solid",
+    iconWrapper: "bg-primary-tint text-primary-tint-foreground",
   },
   error: {
     title: "System Error",
     defaultIcon: <IconAlertTriangle />,
-    iconWrapper:
-      "bg-red-500/10 text-red-600 dark:bg-red-950/40 dark:text-red-400 border border-red-500/20 shadow-2xs",
-    buttonVariant: "destructive-solid",
+    iconWrapper: "bg-error-tint text-error-text",
   },
   success: {
     title: "Action Complete",
     defaultIcon: <IconCircleCheck />,
-    iconWrapper:
-      "bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-500/20 shadow-2xs",
-    buttonVariant: "success-solid",
+    iconWrapper: "bg-success-tint text-success-text",
   },
   maintenance: {
     title: "Under Maintenance",
     defaultIcon: <IconTools />,
-    iconWrapper:
-      "bg-purple-500/10 text-purple-600 dark:bg-purple-950/40 dark:text-purple-400 border border-purple-500/20 shadow-2xs",
-    buttonVariant: "purple-solid",
+    iconWrapper: "bg-primary-tint text-primary-tint-foreground",
   },
 }
 
 function renderAction(
   action: ActionConfig | React.ReactNode,
-  defaultButtonVariant: "destructive-solid" | "warning-solid" | "info-solid" | "success-solid" | "purple-solid" | "outline",
+  defaultButtonVariant: "default" | "outline",
   key: string
 ) {
   if (!action) return null
@@ -246,7 +233,7 @@ function AccessDenied({
                 className="h-8 text-xs"
               />
             </div>
-            <Button type="submit" size="default" variant={config.buttonVariant}>
+            <Button type="submit" size="default" variant="default">
               <IconSearch data-icon="inline-start" />
               {searchButtonLabel}
             </Button>
@@ -306,7 +293,7 @@ function AccessDenied({
 
       {(primaryAction || secondaryAction || action) && (
         <div className="flex flex-wrap items-center justify-center gap-3">
-          {renderAction(primaryAction, config.buttonVariant, "primary")}
+          {renderAction(primaryAction, "default", "primary")}
           {renderAction(secondaryAction, "outline", "secondary")}
           {action}
         </div>
