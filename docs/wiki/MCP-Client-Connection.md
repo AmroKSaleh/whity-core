@@ -45,7 +45,7 @@ Adding `?tools=discover` to the endpoint (`https://your-whity-host/mcp?tools=dis
 
 ### Per-app setup, and what is not yet confirmed
 
-The setups come from `@amroksaleh/features/mcp`, so the desktop shell or your own frontend can offer the same ones. They were checked against each vendor's documentation on 2026-10-28.
+The setups come from `@whity-org/features/mcp`, so the desktop shell or your own frontend can offer the same ones. They were checked against each vendor's documentation on 2026-10-28.
 
 | App | Setup | Notes |
 |---|---|---|

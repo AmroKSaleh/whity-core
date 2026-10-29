@@ -27,7 +27,7 @@ const REPO = path.resolve(path.sep, 'Projects', 'Whity', 'whity-core');
 /** A worktree, nested inside it — the layout this repo actually uses. */
 const WORKTREE = path.join(REPO, '.claude', 'worktrees', 'wt-example');
 
-/** Where `@amroksaleh/ui/button` lands in each checkout. */
+/** Where `@whity-org/ui/button` lands in each checkout. */
 const uiIn = (root: string) => path.join(root, 'packages', 'ui', 'src', 'button.tsx');
 
 describe('isInside', () => {
@@ -119,7 +119,7 @@ describe('assertWorkspaceResolution', () => {
   it('probes a side-effect-free leaf module', () => {
     // Loading the guard must not be able to execute component code, so the
     // probe stays a leaf rather than the package root.
-    expect(PROBE_SPECIFIER).toBe('@amroksaleh/ui/button');
+    expect(PROBE_SPECIFIER).toBe('@whity-org/ui/button');
   });
 
   it('passes for real, in whatever checkout this suite is running from', () => {

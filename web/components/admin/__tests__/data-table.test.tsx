@@ -11,7 +11,7 @@
  * and had no coverage at all. The examples it held are the Storybook stories
  * in `packages/ui/src/data-table.stories.tsx`, which CI builds.
  *
- * WHAT IS WORTH TESTING HERE. The implementation lives in `@amroksaleh/ui`;
+ * WHAT IS WORTH TESTING HERE. The implementation lives in `@whity-org/ui`;
  * this file is an adapter, and adapters fail at their seams. It is also a
  * PUBLISHED registry item (`admin-data-table`, baked verbatim into
  * `web/public/r/data-table.json`), so its exported shape — `Column<T>`,

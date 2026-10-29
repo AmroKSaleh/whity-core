@@ -5,7 +5,7 @@
  *
  * The container itself is a PUBLISHED registry item, so it cannot call
  * useTranslation — a downstream consumer installs that file verbatim into a
- * project where `@amroksaleh/features` need not exist. It takes its accessible
+ * project where `@whity-org/features` need not exist. It takes its accessible
  * names as props instead, and this thin client component supplies them.
  *
  * It exists at all because `app/layout.tsx` mounts the container, and reading
@@ -13,7 +13,7 @@
  * mount keeps the layout as it is.
  */
 
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 import { ToastContainer } from './toast-container';
 
 export function ToastContainerMount() {

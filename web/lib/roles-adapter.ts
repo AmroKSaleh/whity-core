@@ -1,6 +1,6 @@
 /**
  * web/'s RolesAdapter implementation (Path B feature-extraction pilot) — wires
- * the data-source-agnostic `RolesScreen` (@amroksaleh/features/roles) to the
+ * the data-source-agnostic `RolesScreen` (@whity-org/features/roles) to the
  * REST API via web's own cookie-authenticated `apiClient` (silent token refresh
  * on 401, same as every other authenticated fetch in this app).
  *
@@ -29,7 +29,7 @@ import type {
   RoleWithPermissions,
   RolesAdapter,
   Transport,
-} from '@amroksaleh/features/roles';
+} from '@whity-org/features/roles';
 
 function isOk(status: number): boolean {
   return status >= 200 && status < 300;

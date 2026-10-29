@@ -1,5 +1,5 @@
 ---
-"@amroksaleh/api-client": minor
+"@whity-org/api-client": minor
 ---
 
 `createApiClient` gains a token mode, so a frontend on another site (or a

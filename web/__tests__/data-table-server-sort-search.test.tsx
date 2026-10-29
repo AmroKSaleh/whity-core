@@ -4,7 +4,7 @@ import {
   DataTable,
   DATA_TABLE_SEARCH_DEBOUNCE_MS,
   type DataTableColumn,
-} from '@amroksaleh/ui/data-table';
+} from '@whity-org/ui/data-table';
 
 /**
  * Server-driven sorting and searching for the shared DataTable.

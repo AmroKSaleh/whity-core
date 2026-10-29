@@ -1,14 +1,14 @@
 ---
-"@amroksaleh/ui": minor
-"@amroksaleh/features": minor
+"@whity-org/ui": minor
+"@whity-org/features": minor
 ---
 
 A BLOCK SETTINGS view in document mode: the spacing around the selected block,
 how it behaves at a page boundary, and how wide it is.
 
-`@amroksaleh/ui` gains `FlowBlockLayout` (six optional keys on the four block
+`@whity-org/ui` gains `FlowBlockLayout` (six optional keys on the four block
 types that have a box), `FlowBoxedBlock`, `blockAcceptsLayout` and the two
-bounds the renderer validates. `@amroksaleh/features` gains `FlowBlockSettings`,
+bounds the renderer validates. `@whity-org/features` gains `FlowBlockSettings`,
 and `SideRail` gains an optional `blockSettings` slot.
 
 Document mode edits a block AS ITSELF — a heading is a line at heading size, a

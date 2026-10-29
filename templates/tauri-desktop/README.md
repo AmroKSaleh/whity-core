@@ -1,8 +1,8 @@
 # Whity Tauri Desktop Template
 
 A working Tauri v2 + React + TypeScript desktop app boilerplate wired to
-Whity's shared UI/feature packages (`@amroksaleh/ui`, `@amroksaleh/features`,
-`@amroksaleh/tokens`) — start here instead of `create-tauri-app`'s stock
+Whity's shared UI/feature packages (`@whity-org/ui`, `@whity-org/features`,
+`@whity-org/tokens`) — start here instead of `create-tauri-app`'s stock
 scaffold when building a Whity-based desktop product.
 
 **Scope: desktop only** (Windows / macOS / Linux). Tauri's mobile targets are
@@ -83,7 +83,7 @@ src-tauri/                      # Backend (Rust)
 
 ## The adapter pattern (why this matters)
 
-`DemoCatalogList`/`DemoCatalogDetail` (from `@amroksaleh/features/demo-catalog`)
+`DemoCatalogList`/`DemoCatalogDetail` (from `@whity-org/features/demo-catalog`)
 never fetch data directly. They take an injected `DemoCatalogAdapter`:
 
 ```ts
@@ -349,7 +349,7 @@ A plugin doesn't only run offline here — it **draws** offline.
 `src/plugin-blocks/` is the desktop renderer for the SDK's declare-once block
 contract (`sdk/src/Frontend/Blocks/BlockContract.php`): the block tree a plugin
 declares once renders on web and on the device, so a `blocks` screen needs no
-desktop-specific code at all. It maps each block `type` to an `@amroksaleh/ui`
+desktop-specific code at all. It maps each block `type` to an `@whity-org/ui`
 primitive through the same switch/registry web uses, and it never throws — an
 unknown or malformed node renders `UnsupportedBlock` rather than taking the
 whole feature down.
@@ -414,10 +414,10 @@ then `app.manage(...)` it, and receive it in your commands via
 
 ## The nav contract
 
-`AppSidebar`/`PageHeader`/`PageShell` (from `@amroksaleh/ui`) are
+`AppSidebar`/`PageHeader`/`PageShell` (from `@whity-org/ui`) are
 presentational only — no Next.js, no router opinion. `nav-config.tsx`
 authors the sidebar as plain data; `resolveNavGroups()`
-(`@amroksaleh/features/nav`) resolves it against the current path and an
+(`@whity-org/features/nav`) resolves it against the current path and an
 optional translator. `hash-link.tsx` is the `NavLinkAdapter` — swap it for
 `react-router`'s `<Link>` (or anything else) by implementing the same
 `{ href, children, ...props }` contract. See `packages/features/README.md`
@@ -425,12 +425,12 @@ for the full contract documentation.
 
 ## Monorepo note
 
-This template's `package.json` currently points `@amroksaleh/ui`/
-`@amroksaleh/features`/`@amroksaleh/tokens` at `file:../../packages/...` —
+This template's `package.json` currently points `@whity-org/ui`/
+`@whity-org/features`/`@whity-org/tokens` at `file:../../packages/...` —
 correct while this template lives inside the whity-core monorepo (so CI
 always tests it against the latest package source). **If you copy this
 directory out as the start of a new project**, switch those three to the
-published version ranges instead (e.g. `"@amroksaleh/ui": "^0.3.1"`,
+published version ranges instead (e.g. `"@whity-org/ui": "^0.3.1"`,
 matching `packages/ui/package.json`'s own `publishConfig` registry) — the
 `file:` paths won't resolve outside this monorepo.
 

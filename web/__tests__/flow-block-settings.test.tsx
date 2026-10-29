@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { FlowBlockSettings } from '@amroksaleh/features/document-designer';
-import { newFlowBlock } from '@amroksaleh/ui/documents/flow';
-import type { FlowBlock } from '@amroksaleh/ui/documents/flow';
+import { FlowBlockSettings } from '@whity-org/features/document-designer';
+import { newFlowBlock } from '@whity-org/ui/documents/flow';
+import type { FlowBlock } from '@whity-org/ui/documents/flow';
 
 /**
  * The block settings view — spacing, page behaviour and width for the selected

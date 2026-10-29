@@ -34,7 +34,7 @@
  * screen above, like the rest of this slice.
  */
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity-org/ui/card';
 
 import type { RecordSectionSpec } from './types';
 

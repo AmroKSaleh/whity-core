@@ -18,7 +18,7 @@
  * "red-500") so the indicator respects both light and dark themes.
  */
 
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 
 export type StrengthLevel = 'weak' | 'fair' | 'good' | 'strong';
 

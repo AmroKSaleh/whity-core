@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
-import { Button } from '@amroksaleh/ui/button';
+import { Button } from '@whity-org/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   Form,
@@ -13,12 +13,12 @@ import {
   FormControl,
   FormDescription,
   FormMessage,
-} from '@amroksaleh/ui/form';
+} from '@whity-org/ui/form';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { PasswordStrengthIndicator } from '@/components/PasswordStrengthIndicator';
-import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
+import { useTranslation, type TranslateFn } from '@whity-org/features/i18n';
 
 /**
  * Self-service profile editor (WC-64).

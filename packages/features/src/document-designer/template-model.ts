@@ -1,4 +1,4 @@
-import type { DocElement, DocPage, DocTemplate, ElementType, PageSpec, Placeholder } from '@amroksaleh/ui/documents/types';
+import type { DocElement, DocPage, DocTemplate, ElementType, PageSpec, Placeholder } from '@whity-org/ui/documents/types';
 import { DEFAULT_TEXT_STYLE, newPageId } from './presets';
 import type { SavedTemplate } from './types';
 
@@ -86,11 +86,11 @@ function uid(): string {
 }
 
 // `interpolate`/`resolveBound` were pure (no localStorage) and moved to
-// `@amroksaleh/ui/documents/interpolation` (WC doc-designer-ui-extraction) so
+// `@whity-org/ui/documents/interpolation` (WC doc-designer-ui-extraction) so
 // the relocated `element-content.tsx` renderer can use them without pulling in
 // this module's localStorage-backed persistence. Re-exported here for
 // backward compatibility since this module used to own them.
-export { interpolate, resolveBound } from '@amroksaleh/ui/documents/interpolation';
+export { interpolate, resolveBound } from '@whity-org/ui/documents/interpolation';
 
 /** Build the sample-data map from a template's placeholders. */
 export function sampleDataOf(template: DocTemplate): Record<string, string> {

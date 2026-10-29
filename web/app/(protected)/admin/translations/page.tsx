@@ -8,20 +8,20 @@ import { useFetch } from '@/hooks/useFetch';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { TRANSLATIONS_MANAGE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Button } from '@amroksaleh/ui/button';
+import { Button } from '@whity-org/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@amroksaleh/ui/badge';
+import { Badge } from '@whity-org/ui/badge';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@amroksaleh/ui/select';
-import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
-import { AccessDenied } from '@amroksaleh/ui/access-denied';
+} from '@whity-org/ui/select';
+import { Alert, AlertDescription } from '@whity-org/ui/alert';
+import { AccessDenied } from '@whity-org/ui/access-denied';
 import { IconPlus, IconRefresh } from '@tabler/icons-react';
-import { useI18nAvailability, useTranslation } from '@amroksaleh/features/i18n';
+import { useI18nAvailability, useTranslation } from '@whity-org/features/i18n';
 import { EditableTranslationCell } from './editable-cell';
 import { AddKeyModal } from './add-key-modal';
 import { errorMessage } from '../languages/shared';

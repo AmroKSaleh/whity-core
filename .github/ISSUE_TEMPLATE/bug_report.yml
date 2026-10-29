@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for filing a bug report. **If this is a security vulnerability, do not use this form** — see [SECURITY.md](https://github.com/AmroKSaleh/whity-core/blob/main/SECURITY.md) for private reporting instead.
+        Thanks for filing a bug report. **If this is a security vulnerability, do not use this form** — see [SECURITY.md](https://github.com/whity-org/whity-core/blob/main/SECURITY.md) for private reporting instead.
   - type: textarea
     id: what-happened
     attributes:

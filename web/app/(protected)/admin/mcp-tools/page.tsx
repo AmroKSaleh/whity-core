@@ -5,10 +5,10 @@ import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Badge } from '@amroksaleh/ui/badge';
+import { Badge } from '@whity-org/ui/badge';
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { IconLock, IconLockOpen } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 import type { McpTool } from './types';
 
 interface McpToolListResponse {

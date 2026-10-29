@@ -1,11 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import { useTranslation } from '@amroksaleh/features/i18n';
-import { Alert, AlertDescription, AlertTitle } from '@amroksaleh/ui/alert';
-import { Button } from '@amroksaleh/ui/button';
-import { EmptyState } from '@amroksaleh/ui/empty-state';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@amroksaleh/ui/table';
+import { useTranslation } from '@whity-org/features/i18n';
+import { Alert, AlertDescription, AlertTitle } from '@whity-org/ui/alert';
+import { Button } from '@whity-org/ui/button';
+import { EmptyState } from '@whity-org/ui/empty-state';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@whity-org/ui/table';
 import {
   Dialog,
   DialogContent,

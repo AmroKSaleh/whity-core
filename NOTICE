@@ -19,10 +19,10 @@ licence of the host. Which licence applies depends on which part you touch:
   MIT                  The plugin boundary, both halves:
                          - whity/plugin-sdk        (PHP: interfaces, HTTP
                                                     shapes, event constants)
-                         - @amroksaleh/ui          (React component library)
-                         - @amroksaleh/features    (feature modules)
-                         - @amroksaleh/api-client  (typed API client)
-                         - @amroksaleh/tokens      (design tokens)
+                         - @whity-org/ui          (React component library)
+                         - @whity-org/features    (feature modules)
+                         - @whity-org/api-client  (typed API client)
+                         - @whity-org/tokens      (design tokens)
                        Build against these and your plugin is yours: license
                        it however you like, including commercially.
 

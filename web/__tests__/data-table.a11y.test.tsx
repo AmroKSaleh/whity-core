@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
+import { DataTable, type DataTableColumn } from '@whity-org/ui/data-table';
 
 /**
  * The DataTable's accessible name, in every state that renders a `table`.

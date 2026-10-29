@@ -1,4 +1,4 @@
-import type { DocTemplate, TextStyle } from '@amroksaleh/ui/documents/types';
+import type { DocTemplate, TextStyle } from '@whity-org/ui/documents/types';
 
 /** Page-size presets (portrait millimetres). Orientation is applied separately. */
 export const PAGE_PRESETS: ReadonlyArray<{ id: string; label: string; widthMm: number; heightMm: number }> = [

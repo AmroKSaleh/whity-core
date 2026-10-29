@@ -1,16 +1,16 @@
 import { useRef, useState } from 'react';
-import type { DocElement, DocTemplate, PageSpec, Placeholder, TextStyle } from '@amroksaleh/ui/documents/types';
-import { BARCODE_SYMBOLOGIES } from '@amroksaleh/ui/documents/types';
+import type { DocElement, DocTemplate, PageSpec, Placeholder, TextStyle } from '@whity-org/ui/documents/types';
+import { BARCODE_SYMBOLOGIES } from '@whity-org/ui/documents/types';
 import { applyPlainTextEdit, runsToPlainText, toggleRunFormat } from './rich-text';
 import { generateSequence, type SequenceConfig } from './batch';
 import { parseDelimited, parseJsonRows } from './csv';
-import { SHEET_PRESETS, cellsPerSheet, sheetCount, type SheetSpec } from '@amroksaleh/ui/documents/sheet';
+import { SHEET_PRESETS, cellsPerSheet, sheetCount, type SheetSpec } from '@whity-org/ui/documents/sheet';
 import { PAGE_PRESETS } from './presets';
 import { Input } from './ui-i18n';
-import { Switch } from '@amroksaleh/ui/switch';
-import { Button } from '@amroksaleh/ui/button';
-import { MathText } from '@amroksaleh/ui/math-text';
-import { safeImageSrc } from '@amroksaleh/ui/documents/element-content';
+import { Switch } from '@whity-org/ui/switch';
+import { Button } from '@whity-org/ui/button';
+import { MathText } from '@whity-org/ui/math-text';
+import { safeImageSrc } from '@whity-org/ui/documents/element-content';
 import { IconPlus, IconTrash, IconChevronLeft, IconChevronRight, IconBold, IconItalic } from '@tabler/icons-react';
 import { useTranslation, type TranslateFn } from '../i18n';
 

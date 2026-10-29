@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect } from 'react';
 import { Direction as RadixDirection } from 'radix-ui';
-import { useLanguageDirection } from '@amroksaleh/features/i18n';
+import { useLanguageDirection } from '@whity-org/features/i18n';
 
 /**
  * App-wide text/layout direction (LTR / RTL), DERIVED FROM THE CHOSEN LANGUAGE.

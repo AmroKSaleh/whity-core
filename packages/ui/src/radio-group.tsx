@@ -9,7 +9,7 @@ import { cn } from "./utils"
 /**
  * Accessible single-select radio group on Radix RadioGroup. Built for the
  * field-level ConflictResolver's per-field mine / theirs / custom picker
- * (@amroksaleh/features/sync), and generic enough for any single-choice control.
+ * (@whity-org/features/sync), and generic enough for any single-choice control.
  */
 function RadioGroup({ className, ...props }: React.ComponentProps<typeof RadioGroupPrimitive.Root>) {
   return (

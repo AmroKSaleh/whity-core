@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { TagInput, type TagOption } from '@/components/ui/tag-input';
-import { Button } from '@amroksaleh/ui/button';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { Button } from '@whity-org/ui/button';
+import { useTranslation } from '@whity-org/features/i18n';
 import { useAuth } from '@/lib/auth-context';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { TAGS_MANAGE } from '@/lib/capabilities';
@@ -28,7 +28,7 @@ export interface TagPickerProps {
 /**
  * WC-621 tag picker: a reusable multi-select that attaches/detaches the
  * platform's native tags to ANY entity via the core `/api/v1/entity-tags`
- * endpoints. Presentation is the `@amroksaleh/ui` {@link TagInput} chips
+ * endpoints. Presentation is the `@whity-org/ui` {@link TagInput} chips
  * control; this component owns the data + per-change mutations.
  *
  * It is a native app component (not a plugin DSL block): the DSL `source`

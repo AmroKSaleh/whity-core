@@ -77,7 +77,7 @@ See **[docs/wiki/Architecture.md](docs/wiki/Architecture.md)** for the full requ
 Requires Docker (Desktop or Engine) and Node.js for the web UI. **No local PHP is needed** — the backend, tests, and CLI all run inside the `php:8.4`/FrankenPHP containers.
 
 ```bash
-git clone https://github.com/AmroKSaleh/whity-core.git
+git clone https://github.com/whity-org/whity-core.git
 cd whity-core
 
 # Bring up FrankenPHP + PostgreSQL, then migrate + seed
@@ -203,7 +203,7 @@ CI runs these same jobs plus Playwright E2E on every PR.
 
 Core platform — **delivered**: FrankenPHP runtime, plugin hot-loading + lifecycle, RBAC (registry, hierarchy, OU inheritance), multi-tenant isolation, feature flagging system, 2FA, design system, developer docs, an E2E test suite, the organizational-unit hierarchy visualizer (tree + graph views in the OU Management Hub), self-service user profile management, and the family-relations module (Persons/Relations graph — [ADR 0002](docs/adr/0002-family-relations-management.md)).
 
-Under consideration: a maintained first-party mobile client — Flutter currently ships only the design-tokens package (`flutter/whity_tokens`) for downstream apps to consume, not a Whity-authored mobile UI. Desktop is no longer planned as Electron: `templates/tauri-desktop` already delivers a working Tauri (Rust) reference app with offline-first sync, plus a bundled FrankenPHP host that runs real whity plugins offline (see the template's own README). See [open issues](https://github.com/AmroKSaleh/whity-core/issues).
+Under consideration: a maintained first-party mobile client — Flutter currently ships only the design-tokens package (`flutter/whity_tokens`) for downstream apps to consume, not a Whity-authored mobile UI. Desktop is no longer planned as Electron: `templates/tauri-desktop` already delivers a working Tauri (Rust) reference app with offline-first sync, plus a bundled FrankenPHP host that runs real whity plugins offline (see the template's own README). See [open issues](https://github.com/whity-org/whity-core/issues).
 
 Embedding an n8n workflow engine was **deferred, not adopted** — [ADR 0008](docs/adr/0008-defer-n8n-external-automation-surface.md) reframes automation around MCP (any orchestrator that speaks MCP, including n8n, can already call every permission-gated API route).
 
@@ -211,7 +211,7 @@ Embedding an n8n workflow engine was **deferred, not adopted** — [ADR 0008](do
 
 **[AGPL-3.0-only with the Whity Plugin Exception](LICENSE)** — genuine free software. Run it, modify it, deploy it, sell services around it. If you modify Whity Core and offer it to users over a network, you owe those users your source; that is the whole of the bargain.
 
-**Plugins are exempt.** The plugin boundary — `whity/plugin-sdk` on the PHP side, `@amroksaleh/ui` and friends on the client side — is MIT. A plugin that depends only on those is not a derivative work of the core, and you may license and sell it on any terms you choose. See the [Whity Plugin Exception](LICENSE) and [NOTICE](NOTICE).
+**Plugins are exempt.** The plugin boundary — `whity/plugin-sdk` on the PHP side, `@whity-org/ui` and friends on the client side — is MIT. A plugin that depends only on those is not a derivative work of the core, and you may license and sell it on any terms you choose. See the [Whity Plugin Exception](LICENSE) and [NOTICE](NOTICE).
 
 The **Whity name** is protected even though the code is free — fork freely, rename when you do. See [TRADEMARK.md](TRADEMARK.md).
 
@@ -223,4 +223,4 @@ For a licence other than the AGPL: **amroksaleh@gmail.com**
 
 ## Getting help
 
-- 🐛 [Issues](https://github.com/AmroKSaleh/whity-core/issues) · 💬 [Discussions](https://github.com/AmroKSaleh/whity-core/discussions) · 🔒 [SECURITY.md](SECURITY.md)
+- 🐛 [Issues](https://github.com/whity-org/whity-core/issues) · 💬 [Discussions](https://github.com/whity-org/whity-core/discussions) · 🔒 [SECURITY.md](SECURITY.md)

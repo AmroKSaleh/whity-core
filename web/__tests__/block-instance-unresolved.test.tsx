@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react';
-import { BlockInstanceContent } from '@amroksaleh/ui/documents/element-layer';
+import { BlockInstanceContent } from '@whity-org/ui/documents/element-layer';
 
 /**
  * WHAT THE UNRESOLVED-BLOCK MARKER IS ALLOWED TO CLAIM.

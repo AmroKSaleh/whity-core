@@ -1,5 +1,5 @@
 ---
-"@amroksaleh/features": minor
+"@whity-org/features": minor
 ---
 
 The document designer gains **Save as a copy** (File menu and `/` palette):

@@ -2,8 +2,8 @@
 
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { tabsListVariants } from '@amroksaleh/ui/tabs';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { tabsListVariants } from '@whity-org/ui/tabs';
+import { useTranslation } from '@whity-org/features/i18n';
 
 /**
  * Shared tab navigation for the unified "Approval Gating" admin surface

@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import axe from 'axe-core';
-import { TagInput, type TagOption } from '@amroksaleh/ui/tag-input';
+import { TagInput, type TagOption } from '@whity-org/ui/tag-input';
 
 /**
  * Accessibility + behavior regression for TagInput (WC-532 #7). Verifies the
