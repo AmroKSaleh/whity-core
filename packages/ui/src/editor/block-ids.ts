@@ -9,7 +9,7 @@ export function newBlockId(): string {
 }
 
 /**
- * Every top-level block keeps a stable, unique `id`: a new block (typed,
+ * Every block, nested ones included, keeps a stable, unique `id`: a new block (typed,
  * split, pasted or duplicated) gets a fresh one, and a duplicate of an
  * existing id is renamed, the first occurrence keeping it.
  */
@@ -23,7 +23,8 @@ export const BlockIds = Extension.create({
           if (!transactions.some((t) => t.docChanged)) return null
           const seen = new Set<string>()
           let tr: Transaction | null = null
-          state.doc.forEach((node, pos) => {
+          // Every block, including those inside toggles and columns, has a document-wide unique id.
+          state.doc.descendants((node, pos) => {
             if (!("id" in node.attrs)) return
             const id = node.attrs.id as string | null
             if (id && !seen.has(id)) {

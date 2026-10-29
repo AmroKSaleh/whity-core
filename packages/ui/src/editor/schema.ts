@@ -1,5 +1,7 @@
 import { Mark, Node, mergeAttributes } from "@tiptap/core"
 
+import { richSchemaExtensions } from "./schema-rich"
+
 /**
  * The ProseMirror schema for the WhityDocument contract (contract.ts,
  * handoff/editor/README.md). Every block node carries a stable `id` (BlockId)
@@ -291,6 +293,7 @@ export const schemaExtensions = [
   CheckItem,
   Divider,
   UnknownBlock,
+  ...richSchemaExtensions,
   HardBreak,
   Field,
   MathInline,
