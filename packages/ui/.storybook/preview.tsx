@@ -11,6 +11,15 @@ const withTheme: Decorator = (Story, context) => {
   // Design-card stories render edge to edge at the card's size, on the page
   // ground, exactly as docs/design/components/<Name>/index.html does.
   const designCard = context.parameters.designCard as { width: number; height: number } | undefined
+  if (context.parameters.fullBleed) {
+    return (
+      <div className={isDark ? "dark" : ""} dir={isRtl ? "rtl" : "ltr"}>
+        <div className="bg-background text-foreground font-sans">
+          <Story />
+        </div>
+      </div>
+    )
+  }
   if (designCard) {
     return (
       <div className={isDark ? "dark" : ""} dir={isRtl ? "rtl" : "ltr"}>

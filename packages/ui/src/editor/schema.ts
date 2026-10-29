@@ -131,18 +131,26 @@ export const Divider = Node.create({
 })
 
 /** A block a later milestone edits (callout, table, record, plugin…): kept whole, shown as a placeholder. */
-export const UnknownBlock = Node.create({
+export const UnknownBlock = Node.create<{ label: (blockType: string) => string }>({
   name: "unknownBlock",
   group: "block",
   atom: true,
   selectable: true,
   draggable: false,
+  addOptions: () => ({ label: (blockType: string) => blockType }),
   addAttributes: () => ({ ...blockAttributes, data: { default: null, rendered: false } }),
   parseHTML: () => [{ tag: "div[data-type=unknown-block]" }],
-  renderHTML: ({ node }) => [
-    "div",
-    blockAttrs(node.attrs, { "data-type": "unknown-block", "data-block-type": node.attrs.data?.type ?? "" }),
-  ],
+  renderHTML({ node }) {
+    const blockType = String(node.attrs.data?.type ?? "")
+    return [
+      "div",
+      blockAttrs(node.attrs, {
+        "data-type": "unknown-block",
+        "data-block-type": blockType,
+        "data-label": this.options.label(blockType),
+      }),
+    ]
+  },
 })
 
 export const HardBreak = Node.create({
@@ -176,6 +184,18 @@ export const Field = Node.create({
     { "data-field": node.attrs.path, title: node.attrs.path, class: "wy-field" },
     node.attrs.label || node.attrs.path,
   ],
+})
+
+/** E.42: an inline formula in TeX. KaTeX renders it in M3; until then it shows its source. */
+export const MathInline = Node.create({
+  name: "mathInline",
+  group: "inline",
+  inline: true,
+  atom: true,
+  selectable: true,
+  addAttributes: () => ({ tex: { default: "" } }),
+  parseHTML: () => [{ tag: "span[data-math]" }],
+  renderHTML: ({ node }) => ["span", { "data-math": "", dir: "ltr", class: "wy-math" }, node.attrs.tex],
 })
 
 /* --------------------------------------------------------------- Marks */
@@ -273,6 +293,7 @@ export const schemaExtensions = [
   UnknownBlock,
   HardBreak,
   Field,
+  MathInline,
   Link,
   Bold,
   Italic,

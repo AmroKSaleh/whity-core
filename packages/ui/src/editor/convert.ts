@@ -67,6 +67,8 @@ function inlineToPm(content: Inline[]): JSONContent[] {
       out.push(node)
     } else if (run.type === "break") {
       out.push({ type: "hardBreak" })
+    } else if (run.type === "math") {
+      out.push({ type: "mathInline", attrs: { tex: run.tex } })
     } else {
       const node: JSONContent = {
         type: "field",
@@ -94,6 +96,8 @@ function inlineFromPm(content: JSONContent[] | undefined): Inline[] {
       }
     } else if (node.type === "hardBreak") {
       out.push({ type: "break" })
+    } else if (node.type === "mathInline") {
+      out.push({ type: "math", tex: String(node.attrs?.tex ?? "") })
     } else if (node.type === "field") {
       const a = node.attrs ?? {}
       const field: Inline = { type: "field", path: String(a.path ?? ""), label: String(a.label ?? "") }

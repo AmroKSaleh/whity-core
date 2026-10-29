@@ -6,7 +6,7 @@ import {
   type Editor,
 } from "@tiptap/core"
 import type { NodeType, Node as PmNode } from "@tiptap/pm/model"
-import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state"
+import { NodeSelection, Plugin, PluginKey, TextSelection } from "@tiptap/pm/state"
 import { Decoration, DecorationSet } from "@tiptap/pm/view"
 
 /**
@@ -42,6 +42,44 @@ export function moveBlock(editor: Editor, dir: -1 | 1): boolean {
   for (let i = 0; i < target; i++) insertAt += tr.doc.child(i).nodeSize
   tr.insert(insertAt, node)
   tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(insertAt + offset, tr.doc.content.size))))
+  editor.view.dispatch(tr.scrollIntoView())
+  return true
+}
+
+/** Put a copy of the current block right after it; the copy gets a new id. */
+export function duplicateBlock(editor: Editor, pos?: number): boolean {
+  const at = pos ?? currentBlock(editor)?.pos
+  if (at === undefined) return false
+  const node = editor.state.doc.nodeAt(at)
+  if (!node) return false
+  const copy = node.type.create({ ...node.attrs, id: null }, node.content, node.marks)
+  editor.view.dispatch(editor.state.tr.insert(at + node.nodeSize, copy).scrollIntoView())
+  return true
+}
+
+/** Delete the block at `pos` (or the current one). */
+export function deleteBlock(editor: Editor, pos?: number): boolean {
+  const at = pos ?? currentBlock(editor)?.pos
+  if (at === undefined) return false
+  const node = editor.state.doc.nodeAt(at)
+  if (!node) return false
+  const tr = editor.state.tr.delete(at, at + node.nodeSize)
+  if (tr.doc.childCount === 0) tr.insert(0, editor.schema.nodes.paragraph.create())
+  tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(at, tr.doc.content.size))))
+  editor.view.dispatch(tr.scrollIntoView())
+  return true
+}
+
+/** Move the block at `from` (a position) to be the `index`-th block. */
+export function moveBlockTo(editor: Editor, from: number, index: number): boolean {
+  const node = editor.state.doc.nodeAt(from)
+  if (!node) return false
+  const tr = editor.state.tr.delete(from, from + node.nodeSize)
+  const target = Math.max(0, Math.min(index, tr.doc.childCount))
+  let insertAt = 0
+  for (let i = 0; i < target; i++) insertAt += tr.doc.child(i).nodeSize
+  tr.insert(insertAt, node)
+  tr.setSelection(TextSelection.near(tr.doc.resolve(Math.min(insertAt + 1, tr.doc.content.size))))
   editor.view.dispatch(tr.scrollIntoView())
   return true
 }
@@ -130,8 +168,10 @@ function blockRule(
 
 /* ------------------------------------------------------- the extension */
 
-export const DocumentBehaviour = Extension.create({
+export const DocumentBehaviour = Extension.create<{ onBlockMenu: (pos: number) => void }>({
   name: "documentBehaviour",
+
+  addOptions: () => ({ onBlockMenu: () => {} }),
 
   addProseMirrorPlugins() {
     return [listMarkerPlugin]
@@ -185,11 +225,24 @@ export const DocumentBehaviour = Extension.create({
       "Mod-Shift-8": listToggle("listItem", { kind: "bullet" }),
       "Mod-Shift-7": listToggle("listItem", { kind: "number" }),
       "Mod-Shift-9": listToggle("checkItem", { checked: false }),
+      "Mod-d": () => duplicateBlock(editor),
+      // Esc selects the whole block; Enter on a selected block opens its menu (EditorBlockChrome).
+      Escape: () => {
+        const block = currentBlock(editor)
+        if (!block || editor.state.selection instanceof NodeSelection) return false
+        editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, block.pos)))
+        return true
+      },
       "Alt-Shift-ArrowUp": () => moveBlock(editor, -1),
       "Alt-Shift-ArrowDown": () => moveBlock(editor, 1),
       Tab: () => setLevel(editor, 1),
       "Shift-Tab": () => setLevel(editor, -1),
       Enter: () => {
+        const sel = editor.state.selection
+        if (sel instanceof NodeSelection && sel.$from.depth === 0) {
+          this.options.onBlockMenu(sel.from)
+          return true
+        }
         const block = currentBlock(editor)
         if (!block || !LIST_TYPES.has(block.node.type.name) || !editor.state.selection.empty) return false
         if (block.node.content.size === 0) {
@@ -204,7 +257,8 @@ export const DocumentBehaviour = Extension.create({
           .command(({ tr, state }) => {
             const pos = state.selection.$from.before(1)
             const type = block.node.type
-            tr.setNodeMarkup(pos, type, { ...type.defaultAttrs, kind, level, id: null })
+            const attrs = type.name === "checkItem" ? { level, checked: false } : { kind, level }
+            tr.setNodeMarkup(pos, type, { ...attrs, id: null, suggestion: null })
             return true
           })
           .run()
