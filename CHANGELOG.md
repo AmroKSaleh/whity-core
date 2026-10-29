@@ -6,6 +6,8 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+## [0.2.18] - 2026-10-29
+
 ### Added
 
 - **AI apps such as Claude and ChatGPT can sign in to MCP (part two of OAuth sign-in).** Access tokens from the `MCP_OAUTH_ISSUER` server are now accepted on `/mcp`. They are verified against the server's published keys, must be issued for this server's `/mcp` address, and map to a Whity account through the same linked sign-in single sign-on uses, so each person signs in to Whity with that provider once first. The workspace comes from a `tenant_id` claim (configurable with `MCP_OAUTH_TENANT_CLAIM`), or is the person's only workspace. An active membership is always required, and the system workspace can't be reached this way. A token that is genuine but can't be used (no linked account, several workspaces and no claim) gets HTTP 403 with a message that says what to fix. MCP tokens from the wizard work exactly as before. See ADR-0015.
