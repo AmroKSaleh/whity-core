@@ -148,7 +148,7 @@ checkout a path-repository dependency needs):
         with: { path: whity-plugins }
       - uses: actions/checkout@v7
         with:
-          repository: AmroKSaleh/whity-core
+          repository: whity-org/whity-core
           sparse-checkout: sdk
           path: whity-core
 

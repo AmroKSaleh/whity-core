@@ -147,7 +147,7 @@ than most training data — so always read the relevant guide in
 [`web/AGENTS.md`](web/AGENTS.md).
 
 The JS side is an **npm workspace** (`web` + the shared UI library
-`packages/ui`, published as `@amroksaleh/ui`). There is a **single lockfile at
+`packages/ui`, published as `@whity-org/ui`). There is a **single lockfile at
 the repo root** — always `npm ci` at the **root**, never inside `web/`. A
 `web/`-level install leaves `web/node_modules/next` absent and Turbopack fails
 with `couldn't find next/package.json`. If you have a stale `web/node_modules`
@@ -170,7 +170,7 @@ edges. Drop the pin once `@hookform/resolvers` stops advertising the abandoned
 npm ci                    # clean install of ALL workspaces, from the repo root
 npm run dev -w web        # dev server on http://localhost:3000
 # Component galleries (Storybook), decoupled from the app:
-npm run storybook -w @amroksaleh/ui   # UI primitives  → :6006
+npm run storybook -w @whity-org/ui   # UI primitives  → :6006
 npm run storybook -w web              # app components → :7007
 ```
 

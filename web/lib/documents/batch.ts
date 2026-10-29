@@ -6,4 +6,4 @@ export {
   rowsFromValues,
   rowsFromRecords,
   type SequenceConfig,
-} from '@amroksaleh/features/document-designer';
+} from '@whity-org/features/document-designer';

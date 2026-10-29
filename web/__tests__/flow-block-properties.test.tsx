@@ -1,8 +1,8 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { FlowEditor } from '@amroksaleh/features/document-designer';
-import { newFlowBlock } from '@amroksaleh/ui/documents/flow';
-import type { FlowBlock, FlowContent, FlowTable } from '@amroksaleh/ui/documents/flow';
+import { FlowEditor } from '@whity-org/features/document-designer';
+import { newFlowBlock } from '@whity-org/ui/documents/flow';
+import type { FlowBlock, FlowContent, FlowTable } from '@whity-org/ui/documents/flow';
 
 /**
  * The block properties the RENDERER honours and the editor could not set.

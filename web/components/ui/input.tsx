@@ -2,10 +2,10 @@
 
 /** The design system's Input with this app's translations. See ./dialog.tsx. */
 
-import { useTranslation } from '@amroksaleh/features/i18n';
-import { Input as BaseInput } from '@amroksaleh/ui/input';
+import { useTranslation } from '@whity-org/features/i18n';
+import { Input as BaseInput } from '@whity-org/ui/input';
 
-export type { InputProps } from '@amroksaleh/ui/input';
+export type { InputProps } from '@whity-org/ui/input';
 
 export function Input(props: React.ComponentProps<typeof BaseInput>) {
   const t = useTranslation('common');

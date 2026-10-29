@@ -189,7 +189,7 @@ Run what applies. Check the *real* exit code of each.
 `gh pr create` returns GraphQL 500s here. Use the REST API:
 
 ```bash
-gh api repos/AmroKSaleh/whity-core/pulls -X POST \
+gh api repos/whity-org/whity-core/pulls -X POST \
   -f title='…' -f head='<branch>' -f base=develop -F body=@<file>
 ```
 

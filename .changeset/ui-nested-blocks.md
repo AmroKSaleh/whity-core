@@ -1,5 +1,5 @@
 ---
-"@amroksaleh/ui": minor
+"@whity-org/ui": minor
 ---
 
 Blocks may contain blocks. `flattenBlock` expands a block to leaves, resolving

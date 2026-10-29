@@ -27,7 +27,7 @@
  *     built from the plugin's published OpenAPI schema. Every crud feature gets
  *     one without declaring anything.
  *
- * THE SHELL STAYS OURS TO MOUNT. `@amroksaleh/features/record` is not reachable
+ * THE SHELL STAYS OURS TO MOUNT. `@whity-org/features/record` is not reachable
  * from a plugin and is not meant to be: a plugin ships no JavaScript. The crud
  * record page mounts the shell on the plugin's behalf; a blocks tree owns its
  * own content, states and gating, so this route gives it the page chrome and
@@ -46,11 +46,11 @@ import { featureHref } from '@/lib/plugin-record-route';
 import { CrudRecordScreen } from '@/components/plugin/crud-record-screen';
 import { BlockRenderer } from '@/components/plugin/blocks/block-renderer';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Button } from '@amroksaleh/ui/button';
-import { Skeleton } from '@amroksaleh/ui/skeleton';
-import { AccessDenied } from '@amroksaleh/ui/access-denied';
+import { Button } from '@whity-org/ui/button';
+import { Skeleton } from '@whity-org/ui/skeleton';
+import { AccessDenied } from '@whity-org/ui/access-denied';
 import { IconArrowLeft, IconPuzzle } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 
 export default function PluginRecordPage() {
   // Client pages read dynamic segments via useParams (Next 16 app router). A

@@ -2,10 +2,10 @@
 
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
-import { tabsListVariants } from '@amroksaleh/ui/tabs';
+import { tabsListVariants } from '@whity-org/ui/tabs';
 import { api } from '@/lib/api/client';
 import { useFetch } from '@/hooks/useFetch';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 import type { components } from '@/lib/api/schema';
 
 /**
@@ -16,7 +16,7 @@ import type { components } from '@/lib/api/schema';
  * extensive existing test suite built around that separation, notably the
  * WC-235 guarantee that system-wide defaults never render on the tenant
  * page) — this is a purely visual/navigational unification: a real tab bar
- * styled with the same primitives as {@link import('@amroksaleh/ui/tabs')},
+ * styled with the same primitives as {@link import('@whity-org/ui/tabs')},
  * where each "tab" is a `<Link>` to its own route rather than a
  * Radix-controlled panel.
  *

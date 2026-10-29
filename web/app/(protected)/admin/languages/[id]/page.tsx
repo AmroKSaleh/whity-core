@@ -20,8 +20,8 @@ import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { useToast } from '@/lib/toast-context';
-import { useTranslation } from '@amroksaleh/features/i18n';
-import { RecordPageSkeleton } from '@amroksaleh/features/record';
+import { useTranslation } from '@whity-org/features/i18n';
+import { RecordPageSkeleton } from '@whity-org/features/record';
 import { LANGUAGES_MANAGE } from '@/lib/capabilities';
 import { LanguageRecordScreen } from '../record-screen';
 

@@ -1,12 +1,12 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { FlowEditor } from '@amroksaleh/features/document-designer';
+import { FlowEditor } from '@whity-org/features/document-designer';
 import {
   DEFAULT_MAX_FIGURE_BYTES,
   FIGURE_MIME_TYPES,
   judgeFigureFile,
-} from '@amroksaleh/ui/documents/flow';
-import type { FlowContent } from '@amroksaleh/ui/documents/flow';
+} from '@whity-org/ui/documents/flow';
+import type { FlowContent } from '@whity-org/ui/documents/flow';
 
 /**
  * Choosing the image in a `figure` block.

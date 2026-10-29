@@ -42,7 +42,7 @@ WORKDIR /app
 # the tree does not fail `npm ci`, it silently drops that workspace's
 # dependencies and the failure surfaces much later as `next: not found`.
 # templates/ contributes only its package.json (Dockerfile.dockerignore drops
-# the rest); packages/ arrives whole because web consumes @amroksaleh/ui as
+# the rest); packages/ arrives whole because web consumes @whity-org/ui as
 # source, not as a build artifact.
 COPY package.json package-lock.json ./
 COPY packages packages

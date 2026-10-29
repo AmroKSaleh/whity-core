@@ -11,18 +11,18 @@ const customJestConfig = {
   testEnvironment: 'jest-environment-jsdom',
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/$1',
-    // The `@amroksaleh/*` workspace packages must resolve to THIS checkout —
+    // The `@whity-org/*` workspace packages must resolve to THIS checkout —
     // and, more precisely, to the same file the transform rewrites imports to.
     //
-    // web/tsconfig.json maps `@amroksaleh/ui/*` to `../packages/ui/src/*`, and
+    // web/tsconfig.json maps `@whity-org/ui/*` to `../packages/ui/src/*`, and
     // next/jest hands those `paths` to SWC. So an ESM `import … from
-    // '@amroksaleh/ui/dialog'` is emitted as a RELATIVE require, resolved
+    // '@whity-org/ui/dialog'` is emitted as a RELATIVE require, resolved
     // against this tsconfig — always inside the checkout being run. The string
-    // in `jest.mock('@amroksaleh/ui/dialog')` is a call argument rather than an
+    // in `jest.mock('@whity-org/ui/dialog')` is a call argument rather than an
     // import, so SWC leaves it alone and Jest resolves it as a bare specifier:
     // node_modules walked UP from web/. Worktrees live at .claude/worktrees/*
     // INSIDE the repo, so that walk escapes the worktree and lands on the MAIN
-    // checkout's node_modules, whose `@amroksaleh/ui` is an npm-workspaces
+    // checkout's node_modules, whose `@whity-org/ui` is an npm-workspaces
     // symlink to the MAIN checkout's packages/ui.
     //
     // Two physical paths, two module instances: the mock is filed against one
@@ -32,8 +32,8 @@ const customJestConfig = {
     // a broken environment, which is what made it expensive.
     //
     // Mirroring the tsconfig `paths` here puts both halves on one file. Only
-    // these two packages need it: they are the only `@amroksaleh/*` entries in
-    // `paths`, so the only ones SWC rewrites. (`@amroksaleh/tokens` goes through
+    // these two packages need it: they are the only `@whity-org/*` entries in
+    // `paths`, so the only ones SWC rewrites. (`@whity-org/tokens` goes through
     // node_modules for imports and mocks alike — not local, but consistent.)
     //
     // These four entries are load-bearing, and silently so: delete them and the
@@ -46,10 +46,10 @@ const customJestConfig = {
     // here while failing templates/tauri-desktop's Vite build, which has no
     // tsconfig-paths plugin and so resolves through `exports` for real.
     // __tests__/workspace-subpath-exports.test.ts holds that line.
-    '^@amroksaleh/ui$': '<rootDir>/../packages/ui/src/index.ts',
-    '^@amroksaleh/ui/(.*)$': '<rootDir>/../packages/ui/src/$1',
-    '^@amroksaleh/features$': '<rootDir>/../packages/features/src/index.ts',
-    '^@amroksaleh/features/(.*)$': '<rootDir>/../packages/features/src/$1',
+    '^@whity-org/ui$': '<rootDir>/../packages/ui/src/index.ts',
+    '^@whity-org/ui/(.*)$': '<rootDir>/../packages/ui/src/$1',
+    '^@whity-org/features$': '<rootDir>/../packages/features/src/index.ts',
+    '^@whity-org/features/(.*)$': '<rootDir>/../packages/features/src/$1',
     // Peer deps (react, radix, react-hook-form, …) are hoisted to the workspace
     // root node_modules by npm workspaces, so standard resolution walking up
     // from web/ (and from packages/ui/src) finds the single shared copy — no

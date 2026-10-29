@@ -12,10 +12,10 @@ import { ActionScreen } from '@/components/plugin/action-screen';
 import { EmbedScreen } from '@/components/plugin/embed-screen';
 import { BlockRenderer } from '@/components/plugin/blocks/block-renderer';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Skeleton } from '@amroksaleh/ui/skeleton';
-import { AccessDenied } from '@amroksaleh/ui/access-denied';
+import { Skeleton } from '@whity-org/ui/skeleton';
+import { AccessDenied } from '@whity-org/ui/access-denied';
 import { IconPuzzle } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 
 /**
  * Renders a registry override. Declared at module level and fed the component

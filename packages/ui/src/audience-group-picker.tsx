@@ -46,7 +46,7 @@ import {
  *     that re-derived that and got it wrong would present ten people as the
  *     whole group, which is the single misreading this shape exists to prevent.
  *
- * IT FETCHES NOTHING, LIKE EVERY OTHER `@amroksaleh/ui` INPUT
+ * IT FETCHES NOTHING, LIKE EVERY OTHER `@whity-org/ui` INPUT
  * ----------------------------------------------------------
  * Groups and the preview arrive as props. That is the kit's standing convention
  * ({@see TagInput}), and here it is also forced: the preview endpoint is

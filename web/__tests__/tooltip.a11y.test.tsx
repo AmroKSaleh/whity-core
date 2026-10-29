@@ -1,8 +1,8 @@
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import axe from 'axe-core';
-import { Tooltip, TooltipTrigger, TooltipContent } from '@amroksaleh/ui/tooltip';
-import { Button } from '@amroksaleh/ui/button';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@whity-org/ui/tooltip';
+import { Button } from '@whity-org/ui/button';
 
 /**
  * Accessibility regression for Tooltip (WC UI-library flow #535). Radix's

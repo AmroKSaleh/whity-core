@@ -33,7 +33,7 @@ Welcome to the Whity Core documentation.
 
 - **[Development Workflow](Development-Workflow.md)** — How work is planned and shipped: the Instruction Set (IS) and the Tasker flow (`WC-XX` numbering, task lifecycle, parallel execution).
 - **[Testing Against PostgreSQL](Testing-Against-PostgreSQL.md)** — Closing the SQLite/PostgreSQL dialect gap: how to point core's and a plugin's suites at a real engine, and the catalogue of differences that pass silently on SQLite.
-- **[Package Releases](Package-Releases.md)** — How the publishable packages (`@amroksaleh/ui`, the PHP plugin SDK) are versioned and released: monorepo + independently-versioned packages, changesets, version-gated publish.
+- **[Package Releases](Package-Releases.md)** — How the publishable packages (`@whity-org/ui`, the PHP plugin SDK) are versioned and released: monorepo + independently-versioned packages, changesets, version-gated publish.
 - **[CONTRIBUTING.md](../../CONTRIBUTING.md)** — Dev setup, coding standards, testing, and the PR process.
 - **[Plugin Development](Plugin-Development.md)** — Build plugins against `PluginInterface`.
 
@@ -57,7 +57,7 @@ Whity Core is a deployed application, not a library you pull into another projec
 no `amroksaleh/whity-core` package on Packagist. Clone it and bring the stack up:
 
 ```bash
-git clone https://github.com/AmroKSaleh/whity-core.git
+git clone https://github.com/whity-org/whity-core.git
 cd whity-core
 composer install     # on the HOST first — the dev image ships no vendor/, and db-init exits 255 without one
 docker compose up
@@ -67,7 +67,7 @@ See [Installation](Installation.md) for the environment variables, the `db-init`
 the first-run seed.
 
 To deploy rather than develop, the release pipeline publishes versioned images —
-`ghcr.io/amroksaleh/whity-core`, `…/web`, and the optional `…/render` — whose tags must match
+`ghcr.io/whity-org/whity-core`, `…/web`, and the optional `…/render` — whose tags must match
 each other. See [Deployment Guide](DEPLOYMENT_GUIDE.md) and [Core Update](Core-Update.md).
 
 ## License

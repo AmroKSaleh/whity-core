@@ -23,12 +23,12 @@ import { recordHref } from '@/lib/plugin-record-route';
 import type { CapabilityDenial, PluginFeature } from '@/lib/plugin-features';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { usePluginData } from '@/lib/use-plugin-data';
-import type { TranslateFn } from '@amroksaleh/features/i18n';
+import type { TranslateFn } from '@whity-org/features/i18n';
 import { useToast } from '@/lib/toast-context';
 import { useDirection } from '@/lib/direction-context';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type Column } from '@/components/admin/data-table';
-import { Button } from '@amroksaleh/ui/button';
+import { Button } from '@whity-org/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -42,17 +42,17 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@amroksaleh/ui/dropdown-menu';
-import { Skeleton } from '@amroksaleh/ui/skeleton';
-import { ErrorState } from '@amroksaleh/ui/empty-state';
+} from '@whity-org/ui/dropdown-menu';
+import { Skeleton } from '@whity-org/ui/skeleton';
+import { ErrorState } from '@whity-org/ui/empty-state';
 import {
   IconAlertTriangle,
   IconMenu2,
   IconPlus,
   IconShieldLock,
 } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
-import { isDateFieldName, useDateDisplay } from '@amroksaleh/features/datetime';
+import { useTranslation } from '@whity-org/features/i18n';
+import { isDateFieldName, useDateDisplay } from '@whity-org/features/datetime';
 
 /**
  * i18n (domain `plugin`): only the CHROME this file authors is keyed. The

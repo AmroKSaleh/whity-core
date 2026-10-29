@@ -14,9 +14,9 @@ import { MathText } from '../math-text';
  * shows a realistic render while editing.
  *
  * Promoted from `web/components/documents/element-content.tsx` into
- * `@amroksaleh/ui` (see GitHub issue #532 — schema-driven UI components — for
+ * `@whity-org/ui` (see GitHub issue #532 — schema-driven UI components — for
  * a related-but-distinct effort building rich-text/math primitives for the
- * plugin block DSL; this extraction reuses the same `@amroksaleh/ui/math-text`
+ * plugin block DSL; this extraction reuses the same `@whity-org/ui/math-text`
  * primitive rather than inventing a second one).
  */
 export function ElementContent({

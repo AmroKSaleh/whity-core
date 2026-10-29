@@ -1,6 +1,6 @@
 import { createDocumentDesignerAdapter } from '../adapter';
-import type { DocTemplate } from '@amroksaleh/ui/documents/types';
-import type { DocBlock } from '@amroksaleh/ui/documents/blocks';
+import type { DocTemplate } from '@whity-org/ui/documents/types';
+import type { DocBlock } from '@whity-org/ui/documents/blocks';
 import type { Transport, TransportResponse } from '../types';
 
 /**

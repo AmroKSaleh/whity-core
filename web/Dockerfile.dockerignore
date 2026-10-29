@@ -32,7 +32,7 @@ web/test-results
 web/playwright-report
 web/tsconfig.tsbuildinfo
 
-# The workspace packages web imports. @amroksaleh/ui is consumed as SOURCE
+# The workspace packages web imports. @whity-org/ui is consumed as SOURCE
 # (next.config.ts transpilePackages) — there is no prebuilt artifact to copy, so
 # the whole package tree has to be here.
 !packages

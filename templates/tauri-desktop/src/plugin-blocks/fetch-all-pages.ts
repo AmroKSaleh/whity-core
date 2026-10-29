@@ -9,9 +9,9 @@
  * a non-2xx `status` rather than a non-ok `Response`.
  *
  * It is a copy rather than an import because this template ships to consumers
- * who get `@amroksaleh/*` from the registry and no `web/` at all, and the
+ * who get `@whity-org/*` from the registry and no `web/` at all, and the
  * helper lives in the unpublished web app. Hoisting it into
- * `@amroksaleh/features` would make it importable from both, at the cost of
+ * `@whity-org/features` would make it importable from both, at the cost of
  * moving a file four core screens already depend on and pinning the template to
  * a newer package version — a packaging change, not this fix. The parity tests
  * are what keep the copy honest (#847, #850).

@@ -1,11 +1,11 @@
 import { useTranslation } from '../i18n';
-import { Input as BaseInput } from '@amroksaleh/ui/input';
-import { DialogContent as BaseDialogContent } from '@amroksaleh/ui/dialog';
+import { Input as BaseInput } from '@whity-org/ui/input';
+import { DialogContent as BaseDialogContent } from '@whity-org/ui/dialog';
 
 /**
  * The design-system Input and DialogContent with their copy supplied.
  *
- * `@amroksaleh/ui` takes its user-facing copy as props with English defaults,
+ * `@whity-org/ui` takes its user-facing copy as props with English defaults,
  * because it is published standalone and must not depend on the i18n feature
  * (#758). Web solves that with app-level wrappers in `web/components/ui/`, and
  * the designer imported those two — the one web coupling that is neither
@@ -53,4 +53,4 @@ export {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-} from '@amroksaleh/ui/dialog';
+} from '@whity-org/ui/dialog';

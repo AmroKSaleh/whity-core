@@ -46,7 +46,7 @@
  */
 
 import { useCallback, useMemo, type ReactNode } from 'react'
-import type { DataTableColumn } from '@amroksaleh/ui/data-table'
+import type { DataTableColumn } from '@whity-org/ui/data-table'
 
 import { useFormattingLocale } from '../i18n/useFormattingLocale'
 import { useDateDisplayPreferences } from './date-display-context'

@@ -21,20 +21,20 @@
  *     error, because that is an ungranted capability and not a failure.
  *
  * Driven through the data-source-agnostic `RoleRecordScreen`
- * (@amroksaleh/features/roles) with injected props, like the other roles tests
+ * (@whity-org/features/roles) with injected props, like the other roles tests
  * post Path-B extraction — not through web's provider stack.
  */
 
 import React from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { RoleRecordScreen } from '@amroksaleh/features/roles';
+import { RoleRecordScreen } from '@whity-org/features/roles';
 import type {
   Permission,
   RoleWithPermissions,
   RolesAdapter,
   Transport,
-} from '@amroksaleh/features/roles';
+} from '@whity-org/features/roles';
 import { createRolesAdapter } from '@/lib/roles-adapter';
 
 /** English-fallback translator: returns the caller-supplied source string. */

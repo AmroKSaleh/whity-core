@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite"
-import { Button } from "@amroksaleh/ui/button"
+import { Button } from "@whity-org/ui/button"
 
 import { AdminHeader } from "./admin-header"
 

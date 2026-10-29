@@ -1,5 +1,5 @@
 ---
-"@amroksaleh/ui": minor
+"@whity-org/ui": minor
 ---
 
 New `CopyBlock`: text the user is meant to copy somewhere else (a command, a

@@ -8,8 +8,8 @@ import { useCapabilities } from '@/hooks/useCapabilities';
 import { BILLING_PAY } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
-import { Button } from '@amroksaleh/ui/button';
-import { Badge } from '@amroksaleh/ui/badge';
+import { Button } from '@whity-org/ui/button';
+import { Badge } from '@whity-org/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -18,8 +18,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { useTranslation } from '@amroksaleh/features/i18n';
-import { formatMoney } from '@amroksaleh/ui/money/currency';
+import { useTranslation } from '@whity-org/features/i18n';
+import { formatMoney } from '@whity-org/ui/money/currency';
 import { navigateExternal } from '@/lib/external-navigate';
 import { SubscriptionPanel } from './subscription-panel';
 

@@ -1,12 +1,12 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { DemoCatalogDetail } from '@amroksaleh/features/demo-catalog';
-import type { DemoCatalogAdapter, DemoCatalogItem } from '@amroksaleh/features/demo-catalog';
+import { DemoCatalogDetail } from '@whity-org/features/demo-catalog';
+import type { DemoCatalogAdapter, DemoCatalogItem } from '@whity-org/features/demo-catalog';
 
 /**
  * Component tests for the multi-client extraction pilot's DemoCatalogDetail
- * (@amroksaleh/features/demo-catalog). Covers both modes (`itemId: null` =
+ * (@whity-org/features/demo-catalog). Covers both modes (`itemId: null` =
  * create, `itemId` set = edit), the not-found/load-error paths, and that
  * save()/cancel() route through the injected adapter and callbacks — never a
  * direct fetch.

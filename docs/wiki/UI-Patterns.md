@@ -313,7 +313,7 @@ The `Form` layer wires this for you (see [Component-Library › Form](Component-
 **There is one way to put a date on a screen, and a CI guard enforces it.**
 
 ```tsx
-import { useDateDisplay } from '@amroksaleh/features/datetime'
+import { useDateDisplay } from '@whity-org/features/datetime'
 
 const { hidden, date, dateTime, age, relative, dateColumns } = useDateDisplay()
 ```

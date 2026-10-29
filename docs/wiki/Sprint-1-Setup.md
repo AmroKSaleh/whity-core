@@ -63,7 +63,7 @@ Before getting started, ensure you have:
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/AmroKSaleh/whity-core.git
+git clone https://github.com/whity-org/whity-core.git
 cd whity-core
 ```
 
@@ -881,9 +881,9 @@ Now that you have Sprint 1 running:
 
 ## Getting Help
 
-- **Documentation**: [docs/wiki/](https://github.com/AmroKSaleh/whity-core/tree/main/docs/wiki/)
-- **Issues**: [GitHub Issues](https://github.com/AmroKSaleh/whity-core/issues/)
-- **Discussions**: [GitHub Discussions](https://github.com/AmroKSaleh/whity-core/discussions/)
+- **Documentation**: [docs/wiki/](https://github.com/whity-org/whity-core/tree/main/docs/wiki/)
+- **Issues**: [GitHub Issues](https://github.com/whity-org/whity-core/issues/)
+- **Discussions**: [GitHub Discussions](https://github.com/whity-org/whity-core/discussions/)
 
 ## Summary
 

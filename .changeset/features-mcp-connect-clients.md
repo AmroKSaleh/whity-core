@@ -1,8 +1,8 @@
 ---
-"@amroksaleh/features": minor
+"@whity-org/features": minor
 ---
 
-New `@amroksaleh/features/mcp`: how each AI app connects to a Whity MCP server.
+New `@whity-org/features/mcp`: how each AI app connects to a Whity MCP server.
 `MCP_CLIENTS` lists Claude Code, Cursor, VS Code, Windsurf, Codex CLI, Gemini
 CLI, n8n and a generic "other", plus Claude and ChatGPT marked
 `requiresSignIn` until OAuth sign-in lands. Each entry's `setup({ name, url,

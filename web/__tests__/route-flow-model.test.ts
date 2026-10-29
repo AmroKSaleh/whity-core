@@ -10,7 +10,7 @@ import {
   slotAt,
   type RouteFlowGraph,
   type RouteFlowStep,
-} from '@amroksaleh/ui/route-flow/model';
+} from '@whity-org/ui/route-flow/model';
 
 /**
  * The route-flow model (#1027) — the transitions an engine will actually take,
@@ -18,7 +18,7 @@ import {
  *
  * These live here rather than beside the component because `packages/ui` has no
  * Jest project of its own; web's is the only runner in the repo and its
- * `roots`/`moduleNameMapper` resolve `@amroksaleh/ui/*` into this checkout's
+ * `roots`/`moduleNameMapper` resolve `@whity-org/ui/*` into this checkout's
  * `packages/ui/src`, so the module under test is the real one.
  *
  * EXPECTED VALUES ARE WRITTEN OUT, NEVER RE-DERIVED

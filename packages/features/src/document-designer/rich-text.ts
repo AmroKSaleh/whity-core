@@ -1,4 +1,4 @@
-import type { TextRun } from '@amroksaleh/ui/documents/types';
+import type { TextRun } from '@whity-org/ui/documents/types';
 
 /**
  * Pure helpers for the rich-text run model (see `TextRun` in `types.ts`).

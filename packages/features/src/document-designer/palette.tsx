@@ -1,5 +1,5 @@
-import type { DocElement } from '@amroksaleh/ui/documents/types';
-import { BLOCK_SCOPES, type BlockScope, type DocBlock } from '@amroksaleh/ui/documents/blocks';
+import type { DocElement } from '@whity-org/ui/documents/types';
+import { BLOCK_SCOPES, type BlockScope, type DocBlock } from '@whity-org/ui/documents/blocks';
 import {
   IconChevronUp,
   IconChevronDown,
@@ -54,7 +54,7 @@ function elementLabel(el: DocElement, t: TranslateFn): string {
 /**
  * The display name of a block's visibility tier.
  *
- * `BLOCK_SCOPES` lives in the kit (`@amroksaleh/ui/documents/blocks`) and
+ * `BLOCK_SCOPES` lives in the kit (`@whity-org/ui/documents/blocks`) and
  * carries English labels, which is correct — a kit constant may not reach for a
  * translator, and the English is the right default for any consumer that has
  * none. Translating is the CONSUMER's job, and until this existed nobody did

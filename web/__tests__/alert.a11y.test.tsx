@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import axe from 'axe-core';
-import { Alert, AlertTitle, AlertDescription, AlertAction } from '@amroksaleh/ui/alert';
+import { Alert, AlertTitle, AlertDescription, AlertAction } from '@whity-org/ui/alert';
 
 /**
  * Accessibility regression for Alert's expanded semantic variant set

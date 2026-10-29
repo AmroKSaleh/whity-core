@@ -61,9 +61,9 @@ import {
   resolveAccess,
   type RecordBack,
   type RecordFactsFn,
-} from '@amroksaleh/features/record';
-import { Button } from '@amroksaleh/ui/button';
-import { useTranslation } from '@amroksaleh/features/i18n';
+} from '@whity-org/features/record';
+import { Button } from '@whity-org/ui/button';
+import { useTranslation } from '@whity-org/features/i18n';
 
 /**
  * i18n (domain `plugin`): only the CHROME this file authors is keyed. The

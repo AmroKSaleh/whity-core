@@ -9,14 +9,14 @@
  * dependencies (the portable `packages/ui/src/documents/*` renderers +
  * `packages/ui/src/math-text.tsx`) IN-PLACE from source — the exact same
  * source the Next.js app itself compiles (`transpilePackages:
- * ["@amroksaleh/ui"]` in web/next.config), so a change to the on-screen
+ * ["@whity-org/ui"]` in web/next.config), so a change to the on-screen
  * renderer is picked up here automatically on the next build, with no manual
  * sync step.
  *
  * esbuild resolves two path-alias families to mirror `web/tsconfig.json`'s
  * `paths` map (so `print-document.tsx`'s own imports resolve unchanged):
  *   "@/*"            -> <repo>/web/*
- *   "@amroksaleh/ui*" -> <repo>/packages/ui/src*
+ *   "@whity-org/ui*" -> <repo>/packages/ui/src*
  *
  * Emits dist/harness/{bundle.js,bundle.css} (esbuild auto-emits the CSS
  * sibling for the `katex/dist/katex.min.css` import pulled in transitively by
@@ -80,7 +80,7 @@ function resolveWithExtensions(basePath) {
       return candidate;
     }
   }
-  // A DIRECTORY target (e.g. `@amroksaleh/features/document-designer`, a slice
+  // A DIRECTORY target (e.g. `@whity-org/features/document-designer`, a slice
   // whose entry point is its own index) resolves to that index. Without this
   // the alias hands esbuild a directory path and the build dies on an
   // unreadable "file" — on Windows, with the memorably unhelpful "Incorrect
@@ -107,7 +107,7 @@ function escapeRegExp(literal) {
   return literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-/** esbuild plugin: rewrite `@/...` and `@amroksaleh/ui...` specifiers to the
+/** esbuild plugin: rewrite `@/...` and `@whity-org/ui...` specifiers to the
  * matching source paths, mirroring web/tsconfig.json's `paths` map — plus pin
  * the shared runtime packages above to a single physical copy. */
 function pathAliasPlugin() {
@@ -123,12 +123,12 @@ function pathAliasPlugin() {
       build.onResolve({ filter: /^@\// }, (args) => ({
         path: resolveWithExtensions(path.join(WEB_ROOT, args.path.slice(2))),
       }));
-      build.onResolve({ filter: /^@amroksaleh\/ui/ }, (args) => {
-        const rest = args.path.slice('@amroksaleh/ui'.length); // '' or '/documents/xyz'
+      build.onResolve({ filter: /^@whity-org\/ui/ }, (args) => {
+        const rest = args.path.slice('@whity-org/ui'.length); // '' or '/documents/xyz'
         const target = rest === '' ? path.join(UI_SRC_ROOT, 'index') : path.join(UI_SRC_ROOT, rest);
         return { path: resolveWithExtensions(target) };
       });
-      // The designer moved to `@amroksaleh/features/document-designer` so the
+      // The designer moved to `@whity-org/features/document-designer` so the
       // Tauri desktop client could render the same code, and
       // `web/components/documents/print-document.tsx` — which entry.tsx imports
       // — is now a re-export shim pointing there. Without this resolver the
@@ -139,8 +139,8 @@ function pathAliasPlugin() {
       // tabler icons, the canvas) into this production PDF bundle and leave
       // tree-shaking to take it back out. If bundle.js ever jumps in size,
       // check that first.
-      build.onResolve({ filter: /^@amroksaleh\/features/ }, (args) => {
-        const rest = args.path.slice('@amroksaleh/features'.length);
+      build.onResolve({ filter: /^@whity-org\/features/ }, (args) => {
+        const rest = args.path.slice('@whity-org/features'.length);
         const target = rest === '' ? path.join(FEATURES_SRC_ROOT, 'index') : path.join(FEATURES_SRC_ROOT, rest);
         return { path: resolveWithExtensions(target) };
       });

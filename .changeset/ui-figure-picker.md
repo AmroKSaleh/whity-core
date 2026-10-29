@@ -1,6 +1,6 @@
 ---
-"@amroksaleh/ui": minor
-"@amroksaleh/features": minor
+"@whity-org/ui": minor
+"@whity-org/features": minor
 ---
 
 Document mode's `figure` block can now be given an image.
@@ -12,7 +12,7 @@ string would be a block that exists and cannot print — and nothing anywhere le
 the author replace it. The command appeared to work and put an invisible dot on
 the page.
 
-`@amroksaleh/ui` gains `judgeFigureFile`, `FIGURE_MIME_TYPES` and
+`@whity-org/ui` gains `judgeFigureFile`, `FIGURE_MIME_TYPES` and
 `DEFAULT_MAX_FIGURE_BYTES`; `FlowEditor` gains optional `maxFigureBytes` and
 `onError`. Both props are optional, so existing callers are unaffected — though
 a caller that omits `onError` gets a picker that refuses silently, which is why
