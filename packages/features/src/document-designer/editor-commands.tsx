@@ -1,9 +1,9 @@
 
 import type { ReactNode } from 'react';
-import type { DocElement, ElementType } from '@amroksaleh/ui/documents/types';
-import { BLOCK_SCOPES, type DocBlock } from '@amroksaleh/ui/documents/blocks';
+import type { DocElement, ElementType } from '@whity-org/ui/documents/types';
+import { BLOCK_SCOPES, type DocBlock } from '@whity-org/ui/documents/blocks';
 import { STARTER_TEMPLATES } from './starters';
-import type { MenuBarMenu, MenuBarNode } from '@amroksaleh/ui/menu-bar';
+import type { MenuBarMenu, MenuBarNode } from '@whity-org/ui/menu-bar';
 import {
   IconTypography,
   IconVariable,

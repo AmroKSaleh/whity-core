@@ -39,11 +39,11 @@
  * record page's words live.
  */
 
-import { Badge } from '@amroksaleh/ui/badge';
-import { Button } from '@amroksaleh/ui/button';
-import { ErrorState } from '@amroksaleh/ui/empty-state';
-import { PageHeader } from '@amroksaleh/ui/page-header';
-import { Skeleton } from '@amroksaleh/ui/skeleton';
+import { Badge } from '@whity-org/ui/badge';
+import { Button } from '@whity-org/ui/button';
+import { ErrorState } from '@whity-org/ui/empty-state';
+import { PageHeader } from '@whity-org/ui/page-header';
+import { Skeleton } from '@whity-org/ui/skeleton';
 import { IconArrowLeft } from '@tabler/icons-react';
 
 import { useDateDisplay } from '../datetime';

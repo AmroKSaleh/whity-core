@@ -4,7 +4,7 @@ Thanks for using Whity Core! Here's where to go depending on what you need.
 
 ## Bug reports & feature requests
 
-Use [GitHub Issues](https://github.com/AmroKSaleh/whity-core/issues) —
+Use [GitHub Issues](https://github.com/whity-org/whity-core/issues) —
 please search first to avoid duplicates. A good bug report includes:
 
 - What you expected to happen vs. what happened
@@ -20,7 +20,7 @@ private reporting process.
 
 ## Questions & general discussion
 
-Open a [GitHub Discussion](https://github.com/AmroKSaleh/whity-core/discussions)
+Open a [GitHub Discussion](https://github.com/whity-org/whity-core/discussions)
 if enabled on the repository, or open an issue tagged `question` if not.
 
 ## Documentation

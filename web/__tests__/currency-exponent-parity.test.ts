@@ -7,7 +7,7 @@ import {
   minorUnitsPerMajor,
   parseMoney,
   toDecimalString,
-} from '@amroksaleh/ui/money/currency';
+} from '@whity-org/ui/money/currency';
 
 /**
  * The exponent table exists twice — once in PHP, once in TypeScript — and the

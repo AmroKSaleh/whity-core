@@ -1,10 +1,10 @@
 import { act, renderHook } from '@testing-library/react';
 
-import { createAlwaysSyncedController, useSyncStatus } from '@amroksaleh/features/sync';
-import type { SyncController, SyncStatus } from '@amroksaleh/features/sync';
+import { createAlwaysSyncedController, useSyncStatus } from '@whity-org/features/sync';
+import type { SyncController, SyncStatus } from '@whity-org/features/sync';
 
 /**
- * Tests for the shared sync contract (@amroksaleh/features/sync): the
+ * Tests for the shared sync contract (@whity-org/features/sync): the
  * always-synced controller online-only clients inject, and the useSyncStatus
  * hook. The load-bearing invariant is the referential-stability contract on
  * SyncController.getStatus() that keeps useSyncExternalStore from looping.

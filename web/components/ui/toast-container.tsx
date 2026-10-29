@@ -49,7 +49,7 @@ function ToastIcon({ type }: { type: ToastType }) {
  *
  * Props with English defaults rather than a translation hook: this file is a
  * PUBLISHED registry item, installed verbatim into a downstream consumer's
- * project where `@amroksaleh/features` need not exist. A caller that passes
+ * project where `@whity-org/features` need not exist. A caller that passes
  * nothing renders exactly as before.
  */
 export interface ToastContainerProps {

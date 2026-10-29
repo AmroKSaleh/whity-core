@@ -1,14 +1,14 @@
 import * as React from "react"
 import { IconChevronLeft, IconChevronRight, IconMenu2, IconX } from "@tabler/icons-react"
 
-import { Button } from "@amroksaleh/ui/button"
-import type { AppSidebarNavGroup } from "@amroksaleh/ui/app-sidebar"
+import { Button } from "@whity-org/ui/button"
+import type { AppSidebarNavGroup } from "@whity-org/ui/app-sidebar"
 
 import { HashLinkAdapter } from "./hash-link"
 
 /**
  * A close port of the website's OWN sidebar (web/components/sidebar.tsx) —
- * not the generic `@amroksaleh/ui/app-sidebar` primitive the app used
+ * not the generic `@whity-org/ui/app-sidebar` primitive the app used
  * before. The website's sidebar predates that shared primitive and was never
  * swapped over to it, so matching the website pixel-for-pixel means mirroring
  * ITS bespoke JSX/classes (Button-wrapped, numbered nav rows; p-6 header;

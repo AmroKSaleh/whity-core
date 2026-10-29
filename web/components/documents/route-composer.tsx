@@ -123,29 +123,29 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from '@amroksaleh/ui/button';
-import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
-import { Badge } from '@amroksaleh/ui/badge';
+import { Button } from '@whity-org/ui/button';
+import { Alert, AlertDescription } from '@whity-org/ui/alert';
+import { Badge } from '@whity-org/ui/badge';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@amroksaleh/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@amroksaleh/ui/tabs';
+} from '@whity-org/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@whity-org/ui/tabs';
 import {
   AudienceGroupPicker,
   type AudienceGroupOption,
   type AudienceGroupPreview,
   type AudienceGroupPreviewStatus,
-} from '@amroksaleh/ui/audience-group-picker';
+} from '@whity-org/ui/audience-group-picker';
 import {
   AudiencePeoplePicker,
   type AudiencePersonOption,
-} from '@amroksaleh/ui/audience-people-picker';
+} from '@whity-org/ui/audience-people-picker';
 import { IconArrowDown, IconArrowUp, IconPlus, IconTrash } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import type { DraftStep, IssueRouteResponse, RoutingRule } from './routing-wire';

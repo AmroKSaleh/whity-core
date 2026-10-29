@@ -1,8 +1,8 @@
 import { useSyncExternalStore } from 'react';
 import { Toolbar as ToolbarPrimitive } from 'radix-ui';
-import { Button } from '@amroksaleh/ui/button';
+import { Button } from '@whity-org/ui/button';
 import { Input } from './ui-i18n';
-import { MenuBar } from '@amroksaleh/ui/menu-bar';
+import { MenuBar } from '@whity-org/ui/menu-bar';
 import {
   Dialog,
   DialogContent,
@@ -29,7 +29,7 @@ import {
   useEditorChrome,
   type EditorCommandContext,
 } from './editor-commands';
-import { BLOCK_SCOPES, type BlockScope } from '@amroksaleh/ui/documents/blocks';
+import { BLOCK_SCOPES, type BlockScope } from '@whity-org/ui/documents/blocks';
 
 /**
  * The editor's chrome: a Google-Docs-style stack of

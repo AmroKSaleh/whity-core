@@ -40,20 +40,20 @@
  */
 
 import { useEffect, useState } from 'react';
-import { PageHeader } from '@amroksaleh/ui/page-header';
+import { PageHeader } from '@whity-org/ui/page-header';
 import {
   DataTable,
   useDataTableQuery,
   type DataTableColumn,
-} from '@amroksaleh/ui/data-table';
-import { Badge } from '@amroksaleh/ui/badge';
-import { Button } from '@amroksaleh/ui/button';
+} from '@whity-org/ui/data-table';
+import { Badge } from '@whity-org/ui/badge';
+import { Button } from '@whity-org/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@amroksaleh/ui/dropdown-menu';
+} from '@whity-org/ui/dropdown-menu';
 import { IconMenu2, IconPlus } from '@tabler/icons-react';
 import { identityTranslate } from '../nav/types';
 import { ROLES_WRITE, ROLES_DELETE } from './capabilities';

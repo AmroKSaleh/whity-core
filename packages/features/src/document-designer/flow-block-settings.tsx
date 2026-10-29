@@ -4,7 +4,7 @@ import {
   MIN_BLOCK_WIDTH_PERCENT,
   blockAcceptsLayout,
   type FlowBlock,
-} from '@amroksaleh/ui/documents/flow';
+} from '@whity-org/ui/documents/flow';
 import { Input } from './ui-i18n';
 import { useTranslation } from '../i18n';
 

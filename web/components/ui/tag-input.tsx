@@ -2,10 +2,10 @@
 
 /** The design system's TagInput with this app's translations. See ./dialog.tsx. */
 
-import { useTranslation } from '@amroksaleh/features/i18n';
-import { TagInput as BaseTagInput } from '@amroksaleh/ui/tag-input';
+import { useTranslation } from '@whity-org/features/i18n';
+import { TagInput as BaseTagInput } from '@whity-org/ui/tag-input';
 
-export type { TagInputProps, TagOption } from '@amroksaleh/ui/tag-input';
+export type { TagInputProps, TagOption } from '@whity-org/ui/tag-input';
 
 export function TagInput(props: React.ComponentProps<typeof BaseTagInput>) {
   const t = useTranslation('common');

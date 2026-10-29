@@ -12,10 +12,10 @@
     "jsx": "react-jsx",
     "strict": true,
     "paths": {
-      "@amroksaleh/ui": ["../ui/src/index.ts"],
-      "@amroksaleh/ui/*": ["../ui/src/*"],
-      "@amroksaleh/features": ["../features/src/index.ts"],
-      "@amroksaleh/features/*": ["../features/src/*"]
+      "@whity-org/ui": ["../ui/src/index.ts"],
+      "@whity-org/ui/*": ["../ui/src/*"],
+      "@whity-org/features": ["../features/src/index.ts"],
+      "@whity-org/features/*": ["../features/src/*"]
     }
   },
   "include": ["src"]

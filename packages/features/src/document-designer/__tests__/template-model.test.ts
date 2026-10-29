@@ -1,5 +1,5 @@
 import { repointBlockInstances } from '../template-model';
-import type { DocTemplate } from '@amroksaleh/ui/documents/types';
+import type { DocTemplate } from '@whity-org/ui/documents/types';
 
 /**
  * Regression cover for the "missing block" defect.

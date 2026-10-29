@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import LoginPage from '@/app/login/page';
 import { AuthProvider } from '@/lib/auth-context';
 import { ToastProvider } from '@/lib/toast-context';
-import { LanguageProvider } from '@amroksaleh/features/i18n';
+import { LanguageProvider } from '@whity-org/features/i18n';
 
 /**
  * The sign-in screen is the first one converted to real translations, and the

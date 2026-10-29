@@ -1,7 +1,7 @@
 [package]
 name = "whity-tauri-desktop-template"
 version = "0.2.0"
-description = "Whity Tauri desktop boilerplate: @amroksaleh/ui + @amroksaleh/features wired to real local SQLite, plus a worked example of adding a native-crate command (printing)."
+description = "Whity Tauri desktop boilerplate: @whity-org/ui + @whity-org/features wired to real local SQLite, plus a worked example of adding a native-crate command (printing)."
 authors = ["you"]
 edition = "2021"
 

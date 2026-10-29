@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import axe from 'axe-core';
-import { Checkbox } from '@amroksaleh/ui/checkbox';
+import { Checkbox } from '@whity-org/ui/checkbox';
 
 /**
  * Accessibility regression for Checkbox (WC UI-library flow #536). Verifies

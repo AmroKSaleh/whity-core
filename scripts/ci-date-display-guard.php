@@ -84,7 +84,7 @@ if ($violations !== []) {
     fwrite(STDERR, "A tenant may set `ui.hide_dates` and be told that no date or time appears\n");
     fwrite(STDERR, "anywhere in the interface. That is only true if every surface goes through one\n");
     fwrite(STDERR, "path, so use it:\n\n");
-    fwrite(STDERR, "    import { useDateDisplay } from '@amroksaleh/features/datetime'\n");
+    fwrite(STDERR, "    import { useDateDisplay } from '@whity-org/features/datetime'\n");
     fwrite(STDERR, "    const { hidden, date, dateTime, relative, dateColumns } = useDateDisplay()\n\n");
     fwrite(STDERR, "  LOCALE_METHOD / LOCALE_STRING / INTL\n");
     fwrite(STDERR, "      formatting a date yourself. Call `date()` or `dateTime()` instead; they\n");

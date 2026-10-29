@@ -134,14 +134,14 @@ export type RoleActivityResult = RoleActivityEntry[] | 'forbidden';
 /**
  * The transport-agnostic seam every client implements. Defined once in the
  * record slice now that a SECOND adapter (users, #882) is written over it, and
- * re-exported here so `@amroksaleh/features/roles`' published surface is
+ * re-exported here so `@whity-org/features/roles`' published surface is
  * unchanged for everything that already imports it from this module.
  */
 export type { Transport, TransportResponse } from '../record/transport';
 
 /**
  * The per-region verdict map, re-exported from the record slice so a consumer of
- * `@amroksaleh/features/roles` needs one import rather than two.
+ * `@whity-org/features/roles` needs one import rather than two.
  */
 export type { RecordSectionDenial, RecordSectionVerdicts } from '../record/types';
 
@@ -317,7 +317,7 @@ export interface RolesAdapter {
 
 /**
  * The translation function a screen calls — identical in shape to
- * `@amroksaleh/features/i18n`'s `TranslateFn`, redeclared here so this slice
+ * `@whity-org/features/i18n`'s `TranslateFn`, redeclared here so this slice
  * stays self-contained (no dependency on the i18n runtime, which the desktop
  * client does not mount). Callers pass their own; it defaults to
  * `identityTranslate` when omitted.

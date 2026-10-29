@@ -1,11 +1,11 @@
-import type { AudienceGroupPreview } from '@amroksaleh/ui/audience-group-picker';
+import type { AudienceGroupPreview } from '@whity-org/ui/audience-group-picker';
 import type {
   RouteFlowGraph,
   RouteFlowQuorum,
   RouteFlowSatisfaction,
   RouteFlowStep,
   RouteFlowVerdict,
-} from '@amroksaleh/ui/route-flow/model';
+} from '@whity-org/ui/route-flow/model';
 
 /**
  * Wire types for the route-template surface (#1027).
@@ -162,7 +162,7 @@ export interface AudiencePreviewWire {
 }
 
 /**
- * The wire preview in the shape `@amroksaleh/ui/audience-group-picker` reads.
+ * The wire preview in the shape `@whity-org/ui/audience-group-picker` reads.
  *
  * A mapper rather than matching field names on the wire: the API speaks
  * snake_case like the rest of this backend, and the kit speaks camelCase like a

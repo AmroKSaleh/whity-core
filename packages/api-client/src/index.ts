@@ -1,5 +1,5 @@
 /**
- * `@amroksaleh/api-client` — the typed client for the Whity API.
+ * `@whity-org/api-client` — the typed client for the Whity API.
  *
  * The types are generated from the backend's OpenAPI spec (`public/openapi.json`)
  * via `npm run generate`. Build a client with {@link createApiClient} and branch

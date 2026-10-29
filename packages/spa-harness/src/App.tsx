@@ -1,10 +1,10 @@
 import { useMemo } from "react"
 
-import { AppSidebar } from "@amroksaleh/ui/app-sidebar"
-import { PageHeader } from "@amroksaleh/ui/page-header"
-import { PageShell } from "@amroksaleh/ui/page-shell"
-import { resolveNavGroups, exampleNavConfig } from "@amroksaleh/features/nav"
-import { DemoCatalogList, DemoCatalogDetail } from "@amroksaleh/features/demo-catalog"
+import { AppSidebar } from "@whity-org/ui/app-sidebar"
+import { PageHeader } from "@whity-org/ui/page-header"
+import { PageShell } from "@whity-org/ui/page-shell"
+import { resolveNavGroups, exampleNavConfig } from "@whity-org/features/nav"
+import { DemoCatalogList, DemoCatalogDetail } from "@whity-org/features/demo-catalog"
 
 import { HashLinkAdapter } from "./hash-link"
 import { useHashPath } from "./use-hash-path"

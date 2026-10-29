@@ -3,7 +3,7 @@ name: Notify docs site
 # The published documentation at https://docs.whity.dev is compiled from the
 # markdown in this repository, so a docs change here has to trigger a rebuild
 # there. This job does nothing else: it sends one repository_dispatch to
-# AmroKSaleh/whity-web, which owns the build.
+# whity-org/whity-web, which owns the build.
 #
 # Activate-by-config, same as deploy-staging: without DOCS_SITE_DISPATCH_TOKEN
 # the job skips, so merging this workflow cannot turn the pipeline red on a
@@ -51,7 +51,7 @@ jobs:
           gh api \
             --method POST \
             -H "Accept: application/vnd.github+json" \
-            /repos/AmroKSaleh/whity-web/dispatches \
+            /repos/whity-org/whity-web/dispatches \
             -f event_type=docs-updated \
             -F "client_payload[sha]=${SHA}" \
             -F "client_payload[ref]=${REF}"

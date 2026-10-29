@@ -1,6 +1,6 @@
 'use client';
 
-import { LanguageProvider } from '@amroksaleh/features/i18n';
+import { LanguageProvider } from '@whity-org/features/i18n';
 import { useAuth } from '@/lib/auth-context';
 
 /**

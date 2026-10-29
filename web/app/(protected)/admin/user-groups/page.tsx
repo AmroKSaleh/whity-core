@@ -62,10 +62,10 @@ import {
   useDataTableQuery,
   type DataTableColumn,
 } from '@/components/ui/data-table';
-import { Button } from '@amroksaleh/ui/button';
+import { Button } from '@whity-org/ui/button';
 import { Input } from '@/components/ui/input';
-import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
-import { Badge } from '@amroksaleh/ui/badge';
+import { Alert, AlertDescription } from '@whity-org/ui/alert';
+import { Badge } from '@whity-org/ui/badge';
 import {
   Dialog,
   DialogContent,
@@ -79,20 +79,20 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@amroksaleh/ui/dropdown-menu';
+} from '@whity-org/ui/dropdown-menu';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@amroksaleh/ui/select';
+} from '@whity-org/ui/select';
 import {
   AudiencePeoplePicker,
   type AudiencePersonOption,
-} from '@amroksaleh/ui/audience-people-picker';
+} from '@whity-org/ui/audience-people-picker';
 import { IconMenu2, IconPlus } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 import {
   EXPLICIT_KIND,
   configuredProfileIds,

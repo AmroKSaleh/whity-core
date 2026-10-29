@@ -17,7 +17,7 @@ interface StatsChartProps {
    *
    * A prop rather than a translation hook because this file is a PUBLISHED
    * registry item: a downstream consumer installs it verbatim, where
-   * `@amroksaleh/features` need not exist.
+   * `@whity-org/features` need not exist.
    */
   tooltipLabel?: (count: number, label: string) => string;
   /**
@@ -26,7 +26,7 @@ interface StatsChartProps {
    *
    * A prop for the reason `tooltipLabel` is one, and then a second reason.
    * This file is a PUBLISHED registry item installed verbatim downstream, so it
-   * cannot import `@amroksaleh/features` — which means it can reach neither the
+   * cannot import `@whity-org/features` — which means it can reach neither the
    * reader's resolved language nor the tenant's `ui.hide_dates` preference
    * (#1068). It used to call `toLocaleDateString(undefined, …)`, i.e. format
    * two dates in the BROWSER's locale, in a component that had no way to know

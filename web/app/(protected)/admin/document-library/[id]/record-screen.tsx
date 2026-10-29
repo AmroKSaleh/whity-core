@@ -83,9 +83,9 @@ import {
   RecordPageSkeleton,
   sectionAccessFrom,
   useRecordResource,
-} from '@amroksaleh/features/record';
-import type { RecordFactsFn, RecordSectionSpec } from '@amroksaleh/features/record';
-import { useTranslation } from '@amroksaleh/features/i18n';
+} from '@whity-org/features/record';
+import type { RecordFactsFn, RecordSectionSpec } from '@whity-org/features/record';
+import { useTranslation } from '@whity-org/features/i18n';
 import { useAuth } from '@/lib/auth-context';
 import { fetchAllPages } from '@/lib/api/fetch-all-pages';
 import { DocumentViewer } from '@/components/plugin/blocks/document-viewer';

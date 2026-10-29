@@ -4,4 +4,4 @@ export {
   normalizeRuns,
   toggleRunFormat,
   applyPlainTextEdit,
-} from '@amroksaleh/features/document-designer';
+} from '@whity-org/features/document-designer';

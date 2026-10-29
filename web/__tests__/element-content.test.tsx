@@ -4,7 +4,7 @@
  * and print-document.tsx both delegate to it for non-blockInstance elements).
  *
  * Covers the two additions from WC doc-designer rich-text + math work:
- *  - the new 'math' element type (renders via the shared @amroksaleh/ui KaTeX
+ *  - the new 'math' element type (renders via the shared @whity-org/ui KaTeX
  *    wrapper — same component already covered by math-text.test.tsx)
  *  - inline bold/italic runs on text/dynamicText, including the backward-compat
  *    path (no `runs` field → legacy whole-element style, unchanged output).

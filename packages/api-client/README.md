@@ -1,4 +1,4 @@
-# @amroksaleh/api-client
+# @whity-org/api-client
 
 The typed client for the **Whity** API — build your own frontend or integration
 against the same OpenAPI contract the reference web app uses.
@@ -9,16 +9,16 @@ request/response shapes stay in lock-step with the server.
 ## Install
 
 ```bash
-npm install @amroksaleh/api-client openapi-fetch
+npm install @whity-org/api-client openapi-fetch
 ```
 
-(`openapi-fetch` is a peer at runtime; `@amroksaleh/api-client` ships TypeScript
+(`openapi-fetch` is a peer at runtime; `@whity-org/api-client` ships TypeScript
 source, so your bundler compiles it.)
 
 ## Use
 
 ```ts
-import { createApiClient } from '@amroksaleh/api-client';
+import { createApiClient } from '@whity-org/api-client';
 
 // Standalone frontend: point at the backend origin.
 const api = createApiClient({ baseUrl: 'https://your-whity-host' });
@@ -49,7 +49,7 @@ request sends `X-Auth-Mode: token` and `Authorization: Bearer <access token>`,
 never cookies.
 
 ```ts
-import { createApiClient, createMemoryTokenStore } from '@amroksaleh/api-client';
+import { createApiClient, createMemoryTokenStore } from '@whity-org/api-client';
 
 const api = createApiClient({
   baseUrl: 'https://api.example.net', // the backend's origin
@@ -114,7 +114,7 @@ never treated as an expired session.
 ## Types
 
 ```ts
-import type { paths, components, operations } from '@amroksaleh/api-client';
+import type { paths, components, operations } from '@whity-org/api-client';
 ```
 
 ## Tests

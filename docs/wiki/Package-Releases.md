@@ -17,9 +17,9 @@ versions**, released on their own cadence:
 
 | Package | Path | Registry | Notes |
 |---|---|---|---|
-| `@amroksaleh/ui` | `packages/ui` | GitHub Packages | shared React component library |
-| `@amroksaleh/features` | `packages/features` | GitHub Packages | client-safe feature UI (adapter pattern, nav contract, sync UI) for non-Next clients (Tauri/Vite SPA, Flutter) |
-| `@amroksaleh/tokens` | `packages/tokens` | GitHub Packages | design tokens (CSS vars, Dart/Flutter export) |
+| `@whity-org/ui` | `packages/ui` | GitHub Packages | shared React component library |
+| `@whity-org/features` | `packages/features` | GitHub Packages | client-safe feature UI (adapter pattern, nav contract, sync UI) for non-Next clients (Tauri/Vite SPA, Flutter) |
+| `@whity-org/tokens` | `packages/tokens` | GitHub Packages | design tokens (CSS vars, Dart/Flutter export) |
 | `whity/plugin-sdk` | `sdk` | Composer | PHP SDK for plugin authors |
 | `web` | `web` | — (private) | the reference app; deployed, never published |
 
@@ -46,7 +46,7 @@ its own semver.
    ```
    This consumes the pending changesets, bumps each affected `package.json`, and
    writes/updates its `CHANGELOG.md`. Commit the result.
-4. **Merge to `main`.** The `Publish @amroksaleh/ui` workflow runs on any push
+4. **Merge to `main`.** The `Publish @whity-org/ui` workflow runs on any push
    touching `packages/ui`, but it is **version-gated**: it publishes only when
    the `package.json` version isn't already in the registry, otherwise it skips
    with a notice. So a merge with a fresh version publishes; a merge that didn't
@@ -66,7 +66,7 @@ only publishes a genuinely new version — bumps release, incidental edits don't
 
 Everything above is how a package gets *published*. A separate repo (a native
 desktop client, or any other downstream product) that wants to `npm install
-@amroksaleh/ui` (or `features`/`tokens`) needs to *authenticate to GitHub
+@whity-org/ui` (or `features`/`tokens`) needs to *authenticate to GitHub
 Packages first* — **this is required even though the packages are public.**
 Unlike npmjs.org, `npm.pkg.github.com` requires a token on every request,
 including reads of public packages. Skipping this step is what makes
@@ -77,7 +77,7 @@ including reads of public packages. Skipping this step is what makes
 Add to `~/.npmrc` (per-user, not committed):
 
 ```
-@amroksaleh:registry=https://npm.pkg.github.com
+@whity-org:registry=https://npm.pkg.github.com
 //npm.pkg.github.com/:_authToken=${GH_PACKAGES_TOKEN}
 ```
 
@@ -93,15 +93,16 @@ generate it from a shared machine/bot account instead of an individual's.
 Don't put a PAT in another repo's secrets — grant that repo direct read access
 to the package instead, and its own auto-provided `GITHUB_TOKEN` will work:
 
-1. Open the package's page on GitHub (under the publishing account/org that
-   owns `@amroksaleh` — these are user-owned packages here, so
-   `github.com/users/<owner>/packages/npm/<name>`).
+1. Open the package's page on GitHub. The `@whity-org` packages belong to
+   the whity-org organization, so it is
+   `github.com/orgs/whity-org/packages/npm/package/<name>`. Packages published
+   before the move are still under `@amroksaleh` on the maintainer's account.
 2. **Package settings → Manage Actions access → Add repository** — add the
    downstream repo, role **Read**.
 3. Repeat per package (`ui`, `features`, `tokens` — each is a separate grant).
 4. In the downstream workflow, configure npm the same way `setup-node` does it
    in this repo's own publish workflows: `registry-url:
-   https://npm.pkg.github.com`, `scope: @amroksaleh`, and
+   https://npm.pkg.github.com`, `scope: @whity-org`, and
    `NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}` (the default token — no new
    secret to create or rotate).
 

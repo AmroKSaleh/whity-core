@@ -1,6 +1,6 @@
 # EmptyState / ErrorState — usage notes (for the gallery/showcase task)
 
-Import: `import { EmptyState, ErrorState } from '@amroksaleh/ui/empty-state'` (or the root barrel).
+Import: `import { EmptyState, ErrorState } from '@whity-org/ui/empty-state'` (or the root barrel).
 
 `ErrorState` is `EmptyState` pinned to `variant="error"` — identical props minus `variant`.
 

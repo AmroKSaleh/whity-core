@@ -1,8 +1,8 @@
-import type { DocElement, DocTemplate } from '@amroksaleh/ui/documents/types';
-import { chunkIntoSheets, cellPositions, type SheetSpec } from '@amroksaleh/ui/documents/sheet';
-import type { DocBlock } from '@amroksaleh/ui/documents/blocks';
-import { ElementContent } from '@amroksaleh/ui/documents/element-content';
-import { BlockInstanceContent } from '@amroksaleh/ui/documents/element-layer';
+import type { DocElement, DocTemplate } from '@whity-org/ui/documents/types';
+import { chunkIntoSheets, cellPositions, type SheetSpec } from '@whity-org/ui/documents/sheet';
+import type { DocBlock } from '@whity-org/ui/documents/blocks';
+import { ElementContent } from '@whity-org/ui/documents/element-content';
+import { BlockInstanceContent } from '@whity-org/ui/documents/element-layer';
 
 /** One render unit: a single template page paired with one data row. */
 interface Unit {

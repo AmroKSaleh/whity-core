@@ -15,7 +15,7 @@
   "aliases": {
     "components": "@/components",
     "utils": "@/lib/utils",
-    "ui": "@amroksaleh/ui",
+    "ui": "@whity-org/ui",
     "lib": "@/lib",
     "hooks": "@/hooks"
   },

@@ -1,8 +1,8 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { AppSidebar } from '@amroksaleh/ui/app-sidebar';
-import type { AppSidebarNavGroup } from '@amroksaleh/ui/app-sidebar';
+import { AppSidebar } from '@whity-org/ui/app-sidebar';
+import type { AppSidebarNavGroup } from '@whity-org/ui/app-sidebar';
 
 /**
  * Group disclosure and the filter box in the UI kit's `AppSidebar` — the two
@@ -10,7 +10,7 @@ import type { AppSidebarNavGroup } from '@amroksaleh/ui/app-sidebar';
  *
  * These live here rather than beside the component because `packages/ui` has
  * no Jest project of its own; web's is the only runner in the repo and its
- * `roots`/`moduleNameMapper` resolve `@amroksaleh/ui/*` into this checkout's
+ * `roots`/`moduleNameMapper` resolve `@whity-org/ui/*` into this checkout's
  * `packages/ui/src`, so the component under test is the real one.
  */
 

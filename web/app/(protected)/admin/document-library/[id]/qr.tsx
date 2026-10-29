@@ -85,10 +85,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Alert, AlertDescription, AlertTitle } from '@amroksaleh/ui/alert';
-import { Badge } from '@amroksaleh/ui/badge';
-import { Button } from '@amroksaleh/ui/button';
-import { Separator } from '@amroksaleh/ui/separator';
+import { Alert, AlertDescription, AlertTitle } from '@whity-org/ui/alert';
+import { Badge } from '@whity-org/ui/badge';
+import { Button } from '@whity-org/ui/button';
+import { Separator } from '@whity-org/ui/separator';
 import {
   Table,
   TableBody,
@@ -96,12 +96,12 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@amroksaleh/ui/table';
-import { BarcodeSvg } from '@amroksaleh/ui/documents/barcode-svg';
-import { RecordList, RecordListItem } from '@amroksaleh/features/record';
-import { useDateDisplay } from '@amroksaleh/features/datetime';
-import type { DateDisplay } from '@amroksaleh/features/datetime';
-import { useTranslation } from '@amroksaleh/features/i18n';
+} from '@whity-org/ui/table';
+import { BarcodeSvg } from '@whity-org/ui/documents/barcode-svg';
+import { RecordList, RecordListItem } from '@whity-org/features/record';
+import { useDateDisplay } from '@whity-org/features/datetime';
+import type { DateDisplay } from '@whity-org/features/datetime';
+import { useTranslation } from '@whity-org/features/i18n';
 import {
   Dialog,
   DialogContent,

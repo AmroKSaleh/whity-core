@@ -11,7 +11,7 @@ import React from 'react';
 import {
   DataTable as SharedDataTable,
   type DataTableColumn,
-} from '@amroksaleh/ui/data-table';
+} from '@whity-org/ui/data-table';
 
 /**
  * Column configuration for the data table
@@ -47,7 +47,7 @@ export interface DataTableProps<T extends { id: string | number }> {
 }
 
 /**
- * Thin adapter over `@amroksaleh/ui`'s DataTable, preserving this file's
+ * Thin adapter over `@whity-org/ui`'s DataTable, preserving this file's
  * original public shape (Column<T>/DataTableProps<T>) — this component is
  * ALSO baked verbatim into `web/public/r/data-table.json` (a shadcn-style
  * registry entry, built by `npm run build`'s "Building registry" step) for an

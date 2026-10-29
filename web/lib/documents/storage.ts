@@ -1,17 +1,17 @@
-import type { DocTemplate } from '@amroksaleh/ui/documents/types';
+import type { DocTemplate } from '@whity-org/ui/documents/types';
 import { api } from '@/lib/api/client';
 import {
   toSavedTemplate,
   type DocumentDesignerAdapter,
   type SavedTemplate,
-} from '@amroksaleh/features/document-designer';
+} from '@whity-org/features/document-designer';
 import { deleteBlock, listBlocks, saveBlock } from './blocks';
 
 /**
  * Web's HTTP half of document-template persistence.
  *
  * The pure model (validation, v1->v2 migration, the element factory, row
- * mapping, JSON export) moved to `@amroksaleh/features/document-designer` so
+ * mapping, JSON export) moved to `@whity-org/features/document-designer` so
  * the designer itself could be shared with the Tauri desktop client. It is
  * re-exported below, so every existing `@/lib/documents/storage` import — and
  * both Jest suites — keep working unchanged.
@@ -35,7 +35,7 @@ export {
   newElement,
   resolveBound,
   sampleDataOf,
-} from '@amroksaleh/features/document-designer';
+} from '@whity-org/features/document-designer';
 export type { SavedTemplate };
 
 /** The templates visible to the caller (server-side RBAC-filtered — see

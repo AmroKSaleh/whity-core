@@ -25,7 +25,7 @@ jest.mock('@tabler/icons-react', () => ({
 }));
 
 // Mock dialog component
-jest.mock('@amroksaleh/ui/dialog', () => ({
+jest.mock('@whity-org/ui/dialog', () => ({
   Dialog: ({ children, open }: React.PropsWithChildren<{ open?: boolean }>) =>
     open ? <div data-testid="dialog">{children}</div> : null,
   DialogContent: ({ children }: React.PropsWithChildren) => <div data-testid="dialog-content">{children}</div>,
@@ -36,7 +36,7 @@ jest.mock('@amroksaleh/ui/dialog', () => ({
 
 // Mock alert-dialog component — renders a simple controlled dialog with
 // Cancel and Action buttons so tests can interact with it.
-jest.mock('@amroksaleh/ui/alert-dialog', () => ({
+jest.mock('@whity-org/ui/alert-dialog', () => ({
   AlertDialog: ({ children, open }: React.PropsWithChildren<{ open?: boolean }>) =>
     open ? <div data-testid="alert-dialog">{children}</div> : null,
   AlertDialogContent: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
@@ -55,7 +55,7 @@ jest.mock('@amroksaleh/ui/alert-dialog', () => ({
 // Mock button component. The real Button has a custom `variant` prop that is
 // not a valid DOM attribute, so drop it from the props before spreading the
 // rest onto the <button>.
-jest.mock('@amroksaleh/ui/button', () => ({
+jest.mock('@whity-org/ui/button', () => ({
   Button: ({ children, variant, ...props }: React.ComponentProps<'button'> & { variant?: string }) => {
     void variant;
     return <button {...props}>{children}</button>;
@@ -63,7 +63,7 @@ jest.mock('@amroksaleh/ui/button', () => ({
 }));
 
 // Mock alert component
-jest.mock('@amroksaleh/ui/alert', () => ({
+jest.mock('@whity-org/ui/alert', () => ({
   Alert: ({ children, variant }: React.PropsWithChildren<{ variant?: string }>) => (
     <div data-testid={`alert-${variant}`} role="alert">
       {children}
@@ -73,7 +73,7 @@ jest.mock('@amroksaleh/ui/alert', () => ({
 }));
 
 // Mock input component
-jest.mock('@amroksaleh/ui/input', () => ({
+jest.mock('@whity-org/ui/input', () => ({
   Input: (props: React.ComponentProps<'input'>) => <input {...props} />,
 }));
 

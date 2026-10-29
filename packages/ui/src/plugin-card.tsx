@@ -43,10 +43,10 @@ export interface PluginVersion {
    * is really display text is how an unformatted `2026-08-25 14:02:11` ends up
    * on a screen.
    *
-   * It stays a label because this package cannot do better. `@amroksaleh/ui` is
+   * It stays a label because this package cannot do better. `@whity-org/ui` is
    * a design system: it has no access to the reader's resolved language and none
    * to the tenant's `ui.hide_dates` preference (#1068), both of which live in
-   * `@amroksaleh/features`, which depends on THIS package and not the other way
+   * `@whity-org/features`, which depends on THIS package and not the other way
    * round. So the caller formats — through `useDateDisplay()`, the one
    * sanctioned path — and omits this when that path returns null.
    */

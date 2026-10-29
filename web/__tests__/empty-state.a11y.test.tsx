@@ -1,7 +1,7 @@
 import React from 'react';
 import { render } from '@testing-library/react';
 import axe from 'axe-core';
-import { EmptyState, ErrorState } from '@amroksaleh/ui/empty-state';
+import { EmptyState, ErrorState } from '@whity-org/ui/empty-state';
 
 /**
  * Accessibility regression for EmptyState/ErrorState (WC UI-library flow #534).

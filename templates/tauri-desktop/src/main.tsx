@@ -1,6 +1,6 @@
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
-import { isThemeModePreference, resolveIsDark, THEME_STORAGE_KEY } from "@amroksaleh/ui/theme-mode"
+import { isThemeModePreference, resolveIsDark, THEME_STORAGE_KEY } from "@whity-org/ui/theme-mode"
 
 import "./index.css"
 import { App } from "./App"

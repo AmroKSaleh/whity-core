@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import axe from 'axe-core';
-import { Spinner } from '@amroksaleh/ui/spinner';
+import { Spinner } from '@whity-org/ui/spinner';
 
 /**
  * Accessibility regression for Spinner (WC UI-library flow #537). A spinner

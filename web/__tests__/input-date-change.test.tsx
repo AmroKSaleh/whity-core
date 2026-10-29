@@ -16,7 +16,7 @@
  */
 
 import { render, screen } from '@testing-library/react';
-import { Input } from '@amroksaleh/ui/input';
+import { Input } from '@whity-org/ui/input';
 
 describe('Input type="date"', () => {
   it('renders a native input the change event can come from', () => {
