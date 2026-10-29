@@ -258,6 +258,13 @@ jobs:
       # One shard's failure must not cancel the others: a red run should report
       # every failing test, not just the first shard to trip.
       fail-fast: false
+      # Three, measured (WHIT-715). Under ParaTest the suite is about 60
+      # worker-minutes, i.e. ~15 minutes of 4-vCPU runner time, so the shard
+      # count barely changes the runner-minutes taken from the shared
+      # concurrency pool (each shard adds ~1 min of setup); what it changes is
+      # wall time. Two shards
+      # took ~9 min each and put this matrix back on the critical path; three
+      # take ~5-6 min and finish inside the PostgreSQL dialect shards.
       matrix:
         shard: [1, 2, 3]
 
