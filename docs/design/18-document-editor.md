@@ -1,6 +1,6 @@
 # Document editor
 
-One editor for everything people write in Whity: templates Whity Render prints, letters, reports, notes and wiki pages. It takes blocks and speed from Notion and Gutenberg, and pages, comments and suggestions from Google Docs. Agents write in it as suggestions only. The design system defines it (decisions E.1–E.34, the Document editor cards, `handoff/editor/`); the Whity team builds it (E.1).
+One editor for everything people write in Whity: templates Whity Render prints, letters, reports, notes and wiki pages. It takes blocks and speed from Notion and Gutenberg, and pages, comments and suggestions from Google Docs. Agents write in it as suggestions only. The design system defines it (decisions E.1–E.39, the Document editor cards, `handoff/editor/`); the Whity team builds it (E.1).
 
 ## The shell
 

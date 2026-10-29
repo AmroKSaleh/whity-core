@@ -1,6 +1,6 @@
 # Document editor: engineering handoff
 
-The design system defines the editor (decisions E.1–E.34 in `00-decision-register.md`, cards in the **Document editor** group, section 18). The Whity team builds it in whity-core for the Document designer (A33, `/admin/documents`) and every other place documents are written.
+The design system defines the editor (decisions E.1–E.39 in `00-decision-register.md`, cards in the **Document editor** group, section 18). The Whity team builds it in whity-core for the Document designer (A33, `/admin/documents`) and every other place documents are written.
 
 `whity-document.ts` is the contract: the document model, inline marks, block types, comments and suggestions, the block registry for plugins, saved blocks, and the editor's props and events. Whity Render, the MCP tools agents use and plugins all speak it.
 

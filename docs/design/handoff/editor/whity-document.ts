@@ -1,5 +1,5 @@
 /**
- * Whity document editor — the contract (design system 2.2, decisions E.1–E.34).
+ * Whity document editor — the contract (design system 2.2, decisions E.1–E.39).
  *
  * The design system defines the editor; the Whity team builds it (E.1).
  * This file is the shared vocabulary between the editor, Whity Render,
@@ -17,7 +17,7 @@ export type PluginId = string;     // e.g. "com.example.delivery-tracker"
 export type SavedBlockId = string;
 export type ISODateTime = string;  // "2026-10-29T14:02:00Z"
 
-/** Who did something. Agents always carry the person they act for (2.4, E.4). */
+/** Who did something. Agents always carry the person they act for (stage 7 actor chip, E.4). */
 export type Actor =
   | { kind: 'person'; id: UserId; name: string }
   | { kind: 'agent'; id: AgentId; name: string; onBehalfOf: { id: UserId; name: string }; scope: string[] }
