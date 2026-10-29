@@ -1,5 +1,5 @@
-import type { DocElement, DocTemplate, TextStyle } from '@amroksaleh/ui/documents/types';
-import type { FlowBlock, FlowContent } from '@amroksaleh/ui/documents/flow';
+import type { DocElement, DocTemplate, TextStyle } from '@whity-org/ui/documents/types';
+import type { FlowBlock, FlowContent } from '@whity-org/ui/documents/flow';
 
 /**
  * Switching a template between CANVAS and FLOW mode (#1186 slice 2).

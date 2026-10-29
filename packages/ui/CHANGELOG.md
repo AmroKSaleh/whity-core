@@ -1,4 +1,4 @@
-# @amroksaleh/ui
+# @whity-org/ui
 
 ## 0.4.0
 
@@ -8,13 +8,13 @@
   state, sibling of `AccessDenied`, for an offline-TTL-expired session) and
   `RadioGroup` / `RadioGroupItem` (accessible single-select on Radix, used by the
   field-level conflict resolver's per-field picker). Additive — new subpath exports
-  (`@amroksaleh/ui/locked-screen`, `@amroksaleh/ui/radio-group`) + barrel re-exports.
+  (`@whity-org/ui/locked-screen`, `@whity-org/ui/radio-group`) + barrel re-exports.
 
 ## 0.3.1
 
 ### Patch Changes
 
-- `globals.css` now sources its theme tokens from the new `@amroksaleh/tokens` package instead of a hand-maintained, manually-synced block — no visible behavior change, but removes a duplication risk between this package and `web/app/globals.css`. Also adds a CI guard that fails the build if a Next.js-only import ever appears in this package (it must stay usable from a plain Vite/Tauri SPA).
+- `globals.css` now sources its theme tokens from the new `@whity-org/tokens` package instead of a hand-maintained, manually-synced block — no visible behavior change, but removes a duplication risk between this package and `web/app/globals.css`. Also adds a CI guard that fails the build if a Next.js-only import ever appears in this package (it must stay usable from a plain Vite/Tauri SPA).
 
 ## 0.3.0
 

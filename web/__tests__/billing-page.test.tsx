@@ -43,7 +43,7 @@ jest.mock('@/lib/external-navigate', () => ({
   navigateExternal: (url: string) => navigateExternal(url),
 }));
 
-jest.mock('@amroksaleh/features/i18n', () => ({
+jest.mock('@whity-org/features/i18n', () => ({
   // The fallback text, so assertions read as the English a user sees.
   useTranslation: () => (_key: string, fallback: string) => fallback,
 }));

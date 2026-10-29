@@ -1,4 +1,4 @@
-import type { NavLinkAdapter } from "@amroksaleh/features/nav"
+import type { NavLinkAdapter } from "@whity-org/features/nav"
 
 /**
  * The SPA's `NavLinkAdapter` implementation — a hash-router substitute for

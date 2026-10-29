@@ -39,9 +39,9 @@
 
 import { use, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
-import { Button } from '@amroksaleh/ui/button';
-import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity-org/ui/card';
+import { Button } from '@whity-org/ui/button';
+import { useTranslation, type TranslateFn } from '@whity-org/features/i18n';
 
 /** The wire shape of `GET /api/v1/document-verifications/{token}`. */
 type Verification = {

@@ -44,14 +44,14 @@ final class LatestReleaseCheckTest extends TestCase
     {
         $result = (new LatestReleaseCheck(self::fetcher([
             'tag_name' => 'v99.0.0',
-            'html_url' => 'https://github.com/AmroKSaleh/whity-core/releases/tag/v99.0.0',
+            'html_url' => 'https://github.com/whity-org/whity-core/releases/tag/v99.0.0',
             'published_at' => '2026-06-12T00:00:00Z',
         ])))->run();
 
         self::assertSame(ReleaseCheckResult::STATUS_UPDATE_AVAILABLE, $result->status);
         self::assertSame(CoreVersion::VERSION, $result->currentVersion);
         self::assertSame('99.0.0', $result->latestVersion);
-        self::assertSame('https://github.com/AmroKSaleh/whity-core/releases/tag/v99.0.0', $result->releaseUrl);
+        self::assertSame('https://github.com/whity-org/whity-core/releases/tag/v99.0.0', $result->releaseUrl);
         self::assertSame('2026-06-12T00:00:00Z', $result->publishedAt);
         self::assertTrue($result->updateAvailable());
     }

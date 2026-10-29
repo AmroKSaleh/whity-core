@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 
 export default function Home() {
   const router = useRouter();

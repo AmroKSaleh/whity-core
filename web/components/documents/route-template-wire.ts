@@ -85,7 +85,7 @@ export interface RouteTemplateGraphResponse {
  *
  * The three rules are #1014's and are stated in exactly one place on the server
  * (`DocumentRouter::nextForVerdict()`) and one on the canvas
- * (`resolveTransitions()` in `@amroksaleh/ui/route-flow/model`). This is a THIRD
+ * (`resolveTransitions()` in `@whity-org/ui/route-flow/model`). This is a THIRD
  * reader of them, and it is deliberately the smallest one that can answer the
  * question the composer asks — "where does this go?" — for a single stage:
  *

@@ -1,5 +1,5 @@
 {
-  "name": "@amroksaleh/api-client",
+  "name": "@whity-org/api-client",
   "version": "0.1.0",
   "description": "Typed client for the Whity API, generated from its OpenAPI spec.",
   "license": "MIT",

@@ -1,4 +1,4 @@
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 import type { DocumentCollection } from './types';
 
 /**

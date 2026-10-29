@@ -10,12 +10,12 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
-import { Button } from '@amroksaleh/ui/button';
-import { Badge } from '@amroksaleh/ui/badge';
-import { Skeleton } from '@amroksaleh/ui/skeleton';
+import { Button } from '@whity-org/ui/button';
+import { Badge } from '@whity-org/ui/badge';
+import { Skeleton } from '@whity-org/ui/skeleton';
 import { IconEdit, IconPlus, IconTrash, IconUser, IconUserOff, IconX } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
-import { useDateDisplay } from '@amroksaleh/features/datetime';
+import { useTranslation } from '@whity-org/features/i18n';
+import { useDateDisplay } from '@whity-org/features/datetime';
 import type { Person, RelationView } from './types';
 import type { PersonAction } from './relations-view';
 

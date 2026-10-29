@@ -10,9 +10,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Button } from '@amroksaleh/ui/button';
+import { Button } from '@whity-org/ui/button';
 import { IconAlertTriangle } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 import type { Person } from './types';
 
 interface DeletePersonModalProps {

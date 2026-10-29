@@ -8,9 +8,9 @@ import { useToast } from '@/lib/toast-context';
 import { useAuth } from '@/lib/auth-context';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { useFetch } from '@/hooks/useFetch';
-import { Button } from '@amroksaleh/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
-import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
+import { Button } from '@whity-org/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity-org/ui/card';
+import { useTranslation, type TranslateFn } from '@whity-org/features/i18n';
 import {
   IconAlertCircle,
   IconArrowLeft,

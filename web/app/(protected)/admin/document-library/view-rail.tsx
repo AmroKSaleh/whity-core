@@ -1,8 +1,8 @@
 'use client';
 
 import { useMemo } from 'react';
-import { useTranslation } from '@amroksaleh/features/i18n';
-import { Button } from '@amroksaleh/ui/button';
+import { useTranslation } from '@whity-org/features/i18n';
+import { Button } from '@whity-org/ui/button';
 import { IconPlus, IconStar } from '@tabler/icons-react';
 import type {
   DocumentCollection,

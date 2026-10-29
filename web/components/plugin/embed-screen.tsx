@@ -2,7 +2,7 @@
 
 import type { PluginFeature } from '@/lib/plugin-features';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 
 /**
  * Generic "embed" screen (WC-246): iframes the plugin's own declared GET

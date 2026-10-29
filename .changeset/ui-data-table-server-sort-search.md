@@ -1,5 +1,5 @@
 ---
-"@amroksaleh/ui": minor
+"@whity-org/ui": minor
 ---
 
 `DataTable` gains `sorting` and `search` props, the two halves of server-side

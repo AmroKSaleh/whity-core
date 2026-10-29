@@ -1,5 +1,5 @@
 ---
-"@amroksaleh/ui": patch
+"@whity-org/ui": patch
 ---
 
 `DataTable`'s sortable column headers are no longer mouse-only. The header cell

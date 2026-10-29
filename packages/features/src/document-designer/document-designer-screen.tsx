@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { DocElement, DocTemplate, ElementType, PageSpec, Placeholder } from '@amroksaleh/ui/documents/types';
+import type { DocElement, DocTemplate, ElementType, PageSpec, Placeholder } from '@whity-org/ui/documents/types';
 import {
   blankTemplate,
   newPageId,
@@ -19,7 +19,7 @@ import {
   rowsFromValues,
   type SequenceConfig,
 } from './batch';
-import { DEFAULT_SHEET, type SheetSpec } from '@amroksaleh/ui/documents/sheet';
+import { DEFAULT_SHEET, type SheetSpec } from '@whity-org/ui/documents/sheet';
 import { STARTER_BLOCKS, STARTER_TEMPLATES } from './starters';
 import {
   blocksById,
@@ -28,11 +28,11 @@ import {
   wouldCycle,
   type BlockScope,
   type DocBlock,
-} from '@amroksaleh/ui/documents/blocks';
+} from '@whity-org/ui/documents/blocks';
 import { noopNotify, type DocumentDesignerScreenProps, type SavedTemplate } from './types';
 import { useTranslation } from '../i18n';
-import { Button } from '@amroksaleh/ui/button';
-import { PX_PER_MM } from '@amroksaleh/ui/documents/types';
+import { Button } from '@whity-org/ui/button';
+import { PX_PER_MM } from '@whity-org/ui/documents/types';
 import {
   IconPlus,
   IconTrash,
@@ -56,11 +56,11 @@ import {
   type ZoomAction,
 } from './editor-commands';
 import { ConfirmDelete } from './confirm-delete';
-import { CommandPalette } from '@amroksaleh/ui/command-palette';
+import { CommandPalette } from '@whity-org/ui/command-palette';
 import { FlowEditor } from './flow-editor';
 import { FlowBlockSettings } from './flow-block-settings';
 import { canvasToFlow, describeSwitch, flowToCanvas } from './mode-switch';
-import { newFlowBlock, type FlowBlockType, type FlowContent } from '@amroksaleh/ui/documents/flow';
+import { newFlowBlock, type FlowBlockType, type FlowContent } from '@whity-org/ui/documents/flow';
 import { flowPaletteItems, paletteItemsForFlow, paletteItemsFromMenus } from './editor-palette';
 
 /** Zoom bounds + step for the View menu / toolbar zoom controls. */

@@ -5,12 +5,12 @@ import {
   THEME_STORAGE_KEY,
   type ResolvedThemeMode,
   type ThemeModePreference,
-} from "@amroksaleh/ui/theme-mode"
+} from "@whity-org/ui/theme-mode"
 
 /**
  * App-wide color scheme (light / dark / system) — a direct port of
  * web/lib/theme-mode-context.tsx's provider, sharing the SAME cross-client
- * contract (`@amroksaleh/ui/theme-mode`: the `.dark`-class strategy, the
+ * contract (`@whity-org/ui/theme-mode`: the `.dark`-class strategy, the
  * `whity.theme` storage key, the light/dark/system resolution rule) so a
  * toggle here looks identical to the website's.
  *

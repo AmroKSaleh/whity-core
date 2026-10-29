@@ -1,8 +1,8 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import { UnsyncedBanner } from '@amroksaleh/features/sync';
-import type { SyncStatus } from '@amroksaleh/features/sync';
+import { UnsyncedBanner } from '@whity-org/features/sync';
+import type { SyncStatus } from '@whity-org/features/sync';
 
 const base: SyncStatus = {
   online: true,

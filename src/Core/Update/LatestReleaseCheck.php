@@ -31,7 +31,7 @@ final class LatestReleaseCheck
     /**
      * Canonical release stream for the platform core.
      */
-    public const DEFAULT_REPO = 'AmroKSaleh/whity-core';
+    public const DEFAULT_REPO = 'whity-org/whity-core';
 
     /**
      * Seconds before the release lookup gives up.

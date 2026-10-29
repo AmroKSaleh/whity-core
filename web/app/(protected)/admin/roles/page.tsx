@@ -2,7 +2,7 @@
 
 /**
  * Roles admin page — a thin client wrapper around the extracted, data-source-
- * agnostic `RolesScreen` (@amroksaleh/features/roles, Path B pilot). This file
+ * agnostic `RolesScreen` (@whity-org/features/roles, Path B pilot). This file
  * owns only web's provider seams: the cookie-authenticated `webRolesAdapter`,
  * the capability check, the translator, and the toast notifier. The desktop
  * client mounts the same `RolesScreen` with its own adapter/can/t/onNotify.
@@ -10,12 +10,12 @@
 
 import { useCallback, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { RolesScreen } from '@amroksaleh/features/roles';
-import type { Role, RoleScopeSeam, RoleTenantOption } from '@amroksaleh/features/roles';
+import { RolesScreen } from '@whity-org/features/roles';
+import type { Role, RoleScopeSeam, RoleTenantOption } from '@whity-org/features/roles';
 import { webRolesAdapter } from '@/lib/roles-adapter';
 import { useAuth } from '@/lib/auth-context';
 import { useCapabilities } from '@/hooks/useCapabilities';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 import { useToast } from '@/lib/toast-context';
 
 /**
@@ -51,7 +51,7 @@ export default function Page() {
   // Arabic/RTL parity for the chrome without ever shipping an English label on an
   // RTL admin page.
   //
-  // @i18n-dynamic-ignore: this composite forwards a runtime key to the admin/common domains; the literal keys are declared in the @i18n-keys blocks of the @amroksaleh/features/roles component files that call t().
+  // @i18n-dynamic-ignore: this composite forwards a runtime key to the admin/common domains; the literal keys are declared in the @i18n-keys blocks of the @whity-org/features/roles component files that call t().
   const tAdmin = useTranslation('admin');
   const tCommon = useTranslation('common');
   const t = useCallback(

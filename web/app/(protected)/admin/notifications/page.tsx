@@ -31,12 +31,12 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { useToast } from '@/lib/toast-context';
-import { useTranslation } from '@amroksaleh/features/i18n';
-import { Button } from '@amroksaleh/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@amroksaleh/ui/card';
-import { EmptyState } from '@amroksaleh/ui/empty-state';
-import { Skeleton } from '@amroksaleh/ui/skeleton';
-import { AccessDenied } from '@amroksaleh/ui/access-denied';
+import { useTranslation } from '@whity-org/features/i18n';
+import { Button } from '@whity-org/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@whity-org/ui/card';
+import { EmptyState } from '@whity-org/ui/empty-state';
+import { Skeleton } from '@whity-org/ui/skeleton';
+import { AccessDenied } from '@whity-org/ui/access-denied';
 import { latencyDisplay, formatRate } from './format';
 
 type DeliveryStatus = 'queued' | 'sent' | 'failed' | 'bounced';

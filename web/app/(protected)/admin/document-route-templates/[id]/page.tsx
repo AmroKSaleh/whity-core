@@ -9,7 +9,7 @@
 
 import { useParams } from 'next/navigation';
 import { useCapabilities } from '@/hooks/useCapabilities';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 import { ROUTE_TEMPLATES_WRITE } from '@/lib/capabilities';
 import { RouteFlowEditorScreen } from './flow-editor-screen';
 

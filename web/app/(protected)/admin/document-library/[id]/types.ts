@@ -14,7 +14,7 @@
  * field renamed on the wire breaks one declaration rather than three.
  */
 
-import type { RecordSectionVerdicts } from '@amroksaleh/features/record';
+import type { RecordSectionVerdicts } from '@whity-org/features/record';
 
 import type { DocumentArtifact } from '../types';
 

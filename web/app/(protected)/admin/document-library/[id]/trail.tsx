@@ -47,10 +47,10 @@
  */
 
 import { IconArrowRight } from '@tabler/icons-react';
-import { RecordTimeline, RecordTimelineItem } from '@amroksaleh/features/record';
-import { useDateDisplay } from '@amroksaleh/features/datetime';
-import { useTranslation } from '@amroksaleh/features/i18n';
-import { Badge } from '@amroksaleh/ui/badge';
+import { RecordTimeline, RecordTimelineItem } from '@whity-org/features/record';
+import { useDateDisplay } from '@whity-org/features/datetime';
+import { useTranslation } from '@whity-org/features/i18n';
+import { Badge } from '@whity-org/ui/badge';
 import { Pagination } from '@/components/ui/pagination';
 
 import type { Directory, TrailEvent, TrailPagination } from './types';

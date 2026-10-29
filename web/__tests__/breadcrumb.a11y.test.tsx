@@ -1,7 +1,7 @@
 import React from 'react';
 import { render, screen } from '@testing-library/react';
 import axe from 'axe-core';
-import { Breadcrumb } from '@amroksaleh/ui/breadcrumb';
+import { Breadcrumb } from '@whity-org/ui/breadcrumb';
 
 /**
  * Accessibility regression for Breadcrumb (WC UI-library flow #538).

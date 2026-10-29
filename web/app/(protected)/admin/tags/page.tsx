@@ -8,7 +8,7 @@ import { useCapabilities } from '@/hooks/useCapabilities';
 import { TAGS_MANAGE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
-import { Button } from '@amroksaleh/ui/button';
+import { Button } from '@whity-org/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -16,7 +16,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@amroksaleh/ui/select';
+} from '@whity-org/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -30,9 +30,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@amroksaleh/ui/dropdown-menu';
+} from '@whity-org/ui/dropdown-menu';
 import { IconMenu2, IconPlus } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 
 interface Tag {
   id: number;

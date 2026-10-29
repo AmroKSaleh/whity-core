@@ -51,18 +51,18 @@
 
 import { useMemo, useState } from 'react';
 import { IconExternalLink, IconFilePlus } from '@tabler/icons-react';
-import { Button } from '@amroksaleh/ui/button';
-import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
-import { EmptyState } from '@amroksaleh/ui/empty-state';
-import { Spinner } from '@amroksaleh/ui/spinner';
+import { Button } from '@whity-org/ui/button';
+import { Alert, AlertDescription } from '@whity-org/ui/alert';
+import { EmptyState } from '@whity-org/ui/empty-state';
+import { Spinner } from '@whity-org/ui/spinner';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@amroksaleh/ui/select';
-import { useTranslation } from '@amroksaleh/features/i18n';
+} from '@whity-org/ui/select';
+import { useTranslation } from '@whity-org/features/i18n';
 import {
   Dialog,
   DialogContent,

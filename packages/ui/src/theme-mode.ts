@@ -4,7 +4,7 @@
  *
  *   - Strategy: a `.dark` class on the root element (`<html>` on web) — the
  *     exact selector `@custom-variant dark (&:is(.dark *));` (see
- *     @amroksaleh/tokens/css) and every `.dark { ... }` token block target.
+ *     @whity-org/tokens/css) and every `.dark { ... }` token block target.
  *     No class means light mode.
  *   - Persistence key: `whity.theme`, storing the raw preference —
  *     'light' | 'dark' | 'system' — not the resolved value.

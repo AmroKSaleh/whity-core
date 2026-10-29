@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { FlowEditor } from '@amroksaleh/features/document-designer';
+import { FlowEditor } from '@whity-org/features/document-designer';
 import {
   addTableColumn,
   addTableRow,
@@ -8,8 +8,8 @@ import {
   removeTableColumn,
   removeTableRow,
   tableColumnCount,
-} from '@amroksaleh/ui/documents/flow';
-import type { FlowContent, FlowTable } from '@amroksaleh/ui/documents/flow';
+} from '@whity-org/ui/documents/flow';
+import type { FlowContent, FlowTable } from '@whity-org/ui/documents/flow';
 
 /**
  * Reshaping a table block.

@@ -16,7 +16,7 @@
  */
 
 import * as React from 'react';
-import { MathText } from '@amroksaleh/ui/math-text';
+import { MathText } from '@whity-org/ui/math-text';
 
 /** Allow only non-javascript, non-data hrefs. Everything else is dropped to text. */
 function safeHref(url: string): string | null {

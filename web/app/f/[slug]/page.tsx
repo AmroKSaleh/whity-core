@@ -25,10 +25,10 @@
  */
 
 import { use, useEffect, useMemo, useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
-import { Button } from '@amroksaleh/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity-org/ui/card';
+import { Button } from '@whity-org/ui/button';
 import { useDirection } from '@/lib/direction-context';
-import { useDateDisplay } from '@amroksaleh/features/datetime';
+import { useDateDisplay } from '@whity-org/features/datetime';
 import {
   FormField,
   localized,

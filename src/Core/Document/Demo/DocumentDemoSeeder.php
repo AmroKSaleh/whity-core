@@ -2221,7 +2221,7 @@ final class DocumentDemoSeeder
      * The shape is the client's ({@see web/lib/documents/types.ts}) and matches
      * what both readers of it expect — PHP's
      * {@see DocumentTemplateRepository::referencingTemplates()} and its
-     * TypeScript twin `collectBlockIds` in `@amroksaleh/ui/documents/blocks`.
+     * TypeScript twin `collectBlockIds` in `@whity-org/ui/documents/blocks`.
      * `blockId` is a STRING there, and both scanners compare it as one, so it is
      * written as one here rather than as the integer the id actually is; an
      * integer would be silently invisible to the count this fixture exists to
