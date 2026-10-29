@@ -14,7 +14,11 @@ class TenantsCommandTest extends TestCase
 {
     private CliRunner $runner;
 
-    /** @var array<string, mixed> $_ENV entries setUp() replaced, restored by tearDown() */
+    /**
+     * The environment entries setUp() replaced, put back by tearDown().
+     *
+     * @var array<string, mixed>
+     */
     private array $savedEnv = [];
 
     protected function setUp(): void
