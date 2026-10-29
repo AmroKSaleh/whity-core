@@ -1,0 +1,12 @@
+<!-- @dsCard group="Feedback" height=300 -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Alert</title></head>
+<body>
+<div id="root" class="wy-stack"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h(React.Fragment, null, h(W.Alert, { variant: 'info', title: 'MCP is on for this tenant' }, 'AI clients with a credential can call the tools their scope allows.'), h(W.Alert, { variant: 'warning', title: 'Billing assistant asked 14 times today' }, 'Consider allowing reminders without asking, or narrowing its scope.'), h(W.Alert, { variant: 'destructive', title: 'Backup failed', action: h(W.Button, { variant: 'outline', size: 'sm' }, 'Retry') }, 'The last backup did not finish. Your data is safe; retry now.')));
+</script>
+</body>
+</html>

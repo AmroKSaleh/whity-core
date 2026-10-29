@@ -1,0 +1,90 @@
+<!-- @dsCard group="Document editor" height=780 width=1280 subtitle="Right to left: the toolbar, gutter, outline and rail mirror; numbers and fields stay left to right" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Editor in Arabic</title><style>html,body{height:100%} #root{height:100%} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} </style></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement, F = React.Fragment;
+  function I(n, s) { return h(W.Icon, { name: n, size: s || 16 }); }
+  function tb(icon, label, on, sc) { return h(W.IconButton, { icon: icon, label: label, size: 'sm', shortcut: sc, className: on ? 'is-on' : undefined, tooltip: 'bottom' }); }
+  function sep() { return h('span', { className: 'wy-edx__sep', 'aria-hidden': 'true' }); }
+  function mf(label, sample, preview) { return h('span', { className: 'wy-mf' + (preview ? ' is-preview' : ''), contentEditable: false, 'data-field': label }, preview ? sample : label); }
+  function blk(type, kids, extra) { extra = extra || {}; return h('div', { className: 'wy-blk wy-blk--' + type + (extra.cls ? ' ' + extra.cls : ''), 'data-type': type }, extra.gutter ? h('div', { className: 'wy-blk__gutter' }, h('button', { className: 'wy-blk__g', 'aria-label': 'Add a block below' }, I('plus')), h('button', { className: 'wy-blk__g wy-blk__g--drag', 'aria-label': 'Drag to move, click for options' }, I('drag'))) : null, extra.toolbar || null, kids); }
+  function head(o) { o = o || {};
+    return h('div', { className: 'wy-edx__head' },
+      h(W.IconButton, { icon: 'chevron-left', label: o.back || 'Back to templates', tooltip: 'bottom' }),
+      h('span', { className: 'wy-edx__doc', 'aria-hidden': 'true' }, I(o.icon || 'template')),
+      h('div', { className: 'wy-edx__titles' }, h('input', { className: 'wy-edx__title', defaultValue: o.title || 'Payment reminder', 'aria-label': 'Document title', size: 22 }),
+        h('div', { className: 'wy-edx__meta' }, o.where || 'Templates · Letters', h('span', null, '·'), I('check', 12), o.saved || 'Saved 14:02')),
+      h('div', { className: 'wy-edx__acts' },
+        h('button', { className: 'wy-edx__mode' + (o.mode === 'suggest' ? ' is-suggest' : ''), 'aria-haspopup': 'menu' }, I(o.mode === 'suggest' ? 'suggest' : o.mode === 'view' ? 'view' : 'edit', 14), o.mode === 'suggest' ? 'Suggesting' : o.mode === 'view' ? 'Viewing' : 'Editing', I('chevron-down', 14)),
+        h('span', { className: 'wy-edx__count' }, h(W.IconButton, { icon: 'comment', label: 'Comments and suggestions', tooltip: 'bottom' }), h('b', null, o.count || '3')),
+        h(W.Button, { variant: 'outline', size: 'sm', icon: 'download' }, 'PDF'),
+        o.main === false ? null : h(W.Button, { size: 'sm', icon: 'check' }, o.mainLabel || 'Publish')));
+  }
+  function bar(o) { o = o || {};
+    return h('div', { className: 'wy-edx__bar' + (o.readonly ? ' is-readonly' : ''), role: 'toolbar', 'aria-label': 'Formatting' },
+      tb('undo', 'Undo', false, '⌘Z'), tb('redo', 'Redo', false, '⇧⌘Z'), sep(),
+      h('button', { className: 'wy-edx__drop wy-edx__style', 'aria-haspopup': 'menu' }, o.style || 'Normal text', I('chevron-down', 14)), sep(),
+      tb('bold', 'Bold', o.bold, '⌘B'), tb('italic', 'Italic', false, '⌘I'), tb('underline', 'Underline', false, '⌘U'), tb('strike', 'Strikethrough', false, '⇧⌘X'), sep(),
+      tb('link', 'Link', false, '⌘K'), tb('highlight', 'Highlight'), sep(),
+      tb('list-bullet', 'Bulleted list', false, '⇧⌘8'), tb('list-numbered', 'Numbered list', false, '⇧⌘7'), tb('list-todo', 'Checklist', false, '⇧⌘9'), sep(),
+      h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu' }, I('plus', 14), 'Insert', I('chevron-down', 14)),
+      h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu' }, I('field', 14), 'Field', I('chevron-down', 14)),
+      tb('comment-add', 'Comment', false, '⌥⌘M'), sep(),
+      h('button', { className: 'wy-edx__ask' }, I('robot', 14), 'Ask an agent'),
+      h('span', { className: 'wy-edx__grow' }),
+      o.page ? h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu', 'aria-label': 'Zoom' }, o.zoom || '75%', I('chevron-down', 14)) : null,
+      h(W.ToggleGroup, { size: 'sm', label: 'View', required: true, defaultValue: o.page ? 'page' : 'continuous', options: [{ value: 'continuous', label: 'Continuous', icon: 'continuous', iconOnly: true }, { value: 'page', label: 'Page view', icon: 'page', iconOnly: true }] }),
+      tb('outline', 'Outline', o.outline !== false));
+  }
+  function outline(items) { return h('nav', { className: 'wy-edx__outline', 'aria-label': 'Outline' }, h('div', { className: 'wy-edx__outline-h' }, 'Outline'), items.map(function (it, i) { return h('a', { key: i, href: '#', className: 'l' + it[0] + (it[2] ? ' is-on' : '') }, it[1]); })); }
+  function status(t) { return h('div', { className: 'wy-edx__status' }, t.map(function (x, i) { return x === '|' ? h('span', { key: i, className: 'wy-edx__grow' }) : h('span', { key: i }, x); })); }
+  function rcard(top, o) {
+    return h('div', { className: 'wy-rc' + (o.agent ? ' is-agent' : '') + (o.active ? ' is-active' : ''), style: { top: top } },
+      h('div', { className: 'wy-rc__who' }, o.agent ? h(W.ActorChip, { kind: 'agent', name: o.agent, onBehalfOf: o.for }) : h(F, null, h(W.Avatar, { name: o.name, size: 24 }), h('span', { className: 'wy-rc__name' }, o.name)),
+        o.agent ? null : h('span', { className: 'wy-rc__time' }, o.time),
+        h('span', { className: 'wy-rc__acts' }, o.sug ? h(F, null, h(W.IconButton, { icon: 'check', label: 'Accept', size: 'sm' }), h(W.IconButton, { icon: 'close', label: 'Reject', size: 'sm' })) : h(W.IconButton, { icon: 'check', label: 'Resolve', size: 'sm' }))),
+      o.what ? h('div', { className: 'wy-rc__what' }, o.what) : null,
+      o.text ? h('div', null, o.text) : null,
+      o.reply ? h('div', { className: 'wy-rc__reply' }, 'Reply or add others with @') : null);
+  }
+  function tba(icon, label, sc) { return h(W.IconButton, { icon: icon, label: label, size: 'sm', shortcut: sc, tooltip: 'bottom' }); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'wy-edx', dir: 'rtl', lang: 'ar', style: { height: '100%' } },
+    h('div', { className: 'wy-edx__head' },
+      h(W.IconButton, { icon: 'chevron-left', label: 'العودة إلى القوالب', tooltip: 'bottom' }),
+      h('span', { className: 'wy-edx__doc', 'aria-hidden': 'true' }, I('template')),
+      h('div', { className: 'wy-edx__titles' }, h('input', { className: 'wy-edx__title', defaultValue: 'تذكير بالدفع', 'aria-label': 'عنوان المستند', size: 18 }),
+        h('div', { className: 'wy-edx__meta' }, 'القوالب · الرسائل', h('span', null, '·'), I('check', 12), 'حُفظ ', h('bdi', null, '14:02'))),
+      h('div', { className: 'wy-edx__acts' },
+        h('button', { className: 'wy-edx__mode is-suggest' }, I('suggest', 14), 'اقتراح', I('chevron-down', 14)),
+        h('span', { className: 'wy-edx__count' }, h(W.IconButton, { icon: 'comment', label: 'التعليقات والاقتراحات', tooltip: 'bottom' }), h('b', null, '2')),
+        h(W.Button, { variant: 'outline', size: 'sm', icon: 'download' }, 'PDF'), h(W.Button, { size: 'sm', icon: 'check' }, 'نشر'))),
+    h('div', { className: 'wy-edx__bar', role: 'toolbar', 'aria-label': 'التنسيق' },
+      tba('undo', 'تراجع', '⌘Z'), tba('redo', 'إعادة', '⇧⌘Z'), sep(), h('button', { className: 'wy-edx__drop wy-edx__style' }, 'نص عادي', I('chevron-down', 14)), sep(),
+      tba('bold', 'غامق', '⌘B'), tba('italic', 'مائل', '⌘I'), tba('underline', 'تسطير', '⌘U'), tba('strike', 'يتوسطه خط'), sep(), tba('link', 'رابط', '⌘K'), tba('highlight', 'تمييز'), sep(),
+      tba('list-bullet', 'قائمة نقطية'), tba('list-numbered', 'قائمة مرقّمة'), tba('list-todo', 'قائمة مهام'), sep(),
+      h('button', { className: 'wy-edx__drop' }, I('plus', 14), 'إدراج', I('chevron-down', 14)), h('button', { className: 'wy-edx__drop' }, I('field', 14), 'حقل', I('chevron-down', 14)), tba('comment-add', 'تعليق'), sep(),
+      h('button', { className: 'wy-edx__ask' }, I('robot', 14), 'اسأل وكيلاً'), h('span', { className: 'wy-edx__grow' }),
+      h(W.ToggleGroup, { size: 'sm', label: 'العرض', required: true, defaultValue: 'continuous', options: [{ value: 'continuous', label: 'متصل', icon: 'continuous', iconOnly: true }, { value: 'page', label: 'صفحات', icon: 'page', iconOnly: true }] }), tba('outline', 'المخطط')),
+    h('div', { className: 'wy-edx__body' },
+      h('nav', { className: 'wy-edx__outline', 'aria-label': 'المخطط' }, h('div', { className: 'wy-edx__outline-h' }, 'المخطط'), h('a', { href: '#', className: 'l1 is-on' }, 'تذكير بالدفع'), h('a', { href: '#', className: 'l2' }, 'الفواتير المفتوحة')),
+      h('div', { className: 'wy-edx__canvas' }, h('article', { className: 'wy-edx__sheet' },
+        h('h1', { className: 'wy-edx__doctitle' }, 'تذكير بالدفع'),
+        h('div', { className: 'wy-edx__docmeta' }, h(W.Badge, { variant: 'secondary' }, 'قالب'), 'يُطبع عبر ', h('bdi', null, 'Whity Render')),
+        blk('p', h('p', null, 'السادة ', mf('اسم العميل'), ' المحترمين،')),
+        blk('p', h('p', null, 'نذكّركم بأن الفاتورة ', mf('رقم الفاتورة'), ' بقيمة ', mf('إجمالي الفاتورة'), ' استحقت بتاريخ ', mf('تاريخ الاستحقاق'), '. ', h('mark', { className: 'wy-cmt' }, 'نرجو السداد خلال '), h('del', { className: 'wy-sug-del' }, '30 يوماً'), h('ins', { className: 'wy-sug-ins' }, '14 يوماً'), ' من تاريخ هذه الرسالة.'), { gutter: true, cls: 'is-hover' }),
+        blk('callout', h('div', null, I('info'), h('p', null, 'التحويل إلى ', h('bdi', null, 'Example Bank'), '، الآيبان ', mf('آيبان الشركة'), '، مع رقم الفاتورة مرجعاً.')), { cls: 'is-note' }),
+        blk('h2', h('h3', null, 'الفواتير المفتوحة')),
+        blk('table', h('table', null, h('thead', null, h('tr', null, h('th', null, 'الفاتورة'), h('th', null, 'الاستحقاق'), h('th', { className: 'is-num' }, 'المبلغ'))),
+          h('tbody', null, h('tr', null, h('td', null, h('bdi', null, 'INV-1042')), h('td', null, '14 تشرين الأول 2026'), h('td', { className: 'is-num' }, h('bdi', null, 'JOD 301.600'))), h('tr', null, h('td', null, h('bdi', null, 'INV-1051')), h('td', null, '21 تشرين الأول 2026'), h('td', { className: 'is-num' }, h('bdi', null, 'JOD 96.000')))))),
+        blk('p', h('p', null, 'مع التحية،')))),
+      h('aside', { className: 'wy-edx__rail', 'aria-label': 'التعليقات والاقتراحات' },
+        h('div', { className: 'wy-edx__railhead' }, h('span', null, 'اقتراح واحد · تعليق واحد')),
+        h('div', { className: 'wy-rc', style: { top: 176 } }, h('div', { className: 'wy-rc__who' }, h(W.Avatar, { name: 'Omar Khalil', size: 24 }), h('span', { className: 'wy-rc__name' }, 'عمر خليل'), h('span', { className: 'wy-rc__time' }, h('bdi', null, '13:40')), h('span', { className: 'wy-rc__acts' }, h(W.IconButton, { icon: 'check', label: 'حلّ', size: 'sm' }))), h('div', null, 'هل نذكر غرامة التأخير ٢٪ هنا؟')),
+        h('div', { className: 'wy-rc', style: { top: 290 } }, h('div', { className: 'wy-rc__who' }, h(W.Avatar, { name: 'Rana Haddad', size: 24 }), h('span', { className: 'wy-rc__name' }, 'رنا حداد'), h('span', { className: 'wy-rc__acts' }, h(W.IconButton, { icon: 'check', label: 'قبول', size: 'sm' }), h(W.IconButton, { icon: 'close', label: 'رفض', size: 'sm' }))), h('div', { className: 'wy-rc__what' }, 'استبدال ', h('b', null, '30 يوماً'), ' بـ ', h('b', null, '14 يوماً'))))),
+    h('div', { className: 'wy-edx__status' }, h('span', null, '198 كلمة'), h('span', null, 'العربية'), h('span', { className: 'wy-edx__grow' }), h('span', null, 'آخر تعديل: رنا حداد، ', h('bdi', null, '14:02')))));
+</script>
+</body>
+</html>

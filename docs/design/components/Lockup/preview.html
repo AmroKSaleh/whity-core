@@ -1,0 +1,13 @@
+<!-- @dsCard group="Brand" height=170 subtitle="Horizontal (default) and stacked" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Lockup</title></head>
+<body>
+<div id="root" class="wy-stage"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h(React.Fragment, null, h(W.Lockup, { height: 48 }), h(W.Lockup, { height: 24 }), h(W.Lockup, { height: 40, layout: 'stacked' }),
+    h('span', { style: { background: 'var(--brand)', padding: 16, borderRadius: 12, display: 'inline-flex' } }, h(W.Lockup, { height: 32, tone: 'onbrand' }))));
+</script>
+</body>
+</html>

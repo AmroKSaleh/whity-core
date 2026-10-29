@@ -1,0 +1,12 @@
+<!-- @dsCard group="Status" height=120 -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Skeleton</title></head>
+<body>
+<div id="root" class="wy-stack"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h(React.Fragment, null, h(W.Skeleton, { width: '40%', height: 14 }), h(W.Skeleton, { width: '90%' }), h(W.Skeleton, { width: '75%' })));
+</script>
+</body>
+</html>

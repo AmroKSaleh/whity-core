@@ -1,0 +1,21 @@
+<!-- @dsCard group="Templates · Partner app" height=820 width=1280 subtitle="Front Office invoices in a tenant’s brand" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Partner invoices</title><style>html,body{height:100%} #root{min-height:100%}</style></head>
+<body>
+<div id="root" class="wy-theme-partner"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  function tenantLogo(name) { return h('span', { className: 'wy-tenant-logo' }, h('span', { className: 'wy-tenant-logo__tile', 'aria-hidden': 'true' }, name.charAt(0)), name); }
+  function lang() { return h('div', { className: 'wy-auth__lang' }, h('b', null, 'English'), h('span', { lang: 'ar' }, 'العربية')); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h(W.AppShell, { brand: tenantLogo('Example Office'), tenant: 'Example Bakery', user: 'Rana Haddad', role: 'Owner', builtOn: true, topActions: h(React.Fragment, null, h(W.IconButton, { icon: 'notification', label: 'Notifications' })),
+    nav: [{ items: [{ icon: 'dashboard', label: 'Today' }, { icon: 'approval', label: 'Approvals', count: 2 }] }, { label: 'Sales', items: [{ icon: 'lead', label: 'Leads' }, { icon: 'quote', label: 'Quotes' }, { icon: 'invoice', label: 'Invoices', active: true }, { icon: 'customer', label: 'Customers' }] }, { label: 'Reports', items: [{ icon: 'chart', label: 'Sales report' }] }] },
+    h(W.PageHeader, { title: 'Invoices', description: 'Every invoice is sent to JoFotara when you issue it.', actions: h(React.Fragment, null, h(W.Button, { variant: 'outline', icon: 'download' }, 'Export'), h(W.Button, { icon: 'plus' }, 'New invoice')) }),
+    h(W.Alert, { variant: 'warning', title: '3 customers are missing a tax number', action: h(W.Button, { variant: 'outline', size: 'sm' }, 'Fix now') }, 'Their invoices can be saved as drafts but not issued until the number is added.'),
+    h('div', { className: 'wy-grid wy-grid--3' }, h(W.Card, { title: 'Issued this month' }, h('div', { className: 'wy-stat__num' }, h(W.Money, { amount: 18420, decimals: 0 })), h('div', { className: 'wy-stat__delta' }, '64 invoices')), h(W.Card, { title: 'Overdue' }, h('div', { className: 'wy-stat__num' }, h(W.Money, { amount: 4860, decimals: 0 })), h('div', { className: 'wy-stat__delta' }, '12 invoices · reminders waiting for approval')), h(W.Card, { title: 'JoFotara' }, h('div', { className: 'wy-stat__num' }, '61 / 64'), h('div', { className: 'wy-stat__delta' }, 'accepted · 3 drafts'))),
+    h(W.Tabs, { items: [{ value: 'a', label: 'All', count: 64 }, { value: 'o', label: 'Overdue', count: 12 }, { value: 'd', label: 'Drafts', count: 3 }] }),
+    h(W.DataTable, { columns: [{ key: 'no', label: 'Invoice', render: function (r) { return h('span', { className: 'wy-mono' }, r.no); } }, { key: 'cust', label: 'Customer' }, { key: 'date', label: 'Issued' }, { key: 'amt', label: 'Total', align: 'end', render: function (r) { return h(W.Money, { amount: r.amt, decimals: 3 }); } }, { key: 'pay', label: 'Payment', render: function (r) { return h(W.Badge, { variant: r.pay === 'Paid' ? 'success' : r.pay === 'Overdue' ? 'destructive' : 'outline' }, r.pay); } }, { key: 'jf', label: 'JoFotara', render: function (r) { return h(W.Badge, { variant: r.jf === 'Accepted' ? 'info' : r.jf === 'Draft' ? 'secondary' : 'warning', icon: r.jf === 'Accepted' ? 'check' : undefined }, r.jf); } }],
+      rows: [{ id: 1, no: 'INV-1042', cust: 'Example Clinic', date: '27 Oct 2026', amt: 320, pay: 'Paid', jf: 'Accepted' }, { id: 2, no: 'INV-1041', cust: 'Example Trading', date: '26 Oct 2026', amt: 1185.5, pay: 'Unpaid', jf: 'Accepted' }, { id: 3, no: 'INV-1036', cust: 'Example Café', date: '12 Oct 2026', amt: 96, pay: 'Overdue', jf: 'Accepted' }, { id: 4, no: 'Draft', cust: 'Example Hotel', date: '—', amt: 2400, pay: 'Unpaid', jf: 'Draft' }], footer: h(W.Pagination, { from: 1, to: 4, total: 64 }) })));
+</script>
+</body>
+</html>
