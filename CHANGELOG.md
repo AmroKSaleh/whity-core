@@ -6,6 +6,10 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A plugin's own MCP tools can now tell which workspace they're working in (plugin SDK 1.46).** A tool a plugin writes itself (`PluginMcpToolsInterface`) was handed only its arguments, so a plugin serving several workspaces had no supported way to keep each one's data apart. Handlers now also receive an `McpToolContext` with the workspace the call is authorized in and the person calling: `fn(array $arguments, McpToolContext $context)`. Tools written for earlier SDKs keep working unchanged. Plugins that use the context should require SDK `^1.46`. ADR-0006 now also describes tool naming and rate limits as they actually work (#1419).
+
 ## [0.2.18] - 2026-10-29
 
 ### Added
