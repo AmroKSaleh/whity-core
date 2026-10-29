@@ -1098,7 +1098,7 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'href' => '/admin/document-sources',
         'icon' => 'notes',
         'group' => 'documents',
-        'order' => 3,
+        'order' => 6,
         // Editor M2: notes and wiki pages written in the block editor. Mirrors
         // GET /api/document-sources (DocumentSourcesApiHandler), gated on
         // documents:read; rows are filtered by DocumentAccessPolicy on top.

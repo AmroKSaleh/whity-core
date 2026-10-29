@@ -14,8 +14,22 @@ export function normaliseHref(input: string): string {
   const href = input.trim()
   if (!href) return ""
   if (/^(?:[a-z][a-z0-9+.-]*:|\/|#)/i.test(href)) return href
-  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(href)) return `mailto:${href}`
+  if (looksLikeEmail(href)) return `mailto:${href}`
   return `https://${href}`
+}
+
+/**
+ * name@domain.tld: one @, a non-empty name, and a dot inside the domain, with
+ * no spaces. Checked by splitting rather than one regular expression, which
+ * backtracks badly on long hostile input (CodeQL js/polynomial-redos).
+ */
+function looksLikeEmail(text: string): boolean {
+  if (/\s/.test(text)) return false
+  const at = text.indexOf("@")
+  if (at <= 0 || at !== text.lastIndexOf("@")) return false
+  const domain = text.slice(at + 1)
+  const dot = domain.indexOf(".")
+  return dot > 0 && dot < domain.length - 1
 }
 
 /** Only web, mail and in-app links: never javascript: or data: (the href lands in an <a>). */
