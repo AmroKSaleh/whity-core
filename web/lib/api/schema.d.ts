@@ -5464,9 +5464,13 @@ export interface components {
             updated_at: string;
         };
         ConveningBodyCreateRequest: {
+            /** @description Short permanent key (lower-case letters, digits, `-`, `_`). Quoted in every decision number, and cannot be changed later. */
             body_key: string;
+            /** @description Name of the body (council, committee), as text or as a `{language: text}` map. */
             name: string | components["schemas"]["LocalizedLabel"];
+            /** @description Organizational unit the body belongs to; null for none. */
             ou_id?: number | null;
+            /** @description What the body is for. */
             description?: string;
         };
         ConveningBodyDetailResponse: {
@@ -5491,17 +5495,25 @@ export interface components {
             data: components["schemas"]["ConveningBodyMember"][];
         };
         ConveningBodyMemberRequest: {
+            /** @description Profile id of the person to add as a member. */
             profile_id: number;
-            /** @enum {string} */
+            /**
+             * @description Their role in the body: `chair`, `secretary` or `member`.
+             * @enum {string}
+             */
             member_role?: "chair" | "secretary" | "member";
         };
         ConveningBodyResponse: {
             data: components["schemas"]["ConveningBody"];
         };
         ConveningBodyUpdateRequest: {
+            /** @description New name, as text or as a `{language: text}` map. */
             name?: string | components["schemas"]["LocalizedLabel"];
+            /** @description Organizational unit the body belongs to; null for none. */
             ou_id?: number | null;
+            /** @description New description. */
             description?: string;
+            /** @description false retires the body: it keeps its history but convenes no new meetings. */
             is_active?: boolean;
         };
         DataType: {
@@ -5630,10 +5642,16 @@ export interface components {
             revokedAt: string | null;
         };
         DelegationCreateRequest: {
-            /** @enum {string} */
+            /**
+             * @description Who receives the permissions: `role` (everyone holding a role) or `user` (one person).
+             * @enum {string}
+             */
             granteeType: "role" | "user";
+            /** @description Id of the role, or the profile id of the user, named by `granteeType`. */
             granteeId: number;
+            /** @description Permission names (`resource:action`) to delegate. You can only delegate permissions you hold yourself. */
             permissions: string[];
+            /** @description Limit the delegation to this organizational unit and the units below it. Null or omitted applies tenant-wide. */
             ouId?: number | null;
         };
         DelegationCreateResponse: {
@@ -5841,14 +5859,19 @@ export interface components {
             data: components["schemas"]["DocumentConveningEntry"][];
         };
         DocumentCreateRequest: {
+            /** @description Template to issue the document from (see GET /api/document-templates). */
             document_template_id: number;
+            /** @description Document title; defaults from the template. */
             title?: string | null;
+            /** @description Values for the template's placeholders: one object per label or page, mapping placeholder key to text. A key the template does not declare is refused. */
             dataRows?: {
                 [key: string]: string;
             }[];
+            /** @description Optional label-sheet layout for printing several labels per page; null for one per page. */
             sheet?: {
                 [key: string]: unknown;
             } | null;
+            /** @description Omit to render when this server can; true to require a rendered file (503 if rendering is unavailable); false to record without rendering. */
             render?: boolean | null;
         };
         DocumentCreateResponse: {
@@ -5876,20 +5899,28 @@ export interface components {
             };
         };
         DocumentRenderRequest: {
+            /** @description Values for the template's placeholders: one object per label or page, mapping placeholder key to text. Omitted or empty renders one copy with the template's sample values. */
             dataRows?: {
                 [key: string]: string;
             }[];
+            /** @description Optional label-sheet layout for printing several labels per page; null for one per page. */
             sheet?: {
                 [key: string]: unknown;
             } | null;
-            /** @default false */
+            /**
+             * @description true to record the result as a document (returns the record); false (default) returns the PDF as a preview only.
+             * @default false
+             */
             persist: boolean;
+            /** @description Title of the recorded document. Used only when `persist` is true. */
             title?: string | null;
         };
         DocumentRerenderRequest: {
+            /** @description Values for the template's placeholders: one object per label or page, mapping placeholder key to text. */
             dataRows?: {
                 [key: string]: string;
             }[];
+            /** @description Optional label-sheet layout for printing several labels per page; null for one per page. */
             sheet?: {
                 [key: string]: unknown;
             } | null;
@@ -5911,10 +5942,17 @@ export interface components {
             default_quorum: "all" | "any" | "majority";
         };
         DocumentRouteActionRequest: {
-            /** @enum {string} */
+            /**
+             * @description What you did with the document: `forwarded`, `acknowledged`, `returned` or `noted`.
+             * @enum {string}
+             */
             action: "forwarded" | "acknowledged" | "returned" | "noted";
+            /** @description Comment for the trail. Required for `noted`. */
             note?: string | null;
-            /** @enum {string|null} */
+            /**
+             * @description `approved` or `rejected`. Required with `acknowledged` on a decision step; refused anywhere else.
+             * @enum {string|null}
+             */
             verdict?: "approved" | "rejected" | null;
         };
         DocumentRouteActionResponse: {
@@ -5925,7 +5963,9 @@ export interface components {
             decided?: "approved" | "rejected" | null;
         };
         DocumentRouteCreateRequest: {
+            /** @description Name of this circulation; defaults from the document. */
             title?: string | null;
+            /** @description Ordered steps, at least one. Each names a `rule_kind` (see GET /api/routing-rules) and its `rule_config`, deciding who receives the document at that step. A step with `decision: true` is an approval gate whose `on_approved`/`on_rejected` name 1-based step positions. */
             steps: {
                 rule_kind: string;
                 rule_config?: {
@@ -5950,7 +5990,9 @@ export interface components {
             verdict: "approved" | "rejected";
         };
         DocumentRouteFromTemplateRequest: {
+            /** @description Route template (saved design) to apply (see GET /api/document-route-templates). */
             template_id: number;
+            /** @description Name of this circulation; defaults to the route template name. */
             title?: string | null;
         };
         DocumentRouteListResponse: {
@@ -6020,13 +6062,20 @@ export interface components {
             updated_at: string;
         };
         DocumentTemplateCreateRequest: {
+            /** @description Template name. */
             name: string;
+            /** @description The template design as produced by the document designer (pages, elements, placeholders). */
             data: {
                 [key: string]: unknown;
             };
-            /** @enum {string} */
+            /**
+             * @description Who can use it: `personal` (you), `tenant`, `global` or `system`. Anything but `personal` needs documents:publish.
+             * @enum {string}
+             */
             scope?: "personal" | "tenant" | "global" | "system";
+            /** @description Permission a user must hold to use the template; null for none. Needs documents:publish. */
             required_permission?: string | null;
+            /** @description Organizational unit the template is filed under; null files it tenant-wide. Needs documents:publish. */
             owner_ou_id?: number | null;
         };
         DocumentTemplateListResponse: {
@@ -6036,13 +6085,20 @@ export interface components {
             data: components["schemas"]["DocumentTemplate"];
         };
         DocumentTemplateUpdateRequest: {
+            /** @description New template name. */
             name?: string;
+            /** @description Replacement template design. */
             data?: {
                 [key: string]: unknown;
             };
-            /** @enum {string} */
+            /**
+             * @description Who can use it: `personal` (you), `tenant`, `global` or `system`. Anything but `personal` needs documents:publish.
+             * @enum {string}
+             */
             scope?: "personal" | "tenant" | "global" | "system";
+            /** @description Permission a user must hold to use the template; null for none. */
             required_permission?: string | null;
+            /** @description Organizational unit the template is filed under; null files it tenant-wide. */
             owner_ou_id?: number | null;
         };
         DocumentTrailEvent: {
@@ -6206,12 +6262,16 @@ export interface components {
             }[];
         };
         FormCreateRequest: {
+            /** @description Permanent key for the form: a lower-case letter, then letters, digits, `_` or `-`. */
             form_key: string;
+            /** @description Form name as `{"en": ..., "ar": ...}`; a plain string is read as English. */
             name: {
                 ar?: string;
                 en?: string;
             };
+            /** @description What the form is for. */
             description?: string;
+            /** @description Route template that circulates each submission for approval (see GET /api/document-route-templates); null for none. */
             route_template_id?: number | null;
         };
         FormDetailResponse: {
@@ -6245,19 +6305,31 @@ export interface components {
             updated_at?: string;
         };
         FormFieldCreateRequest: {
+            /** @description Permanent key the answers are stored under: a lower-case letter, then letters, digits or `_`. */
             field_key: string;
-            /** @enum {string} */
+            /**
+             * @description Kind of input: text, textarea, number, date, select, multiselect, checkbox, file, profile_ref (a person) or ou_ref (a unit).
+             * @enum {string}
+             */
             field_type: "text" | "textarea" | "number" | "date" | "select" | "multiselect" | "checkbox" | "file" | "profile_ref" | "ou_ref";
+            /** @description Field label as `{"en": ..., "ar": ...}`; a plain string is read as English. */
             label: {
                 ar?: string;
                 en?: string;
             };
+            /** @description Hint shown under the field. */
             help_text?: string;
+            /** @description Whether a submission must answer this field. */
             is_required?: boolean;
+            /** @description Choices for select and multiselect fields. */
             options?: components["schemas"]["FormFieldOption"][];
+            /** @description Extra checks on the answer (length, range, pattern). */
             validation?: components["schemas"]["FormFieldValidation"];
+            /** @description Fill the field in advance from the submitter's profile; sources are listed in the field list's `meta.prefill_sources`. */
             prefill_source?: string | null;
+            /** @description Section to group the field under; fields sharing a key form one section. */
             section_key?: string;
+            /** @description Position in the form; omitted appends it at the end. */
             position?: number;
         };
         FormFieldListResponse: {
@@ -6279,18 +6351,29 @@ export interface components {
             fields: components["schemas"]["FormFieldCreateRequest"][];
         };
         FormFieldUpdateRequest: {
-            /** @enum {string} */
+            /**
+             * @description Kind of input: text, textarea, number, date, select, multiselect, checkbox, file, profile_ref (a person) or ou_ref (a unit).
+             * @enum {string}
+             */
             field_type?: "text" | "textarea" | "number" | "date" | "select" | "multiselect" | "checkbox" | "file" | "profile_ref" | "ou_ref";
+            /** @description New label as `{"en": ..., "ar": ...}`; a plain string is read as English. */
             label?: {
                 ar?: string;
                 en?: string;
             };
+            /** @description New hint shown under the field. */
             help_text?: string;
+            /** @description Whether a submission must answer this field. */
             is_required?: boolean;
+            /** @description Replacement choices for select and multiselect fields. */
             options?: components["schemas"]["FormFieldOption"][];
+            /** @description Replacement checks on the answer. */
             validation?: components["schemas"]["FormFieldValidation"];
+            /** @description Profile detail to prefill from; null for none. */
             prefill_source?: string | null;
+            /** @description Section to group the field under. */
             section_key?: string;
+            /** @description New position in the form. */
             position?: number;
         };
         FormFieldValidation: {
@@ -6356,6 +6439,7 @@ export interface components {
             };
         };
         FormSubmissionCreateRequest: {
+            /** @description Answers keyed by field key, each typed by its field: text, number, boolean, or a list for multiselect. */
             data: {
                 [key: string]: unknown;
             };
@@ -6377,11 +6461,14 @@ export interface components {
             data: components["schemas"]["FormSubmission"][];
         };
         FormUpdateRequest: {
+            /** @description New name as `{"en": ..., "ar": ...}`; a plain string is read as English. */
             name?: {
                 ar?: string;
                 en?: string;
             };
+            /** @description New description. */
             description?: string;
+            /** @description Route template for approving submissions; null removes it. */
             route_template_id?: number | null;
         };
         FormUploadResponse: {
@@ -6601,9 +6688,13 @@ export interface components {
             };
         };
         InvitationCreateRequest: {
+            /** @description Email address to invite into this tenant. */
             email: string;
+            /** @description Role to grant on acceptance, by name. Absent means the global `user` role. */
             role?: string;
+            /** @description Role to grant on acceptance, by id (see GET /api/roles). */
             role_id?: number;
+            /** @description Organizational unit to place the person in on acceptance (see GET /api/ous). */
             ou_id?: number;
         };
         InvitationItem: {
@@ -6847,9 +6938,13 @@ export interface components {
             created_at: string;
         };
         MeetingAgendaItemCreateRequest: {
+            /** @description Agenda item title, as text or as a `{language: text}` map. */
             title: string | components["schemas"]["LocalizedLabel"];
+            /** @description Document the item is about, if any. A decision on the item can then advance the document's approval route. */
             document_id?: number | null;
+            /** @description Notes for the item. */
             notes?: string;
+            /** @description Must be true to add an item to a meeting that has already been held. */
             allow_held?: boolean;
         };
         MeetingAgendaItemListResponse: {
@@ -6859,6 +6954,7 @@ export interface components {
             data: components["schemas"]["MeetingAgendaItem"];
         };
         MeetingAgendaReorderRequest: {
+            /** @description Every agenda item id of the meeting, each exactly once, in the new order. */
             item_ids: number[];
         };
         MeetingAttendanceCount: {
@@ -6878,6 +6974,7 @@ export interface components {
             note?: string | null;
         };
         MeetingAttendanceRequest: {
+            /** @description The complete attendance list, replacing the stored one; `[]` records that nobody attended. Each entry names a person and their capacity. */
             attendees: components["schemas"]["MeetingAttendanceEntryRequest"][];
         };
         MeetingAttendanceResponse: {
@@ -6899,7 +6996,9 @@ export interface components {
             invitation_status: string | null;
         };
         MeetingCreateRequest: {
+            /** @description Convening body holding the meeting (see GET /api/convening-bodies). */
             body_id: number;
+            /** @description Meeting title, as text or as a `{language: text}` map. */
             title: string | components["schemas"]["LocalizedLabel"];
         };
         MeetingDecision: {
@@ -6920,10 +7019,16 @@ export interface components {
             data: components["schemas"]["MeetingDecision"][];
         };
         MeetingDecisionRequest: {
-            /** @enum {string} */
+            /**
+             * @description The decision: `approved`, `rejected` or `deferred`.
+             * @enum {string}
+             */
             verdict: "approved" | "rejected" | "deferred";
+            /** @description Reasoning recorded with the decision. */
             rationale?: string;
+            /** @description The institution's own decision number, in any format. Omit to allocate the next number from the body's yearly counter; a number already used in this tenant is refused. */
             decision_number?: string;
+            /** @description Date the decision was taken, if different from the meeting date. */
             decided_at?: string;
         };
         MeetingDecisionResponse: {
@@ -6950,6 +7055,7 @@ export interface components {
             };
         };
         MeetingHoldRequest: {
+            /** @description When the meeting actually took place. Send the real date when minuting a past meeting; omitted means now. Decision numbers use its year. */
             held_at?: string;
         };
         MeetingInvitation: {
@@ -6984,7 +7090,9 @@ export interface components {
             data: components["schemas"]["Meeting"];
         };
         MeetingScheduleRequest: {
+            /** @description When the meeting will take place, as a date and time (e.g. `2026-11-04 10:00`). Rescheduling notifies invitees. */
             scheduled_at: string;
+            /** @description Where it will take place. */
             location?: string;
         };
         MeetingScheduleResponse: {
@@ -7101,6 +7209,7 @@ export interface components {
             transactional_prefixes: string[];
         };
         NotificationPreferencesUpdateRequest: {
+            /** @description Entries of `{type, channel, enabled}` to set for the signed-in user. Transactional notification types cannot be turned off. */
             preferences: components["schemas"]["NotificationPreferenceEntry"][];
         };
         OpenApiDocumentResponse: {
@@ -7119,10 +7228,15 @@ export interface components {
             ou_type_label: string | null;
         };
         OuCreateRequest: {
+            /** @description Name of the organizational unit. */
             name: string;
+            /** @description What the unit is. */
             description?: string;
+            /** @description Parent unit (see GET /api/ous). Omitted or null creates a root unit. */
             parent_id?: number | null;
+            /** @description Kind of unit, by id (see GET /api/ou-types). Send this or `type`, not both. */
             ou_type_id?: number | null;
+            /** @description Kind of unit, by its stable key (see GET /api/ou-types). Send this or `ou_type_id`, not both. */
             type?: string | null;
         };
         OuDetail: {
@@ -7151,6 +7265,7 @@ export interface components {
             data: components["schemas"]["OrganizationalUnit"];
         };
         OuRoleAssignRequest: {
+            /** @description Role to attach to this unit (see GET /api/roles). */
             role_id: number;
         };
         OuRoleAssignment: {
@@ -7199,10 +7314,15 @@ export interface components {
             sort_order?: number;
         };
         OuUpdateRequest: {
+            /** @description New name. */
             name?: string;
+            /** @description New description. */
             description?: string;
+            /** @description New parent unit. An explicit null makes this a root unit. */
             parent_id?: number | null;
+            /** @description New kind of unit, by id. An explicit null removes the type. Send this or `type`, not both. */
             ou_type_id?: number | null;
+            /** @description New kind of unit, by stable key. An explicit null removes the type. Send this or `ou_type_id`, not both. */
             type?: string | null;
         };
         Pagination: {
@@ -7332,6 +7452,7 @@ export interface components {
             required: string | null;
         };
         PermittedActionsRequest: {
+            /** @description Actions to test, each `{ref, method, path}` with optional `resourceType`/`resourceId`/`scopedPermission`. Answers come back keyed by `ref`. */
             checks: components["schemas"]["PermittedActionCheck"][];
         };
         PermittedActionsResponse: {
@@ -7740,10 +7861,15 @@ export interface components {
             pagination: components["schemas"]["Pagination"];
         };
         RoleCreateRequest: {
+            /** @description Role name, unique among the roles this tenant can see. */
             name: string;
+            /** @description What the role is for. */
             description?: string;
+            /** @description Permissions to grant, each as an id or a `resource:action` name (see GET /api/permissions). Unknown entries are ignored. */
             permissions?: (number | string)[];
+            /** @description Tenant that owns the role. Platform administrators only; others get their own tenant. */
             tenant_id?: number;
+            /** @description Create a platform-wide role visible to every tenant. Platform administrators only; cannot be combined with `tenant_id`. */
             global?: boolean;
         };
         RoleCreateResponse: {
@@ -7777,6 +7903,7 @@ export interface components {
             pagination: components["schemas"]["Pagination"];
         };
         RolePermissionsChangeRequest: {
+            /** @description Permissions to add (POST) or remove (DELETE), each as an id or a `resource:action` name. Other grants are untouched. */
             permissions: (number | string)[];
         };
         RolePermissionsGrantResponse: {
@@ -7804,8 +7931,11 @@ export interface components {
             data: components["schemas"]["RoleSummary"][];
         };
         RoleUpdateRequest: {
+            /** @description New role name. */
             name?: string;
+            /** @description New description. */
             description?: string;
+            /** @description The complete new permission set, replacing the current one: `[]` revokes everything, omitting the key leaves grants unchanged. */
             permissions?: (number | string)[];
         };
         RouteTemplate: {
@@ -8101,8 +8231,11 @@ export interface components {
             createdAt: string | null;
         };
         TenantCreateRequest: {
+            /** @description Display name of the new tenant (workspace). */
             name: string;
+            /** @description URL-safe identifier: lower-case letters, digits and dashes. Generated from the name when omitted; must be unique. */
             slug?: string;
+            /** @description Optional first administrator, created in the same transaction: `{email, password, role?}`. Without it no one can sign in to the new tenant. */
             admin?: components["schemas"]["TenantInitialAdmin"];
         };
         TenantCreatedResponse: {
@@ -8223,7 +8356,9 @@ export interface components {
             data: components["schemas"]["Tenant"];
         };
         TenantUpdateRequest: {
+            /** @description New display name. */
             name?: string;
+            /** @description New URL-safe identifier (lower-case letters, digits, dashes); must be unique. */
             slug?: string;
         };
         ThemeOverridesResponse: {
@@ -8585,12 +8720,21 @@ export interface components {
             authMethod?: "local" | "idp" | "both";
         };
         UserCreateRequest: {
-            /** Format: email */
+            /**
+             * Format: email
+             * @description Sign-in email address of the new user.
+             */
             email: string;
-            /** Format: password */
+            /**
+             * Format: password
+             * @description Initial password; must satisfy the site password policy.
+             */
             password: string;
+            /** @description Role to grant in this tenant, by name or numeric id. Absent means the global `user` role; present but empty is refused. */
             role?: number | string;
+            /** @description Role to grant, by id (see GET /api/roles). Takes precedence over `role`. */
             role_id?: number;
+            /** @description Organizational unit to place the user in (see GET /api/ous). Omitted or null leaves them unassigned. */
             ou_id?: number | null;
         };
         UserGroup: {
@@ -8666,15 +8810,28 @@ export interface components {
             data: components["schemas"]["User"];
         };
         UserUpdateRequest: {
-            /** Format: email */
+            /**
+             * Format: email
+             * @description New sign-in email address.
+             */
             email?: string;
-            /** Format: password */
+            /**
+             * Format: password
+             * @description New password; must satisfy the site password policy.
+             */
             password?: string;
+            /** @description Replacement role in this tenant, by name or numeric id. */
             role?: number | string;
+            /** @description Replacement role, by id (see GET /api/roles). Takes precedence over `role`. */
             role_id?: number;
+            /** @description Organizational unit to move the user to. An explicit null removes them from their unit. */
             ou_id?: number | null;
-            /** @enum {string} */
+            /**
+             * @description `inactive` blocks sign-in for this person everywhere; `active` restores it.
+             * @enum {string}
+             */
             accountStatus?: "active" | "inactive";
+            /** @description Required to set `password` on an account that signs in through an identity provider; otherwise that is refused. */
             allowLocalPasswordOnIdpAccount?: boolean;
         };
         WebhookAckResponse: {

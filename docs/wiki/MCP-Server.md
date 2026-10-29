@@ -120,7 +120,7 @@ Every derived tool carries MCP `annotations`, so a client can run reads without 
 
 `buildInputSchema()` assembles a flat JSON Schema `object` by merging three sources in order:
 
-1. **Path parameters** — extracted from `{name}` or `{name:constraint}` segments of the route path. Always required. Type is `integer` when the constraint is `\d+` or `[0-9]+`; `string` otherwise.
+1. **Path parameters** — extracted from `{name}` or `{name:constraint}` segments of the route path. Always required. Type is `integer` when the constraint is `\d+` or `[0-9]+`; `string` otherwise. Each is described: by the route's own `in: path` entry in `schema['parameters']` when it has one, otherwise from the collection segment before it (`/api/users/{id}` gives "ID of the user.", `/api/meetings/{id}/agenda/{itemId}` gives "ID of the agenda item.").
 
 2. **Query parameters** — declared in `schema['parameters']` with `in: query`. Optional unless `required: true`. Each parameter's type and description come from its `schema` sub-key.
 
@@ -131,6 +131,8 @@ Every derived tool carries MCP `annotations`, so a client can run reads without 
    The resolved body schema's `properties` and `required` arrays are merged into the accumulator.
 
 The final result always has `"type": "object"`. A `properties` key is omitted when the tool has no declared parameters. A `required` array is omitted when no parameters are required.
+
+**Argument descriptions** (WHIT-711): an agent fills a tool in from its argument descriptions, so every argument of a core tool must have one. Describe a body field in its `CoreApiSchemas` component, with `'description' => '...'` inside a literal or `+ ['description' => '...']` after a helper such as `self::int()`. `ToolArgumentDescriptionsTest` fails on an undescribed argument. Its `KNOWN_UNDOCUMENTED` list holds the backlog that existed when the gate was added. It may only shrink: describing a listed field fails the test until the entry is removed.
 
 **Lint warning**: when a `POST`, `PUT`, or `PATCH` route has no resolvable request body, `ToolDeriver` emits a warning via `error_log()` (or the injected `$warn` closure). This surfaces missing schema coverage at derivation time rather than silently producing a parameter-free tool.
 
