@@ -1,4 +1,5 @@
 import type { WhityDocument } from '@whity-org/ui/editor/contract';
+import type { EditorServices } from '@whity-org/ui/editor/services';
 
 /** A document as the server keeps it: the contract's document plus its draft version. */
 export interface LoadedDocument {
@@ -22,4 +23,10 @@ export type SaveResult =
 export interface DocumentEditorAdapter {
   load(id: string): Promise<LoadedDocument>;
   save(id: string, patch: DraftPatch, version: number): Promise<SaveResult>;
+  /**
+   * Live data and storage for the document's rich blocks (M3): records,
+   * charts and uploads, each answered within the reader's permissions.
+   * Without it, those blocks say what is missing instead of loading.
+   */
+  loadServices?(id: string): Promise<EditorServices>;
 }

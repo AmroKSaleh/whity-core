@@ -180,7 +180,8 @@ function BlockToolbar({ editor, labels, container }: { editor: Editor; labels: E
           ref={fileInput}
           type="file"
           hidden
-          accept={type === "image" ? "image/png,image/jpeg,image/webp,image/gif,image/svg+xml" : undefined}
+          /* What the server stores (FormUploadPolicy): PNG and JPEG images, and PDF for files. */
+          accept={type === "image" ? "image/png,image/jpeg" : "application/pdf,image/png,image/jpeg"}
           onChange={(e) => {
             const file = e.target.files?.[0]
             e.target.value = ""

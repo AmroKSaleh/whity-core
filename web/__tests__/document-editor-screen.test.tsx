@@ -10,11 +10,13 @@ import { SAMPLE_DOCUMENT } from '@whity-org/ui/editor/sample';
 import type { WhityDocument } from '@whity-org/ui/editor/contract';
 
 let lastOnChange: ((doc: WhityDocument) => void) | null = null;
+let lastServices: unknown = 'not rendered';
 
 // The editor itself is covered by editor-*.test.ts; here only its onChange matters.
 jest.mock('@whity-org/ui/editor/doc-editor', () => ({
-  DocEditor: (props: { document: WhityDocument; onChange: (d: WhityDocument) => void; save?: { state: string } }) => {
+  DocEditor: (props: { document: WhityDocument; onChange: (d: WhityDocument) => void; save?: { state: string }; services?: unknown }) => {
     lastOnChange = props.onChange;
+    lastServices = props.services;
     return <div data-testid="editor" data-save={props.save?.state ?? ''}>{props.document.title}</div>;
   },
 }));
@@ -107,4 +109,25 @@ it('retries a failed save, later each time', async () => {
   expect(calls).toHaveLength(3);
   expect(calls[2]).toEqual({ title: 'Draft', version: 4 });
   expect(screen.getByTestId('editor').dataset.save).toBe('saved');
+});
+
+it('loads the services of the rich blocks once and hands them to the editor (M3)', async () => {
+  const { a } = adapter([]);
+  const services = { recordTypes: [{ key: 'document', label: 'Issued document' }] };
+  a.loadServices = jest.fn(async () => services);
+  await mount(a);
+
+  expect(a.loadServices).toHaveBeenCalledWith('7');
+  expect(lastServices).toBe(services);
+});
+
+it('still opens the document when its services fail to load', async () => {
+  const { a } = adapter([]);
+  a.loadServices = jest.fn(async () => {
+    throw new Error('offline');
+  });
+  await mount(a);
+
+  expect(lastServices).toEqual({});
+  expect(screen.getByTestId('editor').textContent).toBe(SAMPLE_DOCUMENT.title);
 });
