@@ -1,0 +1,17 @@
+<!-- @dsCard group="Forms" height=300 width=1000 subtitle="Search, empty and loading" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Combobox</title><style>#root{padding:16px 24px} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px 32px;align-items:start} .ar{font-family:var(--font-arabic)} .grid2{grid-template-columns:repeat(3,minmax(0,1fr))}</style></head>
+<body>
+<div id="root" class=""></div>
+<script>
+  var W = window.Whity, h = React.createElement; 
+  function cap(t) { return h('p', { className: 'cap' }, t); }
+  function col() { return h.apply(null, ['div', { style: { display: 'grid', gap: 12, alignContent: 'start' } }].concat([].slice.call(arguments))); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'grid2' },
+  col(cap('Open, filtered as you type'), h(W.Combobox, { label: 'Customer', options: [{"value": "C-0031", "label": "Example Clinic", "hint": "C-0031 · Amman"}, {"value": "C-0044", "label": "Example Café", "hint": "C-0044 · Amman"}, {"value": "C-0052", "label": "Example Hotel", "hint": "C-0052 · Dead Sea"}, {"value": "C-0060", "label": "Example Trading", "hint": "C-0060 · Zarqa"}, {"value": "C-0071", "label": "Example Office", "hint": "C-0071 · Amman"}, {"value": "C-0083", "label": "Example Clinic, Irbid branch", "hint": "C-0083 · Irbid"}], defaultOpen: true, defaultQuery: 'clinic', defaultValue: 'C-0031', footer: h('button', { type: 'button', className: 'wy-menu__item' }, h(W.Icon, { name: 'plus', size: 16 }), h('span', { className: 'wy-menu__label' }, 'New customer')) })),
+  col(cap('No match'), h(W.Combobox, { label: 'Customer', options: [{"value": "C-0031", "label": "Example Clinic", "hint": "C-0031 · Amman"}, {"value": "C-0044", "label": "Example Café", "hint": "C-0044 · Amman"}, {"value": "C-0052", "label": "Example Hotel", "hint": "C-0052 · Dead Sea"}, {"value": "C-0060", "label": "Example Trading", "hint": "C-0060 · Zarqa"}, {"value": "C-0071", "label": "Example Office", "hint": "C-0071 · Amman"}, {"value": "C-0083", "label": "Example Clinic, Irbid branch", "hint": "C-0083 · Irbid"}], defaultOpen: true, defaultQuery: 'Example Mall' })),
+  col(cap('Loading from the server'), h(W.Combobox, { label: 'Supplier', options: [], loading: true, defaultOpen: true, defaultQuery: 'mill', labels: { placeholder: 'Search suppliers' } }))));
+</script>
+</body>
+</html>

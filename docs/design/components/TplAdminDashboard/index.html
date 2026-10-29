@@ -1,0 +1,29 @@
+<!-- @dsCard group="Templates · Whity admin" height=882 width=1280 subtitle="The operator’s home on the system tenant" -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../bundle.css"><script src="../../preview-runtime/react.production.min.js"></script><script src="../../preview-runtime/react-dom.production.min.js"></script><script src="../bundle.js"></script><script>(function(){var t=(location.hash.match(/theme=(dark|light)/)||[])[1]||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);})();</script><style>body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font-sans);width:1280px;min-height:882px}</style><meta charset="utf-8"><title>Admin dashboard</title><style>html,body{height:100%} #root{min-height:100%} </style></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  function nav(active, counts) { counts = counts || {}; function it(icon, label) { return { icon: icon, label: label, active: label === active, count: counts[label] }; }
+    return [{ items: [it('dashboard', 'Dashboard'), it('inbox', 'Inbox'), it('approval', 'Approvals')] },
+      { label: 'People', items: [it('users', 'Users'), it('role', 'Roles'), it('delegation', 'Delegations')] },
+      { label: 'AI', items: [it('ai-principal', 'AI principals'), it('tool', 'MCP tools'), it('activity', 'Agent activity')] },
+      { label: 'Documents', items: [it('document', 'Library'), it('routing', 'Routing')] },
+      { label: 'Platform', items: [it('tenant', 'Tenants'), it('plugin', 'Plugins'), it('branding', 'Branding'), it('audit', 'Audit log')] }]; }
+  var topBar = h(React.Fragment, null, h(W.IconButton, { icon: 'notification', label: 'Notifications' }), h(W.IconButton, { icon: 'help', label: 'Help' }));
+  ReactDOM.createRoot(document.getElementById('root')).render(h(W.AppShell, { brand: h(W.Lockup, { height: 24 }), tenant: 'Platform (system)', user: 'Amro Saleh', role: 'Operator', nav: nav('Dashboard', { Inbox: 2 }), topActions: topBar },
+    h(W.PageHeader, { title: 'Dashboard', description: 'Everything running on this Whity deployment.', actions: h(W.Button, { icon: 'plus' }, 'Add tenant') }),
+    h('div', { className: 'wy-grid wy-grid--3' },
+      h(W.Card, { title: 'Tenants', action: h(W.Badge, { variant: 'outline' }, '3 on trial') }, h('div', { className: 'wy-stat__num' }, '24'), h('div', { className: 'wy-stat__delta' }, '+4 this month')),
+      h(W.Card, { title: 'Agent actions this week', action: h(W.Badge, { variant: 'success' }, '97% approved') }, h('div', { className: 'wy-stat__num' }, '1,284'), h('div', { className: 'wy-stat__delta' }, '38 waiting for a person')),
+      h(W.Card, { title: 'Plugins active', action: h(W.Badge, { variant: 'destructive' }, '1 failed') }, h('div', { className: 'wy-stat__num' }, '11'), h('div', { className: 'wy-stat__delta' }, 'HelloWorld failed to load at 09:12'))),
+    h(W.Alert, { variant: 'warning', title: 'Backups are overdue', action: h(W.Button, { variant: 'outline', size: 'sm' }, 'Open backups') }, 'The last successful backup was 3 days ago.'),
+    h('div', { className: 'wy-split' },
+      h(W.DataTable, { columns: [{ key: 'name', label: 'Tenant' }, { key: 'plan', label: 'Plan', render: function (r) { return h(W.Badge, { variant: 'outline' }, r.plan); } }, { key: 'users', label: 'Users', align: 'end' }, { key: 'agents', label: 'AI principals', align: 'end' }, { key: 'status', label: 'Status', render: function (r) { return h(W.Badge, { variant: r.status === 'Active' ? 'success' : 'warning' }, r.status); } }],
+        rows: [{ id: 1, name: '[Tenant one]', plan: 'Pro', users: 12, agents: 2, status: 'Active' }, { id: 2, name: '[Tenant two]', plan: 'Free', users: 3, agents: 0, status: 'Trial' }, { id: 3, name: '[Tenant three]', plan: 'Pro', users: 28, agents: 4, status: 'Active' }, { id: 4, name: '[Tenant four]', plan: 'Pro', users: 9, agents: 1, status: 'Past due' }], footer: h(W.Pagination, { from: 1, to: 4, total: 24 }) }),
+      h('div', { className: 'wy-grid' }, h(W.PluginCard, { icon: 'invoice', name: 'Front Office', by: 'by Whity', state: 'active', stateLabel: 'Active' }), h(W.PluginCard, { icon: 'plugin', name: 'HelloWorld', by: 'Example plugin', state: 'failed', stateLabel: 'Failed' })))));
+</script>
+</body>
+</html>

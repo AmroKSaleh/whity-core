@@ -1,0 +1,19 @@
+<!-- @dsCard group="Data" height=420 width=1000 subtitle="Checkbox column, bulk bar with the money total, sort, totals row" -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../bundle.css"><script src="../../preview-runtime/react.production.min.js"></script><script src="../../preview-runtime/react-dom.production.min.js"></script><script src="../bundle.js"></script><script>(function(){var t=(location.hash.match(/theme=(dark|light)/)||[])[1]||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);})();</script><style>body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font-sans);width:1000px;min-height:420px}</style><meta charset="utf-8"><title>Data table, selection</title><style>#root{padding:16px 24px} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px 32px;align-items:start} .ar{font-family:var(--font-arabic)} </style></head>
+<body>
+<div id="root" class=""></div>
+<script>
+  var W = window.Whity, h = React.createElement; 
+  function cap(t) { return h('p', { className: 'cap' }, t); }
+  function col() { return h.apply(null, ['div', { style: { display: 'grid', gap: 12, alignContent: 'start' } }].concat([].slice.call(arguments))); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h(W.DataTable, { label: 'Invoices', columns: [{ key: 'no', label: 'Invoice', sortable: true, render: function (r) { return h('span', { className: 'wy-mono' }, r.no); } }, { key: 'cust', label: 'Customer', sortable: true }, { key: 'date', label: 'Issued' },
+  { key: 'amt', label: 'Total', align: 'end', sortable: true, render: function (r) { return h(W.Money, { amount: r.amt, decimals: 3 }); } },
+  { key: 'st', label: 'Payment', render: function (r) { return h(W.Badge, { variant: r.st === 'Paid' ? 'success' : r.st === 'Overdue' ? 'destructive' : 'outline' }, r.st); } }], rows: [{"id": 1, "no": "INV-1042", "cust": "Example Clinic", "date": "27 Oct", "amt": 301.6, "st": "Paid"}, {"id": 2, "no": "INV-1041", "cust": "Example Trading", "date": "26 Oct", "amt": 1185.5, "st": "Unpaid"}, {"id": 3, "no": "INV-1036", "cust": "Example Café", "date": "12 Oct", "amt": 96, "st": "Overdue"}, {"id": 4, "no": "INV-1031", "cust": "Example Clinic", "date": "20 Oct", "amt": 96, "st": "Unpaid"}, {"id": 5, "no": "INV-1029", "cust": "Example Café", "date": "28 Sep", "amt": 148.5, "st": "Overdue"}], selectable: true, defaultSelected: [3, 5], defaultSort: { key: 'amt', dir: 'desc' }, rowMenu: true, onRowClick: function () {},
+  totals: { amt: h(W.Money, { amount: 1827.6, decimals: 3 }) }, totalsLabel: '5 invoices',
+  selectionSum: function (rows) { return 'JOD ' + rows.reduce(function (s, r) { return s + r.amt; }, 0).toLocaleString('en-US', { minimumFractionDigits: 3 }); },
+  bulkActions: function () { return h(React.Fragment, null, h(W.Button, { variant: 'outline', size: 'sm', icon: 'send' }, 'Send reminders'), h(W.Button, { variant: 'outline', size: 'sm', icon: 'download' }, 'Download')); } }));
+</script>
+</body>
+</html>

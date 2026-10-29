@@ -1,0 +1,12 @@
+<!-- @dsCard group="Surfaces" height=264 -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>EmptyState</title></head>
+<body>
+<div id="root" class="wy-stack"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h(W.EmptyState, { icon: 'approval', title: 'Nothing waiting for you', description: 'When an agent asks before it acts, the request appears here.', action: h(W.Button, { variant: 'outline', size: 'sm' }, 'Review agent scopes') }));
+</script>
+</body>
+</html>

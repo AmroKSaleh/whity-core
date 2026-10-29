@@ -1,0 +1,18 @@
+<!-- @dsCard group="Forms" height=320 subtitle="Radio list, row and cards; checkbox with a mixed state" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Radio and checkbox</title><style>#root{padding:16px 24px} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px 32px;align-items:start} .ar{font-family:var(--font-arabic)} </style></head>
+<body>
+<div id="root" class=""></div>
+<script>
+  var W = window.Whity, h = React.createElement; 
+  function cap(t) { return h('p', { className: 'cap' }, t); }
+  function col() { return h.apply(null, ['div', { style: { display: 'grid', gap: 12, alignContent: 'start' } }].concat([].slice.call(arguments))); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'grid2' },
+  col(h(W.RadioGroup, { label: 'Invoice type', defaultValue: 'account', options: [{ value: 'cash', label: 'Cash', hint: 'Paid now; the receipt is the invoice.' }, { value: 'account', label: 'On account', hint: 'Paid later, by the due date.' }, { value: 'export', label: 'Export', hint: 'Needs a customs number.', disabled: true }] }),
+      h(W.RadioGroup, { label: 'Send by', orientation: 'horizontal', defaultValue: 'email', options: [{ value: 'email', label: 'Email' }, { value: 'wa', label: 'WhatsApp' }, { value: 'print', label: 'Print' }] })),
+  col(h(W.RadioGroup, { label: 'Documents for this customer', variant: 'cards', defaultValue: 'ar', options: [{ value: 'en', label: 'English leads', hint: 'Arabic as small labels' }, { value: 'ar', label: 'Arabic leads', hint: 'English as small labels; the page mirrors' }] }),
+      h('div', { style: { display: 'grid', gap: 8 } }, h(W.Checkbox, { label: 'Select all 64 invoices', indeterminate: true }), h(W.Checkbox, { label: 'INV-1042', defaultChecked: true }), h(W.Checkbox, { label: 'INV-1041' }), h(W.Checkbox, { label: 'Archived invoices', disabled: true })))));
+</script>
+</body>
+</html>

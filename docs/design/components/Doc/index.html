@@ -1,0 +1,16 @@
+<!-- @dsCard group="Documents" height=720 subtitle="Amount in words, English and Arabic" -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../bundle.css"><script src="../../preview-runtime/react.production.min.js"></script><script src="../../preview-runtime/react-dom.production.min.js"></script><script src="../bundle.js"></script><script>(function(){var t=(location.hash.match(/theme=(dark|light)/)||[])[1]||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);})();</script><style>body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font-sans);width:960px;min-height:720px}</style><meta charset="utf-8"><title>Doc</title></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { style: { display: 'grid', gap: 8, padding: '12px 20px', background: 'var(--background)', minHeight: '100%' } },
+    h('p', { className: 'wy-caption', style: { margin: 0 } }, 'Whity.amountInWords(amount, lang) · JOD with fils · used under every total'),
+    h('table', { style: { width: '100%', borderCollapse: 'collapse', fontSize: 13 } },
+      h('thead', null, h('tr', null, ['JOD', 'English', 'Arabic'].map(function (t, i) { return h('th', { key: t, style: { textAlign: i === 2 ? 'right' : i === 0 ? 'right' : 'left', padding: '6px 8px', borderBottom: '1.5px solid var(--foreground)', fontWeight: 500 } }, t); }))),
+      h('tbody', null, [1, 2, 3, 11, 15, 100, 200, 301.6, 1000, 2000, 2500, 4860, 11000, 0.05, 98.6, 1185.5].map(function (a) { return h('tr', { key: a }, h('td', { style: { padding: '6px 8px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap' } }, a.toLocaleString('en-US', { minimumFractionDigits: 3 })), h('td', { style: { padding: '6px 8px', borderBottom: '1px solid var(--border)' } }, W.amountInWords(a, 'en')), h('td', { dir: 'rtl', lang: 'ar', style: { padding: '6px 8px', borderBottom: '1px solid var(--border)', fontFamily: 'var(--font-arabic)' } }, W.amountInWords(a, 'ar'))); })))));
+</script>
+</body>
+</html>
