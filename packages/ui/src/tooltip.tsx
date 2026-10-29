@@ -17,7 +17,8 @@ import { cn } from "./utils"
  */
 
 function TooltipProvider({
-  delayDuration = 300,
+  // Tooltips appear after 500 ms on hover and at once on keyboard focus (stage 8).
+  delayDuration = 500,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Provider>) {
   return (
@@ -57,13 +58,13 @@ function TooltipContent({
         data-slot="tooltip-content"
         sideOffset={sideOffset}
         className={cn(
-          "z-50 max-w-64 origin-(--radix-tooltip-content-transform-origin) rounded-md bg-popover px-2 py-1 text-[0.6875rem]/relaxed text-balance text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+          // The reference is docs/design/components/Tooltip (`.wy-tip__bubble`): ink on the page colour.
+          "z-50 inline-flex max-w-64 items-center gap-1.5 rounded-md bg-foreground px-2 py-[5px] text-xs leading-tight font-medium text-balance text-background data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0 motion-reduce:animate-none [&_kbd]:font-mono [&_kbd]:text-2xs [&_kbd]:opacity-75",
           className
         )}
         {...props}
       >
         {children}
-        <TooltipPrimitive.Arrow className="fill-popover" />
       </TooltipPrimitive.Content>
     </TooltipPrimitive.Portal>
   )

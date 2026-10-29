@@ -68,7 +68,7 @@ export function PageHeader({
             )}
             <div className="flex flex-col gap-1 min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-xl md:text-2xl font-bold tracking-tight text-foreground truncate">
+                <h1 className="text-xl md:text-2xl font-semibold tracking-tight text-foreground truncate">
                   {title}
                 </h1>
                 {badge && <div className="shrink-0">{badge}</div>}
@@ -102,7 +102,7 @@ export function PageHeader({
           )}
           <div className="flex flex-col gap-1 min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-xl md:text-2xl font-bold tracking-tight text-foreground truncate">
+              <h1 className="text-xl md:text-2xl font-semibold tracking-tight text-foreground truncate">
                 {title}
               </h1>
               {badge && <div className="shrink-0">{badge}</div>}

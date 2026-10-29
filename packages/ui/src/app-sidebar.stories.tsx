@@ -130,12 +130,12 @@ export const FullFeaturedWithProfileIcon: Story = {
         onCollapsedChange={setCollapsed}
         header={
           <div className="flex items-center gap-2.5">
-            <div className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-xs shadow-2xs">
+            <div className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground font-semibold text-xs shadow-2xs">
               W
             </div>
             {!collapsed && (
               <div className="flex flex-col">
-                <span className="text-sm font-bold tracking-tight text-sidebar-foreground">Whity Engine</span>
+                <span className="text-sm font-semibold tracking-tight text-sidebar-foreground">Whity Engine</span>
                 <span className="text-[0.625rem] text-sidebar-foreground/70 font-mono">v2.4.0</span>
               </div>
             )}
@@ -164,14 +164,14 @@ export const FullFeaturedWithProfileIcon: Story = {
         footer={
           collapsed ? (
             <div className="flex justify-center" title="Amro K. Saleh (amro@example.com)">
-              <div className="flex size-8 items-center justify-center rounded-full bg-primary/20 text-primary font-bold text-xs ring-2 ring-primary/30">
+              <div className="flex size-8 items-center justify-center rounded-full bg-primary/20 text-primary font-semibold text-xs ring-2 ring-primary/30">
                 AS
               </div>
             </div>
           ) : (
             <div className="flex items-center justify-between gap-2.5 w-full">
               <div className="flex items-center gap-2.5 min-w-0">
-                <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/20 text-primary font-bold text-xs ring-2 ring-primary/30">
+                <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/20 text-primary font-semibold text-xs ring-2 ring-primary/30">
                   AS
                 </div>
                 <div className="flex flex-col min-w-0 text-start">

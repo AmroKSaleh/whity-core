@@ -173,7 +173,7 @@ function StorageSettingsForm({ addToast }: { addToast: AddToast }) {
     return (
       <Card className="border border-border bg-card shadow-sm">
         <CardHeader>
-          <CardTitle className="text-lg font-bold font-heading">
+          <CardTitle className="text-lg font-semibold font-heading">
             <h2>{t('settings.storage.form.title', 'Storage')}</h2>
           </CardTitle>
         </CardHeader>
@@ -195,7 +195,7 @@ function StorageSettingsForm({ addToast }: { addToast: AddToast }) {
           className="border border-border bg-card shadow-sm"
         >
           <CardHeader>
-            <CardTitle className="text-lg font-bold font-heading">
+            <CardTitle className="text-lg font-semibold font-heading">
               <h2>{section.title}</h2>
             </CardTitle>
             {section.description && (

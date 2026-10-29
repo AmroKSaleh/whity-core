@@ -15,7 +15,7 @@ export function AdminHeader({ title, description, action, breadcrumb }: AdminHea
       )}
       <div className="flex items-center justify-between">
         <div className="flex-1">
-          <h1 className="text-3xl font-bold text-foreground">
+          <h1 className="text-3xl font-semibold text-foreground">
             {title}
           </h1>
           {description && (

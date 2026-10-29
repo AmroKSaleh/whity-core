@@ -172,7 +172,7 @@ export default function TwoFactorRecoveryApprovalsPage() {
 
       <Card className="border border-border bg-card shadow-sm">
         <CardHeader>
-          <CardTitle className="text-lg font-bold font-heading">
+          <CardTitle className="text-lg font-semibold font-heading">
             <h2>{t('twoFactorRecovery.list.title', 'Awaiting approval')}</h2>
           </CardTitle>
           <CardDescription className="text-sm">

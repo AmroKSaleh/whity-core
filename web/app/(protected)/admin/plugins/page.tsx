@@ -469,25 +469,25 @@ export default function PluginsPage() {
         <Card className="border border-border/80 bg-card/50 backdrop-blur-sm shadow-sm hover:shadow-md transition-shadow">
           <CardHeader className="pb-2">
             <CardDescription className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">{t('plugins.stat.total', 'Total Plugins')}</CardDescription>
-            <CardTitle className="text-3xl font-bold font-heading">{totalInstalled}</CardTitle>
+            <CardTitle className="text-3xl font-semibold font-heading">{totalInstalled}</CardTitle>
           </CardHeader>
         </Card>
         <Card className="border border-border/80 bg-card/50 backdrop-blur-sm shadow-sm hover:shadow-md transition-shadow">
           <CardHeader className="pb-2">
             <CardDescription className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">{t('plugins.stat.active', 'Active')}</CardDescription>
-            <CardTitle className="text-3xl font-bold font-heading text-success">{activeCount}</CardTitle>
+            <CardTitle className="text-3xl font-semibold font-heading text-success">{activeCount}</CardTitle>
           </CardHeader>
         </Card>
         <Card className="border border-border/80 bg-card/50 backdrop-blur-sm shadow-sm hover:shadow-md transition-shadow">
           <CardHeader className="pb-2">
             <CardDescription className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">{t('plugins.stat.disabled', 'Disabled')}</CardDescription>
-            <CardTitle className="text-3xl font-bold font-heading text-warning">{disabledCount}</CardTitle>
+            <CardTitle className="text-3xl font-semibold font-heading text-warning">{disabledCount}</CardTitle>
           </CardHeader>
         </Card>
         <Card className="border border-border/80 bg-card/50 backdrop-blur-sm shadow-sm hover:shadow-md transition-shadow">
           <CardHeader className="pb-2">
             <CardDescription className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/80">{t('plugins.stat.failed', 'Failed')}</CardDescription>
-            <CardTitle className="text-3xl font-bold font-heading text-error">{failedCount}</CardTitle>
+            <CardTitle className="text-3xl font-semibold font-heading text-error">{failedCount}</CardTitle>
           </CardHeader>
         </Card>
       </div>
@@ -573,7 +573,7 @@ export default function PluginsPage() {
                     </Badge>
                   </div>
                 </div>
-                <CardTitle className="text-lg font-bold font-heading mt-4">{plugin.name}</CardTitle>
+                <CardTitle className="text-lg font-semibold font-heading mt-4">{plugin.name}</CardTitle>
                 <CardDescription className="text-xs font-mono text-muted-foreground/80 truncate">
                   {plugin.id}
                 </CardDescription>
@@ -668,7 +668,7 @@ export default function PluginsPage() {
       <Dialog open={uploadOpen} onOpenChange={(open) => (open ? setUploadOpen(true) : closeUploadDialog())}>
         <DialogContent className="sm:max-w-md text-xs">
           <DialogHeader>
-            <DialogTitle className="text-base font-bold font-heading flex items-center gap-2">
+            <DialogTitle className="text-base font-semibold font-heading flex items-center gap-2">
               <IconUpload className="w-5 h-5" /> {t('plugins.upload.title', 'Upload Plugin')}
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
@@ -745,7 +745,7 @@ export default function PluginsPage() {
                   <IconPlug className="w-6 h-6" />
                 </div>
                 <div>
-                  <DialogTitle className="text-base font-bold font-heading">{detailPlugin.name}</DialogTitle>
+                  <DialogTitle className="text-base font-semibold font-heading">{detailPlugin.name}</DialogTitle>
                   <DialogDescription className="text-xs font-mono font-semibold">
                     {t('plugins.detail.id', 'ID: {id}', { id: detailPlugin.id })}
                   </DialogDescription>
@@ -795,7 +795,7 @@ export default function PluginsPage() {
               {/* If plugin failed, render the details stack */}
               {detailPlugin.status === 'failed' && (
                 <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-xl space-y-2 text-destructive">
-                  <div className="flex items-center gap-1.5 font-bold">
+                  <div className="flex items-center gap-1.5 font-semibold">
                     <IconAlertCircle size={16} />{' '}
                     {t('plugins.detail.failedTitle', 'Failed State Details')}
                   </div>
@@ -932,7 +932,7 @@ export default function PluginsPage() {
         <AlertDialog open={!!uninstallTarget} onOpenChange={() => setUninstallTarget(null)}>
           <AlertDialogContent className="sm:max-w-md text-xs">
             <AlertDialogHeader>
-              <AlertDialogTitle className="text-sm font-bold flex items-center gap-1.5 text-destructive font-heading">
+              <AlertDialogTitle className="text-sm font-semibold flex items-center gap-1.5 text-destructive font-heading">
                 <IconAlertCircle className="w-5 h-5" />{' '}
                 {t('plugins.uninstall.title', 'Confirm Plugin Uninstallation')}
               </AlertDialogTitle>

@@ -383,7 +383,7 @@ export function BrandingSettings({ tenantOverridable = true, variant = 'tenant' 
       {variant === 'tenant' && (
       <Card className="border border-border bg-card shadow-sm">
         <CardHeader>
-          <CardTitle className="text-lg font-bold font-heading">
+          <CardTitle className="text-lg font-semibold font-heading">
             <h2>{t('branding.tenant.title', 'Branding')}</h2>
           </CardTitle>
           <CardDescription className="text-sm">
@@ -448,7 +448,7 @@ export function BrandingSettings({ tenantOverridable = true, variant = 'tenant' 
                 <IconWorld className="w-5 h-5" />
               </div>
               <div>
-                <CardTitle className="text-lg font-bold font-heading">
+                <CardTitle className="text-lg font-semibold font-heading">
                   <h2>{t('branding.global.title', 'Global branding defaults')}</h2>
                 </CardTitle>
                 <CardDescription className="text-sm">
