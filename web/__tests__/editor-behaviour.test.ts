@@ -166,3 +166,47 @@ describe('checklist', () => {
     editor.destroy();
   });
 });
+
+describe('tables (E.8)', () => {
+  const table = (): Block[] => [
+    {
+      id: 't',
+      type: 'table',
+      headerRow: true,
+      columns: [{ align: 'start' }, { align: 'end' }],
+      rows: [
+        [[text('Item')], [text('Amount')]],
+        [[text('Bread')], [text('4.50')]],
+      ],
+    },
+  ];
+  const cellText = (editor: Editor) => editor.state.selection.$from.parent.textContent;
+
+  it('Tab and Shift-Tab move between cells, across rows', () => {
+    const editor = make(table());
+    editor.commands.setTextSelection(3);
+    expect(cellText(editor)).toBe('Item');
+    key(editor, 'Tab');
+    expect(cellText(editor)).toBe('Amount');
+    key(editor, 'Tab');
+    expect(cellText(editor)).toBe('Bread');
+    key(editor, 'Tab', { shift: true });
+    expect(cellText(editor)).toBe('Amount');
+    editor.destroy();
+  });
+
+  it('Tab on the last cell adds an empty row and keeps the content', () => {
+    const editor = make(table());
+    editor.commands.setTextSelection(3);
+    for (let i = 0; i < 4; i++) key(editor, 'Tab');
+    const [t] = blocks(editor);
+    expect(t).toMatchObject({ type: 'table', columns: [{ align: 'start' }, { align: 'end' }] });
+    expect((t as Extract<Block, { type: 'table' }>).rows).toEqual([
+      [[text('Item')], [text('Amount')]],
+      [[text('Bread')], [text('4.50')]],
+      [[], []],
+    ]);
+    expect(editor.state.selection.$from.parent.type.name).toBe('tableCell');
+    editor.destroy();
+  });
+});

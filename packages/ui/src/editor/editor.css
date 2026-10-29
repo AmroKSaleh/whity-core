@@ -186,3 +186,100 @@
 
 /* Viewing mode: no caret, no placeholder. */
 .wy-doc[contenteditable="false"] p.is-empty::before { content: none; }
+
+/* ---------------------------------------------------- Rich blocks (M3) */
+
+.wy-doc .wy-rich { position: relative; margin-block: 3px; }
+.wy-doc .wy-rich.is-selected,
+.wy-doc .ProseMirror-selectednode > .wy-rich { outline: 2px solid var(--ring); outline-offset: 4px; border-radius: 4px; }
+
+/* Callout (E.14): Note on the muted grey, Important on the warning tint. */
+.wy-doc [data-type="callout"] {
+  display: flex;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-control-lg);
+  background: var(--muted);
+}
+.wy-doc [data-type="callout"][data-kind="important"] { background: var(--warning-tint); }
+.wy-doc .wy-callout-icon { flex: none; margin-top: 3px; color: var(--muted-foreground); }
+.wy-doc [data-kind="important"] .wy-callout-icon { color: var(--warning-text); }
+.wy-doc .wy-callout-text { flex: 1; min-width: 0; unicode-bidi: plaintext; }
+
+/* Toggle: the summary line, and the blocks it hides. */
+.wy-doc [data-type="toggle"] { display: flex; gap: 4px; align-items: flex-start; }
+.wy-doc .wy-toggle-button {
+  flex: none; margin-top: 2px; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px;
+  display: grid; place-items: center; background: none; color: var(--muted-foreground); cursor: pointer;
+  transition: rotate var(--dur-fast) var(--ease-out);
+}
+.wy-doc .wy-toggle-button:hover { background: var(--muted); }
+.wy-doc .wy-toggle-button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.wy-doc [data-type="toggle"][data-open="true"] > .wy-toggle-button { rotate: 90deg; }
+[dir="rtl"] .wy-doc [data-type="toggle"] > .wy-toggle-button { scale: -1 1; }
+[dir="rtl"] .wy-doc [data-type="toggle"][data-open="true"] > .wy-toggle-button { rotate: -90deg; }
+.wy-doc .wy-toggle-content { flex: 1; min-width: 0; }
+.wy-doc .wy-toggle-content > [data-node-view-content-react] > * + *,
+.wy-doc .wy-toggle-content > * + * { padding-inline-start: 0; }
+.wy-doc [data-type="toggle-summary"] { unicode-bidi: plaintext; padding-block: 0; }
+.wy-doc [data-type="toggle"][data-open="false"] [data-type="toggle-summary"] ~ * { display: none; }
+
+/* Columns (2). */
+.wy-doc [data-type="columns"] { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; }
+.wy-doc [data-type="column"] { min-width: 0; min-height: 1.5em; }
+@media (max-width: 640px) { .wy-doc [data-type="columns"] { grid-template-columns: 1fr; gap: 12px; } }
+
+/* Table (E.15): a document table, hairlines, numbers end-aligned. */
+.wy-doc table[data-type="table"] { width: 100%; border-collapse: collapse; font-size: 0.875rem; margin-block: 3px; }
+.wy-doc table[data-type="table"] td { border: 1px solid var(--border); padding: 6px 10px; vertical-align: top; text-align: start; unicode-bidi: plaintext; }
+.wy-doc table[data-type="table"] td[data-align="end"] { text-align: end; font-variant-numeric: tabular-nums; }
+.wy-doc table[data-type="table"][data-header-row="true"] tr:first-child td { background: var(--muted); font-weight: 500; }
+.wy-doc table[data-type="table"] .selectedCell { background: var(--primary-tint); }
+
+/* Page break: a dashed line that prints as a new page. */
+.wy-doc .wy-pagebreak { display: flex; align-items: center; gap: 10px; color: var(--muted-foreground); font-size: 0.75rem; margin: 10px 0; }
+.wy-doc .wy-pagebreak::before, .wy-doc .wy-pagebreak::after { content: ""; flex: 1; border-top: 1px dashed var(--input); }
+
+/* Image: half, wide or full width, with a caption. */
+.wy-doc .wy-figure { margin: 0; display: grid; gap: 6px; }
+.wy-doc .wy-figure img { display: block; width: 100%; border-radius: var(--radius-control-lg); border: 1px solid var(--border); }
+.wy-doc [data-type="image"][data-width="half"] .wy-figure { width: 50%; }
+.wy-doc [data-type="image"][data-width="wide"] .wy-figure { margin-inline: -48px; }
+.wy-doc .wy-figure figcaption { font-size: 0.8125rem; color: var(--muted-foreground); text-align: center; }
+
+/* File, record and chart sit on a bordered card. */
+.wy-doc .wy-file { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-control-lg); font-size: 0.875rem; }
+.wy-doc .wy-file-meta { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.wy-doc .wy-file-download { display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-control-sm); color: var(--foreground); }
+.wy-doc .wy-file-download:hover { background: var(--muted); }
+.wy-doc .wy-tile { width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center; background: var(--muted); color: var(--muted-foreground); flex: none; }
+.wy-doc .wy-tile.is-tint { width: 36px; height: 36px; border-radius: 9px; background: var(--primary-tint); color: var(--primary-tint-foreground); }
+.wy-doc .wy-embed { display: grid; gap: 10px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--card); font-size: 0.875rem; }
+.wy-doc .wy-embed-head { display: flex; align-items: center; gap: 8px; font-size: 0.75rem; color: var(--muted-foreground); }
+.wy-doc .wy-embed-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.wy-doc .wy-embed-main { display: grid; gap: 1px; flex: 1; min-width: 0; }
+
+/* Signature and stamp (stage 6). */
+.wy-doc .wy-sign { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 32px; align-items: end; padding-top: 28px; font-size: 0.8125rem; color: var(--muted-foreground); }
+.wy-doc .wy-sign-line { border-top: 1px solid var(--foreground); padding-top: 6px; display: grid; gap: 2px; }
+.wy-doc .wy-sign-line b { color: var(--foreground); font-weight: 500; }
+.wy-doc .wy-sign-stamp { width: 84px; height: 84px; border: 1.5px dashed var(--input); border-radius: 50%; display: grid; place-items: center; text-align: center; font-size: 0.6875rem; justify-self: end; }
+
+/* Barcode, QR code and maths (E.40–E.42). Codes stay ink on white in both themes so they scan (mark-sheet is white in both). */
+.wy-doc .wy-code { margin: 0; display: grid; gap: 6px; justify-items: start; }
+.wy-doc .wy-code-art { background: var(--mark-sheet); padding: 6px; border-radius: 4px; }
+.wy-doc .wy-code.is-bar .wy-code-art { width: 220px; }
+.wy-doc .wy-code.is-qr .wy-code-art { width: 120px; }
+.wy-doc .wy-code figcaption { font-size: 0.75rem; color: var(--muted-foreground); }
+.wy-doc .wy-math-block { overflow-x: auto; padding-block: 4px; }
+.wy-doc .wy-math { font-family: var(--font-mono); font-size: 0.875em; }
+
+/* Empty and unavailable states. */
+.wy-doc .wy-placeholder { padding: 10px 12px; border: 1px dashed var(--input); border-radius: var(--radius-control-lg); color: var(--muted-foreground); font-size: 0.875rem; }
+.wy-doc .wy-placeholder.is-field { border-style: dotted; border-color: var(--primary); color: var(--primary-tint-foreground); background: var(--primary-tint); }
+.wy-doc .wy-skeleton { height: 40px; border-radius: var(--radius-control); background: var(--muted); }
+.wy-doc .wy-skeleton.is-tall { height: 170px; }
+@media (prefers-reduced-motion: no-preference) {
+  .wy-doc .wy-skeleton { animation: wy-pulse 1.2s ease-in-out infinite; }
+}
+@keyframes wy-pulse { 50% { opacity: 0.55; } }
