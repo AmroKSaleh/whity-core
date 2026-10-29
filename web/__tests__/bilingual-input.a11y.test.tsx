@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import axe from 'axe-core';
-import { BilingualInput, type BilingualValue } from '@amroksaleh/ui/bilingual-input';
+import { BilingualInput, type BilingualValue } from '@whity-org/ui/bilingual-input';
 
 /**
  * Accessibility + behavior regression for BilingualInput (WC-532 #1). Verifies

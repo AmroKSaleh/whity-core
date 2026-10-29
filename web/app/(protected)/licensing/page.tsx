@@ -8,8 +8,8 @@ import { useCapabilities } from '@/hooks/useCapabilities';
 import { LICENSING_MANAGE, LICENSING_ISSUE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
-import { Badge } from '@amroksaleh/ui/badge';
-import { Button } from '@amroksaleh/ui/button';
+import { Badge } from '@whity-org/ui/badge';
+import { Button } from '@whity-org/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -18,8 +18,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { useDateDisplay } from '@amroksaleh/features/datetime';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useDateDisplay } from '@whity-org/features/datetime';
+import { useTranslation } from '@whity-org/features/i18n';
 
 /**
  * LICENSED DEVICES, AND THE CODES THAT ACTIVATE THEM.

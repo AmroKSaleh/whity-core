@@ -1,4 +1,4 @@
-# @amroksaleh/ui
+# @whity-org/ui
 
 Shared UI primitives for Whity products, built on Radix + Tailwind v4.
 
@@ -21,10 +21,10 @@ Everything else has no directive at all (nothing RSC-sensitive to mark).
 Two ways to consume this package, matching how it's used inside whity-core
 itself:
 
-1. **npm package** — `npm install @amroksaleh/ui` (published to GitHub
-   Packages under the `@amroksaleh` scope) for the components' compiled
-   exports and the theme (`@amroksaleh/ui/globals.css`, itself built on top of
-   `@amroksaleh/tokens` — see below).
+1. **npm package** — `npm install @whity-org/ui` (published to GitHub
+   Packages under the `@whity-org` scope) for the components' compiled
+   exports and the theme (`@whity-org/ui/globals.css`, itself built on top of
+   `@whity-org/tokens` — see below).
 2. **shadcn registry** — for a locally-customizable, re-pullable copy of a
    component's actual source (the same mechanism whity-core's own `web/`
    package uses): add a `registries` entry to your own project's
@@ -42,18 +42,18 @@ itself:
 ### Design tokens without the component library
 
 If a client only needs the design tokens (colors, typography, spacing,
-radius) — not the React components — depend on `@amroksaleh/tokens` directly
+radius) — not the React components — depend on `@whity-org/tokens` directly
 instead:
 
 ```css
 @import "tailwindcss";
-@import "@amroksaleh/tokens/css";       /* colors + typography theme */
-@import "@amroksaleh/tokens/base.css";  /* shadcn/Tailwind base-reset layer */
-@import "@amroksaleh/tokens/fonts.css"; /* self-hosted Noto Sans, Noto Sans Arabic, Geist Mono */
+@import "@whity-org/tokens/css";       /* colors + typography theme */
+@import "@whity-org/tokens/base.css";  /* shadcn/Tailwind base-reset layer */
+@import "@whity-org/tokens/fonts.css"; /* self-hosted Noto Sans, Noto Sans Arabic, Geist Mono */
 ```
 
 ```ts
-import tokens from "@amroksaleh/tokens"; // tokens.json
+import tokens from "@whity-org/tokens"; // tokens.json
 ```
 
 `./css` gives you the color/typography custom properties and the Tailwind v4
@@ -76,7 +76,7 @@ font assets in `pubspec.yaml` (family names must match
 `typography.fontFamilyDart` in `src/design/tokens/base.json`: `Noto Sans`,
 `Noto Sans Arabic`, `Geist Mono`).
 
-All three (`@amroksaleh/ui`, `@amroksaleh/tokens`, `flutter/whity_tokens`) are
+All three (`@whity-org/ui`, `@whity-org/tokens`, `flutter/whity_tokens`) are
 generated from the same single source of truth,
 `src/design/tokens/base.json` — run `npm run tokens:generate` (from `web/`)
 after changing it to regenerate every target.
@@ -88,7 +88,7 @@ built in one client looks and behaves identically in another:
 
 - **Strategy**: apply/remove a `.dark` class on the root element (`<html>` on
   web) — the exact selector `@custom-variant dark (&:is(.dark *));` (in
-  `@amroksaleh/tokens/css`) and every `.dark { ... }` token block target. No
+  `@whity-org/tokens/css`) and every `.dark { ... }` token block target. No
   class means light mode.
 - **Persistence key**: `whity.theme`, storing the raw preference —
   `'light' | 'dark' | 'system'`, not the resolved value.
@@ -97,7 +97,7 @@ built in one client looks and behaves identically in another:
 - **FOUC**: apply the class before first paint. On web this is a small
   blocking inline `<script>` in `<head>`, before any stylesheet.
 
-`src/theme-mode.ts` (exported as `@amroksaleh/ui/theme-mode`, also available
+`src/theme-mode.ts` (exported as `@whity-org/ui/theme-mode`, also available
 via the shadcn registry as `@whity/theme-mode`) is the framework-agnostic
 (no React) half of this contract — the storage key constant, the
 `resolveIsDark()` resolution rule, and `buildThemeInitScript()` for the

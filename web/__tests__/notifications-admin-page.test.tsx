@@ -40,7 +40,7 @@ jest.mock('@/hooks/useCapabilities', () => ({
   }),
 }));
 
-jest.mock('@amroksaleh/features/i18n', () => ({
+jest.mock('@whity-org/features/i18n', () => ({
   // The English fallback, so assertions read as what an operator actually sees.
   useTranslation: () => (_key: string, fallback: string) => fallback,
 }));

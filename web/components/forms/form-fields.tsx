@@ -17,9 +17,9 @@
  */
 
 import { useState } from 'react';
-import { Input } from '@amroksaleh/ui/input';
-import { Textarea } from '@amroksaleh/ui/textarea';
-import { Checkbox } from '@amroksaleh/ui/checkbox';
+import { Input } from '@whity-org/ui/input';
+import { Textarea } from '@whity-org/ui/textarea';
+import { Checkbox } from '@whity-org/ui/checkbox';
 
 export interface LocalizedText {
   ar?: string;

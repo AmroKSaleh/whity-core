@@ -8,8 +8,8 @@ import {
   type DocumentDesignerAdapter,
   type SavedTemplate,
   type Transport,
-} from "@amroksaleh/features/document-designer"
-import type { DocTemplate } from "@amroksaleh/ui/documents/types"
+} from "@whity-org/features/document-designer"
+import type { DocTemplate } from "@whity-org/ui/documents/types"
 
 import { remoteRequest } from "./remote-client"
 

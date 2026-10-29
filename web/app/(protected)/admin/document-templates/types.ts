@@ -10,7 +10,7 @@
  * WHY THESE ARE NOT `SavedTemplate` / `DocBlock`
  * ---------------------------------------------
  * The designer already has row types for both tables
- * (`@amroksaleh/features/document-designer`), and reusing them here would be
+ * (`@whity-org/features/document-designer`), and reusing them here would be
  * wrong twice over:
  *
  *  - They DROP the governance columns. `SavedTemplate` is `{id, name, updatedAt,

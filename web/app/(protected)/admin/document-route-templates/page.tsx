@@ -27,7 +27,7 @@ import { useCapabilities } from '@/hooks/useCapabilities';
 import { ROUTE_TEMPLATES_WRITE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
-import { Button } from '@amroksaleh/ui/button';
+import { Button } from '@whity-org/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   Dialog,
@@ -38,7 +38,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { IconPlus } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 import type { RouteTemplateSummary } from './types';
 
 export default function RouteTemplatesPage() {

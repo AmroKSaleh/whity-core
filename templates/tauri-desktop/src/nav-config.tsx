@@ -7,11 +7,11 @@ import {
   IconPuzzle,
   IconShieldLock,
 } from "@tabler/icons-react"
-import type { NavConfig } from "@amroksaleh/features/nav"
+import type { NavConfig } from "@whity-org/features/nav"
 
 /**
  * This app's nav config — plain data, per the nav contract
- * (@amroksaleh/features/nav). Add a route by adding an item here; no other
+ * (@whity-org/features/nav). Add a route by adding an item here; no other
  * wiring needed besides the corresponding branch in App.tsx's view switch.
  *
  * Icons carry an explicit `size-5` (20px, matching the website's sidebar —

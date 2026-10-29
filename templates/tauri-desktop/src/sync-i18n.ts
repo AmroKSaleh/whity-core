@@ -1,4 +1,4 @@
-import type { NavTranslate } from "@amroksaleh/features/nav"
+import type { NavTranslate } from "@whity-org/features/nav"
 
 /**
  * English strings for the shared feature UI that still resolves i18n keys
@@ -85,7 +85,7 @@ const STRINGS: Record<string, string> = {
 export const appT: NavTranslate = (key) => STRINGS[key] ?? key
 
 /**
- * Translator for `@amroksaleh/features/roles`'s `RolesScreen`, whose `t` prop
+ * Translator for `@whity-org/features/roles`'s `RolesScreen`, whose `t` prop
  * is richer than `NavTranslate`: it passes an English `fallback` and `{token}`
  * `vars` alongside each key. The screen's own default (`identityTranslate`)
  * renders the raw KEY, so a real translator is required for a usable UI. This

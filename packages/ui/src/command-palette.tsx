@@ -20,7 +20,7 @@ import { cn } from "./utils"
  * feeds it something else entirely.
  *
  * COPY ARRIVES AS PROPS, with English defaults, for the reason every component
- * in this package does: `@amroksaleh/ui` is published standalone and may not
+ * in this package does: `@whity-org/ui` is published standalone and may not
  * depend on the i18n feature (#758). Translating is the consumer's job.
  */
 

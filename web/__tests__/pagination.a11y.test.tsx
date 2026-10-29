@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import axe from 'axe-core';
-import { Pagination } from '@amroksaleh/ui/pagination';
+import { Pagination } from '@whity-org/ui/pagination';
 
 /**
  * Accessibility regression for Pagination (WC UI-library flow #539). Models

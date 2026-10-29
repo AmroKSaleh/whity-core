@@ -23,15 +23,15 @@
  *     did not.
  *
  * Driven through the data-source-agnostic `UserRecordScreen`
- * (@amroksaleh/features/users) with injected props, like the roles tests.
+ * (@whity-org/features/users) with injected props, like the roles tests.
  */
 
 import React from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { UserRecordScreen } from '@amroksaleh/features/users';
-import type { UserMembership, UserRecord, UsersAdapter } from '@amroksaleh/features/users';
-import type { Transport } from '@amroksaleh/features/roles';
+import { UserRecordScreen } from '@whity-org/features/users';
+import type { UserMembership, UserRecord, UsersAdapter } from '@whity-org/features/users';
+import type { Transport } from '@whity-org/features/roles';
 import { createUsersAdapter } from '@/lib/users-adapter';
 
 /** English-fallback translator: returns the caller-supplied source string. */

@@ -1,16 +1,16 @@
 import * as React from "react"
 
-import { Alert, AlertDescription } from "@amroksaleh/ui/alert"
+import { Alert, AlertDescription } from "@whity-org/ui/alert"
 import {
   DocumentDesignerScreen,
   type DocumentsNotifyType,
-} from "@amroksaleh/features/document-designer"
+} from "@whity-org/features/document-designer"
 
 import { documentsAdapter } from "./documents-composite-adapter"
 
 /**
  * Desktop mount of the shared Document & Label Designer
- * (@amroksaleh/features/document-designer) — the same React that renders
+ * (@whity-org/features/document-designer) — the same React that renders
  * /admin/documents on web, injected with the desktop adapter (the enrolled
  * remote instance over `remote_request`) instead of web's cookie-authenticated
  * one. Same Path-B shape as `roles-page.tsx`: one screen, two transports.

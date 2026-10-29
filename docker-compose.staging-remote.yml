@@ -73,7 +73,7 @@ services:
   frankenphp:
     # The published release image (code baked in). Override the tag per deploy
     # with WHITY_IMAGE; defaults to :latest so a bare `up` pulls the newest release.
-    image: ${WHITY_IMAGE:-ghcr.io/amroksaleh/whity-core:latest}
+    image: ${WHITY_IMAGE:-ghcr.io/whity-org/whity-core:latest}
     container_name: whity_staging_frankenphp
     restart: unless-stopped
     pull_policy: always
@@ -134,7 +134,7 @@ services:
   # COMPOSE_PROFILES=web (in the env file or the shell), or pass `--profile web`.
   # Without it, an ordinary `up` is the API alone: no login page.
   web:
-    image: ${WHITY_WEB_IMAGE:-ghcr.io/amroksaleh/whity-core/web:latest}
+    image: ${WHITY_WEB_IMAGE:-ghcr.io/whity-org/whity-core/web:latest}
     container_name: whity_staging_web
     restart: unless-stopped
     pull_policy: always
@@ -189,7 +189,7 @@ services:
   # container a mem_limit you chose and read
   # docs/wiki/Document-Render-Service.md before raising any limit.
   render:
-    image: ${WHITY_RENDER_IMAGE:-ghcr.io/amroksaleh/whity-core/render:latest}
+    image: ${WHITY_RENDER_IMAGE:-ghcr.io/whity-org/whity-core/render:latest}
     container_name: whity_staging_render
     restart: unless-stopped
     pull_policy: always

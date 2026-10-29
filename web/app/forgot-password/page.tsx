@@ -5,11 +5,11 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useToast } from '@/lib/toast-context';
 import { useBranding } from '@/lib/branding-context';
-import { Button } from '@amroksaleh/ui/button';
+import { Button } from '@whity-org/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
-import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity-org/ui/card';
+import { Alert, AlertDescription } from '@whity-org/ui/alert';
+import { useTranslation } from '@whity-org/features/i18n';
 
 /**
  * Self-service "forgot password" entry point (WC-password-reset-2fa-recovery).

@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, waitFor, act } from '@testing-library/react';
-import { LanguageProvider, useCurrentLanguage } from '@amroksaleh/features/i18n';
+import { LanguageProvider, useCurrentLanguage } from '@whity-org/features/i18n';
 import { DirectionProvider, useDirection } from '@/lib/direction-context';
 
 /**

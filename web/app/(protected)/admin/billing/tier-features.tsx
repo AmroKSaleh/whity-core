@@ -4,10 +4,10 @@ import { useMemo, useState } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { useFetch } from '@/hooks/useFetch';
-import { useTranslation } from '@amroksaleh/features/i18n';
-import { Button } from '@amroksaleh/ui/button';
-import { Badge } from '@amroksaleh/ui/badge';
-import { Checkbox } from '@amroksaleh/ui/checkbox';
+import { useTranslation } from '@whity-org/features/i18n';
+import { Button } from '@whity-org/ui/button';
+import { Badge } from '@whity-org/ui/badge';
+import { Checkbox } from '@whity-org/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import {
   Dialog,

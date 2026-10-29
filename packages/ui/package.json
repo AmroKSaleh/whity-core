@@ -1,6 +1,6 @@
 {
-  "name": "@amroksaleh/ui",
-  "version": "0.4.0",
+  "name": "@whity-org/ui",
+  "version": "0.5.0",
   "description": "Shared UI primitives for Whity products",
   "license": "MIT",
   "scripts": {
@@ -98,7 +98,7 @@
     "react-hook-form": ">=7"
   },
   "dependencies": {
-    "@amroksaleh/tokens": "^0.1.0",
+    "@whity-org/tokens": "^0.1.0",
     "@tanstack/react-table": "^9.2.4",
     "@xyflow/react": "^12.12.0",
     "bwip-js": "^4.11.3",

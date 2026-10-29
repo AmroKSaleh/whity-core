@@ -3,22 +3,22 @@
 import { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { IconExternalLink, IconMenu2, IconShieldLock } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
-import { useDateDisplay } from '@amroksaleh/features/datetime';
-import { collectBlockIds } from '@amroksaleh/ui/documents/blocks';
-import { Badge } from '@amroksaleh/ui/badge';
-import { Button } from '@amroksaleh/ui/button';
-import { ErrorState } from '@amroksaleh/ui/empty-state';
-import { Skeleton } from '@amroksaleh/ui/skeleton';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@amroksaleh/ui/tabs';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@amroksaleh/ui/tooltip';
+import { useTranslation } from '@whity-org/features/i18n';
+import { useDateDisplay } from '@whity-org/features/datetime';
+import { collectBlockIds } from '@whity-org/ui/documents/blocks';
+import { Badge } from '@whity-org/ui/badge';
+import { Button } from '@whity-org/ui/button';
+import { ErrorState } from '@whity-org/ui/empty-state';
+import { Skeleton } from '@whity-org/ui/skeleton';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@whity-org/ui/tabs';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@whity-org/ui/tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from '@amroksaleh/ui/dropdown-menu';
+} from '@whity-org/ui/dropdown-menu';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { useAuth } from '@/lib/auth-context';

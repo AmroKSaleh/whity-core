@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import type { DocElement, PageSpec } from '@amroksaleh/ui/documents/types';
-import { PX_PER_MM } from '@amroksaleh/ui/documents/types';
-import { snapMove } from '@amroksaleh/ui/documents/geometry';
-import type { DocBlock } from '@amroksaleh/ui/documents/blocks';
-import { ElementContent } from '@amroksaleh/ui/documents/element-content';
-import { BlockInstanceContent } from '@amroksaleh/ui/documents/element-layer';
+import type { DocElement, PageSpec } from '@whity-org/ui/documents/types';
+import { PX_PER_MM } from '@whity-org/ui/documents/types';
+import { snapMove } from '@whity-org/ui/documents/geometry';
+import type { DocBlock } from '@whity-org/ui/documents/blocks';
+import { ElementContent } from '@whity-org/ui/documents/element-content';
+import { BlockInstanceContent } from '@whity-org/ui/documents/element-layer';
 import { useTranslation } from '../i18n';
 
 interface HandleDef {

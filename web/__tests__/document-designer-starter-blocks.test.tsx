@@ -1,12 +1,12 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { DocumentDesignerScreen } from '@amroksaleh/features/document-designer';
+import { DocumentDesignerScreen } from '@whity-org/features/document-designer';
 import type {
   DocumentDesignerAdapter,
   SavedTemplate,
-} from '@amroksaleh/features/document-designer';
-import type { DocBlock } from '@amroksaleh/ui/documents/blocks';
-import type { DocTemplate } from '@amroksaleh/ui/documents/types';
+} from '@whity-org/features/document-designer';
+import type { DocBlock } from '@whity-org/ui/documents/blocks';
+import type { DocTemplate } from '@whity-org/ui/documents/types';
 
 /**
  * THE STARTER BLOCKS, AND THE HOLE THEY USED TO LEAVE IN THE PDF.

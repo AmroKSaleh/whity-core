@@ -21,7 +21,7 @@
  * the operator draws), stored as data and applied via inline style. That is
  * distinct from the app's own chrome, which uses design tokens only.
  *
- * Promoted from `web/lib/documents/types.ts` into `@amroksaleh/ui` so the
+ * Promoted from `web/lib/documents/types.ts` into `@whity-org/ui` so the
  * model + the portable renderers that consume it (`element-content.tsx`,
  * `element-layer.tsx`) can be reused and Storybook-iterated outside the Next.js
  * app. `web/lib/documents/types.ts` re-exports this module unchanged so every
@@ -165,7 +165,7 @@ export interface LineElement extends ElementCommon {
   strokeWidth: number;
 }
 
-/** A LaTeX math expression, rendered via KaTeX (`@amroksaleh/ui/math-text`). */
+/** A LaTeX math expression, rendered via KaTeX (`@whity-org/ui/math-text`). */
 export interface MathElement extends ElementCommon {
   type: 'math';
   /** LaTeX source, without surrounding $ delimiters (passed straight to KaTeX). */

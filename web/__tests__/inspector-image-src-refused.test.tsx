@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
-import { Inspector } from '@amroksaleh/features/document-designer';
-import { safeImageSrc } from '@amroksaleh/ui/documents/element-content';
+import { Inspector } from '@whity-org/features/document-designer';
+import { safeImageSrc } from '@whity-org/ui/documents/element-content';
 
 /**
  * WHY THE IMAGE BOX IS EMPTY.

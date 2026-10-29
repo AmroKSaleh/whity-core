@@ -15,7 +15,7 @@
  *                              for the actual Dart package target, ../../../flutter/whity_tokens/lib/src/generated/tokens.dart)
  *   - ../../../web/app/globals.css  (CSS custom properties, synced between sentinel markers)
  *   - ../../../packages/tokens/generated/{tokens.json,theme.css,base.css,fonts.css}
- *     (@amroksaleh/tokens — standalone, Next-independent JSON + Tailwind v4
+ *     (@whity-org/tokens — standalone, Next-independent JSON + Tailwind v4
  *     theme CSS, shadcn base/reset layer, and self-hosted @font-face CSS for
  *     non-Next clients; see packages/tokens/fonts/ for the font binaries)
  *
@@ -514,7 +514,7 @@ const REDUCED_MOTION_CSS = [
 ].join('\n');
 
 /**
- * Standalone Tailwind v4 theme CSS for `@amroksaleh/tokens` — the whole file
+ * Standalone Tailwind v4 theme CSS for `@whity-org/tokens` — the whole file
  * is generated (unlike the sentinel-spliced web/app/globals.css region),
  * since a client importing it owns nothing else about it. Deliberately has NO
  * Next.js/shadcn/font-loader dependency: font-family values are the real
@@ -597,7 +597,7 @@ const FONT_FACES = [
 function generateFontsCss() {
   const lines = [];
   lines.push('/**');
-  lines.push(' * Self-hosted @font-face declarations for @amroksaleh/tokens.');
+  lines.push(' * Self-hosted @font-face declarations for @whity-org/tokens.');
   lines.push(' * Do not edit manually - run: npm run tokens:generate');
   lines.push(' *');
   lines.push(' * Binaries live in ../fonts (relative to this file once published —');

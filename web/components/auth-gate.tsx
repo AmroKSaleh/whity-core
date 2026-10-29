@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { api } from '@/lib/api/client';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 import { SETTINGS_MANAGE, SYSTEM_TENANT_ID } from '@/app/(protected)/admin/settings/settings-shared';
 
 /**

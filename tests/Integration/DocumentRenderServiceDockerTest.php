@@ -104,7 +104,7 @@ final class DocumentRenderServiceDockerTest extends TestCase
     /**
      * A real render exercising text + rich-text runs + math + barcode + QR —
      * the exact element mix WC-docdesigner Track 1 added (rich-text spans,
-     * the `math` element type via @amroksaleh/ui/math-text/KaTeX) plus the
+     * the `math` element type via @whity-org/ui/math-text/KaTeX) plus the
      * original barcode/QR elements this whole tool exists to print — over
      * REAL Puppeteer/headless-Chromium, not a mock. Arabic text is included
      * (the hard cross-cutting RTL requirement); legibility (not tofu) was

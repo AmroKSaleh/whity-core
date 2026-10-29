@@ -2,16 +2,16 @@
 
 import { useMemo, useState } from 'react';
 import { IconAlertTriangle } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
-import { Alert, AlertDescription, AlertTitle } from '@amroksaleh/ui/alert';
-import { Button } from '@amroksaleh/ui/button';
+import { useTranslation } from '@whity-org/features/i18n';
+import { Alert, AlertDescription, AlertTitle } from '@whity-org/ui/alert';
+import { Button } from '@whity-org/ui/button';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@amroksaleh/ui/select';
+} from '@whity-org/ui/select';
 import {
   Dialog,
   DialogContent,

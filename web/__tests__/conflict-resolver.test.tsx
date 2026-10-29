@@ -1,8 +1,8 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import { ConflictResolver } from '@amroksaleh/features/sync';
-import type { Conflict } from '@amroksaleh/features/sync';
+import { ConflictResolver } from '@whity-org/features/sync';
+import type { Conflict } from '@whity-org/features/sync';
 
 const conflict: Conflict = {
   id: 42,
