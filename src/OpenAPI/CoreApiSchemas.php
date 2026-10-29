@@ -4819,18 +4819,18 @@ final class CoreApiSchemas
             // documents:publish (403 otherwise). owner_ou_id must be a unit of the
             // caller's own tenant (422 otherwise); null files the row tenant-wide.
             'DocumentTemplateCreateRequest' => self::object([
-                'name' => self::str(),
-                'data' => ['type' => 'object', 'additionalProperties' => true],
-                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
-                'required_permission' => self::str(true),
-                'owner_ou_id' => self::int(true),
+                'name' => self::str() + ['description' => 'Template name.'],
+                'data' => ['type' => 'object', 'additionalProperties' => true, 'description' => 'The template design as produced by the document designer (pages, elements, placeholders).'],
+                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system'], 'description' => 'Who can use it: `personal` (you), `tenant`, `global` or `system`. Anything but `personal` needs documents:publish.'],
+                'required_permission' => self::str(true) + ['description' => 'Permission a user must hold to use the template; null for none. Needs documents:publish.'],
+                'owner_ou_id' => self::int(true) + ['description' => 'Organizational unit the template is filed under; null files it tenant-wide. Needs documents:publish.'],
             ], ['name', 'data']),
             'DocumentTemplateUpdateRequest' => self::object([
-                'name' => self::str(),
-                'data' => ['type' => 'object', 'additionalProperties' => true],
-                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
-                'required_permission' => self::str(true),
-                'owner_ou_id' => self::int(true),
+                'name' => self::str() + ['description' => 'New template name.'],
+                'data' => ['type' => 'object', 'additionalProperties' => true, 'description' => 'Replacement template design.'],
+                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system'], 'description' => 'Who can use it: `personal` (you), `tenant`, `global` or `system`. Anything but `personal` needs documents:publish.'],
+                'required_permission' => self::str(true) + ['description' => 'Permission a user must hold to use the template; null for none.'],
+                'owner_ou_id' => self::int(true) + ['description' => 'Organizational unit the template is filed under; null files it tenant-wide.'],
             ], []),
 
             // Server-side render (ADR 0012 / WC-docdesigner Track 2). `dataRows`
@@ -4848,10 +4848,10 @@ final class CoreApiSchemas
             // DocumentRenderApiHandler. `title` names the record and is ignored
             // when not persisting.
             'DocumentRenderRequest' => self::object([
-                'dataRows' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']]],
-                'sheet' => ['type' => 'object', 'additionalProperties' => true, 'nullable' => true],
-                'persist' => ['type' => 'boolean', 'default' => false],
-                'title' => self::str(true),
+                'dataRows' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']], 'description' => 'Values for the template\'s placeholders: one object per label or page, mapping placeholder key to text. Omitted or empty renders one copy with the template\'s sample values.'],
+                'sheet' => ['type' => 'object', 'additionalProperties' => true, 'nullable' => true, 'description' => 'Optional label-sheet layout for printing several labels per page; null for one per page.'],
+                'persist' => ['type' => 'boolean', 'default' => false, 'description' => 'true to record the result as a document (returns the record); false (default) returns the PDF as a preview only.'],
+                'title' => self::str(true) + ['description' => 'Title of the recorded document. Used only when `persist` is true.'],
             ], []),
 
             // ── Issued documents (#947 item 1) ────────────────────────────────
@@ -4969,11 +4969,11 @@ final class CoreApiSchemas
             // artifact" (503 when it cannot), false = "record only". Omitting it
             // is what a client that does not care should do.
             'DocumentCreateRequest' => self::object([
-                'document_template_id' => self::int(),
-                'title' => self::str(true),
-                'dataRows' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']]],
-                'sheet' => ['type' => 'object', 'additionalProperties' => true, 'nullable' => true],
-                'render' => ['type' => 'boolean', 'nullable' => true],
+                'document_template_id' => self::int() + ['description' => 'Template to issue the document from (see GET /api/document-templates).'],
+                'title' => self::str(true) + ['description' => 'Document title; defaults from the template.'],
+                'dataRows' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']], 'description' => 'Values for the template\'s placeholders: one object per label or page, mapping placeholder key to text. A key the template does not declare is refused.'],
+                'sheet' => ['type' => 'object', 'additionalProperties' => true, 'nullable' => true, 'description' => 'Optional label-sheet layout for printing several labels per page; null for one per page.'],
+                'render' => ['type' => 'boolean', 'nullable' => true, 'description' => 'Omit to render when this server can; true to require a rendered file (503 if rendering is unavailable); false to record without rendering.'],
             ], ['document_template_id']),
 
             // Why the render outcome is a SIBLING of `data` rather than a status
@@ -5009,8 +5009,8 @@ final class CoreApiSchemas
             // minus `persist`/`title`: this route ALWAYS persists (that is what
             // it is for) and never renames the record it appends to.
             'DocumentRerenderRequest' => self::object([
-                'dataRows' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']]],
-                'sheet' => ['type' => 'object', 'additionalProperties' => true, 'nullable' => true],
+                'dataRows' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']], 'description' => 'Values for the template\'s placeholders: one object per label or page, mapping placeholder key to text.'],
+                'sheet' => ['type' => 'object', 'additionalProperties' => true, 'nullable' => true, 'description' => 'Optional label-sheet layout for printing several labels per page; null for one per page.'],
             ], []),
 
             // -- Document routing (#947 item 3) --------------------------------
@@ -5122,7 +5122,7 @@ final class CoreApiSchemas
             // `steps` is required and must be non-empty: a route with no steps
             // would issue a document to nobody and record it as sent.
             'DocumentRouteCreateRequest' => self::object([
-                'title' => self::str(true),
+                'title' => self::str(true) + ['description' => 'Name of this circulation; defaults from the document.'],
                 'steps' => [
                     'type' => 'array',
                     'items' => self::object([
@@ -5164,6 +5164,7 @@ final class CoreApiSchemas
                             'enum' => ['act', 'delivery'],
                         ],
                     ], ['rule_kind']),
+                    'description' => 'Ordered steps, at least one. Each names a `rule_kind` (see GET /api/routing-rules) and its `rule_config`, deciding who receives the document at that step. A step with `decision: true` is an approval gate whose `on_approved`/`on_rejected` name 1-based step positions.',
                 ],
             ], ['steps']),
 
@@ -5175,11 +5176,11 @@ final class CoreApiSchemas
             // `documents.routing_max_steps` is re-checked at this moment, since
             // the setting can have moved since the design was authored.
             'DocumentRouteFromTemplateRequest' => self::object([
-                'template_id' => self::int(),
+                'template_id' => self::int() + ['description' => 'Route template (saved design) to apply (see GET /api/document-route-templates).'],
                 // Left out, the ROUTE is named after the DESIGN rather than after
                 // the document - an author who applied "Purchase approval" is
                 // naming the circulation after the flow it follows.
-                'title' => self::str(true),
+                'title' => self::str(true) + ['description' => 'Name of this circulation; defaults to the route template name.'],
             ], ['template_id']),
 
             // The trail. Every field is a COLUMN (migration 112) rather than a
@@ -5242,15 +5243,15 @@ final class CoreApiSchemas
             'DocumentRouteRecipientListResponse' => self::listEnvelope('DocumentRouteRecipient'),
 
             'DocumentRouteActionRequest' => self::object([
-                'action' => ['type' => 'string', 'enum' => ['forwarded', 'acknowledged', 'returned', 'noted']],
+                'action' => ['type' => 'string', 'enum' => ['forwarded', 'acknowledged', 'returned', 'noted'], 'description' => 'What you did with the document: `forwarded`, `acknowledged`, `returned` or `noted`.'],
                 // Required for `noted` (an empty note records nothing), optional
                 // on the other three.
-                'note' => self::str(true),
+                'note' => self::str(true) + ['description' => 'Comment for the trail. Required for `noted`.'],
                 // #1014. REQUIRED with `acknowledged` on a decision step and
                 // refused everywhere else - including on a circulation step,
                 // where a recorded verdict nothing routes on would read later as
                 // an authorisation that was never asked for.
-                'verdict' => ['type' => 'string', 'enum' => ['approved', 'rejected'], 'nullable' => true],
+                'verdict' => ['type' => 'string', 'enum' => ['approved', 'rejected'], 'nullable' => true, 'description' => '`approved` or `rejected`. Required with `acknowledged` on a decision step; refused anywhere else.'],
             ], ['action']),
             'DocumentRouteActionResponse' => self::object([
                 'data' => SchemaBuilder::ref('DocumentTrailEvent'),
@@ -5860,8 +5861,8 @@ final class CoreApiSchemas
                 ],
             ],
             'UserCreateRequest' => self::object([
-                'email' => self::email(),
-                'password' => self::password(),
+                'email' => self::email() + ['description' => 'Sign-in email address of the new user.'],
+                'password' => self::password() + ['description' => 'Initial password; must satisfy the site password policy.'],
                 // Accepted as a role NAME or a numeric role id, under either
                 // spelling: the handler reads `$body['role'] ?? $body['role_id']`.
                 // `role_id` was missing from this declaration entirely, so a
@@ -5880,29 +5881,29 @@ final class CoreApiSchemas
                 // property can be absent or typed, not "present but must not be
                 // empty" — so it is stated here, where a client author reading
                 // the declaration will see it.
-                'role' => $permissionRef,
-                'role_id' => self::reference('/api/roles', 'name'),
+                'role' => $permissionRef + ['description' => 'Role to grant in this tenant, by name or numeric id. Absent means the global `user` role; present but empty is refused.'],
+                'role_id' => self::reference('/api/roles', 'name') + ['description' => 'Role to grant, by id (see GET /api/roles). Takes precedence over `role`.'],
                 // Optional OU placement, so provisioning is one atomic call. The
                 // OU must belong to the caller's tenant (403 otherwise); omitted
                 // or null leaves the membership unassigned.
-                'ou_id' => self::reference('/api/ous', 'name', nullable: true),
+                'ou_id' => self::reference('/api/ous', 'name', nullable: true) + ['description' => 'Organizational unit to place the user in (see GET /api/ous). Omitted or null leaves them unassigned.'],
             ], ['email', 'password']),
             'UserUpdateRequest' => self::object([
-                'email' => self::email(),
-                'password' => self::password(),
-                'role' => $permissionRef,
-                'role_id' => self::reference('/api/roles', 'name'),
+                'email' => self::email() + ['description' => 'New sign-in email address.'],
+                'password' => self::password() + ['description' => 'New password; must satisfy the site password policy.'],
+                'role' => $permissionRef + ['description' => 'Replacement role in this tenant, by name or numeric id.'],
+                'role_id' => self::reference('/api/roles', 'name') + ['description' => 'Replacement role, by id (see GET /api/roles). Takes precedence over `role`.'],
                 // array_key_exists, not isset: an explicit null CLEARS the OU.
-                'ou_id' => self::reference('/api/ous', 'name', nullable: true),
+                'ou_id' => self::reference('/api/ous', 'name', nullable: true) + ['description' => 'Organizational unit to move the user to. An explicit null removes them from their unit.'],
                 // WC-user-status: the admin deactivate/reactivate control.
-                'accountStatus' => ['type' => 'string', 'enum' => ['active', 'inactive']],
+                'accountStatus' => ['type' => 'string', 'enum' => ['active', 'inactive'], 'description' => '`inactive` blocks sign-in for this person everywhere; `active` restores it.'],
                 // #917: permits `password` against an account whose credentials
                 // belong to an identity provider (`authMethod: 'idp'`), which is
                 // otherwise refused with 409. Taking it moves the account to
                 // 'both' and records an audit row - the arrangement stays
                 // available, it just stops being something that can happen by
                 // accident. Ignored when no password is sent.
-                'allowLocalPasswordOnIdpAccount' => self::bool(),
+                'allowLocalPasswordOnIdpAccount' => self::bool() + ['description' => 'Required to set `password` on an account that signs in through an identity provider; otherwise that is refused.'],
             ], []),
 
             'Permission' => $permission,
@@ -6014,22 +6015,22 @@ final class CoreApiSchemas
             // request. RequestSchemaValidationParityTest pins both halves.
             'RoleCreateRequest' => self::object([
                 // `empty()` rejects it, so "" is a 400 as surely as an omission.
-                'name' => self::name(nonEmpty: true),
-                'description' => self::text(),
+                'name' => self::name(nonEmpty: true) + ['description' => 'Role name, unique among the roles this tenant can see.'],
+                'description' => self::text() + ['description' => 'What the role is for.'],
                 // Mixed id-or-`resource:action` notation. A DIGIT-STRING is read
                 // as an id, never as a name, and a reference that resolves to
                 // nothing is dropped silently rather than refused.
-                'permissions' => ['type' => 'array', 'items' => $permissionRef],
-                'tenant_id' => self::int(),
-                'global' => self::bool(),
+                'permissions' => ['type' => 'array', 'items' => $permissionRef, 'description' => 'Permissions to grant, each as an id or a `resource:action` name (see GET /api/permissions). Unknown entries are ignored.'],
+                'tenant_id' => self::int() + ['description' => 'Tenant that owns the role. Platform administrators only; others get their own tenant.'],
+                'global' => self::bool() + ['description' => 'Create a platform-wide role visible to every tenant. Platform administrators only; cannot be combined with `tenant_id`.'],
             ], ['name']),
             'RoleUpdateRequest' => self::object([
-                'name' => self::name(nonEmpty: true),
-                'description' => self::text(),
+                'name' => self::name(nonEmpty: true) + ['description' => 'New role name.'],
+                'description' => self::text() + ['description' => 'New description.'],
                 // A full REPLACE of the role's grants, so `[]` revokes every one
                 // of them. Omitting the key leaves the grants untouched — the
                 // two are emphatically not the same request.
-                'permissions' => ['type' => 'array', 'items' => $permissionRef],
+                'permissions' => ['type' => 'array', 'items' => $permissionRef, 'description' => 'The complete new permission set, replacing the current one: `[]` revokes everything, omitting the key leaves grants unchanged.'],
             ], []),
             // `tenantId`/`global` echo the RESOLVED owner (#888). The request's
             // ownership fields are optional, so a caller that omitted them
@@ -6049,7 +6050,7 @@ final class CoreApiSchemas
             // notation as RoleCreateRequest.permissions, so a client that can
             // already build a full replace can build a delta with no new code.
             'RolePermissionsChangeRequest' => self::object([
-                'permissions' => ['type' => 'array', 'items' => $permissionRef],
+                'permissions' => ['type' => 'array', 'items' => $permissionRef, 'description' => 'Permissions to add (POST) or remove (DELETE), each as an id or a `resource:action` name. Other grants are untouched.'],
             ], ['permissions']),
             // `granted` / `revoked` count what the call actually CHANGED, which
             // for an idempotent endpoint is not the size of the request: a
@@ -6091,9 +6092,9 @@ final class CoreApiSchemas
             // a user targets the caller's tenant, and switching to the new one
             // requires the very membership that cannot yet be made.
             'TenantCreateRequest' => self::object([
-                'name' => self::str(),
-                'slug' => ['type' => 'string', 'pattern' => '^[a-z0-9-]+$'],
-                'admin' => SchemaBuilder::ref('TenantInitialAdmin'),
+                'name' => self::str() + ['description' => 'Display name of the new tenant (workspace).'],
+                'slug' => ['type' => 'string', 'pattern' => '^[a-z0-9-]+$', 'description' => 'URL-safe identifier: lower-case letters, digits and dashes. Generated from the name when omitted; must be unique.'],
+                'admin' => SchemaBuilder::ref('TenantInitialAdmin') + ['description' => 'Optional first administrator, created in the same transaction: `{email, password, role?}`. Without it no one can sign in to the new tenant.'],
             ], ['name']),
             // `role` names a role the new tenant can see: one it owns (seeded by
             // a tenant.created listener) or a global one. Defaults to `admin`.
@@ -6103,8 +6104,8 @@ final class CoreApiSchemas
                 'role' => self::str(),
             ], ['email', 'password']),
             'TenantUpdateRequest' => self::object([
-                'name' => self::str(),
-                'slug' => ['type' => 'string', 'pattern' => '^[a-z0-9-]+$'],
+                'name' => self::str() + ['description' => 'New display name.'],
+                'slug' => ['type' => 'string', 'pattern' => '^[a-z0-9-]+$', 'description' => 'New URL-safe identifier (lower-case letters, digits, dashes); must be unique.'],
             ], []),
 
             'OrganizationalUnit' => $ou,
@@ -6131,30 +6132,30 @@ final class CoreApiSchemas
             ]),
             'OuDetailResponse' => self::dataEnvelope(SchemaBuilder::ref('OuDetail')),
             'OuCreateRequest' => self::object([
-                'name' => self::name(nonEmpty: true),
-                'description' => self::text(),
+                'name' => self::name(nonEmpty: true) + ['description' => 'Name of the organizational unit.'],
+                'description' => self::text() + ['description' => 'What the unit is.'],
                 // Omitted or null makes the unit a root. A parent outside the
                 // caller's tenant is a 403, not a 404.
-                'parent_id' => self::reference('/api/ous', 'name', nullable: true),
+                'parent_id' => self::reference('/api/ous', 'name', nullable: true) + ['description' => 'Parent unit (see GET /api/ous). Omitted or null creates a root unit.'],
                 // #822: the unit's kind, addressed by id OR by stable key.
                 // Supplying both is a 422 rather than a silent preference — the
                 // `not` clause below is what says so in the published contract.
-                'ou_type_id' => self::reference('/api/ou-types', 'label', nullable: true),
-                'type' => self::ouTypeKey(),
+                'ou_type_id' => self::reference('/api/ou-types', 'label', nullable: true) + ['description' => 'Kind of unit, by id (see GET /api/ou-types). Send this or `type`, not both.'],
+                'type' => self::ouTypeKey() + ['description' => 'Kind of unit, by its stable key (see GET /api/ou-types). Send this or `ou_type_id`, not both.'],
             ], ['name']) + self::mutuallyExclusive('ou_type_id', 'type'),
             'OuUpdateRequest' => self::object([
-                'name' => self::name(nonEmpty: true),
-                'description' => self::text(),
+                'name' => self::name(nonEmpty: true) + ['description' => 'New name.'],
+                'description' => self::text() + ['description' => 'New description.'],
                 // array_key_exists, not isset: an explicit null moves the unit
                 // to the root, and an explicit null `ou_type_id`/`type` untypes
                 // it. (`name` and `description` are read with isset, so an
                 // explicit null there is a silent no-op, not a clear.)
-                'parent_id' => self::reference('/api/ous', 'name', nullable: true),
-                'ou_type_id' => self::reference('/api/ou-types', 'label', nullable: true),
-                'type' => self::ouTypeKey(),
+                'parent_id' => self::reference('/api/ous', 'name', nullable: true) + ['description' => 'New parent unit. An explicit null makes this a root unit.'],
+                'ou_type_id' => self::reference('/api/ou-types', 'label', nullable: true) + ['description' => 'New kind of unit, by id. An explicit null removes the type. Send this or `type`, not both.'],
+                'type' => self::ouTypeKey() + ['description' => 'New kind of unit, by stable key. An explicit null removes the type. Send this or `ou_type_id`, not both.'],
             ], []) + self::mutuallyExclusive('ou_type_id', 'type'),
             'OuRoleAssignRequest' => self::object([
-                'role_id' => self::reference('/api/roles', 'name') + ['minimum' => 1],
+                'role_id' => self::reference('/api/roles', 'name') + ['minimum' => 1, 'description' => 'Role to attach to this unit (see GET /api/roles).'],
             ], ['role_id']),
             'OuRoleAssignment' => self::object([
                 'id' => self::int(),
@@ -6375,21 +6376,22 @@ final class CoreApiSchemas
                     'minLength' => 1,
                     'maxLength' => 128,
                     'pattern' => '^[a-z][a-z0-9_-]*$',
+                    'description' => 'Permanent key for the form: a lower-case letter, then letters, digits, `_` or `-`.',
                 ],
                 // A bare string is accepted and read as English: a form named in
                 // one language only is the ordinary case, and demanding the object
                 // shape would 422 a request that meant something perfectly clear.
-                'name' => self::localizedText(),
-                'description' => self::text(),
-                'route_template_id' => self::int(true),
+                'name' => self::localizedText() + ['description' => 'Form name as `{"en": ..., "ar": ...}`; a plain string is read as English.'],
+                'description' => self::text() + ['description' => 'What the form is for.'],
+                'route_template_id' => self::int(true) + ['description' => 'Route template that circulates each submission for approval (see GET /api/document-route-templates); null for none.'],
             ], ['form_key', 'name']),
             // `form_key` and `status` are absent because both are REFUSED with a
             // 422 rather than ignored — a caller who sent one meant something, and
             // dropping it silently would leave them believing a change happened.
             'FormUpdateRequest' => self::object([
-                'name' => self::localizedText(),
-                'description' => self::text(),
-                'route_template_id' => self::int(true),
+                'name' => self::localizedText() + ['description' => 'New name as `{"en": ..., "ar": ...}`; a plain string is read as English.'],
+                'description' => self::text() + ['description' => 'New description.'],
+                'route_template_id' => self::int(true) + ['description' => 'Route template for approving submissions; null removes it.'],
             ], []) + ['minProperties' => 1],
             'FormFieldCreateRequest' => self::object([
                 'field_key' => [
@@ -6397,20 +6399,23 @@ final class CoreApiSchemas
                     'minLength' => 1,
                     'maxLength' => 128,
                     'pattern' => '^[a-z][a-z0-9_]*$',
+                    'description' => 'Permanent key the answers are stored under: a lower-case letter, then letters, digits or `_`.',
                 ],
                 'field_type' => ['type' => 'string', 'enum' => [
                     'text', 'textarea', 'number', 'date', 'select',
                     'multiselect', 'checkbox', 'file', 'profile_ref', 'ou_ref',
-                ]],
-                'label' => self::localizedText(),
-                'help_text' => self::text(),
-                'is_required' => self::bool(),
-                'options' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormFieldOption')],
-                'validation' => SchemaBuilder::ref('FormFieldValidation'),
-                'prefill_source' => self::str(true),
-                'section_key' => self::name(),
+                ],
+                    'description' => 'Kind of input: text, textarea, number, date, select, multiselect, checkbox, file, profile_ref (a person) or ou_ref (a unit).',
+                ],
+                'label' => self::localizedText() + ['description' => 'Field label as `{"en": ..., "ar": ...}`; a plain string is read as English.'],
+                'help_text' => self::text() + ['description' => 'Hint shown under the field.'],
+                'is_required' => self::bool() + ['description' => 'Whether a submission must answer this field.'],
+                'options' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormFieldOption'), 'description' => 'Choices for select and multiselect fields.'],
+                'validation' => SchemaBuilder::ref('FormFieldValidation') + ['description' => 'Extra checks on the answer (length, range, pattern).'],
+                'prefill_source' => self::str(true) + ['description' => 'Fill the field in advance from the submitter\'s profile; sources are listed in the field list\'s `meta.prefill_sources`.'],
+                'section_key' => self::name() + ['description' => 'Section to group the field under; fields sharing a key form one section.'],
                 // Absent means the server appends it after the current maximum.
-                'position' => self::int(),
+                'position' => self::int() + ['description' => 'Position in the form; omitted appends it at the end.'],
             ], ['field_key', 'field_type', 'label']),
             // The WHOLE set, in order. Each entry is a create-shaped field; the
             // list's order IS the position, so a caller that shows a sequence
@@ -6428,15 +6433,17 @@ final class CoreApiSchemas
                 'field_type' => ['type' => 'string', 'enum' => [
                     'text', 'textarea', 'number', 'date', 'select',
                     'multiselect', 'checkbox', 'file', 'profile_ref', 'ou_ref',
-                ]],
-                'label' => self::localizedText(),
-                'help_text' => self::text(),
-                'is_required' => self::bool(),
-                'options' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormFieldOption')],
-                'validation' => SchemaBuilder::ref('FormFieldValidation'),
-                'prefill_source' => self::str(true),
-                'section_key' => self::name(),
-                'position' => self::int(),
+                ],
+                    'description' => 'Kind of input: text, textarea, number, date, select, multiselect, checkbox, file, profile_ref (a person) or ou_ref (a unit).',
+                ],
+                'label' => self::localizedText() + ['description' => 'New label as `{"en": ..., "ar": ...}`; a plain string is read as English.'],
+                'help_text' => self::text() + ['description' => 'New hint shown under the field.'],
+                'is_required' => self::bool() + ['description' => 'Whether a submission must answer this field.'],
+                'options' => ['type' => 'array', 'items' => SchemaBuilder::ref('FormFieldOption'), 'description' => 'Replacement choices for select and multiselect fields.'],
+                'validation' => SchemaBuilder::ref('FormFieldValidation') + ['description' => 'Replacement checks on the answer.'],
+                'prefill_source' => self::str(true) + ['description' => 'Profile detail to prefill from; null for none.'],
+                'section_key' => self::name() + ['description' => 'Section to group the field under.'],
+                'position' => self::int() + ['description' => 'New position in the form.'],
             ], []) + ['minProperties' => 1],
             // `prefill` is keyed by FIELD KEY, not by source: two fields may name
             // the same source and each wants its own entry. It is kept OUT of the
@@ -6463,7 +6470,7 @@ final class CoreApiSchemas
                 // kind — a string, a number, a boolean, or a list of choices —
                 // which is why this is `additionalProperties: true` rather than a
                 // narrower map: one schema cannot express "shaped by another row".
-                'data' => ['type' => 'object', 'additionalProperties' => true],
+                'data' => ['type' => 'object', 'additionalProperties' => true, 'description' => 'Answers keyed by field key, each typed by its field: text, number, boolean, or a list for multiselect.'],
             ], ['data']),
             // ---- the public link (migration 132) ----
             // Both boundaries optional and either nullable: null means "no
@@ -6843,22 +6850,22 @@ final class CoreApiSchemas
                 // quoted inside every decision number the body mints, and a key
                 // with a slash or a space produces numbers nobody can quote
                 // unambiguously.
-                'body_key' => self::str() + ['pattern' => '^[a-z0-9][a-z0-9_-]{0,63}$'],
-                'name' => ['oneOf' => [self::str(), SchemaBuilder::ref('LocalizedLabel')]],
-                'ou_id' => self::int(true),
-                'description' => self::text(),
+                'body_key' => self::str() + ['pattern' => '^[a-z0-9][a-z0-9_-]{0,63}$', 'description' => 'Short permanent key (lower-case letters, digits, `-`, `_`). Quoted in every decision number, and cannot be changed later.'],
+                'name' => ['oneOf' => [self::str(), SchemaBuilder::ref('LocalizedLabel')], 'description' => 'Name of the body (council, committee), as text or as a `{language: text}` map.'],
+                'ou_id' => self::int(true) + ['description' => 'Organizational unit the body belongs to; null for none.'],
+                'description' => self::text() + ['description' => 'What the body is for.'],
             ], ['body_key', 'name']),
             // `body_key` is absent rather than declared-and-ignored: it is
             // immutable, because decision numbers already quote it.
             'ConveningBodyUpdateRequest' => self::object([
-                'name' => ['oneOf' => [self::str(), SchemaBuilder::ref('LocalizedLabel')]],
-                'ou_id' => self::int(true),
-                'description' => self::text(),
-                'is_active' => self::bool(),
+                'name' => ['oneOf' => [self::str(), SchemaBuilder::ref('LocalizedLabel')], 'description' => 'New name, as text or as a `{language: text}` map.'],
+                'ou_id' => self::int(true) + ['description' => 'Organizational unit the body belongs to; null for none.'],
+                'description' => self::text() + ['description' => 'New description.'],
+                'is_active' => self::bool() + ['description' => 'false retires the body: it keeps its history but convenes no new meetings.'],
             ], []) + ['minProperties' => 1],
             'ConveningBodyMemberRequest' => self::object([
-                'profile_id' => self::int(),
-                'member_role' => ['type' => 'string', 'enum' => MemberRole::all()],
+                'profile_id' => self::int() + ['description' => 'Profile id of the person to add as a member.'],
+                'member_role' => ['type' => 'string', 'enum' => MemberRole::all(), 'description' => 'Their role in the body: `chair`, `secretary` or `member`.'],
             ], ['profile_id']),
 
             // One SITTING. `scheduled_at` and `held_at` are both nullable and
@@ -7009,6 +7016,7 @@ final class CoreApiSchemas
                     'type' => 'array',
                     'items' => SchemaBuilder::ref('MeetingAttendanceEntryRequest'),
                     'maxItems' => AttendanceEntry::MAX_ATTENDEES,
+                    'description' => 'The complete attendance list, replacing the stored one; `[]` records that nobody attended. Each entry names a person and their capacity.',
                 ],
             ], ['attendees']),
             'MeetingListResponse' => self::listEnvelope('Meeting'),
@@ -7034,12 +7042,12 @@ final class CoreApiSchemas
                 ]]
             ),
             'MeetingCreateRequest' => self::object([
-                'body_id' => self::int(),
-                'title' => ['oneOf' => [self::str(), SchemaBuilder::ref('LocalizedLabel')]],
+                'body_id' => self::int() + ['description' => 'Convening body holding the meeting (see GET /api/convening-bodies).'],
+                'title' => ['oneOf' => [self::str(), SchemaBuilder::ref('LocalizedLabel')], 'description' => 'Meeting title, as text or as a `{language: text}` map.'],
             ], ['body_id', 'title']),
             'MeetingScheduleRequest' => self::object([
-                'scheduled_at' => self::str(),
-                'location' => self::name(),
+                'scheduled_at' => self::str() + ['description' => 'When the meeting will take place, as a date and time (e.g. `2026-11-04 10:00`). Rescheduling notifies invitees.'],
+                'location' => self::name() + ['description' => 'Where it will take place.'],
             ], ['scheduled_at']),
             'MeetingScheduleResponse' => self::object([
                 'data' => SchemaBuilder::ref('Meeting'),
@@ -7052,7 +7060,7 @@ final class CoreApiSchemas
                 // minutes yesterday's sitting, and a server-stamped date would
                 // put every such meeting — and the YEAR each of its decision
                 // numbers is minted under — on the wrong day.
-                'held_at' => self::str(),
+                'held_at' => self::str() + ['description' => 'When the meeting actually took place. Send the real date when minuting a past meeting; omitted means now. Decision numbers use its year.'],
             ], []),
             'MeetingInviteResponse' => self::object([
                 'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('MeetingInvitation')],
@@ -7067,24 +7075,24 @@ final class CoreApiSchemas
                 'status' => ['type' => 'string', 'enum' => InvitationStatus::responses()],
             ], ['status']),
             'MeetingAgendaItemCreateRequest' => self::object([
-                'title' => ['oneOf' => [self::str(), SchemaBuilder::ref('LocalizedLabel')]],
-                'document_id' => self::int(true),
-                'notes' => self::text(),
+                'title' => ['oneOf' => [self::str(), SchemaBuilder::ref('LocalizedLabel')], 'description' => 'Agenda item title, as text or as a `{language: text}` map.'],
+                'document_id' => self::int(true) + ['description' => 'Document the item is about, if any. A decision on the item can then advance the document\'s approval route.'],
+                'notes' => self::text() + ['description' => 'Notes for the item.'],
                 // The EXPLICIT confirmation that an item is being attached to a
                 // sitting that already happened. Allowed, because a paper tabled
                 // on the day is minuted afterwards — and never silent, because
                 // the other reading is somebody on the wrong screen.
-                'allow_held' => self::bool(),
+                'allow_held' => self::bool() + ['description' => 'Must be true to add an item to a meeting that has already been held.'],
             ], ['title']),
             'MeetingAgendaReorderRequest' => self::object([
                 // EVERY item on the agenda, exactly once. A partial list
                 // describes an order that omits some items, and both readings of
                 // that — leave them, or append them — are guesses.
-                'item_ids' => ['type' => 'array', 'items' => self::int(), 'minItems' => 1],
+                'item_ids' => ['type' => 'array', 'items' => self::int(), 'minItems' => 1, 'description' => 'Every agenda item id of the meeting, each exactly once, in the new order.'],
             ], ['item_ids']),
             'MeetingDecisionRequest' => self::object([
-                'verdict' => ['type' => 'string', 'enum' => DecisionVerdict::all()],
-                'rationale' => self::text(),
+                'verdict' => ['type' => 'string', 'enum' => DecisionVerdict::all(), 'description' => 'The decision: `approved`, `rejected` or `deferred`.'],
+                'rationale' => self::text() + ['description' => 'Reasoning recorded with the decision.'],
                 // BOTH OF THESE ARE THE INSTITUTION'S TO ASSIGN, and they are
                 // the two halves of one fact: a minute book records that
                 // decision N was taken on date D. Both are written by hand, in
@@ -7101,8 +7109,8 @@ final class CoreApiSchemas
                 // holds is REFUSED, not silently accepted: two minutes under one
                 // number cannot be told apart afterwards, which is the whole
                 // reason a decision has a number.
-                'decision_number' => ['type' => 'string', 'maxLength' => DecisionNumbers::MAX_LENGTH],
-                'decided_at' => self::str(),
+                'decision_number' => ['type' => 'string', 'maxLength' => DecisionNumbers::MAX_LENGTH, 'description' => 'The institution\'s own decision number, in any format. Omit to allocate the next number from the body\'s yearly counter; a number already used in this tenant is refused.'],
+                'decided_at' => self::str() + ['description' => 'Date the decision was taken, if different from the meeting date.'],
             ], ['verdict']),
             // WHAT THE DECISION DID, always present beside what it SAID.
             // `applied` false with a `reason` is an ordinary outcome, not an
@@ -7140,10 +7148,10 @@ final class CoreApiSchemas
             'Delegation' => $delegation,
             'DelegationListResponse' => self::paginatedListEnvelope('Delegation'),
             'DelegationCreateRequest' => self::object([
-                'granteeType' => ['type' => 'string', 'enum' => ['role', 'user']],
-                'granteeId' => self::int(),
-                'permissions' => ['type' => 'array', 'items' => self::str(), 'minItems' => 1],
-                'ouId' => self::int(true),
+                'granteeType' => ['type' => 'string', 'enum' => ['role', 'user'], 'description' => 'Who receives the permissions: `role` (everyone holding a role) or `user` (one person).'],
+                'granteeId' => self::int() + ['description' => 'Id of the role, or the profile id of the user, named by `granteeType`.'],
+                'permissions' => ['type' => 'array', 'items' => self::str(), 'minItems' => 1, 'description' => 'Permission names (`resource:action`) to delegate. You can only delegate permissions you hold yourself.'],
+                'ouId' => self::int(true) + ['description' => 'Limit the delegation to this organizational unit and the units below it. Null or omitted applies tenant-wide.'],
             ], ['granteeType', 'granteeId', 'permissions']),
             'DelegationCreateResponse' => self::dataEnvelope(self::object([
                 'ids' => ['type' => 'array', 'items' => self::int()],
@@ -7299,7 +7307,7 @@ final class CoreApiSchemas
                 'scopedPermission' => self::str(true),
             ], ['ref', 'method', 'path']),
             'PermittedActionsRequest' => self::object([
-                'checks' => ['type' => 'array', 'items' => SchemaBuilder::ref('PermittedActionCheck')],
+                'checks' => ['type' => 'array', 'items' => SchemaBuilder::ref('PermittedActionCheck'), 'description' => 'Actions to test, each `{ref, method, path}` with optional `resourceType`/`resourceId`/`scopedPermission`. Answers come back keyed by `ref`.'],
             ], ['checks']),
             // `required` mirrors RbacMiddleware's 403 body: the permission slug
             // that refused, or null when a role (or a missing route) refused.
@@ -7357,7 +7365,7 @@ final class CoreApiSchemas
                 'transactional_prefixes' => ['type' => 'array', 'items' => self::str()],
             ], ['data', 'transactional_prefixes']),
             'NotificationPreferencesUpdateRequest' => self::object([
-                'preferences' => ['type' => 'array', 'items' => SchemaBuilder::ref('NotificationPreferenceEntry')],
+                'preferences' => ['type' => 'array', 'items' => SchemaBuilder::ref('NotificationPreferenceEntry'), 'description' => 'Entries of `{type, channel, enabled}` to set for the signed-in user. Transactional notification types cannot be turned off.'],
             ], ['preferences']),
             'TenantNotificationSettingsEntry' => self::object([
                 'channel' => self::str(),
@@ -7803,10 +7811,10 @@ final class CoreApiSchemas
             // `role_id` an id; both resolve against the tenant's own roles plus
             // the platform-global ones, and absent means the global `user` role.
             'InvitationCreateRequest' => self::object([
-                'email' => self::str(),
-                'role' => self::str(),
-                'role_id' => self::int(),
-                'ou_id' => self::int(),
+                'email' => self::str() + ['description' => 'Email address to invite into this tenant.'],
+                'role' => self::str() + ['description' => 'Role to grant on acceptance, by name. Absent means the global `user` role.'],
+                'role_id' => self::int() + ['description' => 'Role to grant on acceptance, by id (see GET /api/roles).'],
+                'ou_id' => self::int() + ['description' => 'Organizational unit to place the person in on acceptance (see GET /api/ous).'],
             ], ['email']),
             // One invitation as an administrator sees it. Deliberately carries
             // NO profile id and no account-existence flag: a tenant admin may

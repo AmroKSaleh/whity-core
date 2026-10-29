@@ -16,6 +16,7 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ### Changed
 
+- **MCP tools now explain their arguments.** Almost every path parameter was a bare `id`, and most body fields had no description, so an agent had to guess what to send. Path parameters are now described from the route ("ID of the meeting"), and the request fields of users, roles, tenants, organizational units, invitations, delegations, documents and their templates and routing, meetings, convening bodies and forms say what they do, including defaults and the values that are refused. The same descriptions appear in `public/openapi.json` and the typed clients. On core tools, undescribed arguments are down from 518 to 198, and a test now stops new core routes from adding more.
 - **A tool called with bad arguments now tells the agent what to fix.** Arguments that don't match a tool's input schema used to fail as a JSON-RPC error (-32602), which many AI apps never show the model. They now come back as a tool result marked `isError`, naming the problem and listing the expected arguments, as the MCP spec asks, so the agent can correct its call and retry. The tool still never runs. In discovery mode, `call_tool` with a tool name that doesn't exist also answers this way and points at `search_tools`.
 - **An unauthenticated MCP call is now HTTP 401, not 200.** The JSON-RPC body is unchanged (`-32001 Unauthenticated`); the status and a `WWW-Authenticate` header are added, as every MCP authorization revision requires. A notification is now answered `202 Accepted`.
 

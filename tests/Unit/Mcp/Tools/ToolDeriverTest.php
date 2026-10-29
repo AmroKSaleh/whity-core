@@ -138,6 +138,50 @@ final class ToolDeriverTest extends TestCase
         self::assertContains('jti', $input['required']);
     }
 
+    public function testDeriveTools_pathParams_areDescribedByTheirCollection(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'GET', 'path' => '/api/users/{id:\d+}', 'schema' => ['summary' => 'Get user']],
+            ['method' => 'GET', 'path' => '/api/ou-types/{id:\d+}', 'schema' => ['summary' => 'Get type']],
+            ['method' => 'GET', 'path' => '/api/meetings/{id:\d+}/agenda/{itemId:\d+}', 'schema' => ['summary' => 'Get item']],
+            ['method' => 'GET', 'path' => '/api/ous/{ouId:\d+}/members/{profileId:\d+}', 'schema' => ['summary' => 'Get member']],
+            ['method' => 'DELETE', 'path' => '/api/branding/assets/{key}', 'schema' => ['summary' => 'Delete asset']],
+        ]);
+
+        $props = array_map(
+            static fn (array $tool): array => array_map(
+                static fn (array $p): ?string => $p['description'] ?? null,
+                $tool['inputSchema']['properties'],
+            ),
+            $deriver->deriveTools(),
+        );
+
+        self::assertSame(['id' => 'ID of the user.'], $props[0]);
+        self::assertSame(['id' => 'ID of the OU type.'], $props[1]);
+        self::assertSame(['id' => 'ID of the meeting.', 'itemId' => 'ID of the agenda item.'], $props[2]);
+        self::assertSame(['ouId' => 'ID of the OU.', 'profileId' => 'ID of the member profile.'], $props[3]);
+        self::assertSame(['key' => 'Key of the asset.'], $props[4]);
+    }
+
+    public function testDeriveTools_pathParams_preferTheRoutesOwnDescription(): void
+    {
+        $deriver = new ToolDeriver([
+            ['method' => 'GET', 'path' => '/api/data-types/{type}/{id}', 'schema' => [
+                'summary' => 'Get record',
+                'parameters' => [
+                    ['name' => 'type', 'in' => 'path', 'required' => true, 'schema' => ['type' => 'string'], 'description' => 'The namespaced data-type key'],
+                ],
+            ]],
+        ]);
+
+        $props = $deriver->deriveTools()[0]['inputSchema']['properties'];
+
+        self::assertSame('The namespaced data-type key', $props['type']['description']);
+        self::assertSame('ID of the data type.', $props['id']['description']);
+        // A path parameter is still never offered as a query parameter.
+        self::assertSame(['type', 'id'], $deriver->deriveTools()[0]['inputSchema']['required']);
+    }
+
     public function testDeriveTools_inputSchema_noRequiredOrProperties_forSimpleRoute(): void
     {
         $deriver = new ToolDeriver([
