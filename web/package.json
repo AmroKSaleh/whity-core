@@ -24,7 +24,7 @@
   "dependencies": {
     "@whity-org/features": "file:../packages/features",
     "@whity-org/ui": "file:../packages/ui",
-    "@hookform/resolvers": "^5.9.1",
+    "@hookform/resolvers": "^6.0.0",
     "@tabler/icons-react": "^3.49.0",
     "@xyflow/react": "^12.12.0",
     "bwip-js": "^4.11.3",

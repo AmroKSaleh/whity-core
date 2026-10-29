@@ -15,7 +15,7 @@
     "@whity-org/features": "file:../../packages/features",
     "@whity-org/tokens": "file:../../packages/tokens",
     "@whity-org/ui": "file:../../packages/ui",
-    "@hookform/resolvers": "^5.9.1",
+    "@hookform/resolvers": "^6.0.0",
     "@tabler/icons-react": "^3.49.0",
     "@tauri-apps/api": "^2.12.4",
     "@tauri-apps/plugin-opener": "^2.7.2",
