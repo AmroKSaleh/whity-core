@@ -11,7 +11,8 @@ Surveyed on `develop` at `0c525285` (29 Oct 2026). Paths are relative to the rep
 - **No editor library is installed** (TipTap, ProseMirror, Lexical, Slate). Rich text today is an in-house `TextRun[]` model.
 - **The server has none of the collaboration and agent pieces**: no document versions, no optimistic concurrency, no comments, no suggestions, no realtime channel, no generic file upload, no agent identity, no proposals and no per-permission modes. An agent today *is* a person's token, and the audit log can't tell the two apart.
 - **What fits well:** the permission registry, the tenant-isolation guards, route-derived MCP tools, the event outbox, the render service's JSON-in/PDF-out protocol and its deterministic paginator, which the editor's page view can reuse, and the plugin system's interfaces, which can be extended with block definitions.
-- **Estimate:** about 36–46 engineer-weeks for M1–M8 including the server work, or 9–12 months for one engineer (see [Estimates](#dependencies-risks-and-estimates)).
+- **Estimate:** about 39–51 engineer-weeks for M1–M8 including the server work, or 10–13 months for one engineer (see [Estimates](#dependencies-risks-and-estimates)).
+- **The owner answered every question on 29 Oct 2026** (see [Owner's answers](#owners-answers-29-oct-2026)). The editor replaces both modes of the current designer. Four blocks and one page kind are proposed as register additions, waiting for approval.
 
 ## 1. Foundation status (section 12, "Changes whity-core needs")
 
@@ -248,13 +249,13 @@ In engineer-weeks for one experienced full-stack engineer, including tests and t
 | --- | --- | --- | --- |
 | M1 Foundation (tokens v3, fonts, icons, 10 components, screenshot harness) | 4–5 | 0 | **4–5** |
 | M2 Editor core | 4–5 | 1 | **5–6** |
-| M3 Rich blocks (incl. live Record and Chart, files) | 3–4 | 1–2 | **4–6** |
-| M4 Templates (fields, page view, publish, Render path, A33) | 3 | 3–4 (incl. the `Doc` page rules) | **6–7** |
+| M3 Rich blocks (incl. live Record and Chart, files, and Barcode, QR and Maths per Q1) | 4–5 | 1–3 | **5–8** |
+| M4 Templates (fields, page view, publish, Render path, A33, label sheets and CSV batch, moving existing templates per Q1) | 4–5 | 4–5 (incl. the `Doc` page rules) | **8–10** |
 | M5 Comments and suggestions | 3–4 | 2 | **5–6** |
 | M6 Agents (incl. items 10 and 11) | 2 | 4–5 | **6–7**, once Q3 is settled |
 | M7 Plugin and saved blocks | 2–3 | 2–3 | **4–6** |
 | M8 Arabic, type, accessibility | 2–3 | 0 | **2–3** |
-| **All** | | | **36–46** |
+| **All** | | | **39–51** |
 
 The 13 templates, amount in words and JoFotara (the rest of item 12) aren't in these numbers: add 4–6 weeks.
 
@@ -267,7 +268,49 @@ The 13 templates, amount in words and JoFotara (the rest of item 12) aren't in t
 - **A screenshot harness:** Playwright over Storybook, rendering each component's story at its card's size from `cards.html` in light, dark and Arabic, compared against `docs/design/screenshots/`. That makes the per-milestone visual check repeatable.
 - **Not in M1:** the rest of the palette-class clean-up outside those components, data table, app shell and cards. They're section 12 items, but the editor doesn't need them. They'd be a separate foundation branch if wanted.
 
+## Owner's answers (29 Oct 2026)
+
+| Q | Answer | What it changes |
+| --- | --- | --- |
+| 1 | **Replace both modes.** The new editor replaces the flow mode and the canvas mode. Barcode, QR code and Maths become blocks, and labels and certificates become a label sheet layout with CSV batch printing. | Proposed register additions below. M3 gains three blocks. M4 gains the label sheet kind, CSV batch and a migration of existing templates and starters into the new model. `ScreenTooSmall` and the old designer are deleted once nothing uses them (no-legacy rule). |
+| 2 | **Evolve `document_blocks`** into `saved_blocks`. | Edit migration 059 (plus 075 and 117). `global` and `system` stay for blocks Whity ships; the Save dialog offers Only me and Everyone in the workspace. |
+| 3 | **No Whity-paid model API for now.** In local mode the request goes to the person's own AI client (Claude Code or similar) connected over MCP. What the hosted website does is undecided. | No built-in agent runtime and no model-provider billing. "Ask an agent" writes an agent request to a queue. The person's MCP client picks it up with `document_agent_requests_next`, works with the tools in 3.4, and reports progress with `document_agent_request_update`, which feeds `AgentRunStatus` through the changes feed. The picker lists only agents connected for that person. When none is connected, the sheet says how to connect one rather than failing. The hosted website's behaviour stays open and doesn't block M6. ("Local mode" isn't yet a named concept in the code; it means a Whity the person's own AI client can reach over MCP.) |
+| 4 | **Draft inside, published outside.** | As proposed: `document_read` returns the draft for requests started in the editor and the published version everywhere else. |
+| 5 | **Plural `documents:*` slugs and a `document_sources` table.** | As proposed in 3.1 and 3.5. |
+| 6 | **Field providers.** | `DocumentFieldProvider` per record type, registered by core (Company, Today) and plugins; Record blocks resolve through it. The contract carries the internal id and shows the display number. |
+| 7 | **Separate slugs, granted to readers.** | As proposed in 3.5. |
+| 8 | **Native rendering for first-party blocks only.** | Every third-party plugin uses the sandboxed frame, verified or not, until a signed-module mechanism exists. |
+| 9 | **The suggestion itself is the approval.** | No proposal is wrapped around an agent's suggestion. |
+| 10 | **PHP print view.** | As proposed in 3.7. `print.renderer` in the contract needs a register-approved rename or reinterpretation before M7. |
+| 11 | **TipTap 3.** | `handoff/editor/README.md` says TipTap 2; the build uses 3. |
+| 12 | **Fix the cross-references** in this PR. | Done in a separate commit (see below). The register's values were already right, so it isn't changed. |
+| 13 | **The text is enough** for the 1024 and 768px layouts. | Checked against the card READMEs and section 18, not screenshots. |
+| 14 | **CONTRIBUTING naming** (`feature/WC-XX-…`, `WC-XX:`) once there's a ticket; until then `design/editor-mN` and "Editor Mn:". | Later milestones use the ticket the owner gives. |
+
+### Cross-reference fixes made (Q12)
+
+- `18-document-editor.md`, `handoff/editor/README.md` and the `whity-document.ts` header: "E.1–E.34" → "E.1–E.39".
+- `components/EditorCollab/README.md`: the dashed-means-not-happened rule points at 4.3, not 2.4. `whity-document.ts` (`Actor` comment): attribution points at the stage 7 actor chip, not 2.4.
+- `components/EditorAgents/README.md`: the set-down is 5.4, not 2.6.
+
+Section 18's shorter block menu is left as is: the card is the detailed spec, and the build follows the card (Copy link to block included).
+
+### Proposed register additions (Q1), waiting for approval
+
+These are drafts for the owner. The register isn't changed until they're approved, and nothing depending on them is built before then. Numbers continue the editor series.
+
+| # | Decision | Proposed value |
+| --- | --- | --- |
+| E.40 | Barcode block | A Whity block: Code 128, EAN-13 or Code 39, with the value typed or a merge field and the text under it optional. Ink only, sized in mm in the page view. Group "Whity" in the / menu. |
+| E.41 | QR code block | A Whity block: a value or a merge field as a QR, with an optional caption. Distinct from the document's verification QR in the footer (6.7), which stays automatic. |
+| E.42 | Maths block | A block (and an inline `math` node) for formulas in TeX, rendered with KaTeX on screen and in print. Group "Basic". |
+| E.43 | Label sheets | A document kind `label`: a sheet (A4, Letter) divided into a fixed grid of labels, each one the same blocks with fields; Print fills one label per record or per row of an uploaded CSV. It opens in the page view and never in the continuous view. Replaces the canvas mode's labels and certificates; a certificate is a one-label sheet. |
+
+The contract needs matching additions when these are approved: `BarcodeBlock`, `QrBlock`, `MathBlock` and an inline `MathRef` in `Block` and `Inline`, `'label'` in `DocumentKind`, and a `labels: { size, columns, rows, gapMm }` page setting.
+
 ## Questions for the owner
+
+All answered on 29 Oct 2026 (above). Kept here as asked, for the record.
 
 1. **The existing Document designer.** Does the new editor replace it, or sit beside it?
    - It has a canvas mode (absolutely placed text, images, barcodes, QR, shapes, maths), a flow mode, starters and CSV batch printing, none of which are in E.13.
