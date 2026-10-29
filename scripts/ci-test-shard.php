@@ -126,7 +126,7 @@ if ($command === 'timings' && $argc >= 4) {
         exit(2);
     }
 
-    $timings = whity_timings_from_junit($xml, $repoRoot);
+    $timings = whity_timings_from_junit($xml, whity_list_test_files($repoRoot));
     file_put_contents($argv[2], json_encode($timings, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");
     printf("ci-test-shard: %d files, %.0f s total -> %s\n", count($timings), array_sum($timings), $argv[2]);
     exit(0);

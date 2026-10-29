@@ -91,13 +91,17 @@ function whity_plan_shards(array $files, array $timings, int $shards): array
  * Sum JUnit `<testcase time>` per test file. Works for both PHPUnit's and
  * ParaTest's JUnit output: each testcase carries the `file` it came from.
  *
- * @param list<string> $junitXml documents to read
+ * Paths are matched to $testFiles by suffix, so a report written anywhere
+ * (CI's /home/runner/work/..., a container's /app) maps onto this checkout.
+ * Entries that match no known test file are dropped.
+ *
+ * @param list<string> $junitXml  documents to read
+ * @param list<string> $testFiles repo-relative test files (whity_list_test_files())
  *
  * @return array<string, float> seconds per repo-relative file, sorted by path
  */
-function whity_timings_from_junit(array $junitXml, string $repoRoot): array
+function whity_timings_from_junit(array $junitXml, array $testFiles): array
 {
-    $root = rtrim(str_replace('\\', '/', $repoRoot), '/') . '/';
     $timings = [];
 
     foreach ($junitXml as $xml) {
@@ -106,14 +110,25 @@ function whity_timings_from_junit(array $junitXml, string $repoRoot): array
             throw new RuntimeException('not a JUnit XML document');
         }
         foreach ($doc->getElementsByTagName('testcase') as $case) {
-            $file = str_replace('\\', '/', $case->getAttribute('file'));
-            if ($file === '') {
-                continue;
+            // A testcase's own `file` is where the METHOD is declared, which for
+            // an inherited test (the SDK conformance kits) is the base class in
+            // sdk/src, not the test file the shard runs. The class-level
+            // <testsuite> carries the test file; data-provider suites in
+            // between carry no `file`, so walk up to the first one that does.
+            $file = '';
+            for ($node = $case->parentNode; $node instanceof DOMElement; $node = $node->parentNode) {
+                if ($node->tagName === 'testsuite' && $node->getAttribute('file') !== '') {
+                    $file = $node->getAttribute('file');
+                    break;
+                }
             }
-            if (str_starts_with($file, $root)) {
-                $file = substr($file, strlen($root));
+            $file = str_replace('\\', '/', $file !== '' ? $file : $case->getAttribute('file'));
+            foreach ($testFiles as $known) {
+                if ($file === $known || str_ends_with($file, '/' . $known)) {
+                    $timings[$known] = ($timings[$known] ?? 0.0) + (float) $case->getAttribute('time');
+                    break;
+                }
             }
-            $timings[$file] = ($timings[$file] ?? 0.0) + (float) $case->getAttribute('time');
         }
     }
 

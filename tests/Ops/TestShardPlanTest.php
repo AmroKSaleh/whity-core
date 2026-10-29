@@ -89,6 +89,10 @@ final class TestShardPlanTest extends TestCase
         self::assertSame([], $plan[1]['files']);
     }
 
+    /**
+     * Seconds go to the test file the shard runs: data-provider rows sit in an
+     * inner suite with no `file`, and inherited methods name the base class.
+     */
     public function testTimingsAreSummedPerFileFromJunit(): void
     {
         $xml = <<<'XML'
@@ -100,7 +104,10 @@ final class TestShardPlanTest extends TestCase
                   <testcase name="two" file="/repo/tests/ATest.php" time="0.75"/>
                 </testsuite>
                 <testsuite name="B" file="/repo/tests/Sub/BTest.php">
-                  <testcase name="one" file="/repo/tests/Sub/BTest.php" time="0.5"/>
+                  <testsuite name="B::provided">
+                    <testcase name="provided with data set #0" file="/repo/tests/Sub/BTest.php" time="0.25"/>
+                  </testsuite>
+                  <testcase name="inherited" file="/repo/sdk/src/Testing/BaseTestCase.php" time="0.25"/>
                 </testsuite>
               </testsuite>
             </testsuites>
@@ -108,7 +115,7 @@ final class TestShardPlanTest extends TestCase
 
         self::assertSame(
             ['tests/ATest.php' => 2.0, 'tests/Sub/BTest.php' => 0.5],
-            whity_timings_from_junit([$xml], '/repo')
+            whity_timings_from_junit([$xml], ['tests/ATest.php', 'tests/Sub/BTest.php'])
         );
     }
 
