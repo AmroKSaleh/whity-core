@@ -1,0 +1,21 @@
+<!-- @dsCard group="Templates · Account" height=602 width=1280 subtitle="Joining a tenant, then the first-run setup" -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../bundle.css"><script src="../../preview-runtime/react.production.min.js"></script><script src="../../preview-runtime/react-dom.production.min.js"></script><script src="../bundle.js"></script><script>(function(){var t=(location.hash.match(/theme=(dark|light)/)||[])[1]||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);})();</script><style>body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font-sans);width:1280px;min-height:602px}</style><meta charset="utf-8"><title>Invitation and onboarding</title><style>html,body{height:100%} </style></head>
+<body>
+<div id="root" class="wy-theme-partner"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  function tenantLogo(name) { return h('span', { className: 'wy-tenant-logo' }, h('span', { className: 'wy-tenant-logo__tile', 'aria-hidden': 'true' }, name.charAt(0)), name); }
+  function lang() { return h('div', { className: 'wy-auth__lang' }, h('b', null, 'English'), h('span', { lang: 'ar' }, 'العربية')); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'wy-panels' },
+    h('div', null, h('div', { className: 'wy-panel-label' }, 'ACCEPT AN INVITATION'), h('div', { className: 'wy-auth__card' }, h('div', { className: 'wy-auth__brand' }, tenantLogo('Example Office')), h('h1', { className: 'wy-auth__title' }, 'Join Example Bakery'), h('p', { className: 'wy-auth__sub' }, 'Rana Haddad invited you as Accountant.'),
+      h(W.Input, { label: 'Your name', defaultValue: 'Omar Saleh' }), h(W.Input, { label: 'Email', defaultValue: 'omar@example.jo', disabled: true }), h(W.Input, { label: 'Password', type: 'password', placeholder: 'At least 12 characters' }), h(W.Button, { size: 'lg' }, 'Join Example Bakery'), h('p', { className: 'wy-auth__foot' }, 'Wrong person? ', h('a', { className: 'wy-link', href: '#' }, 'Decline the invitation')))),
+    h('div', null, h('div', { className: 'wy-panel-label' }, 'ONBOARDING · STEP 2 OF 3'), h('div', { className: 'wy-auth__card' }, h('div', { style: { display: 'flex', gap: 6 } }, [1, 1, 0].map(function (on, i) { return h('span', { key: i, style: { flex: 1, height: 4, borderRadius: 4, background: on ? 'var(--primary)' : 'var(--muted)' } }); })),
+      h('h1', { className: 'wy-auth__title', style: { textAlign: 'start' } }, 'Make it yours'), h('p', { className: 'wy-auth__sub', style: { textAlign: 'start', margin: 0 } }, 'Your name and colour appear on every screen, email and document.'),
+      h(W.Input, { label: 'Workspace name', defaultValue: 'Example Bakery' }), h(W.Select, { label: 'Main language', options: [{ value: 'en', label: 'English' }, { value: 'ar', label: 'العربية' }] }),
+      h('div', { className: 'wy-field' }, h('span', { className: 'wy-field__label' }, 'Main colour'), h('div', { className: 'wy-row' }, ['oklch(0.5 0.16 255)', '#b74c05', 'oklch(0.5 0.15 150)', 'oklch(0.55 0.18 30)', 'oklch(0.45 0.15 300)'].map(function (c, i) { return h('span', { key: c, role: 'radio', 'aria-checked': i === 1, 'aria-label': ['Blue', 'Orange', 'Green', 'Red', 'Violet'][i], className: 'wy-swatch', style: { background: c, outline: i === 1 ? '2px solid var(--foreground)' : 'none', outlineOffset: 2 } }); }))),
+      h('div', { className: 'wy-auth__row' }, h(W.Button, { variant: 'ghost', style: { width: 'auto' } }, 'Back'), h(W.Button, { style: { width: 'auto' } }, 'Continue'))))));
+</script>
+</body>
+</html>

@@ -1,0 +1,86 @@
+<!-- @dsCard group="Document editor" height=1090 width=1280 subtitle="Blocks from plugins (native or sandboxed, plugin off) and blocks people save from several blocks" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Plugin and saved blocks</title><style>html,body{height:100%} #root{height:100%} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} #root{padding:24px;box-sizing:border-box;height:auto}</style></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement, F = React.Fragment;
+  function I(n, s) { return h(W.Icon, { name: n, size: s || 16 }); }
+  function tb(icon, label, on, sc) { return h(W.IconButton, { icon: icon, label: label, size: 'sm', shortcut: sc, className: on ? 'is-on' : undefined, tooltip: 'bottom' }); }
+  function sep() { return h('span', { className: 'wy-edx__sep', 'aria-hidden': 'true' }); }
+  function mf(label, sample, preview) { return h('span', { className: 'wy-mf' + (preview ? ' is-preview' : ''), contentEditable: false, 'data-field': label }, preview ? sample : label); }
+  function blk(type, kids, extra) { extra = extra || {}; return h('div', { className: 'wy-blk wy-blk--' + type + (extra.cls ? ' ' + extra.cls : ''), 'data-type': type }, extra.gutter ? h('div', { className: 'wy-blk__gutter' }, h('button', { className: 'wy-blk__g', 'aria-label': 'Add a block below' }, I('plus')), h('button', { className: 'wy-blk__g wy-blk__g--drag', 'aria-label': 'Drag to move, click for options' }, I('drag'))) : null, extra.toolbar || null, kids); }
+  function head(o) { o = o || {};
+    return h('div', { className: 'wy-edx__head' },
+      h(W.IconButton, { icon: 'chevron-left', label: o.back || 'Back to templates', tooltip: 'bottom' }),
+      h('span', { className: 'wy-edx__doc', 'aria-hidden': 'true' }, I(o.icon || 'template')),
+      h('div', { className: 'wy-edx__titles' }, h('input', { className: 'wy-edx__title', defaultValue: o.title || 'Payment reminder', 'aria-label': 'Document title', size: 22 }),
+        h('div', { className: 'wy-edx__meta' }, o.where || 'Templates · Letters', h('span', null, '·'), I('check', 12), o.saved || 'Saved 14:02')),
+      h('div', { className: 'wy-edx__acts' },
+        h('button', { className: 'wy-edx__mode' + (o.mode === 'suggest' ? ' is-suggest' : ''), 'aria-haspopup': 'menu' }, I(o.mode === 'suggest' ? 'suggest' : o.mode === 'view' ? 'view' : 'edit', 14), o.mode === 'suggest' ? 'Suggesting' : o.mode === 'view' ? 'Viewing' : 'Editing', I('chevron-down', 14)),
+        h('span', { className: 'wy-edx__count' }, h(W.IconButton, { icon: 'comment', label: 'Comments and suggestions', tooltip: 'bottom' }), h('b', null, o.count || '3')),
+        h(W.Button, { variant: 'outline', size: 'sm', icon: 'download' }, 'PDF'),
+        o.main === false ? null : h(W.Button, { size: 'sm', icon: 'check' }, o.mainLabel || 'Publish')));
+  }
+  function bar(o) { o = o || {};
+    return h('div', { className: 'wy-edx__bar' + (o.readonly ? ' is-readonly' : ''), role: 'toolbar', 'aria-label': 'Formatting' },
+      tb('undo', 'Undo', false, '⌘Z'), tb('redo', 'Redo', false, '⇧⌘Z'), sep(),
+      h('button', { className: 'wy-edx__drop wy-edx__style', 'aria-haspopup': 'menu' }, o.style || 'Normal text', I('chevron-down', 14)), sep(),
+      tb('bold', 'Bold', o.bold, '⌘B'), tb('italic', 'Italic', false, '⌘I'), tb('underline', 'Underline', false, '⌘U'), tb('strike', 'Strikethrough', false, '⇧⌘X'), sep(),
+      tb('link', 'Link', false, '⌘K'), tb('highlight', 'Highlight'), sep(),
+      tb('list-bullet', 'Bulleted list', false, '⇧⌘8'), tb('list-numbered', 'Numbered list', false, '⇧⌘7'), tb('list-todo', 'Checklist', false, '⇧⌘9'), sep(),
+      h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu' }, I('plus', 14), 'Insert', I('chevron-down', 14)),
+      h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu' }, I('field', 14), 'Field', I('chevron-down', 14)),
+      tb('comment-add', 'Comment', false, '⌥⌘M'), sep(),
+      h('button', { className: 'wy-edx__ask' }, I('robot', 14), 'Ask an agent'),
+      h('span', { className: 'wy-edx__grow' }),
+      o.page ? h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu', 'aria-label': 'Zoom' }, o.zoom || '75%', I('chevron-down', 14)) : null,
+      h(W.ToggleGroup, { size: 'sm', label: 'View', required: true, defaultValue: o.page ? 'page' : 'continuous', options: [{ value: 'continuous', label: 'Continuous', icon: 'continuous', iconOnly: true }, { value: 'page', label: 'Page view', icon: 'page', iconOnly: true }] }),
+      tb('outline', 'Outline', o.outline !== false));
+  }
+  function outline(items) { return h('nav', { className: 'wy-edx__outline', 'aria-label': 'Outline' }, h('div', { className: 'wy-edx__outline-h' }, 'Outline'), items.map(function (it, i) { return h('a', { key: i, href: '#', className: 'l' + it[0] + (it[2] ? ' is-on' : '') }, it[1]); })); }
+  function status(t) { return h('div', { className: 'wy-edx__status' }, t.map(function (x, i) { return x === '|' ? h('span', { key: i, className: 'wy-edx__grow' }) : h('span', { key: i }, x); })); }
+  function rcard(top, o) {
+    return h('div', { className: 'wy-rc' + (o.agent ? ' is-agent' : '') + (o.active ? ' is-active' : ''), style: { top: top } },
+      h('div', { className: 'wy-rc__who' }, o.agent ? h(W.ActorChip, { kind: 'agent', name: o.agent, onBehalfOf: o.for }) : h(F, null, h(W.Avatar, { name: o.name, size: 24 }), h('span', { className: 'wy-rc__name' }, o.name)),
+        o.agent ? null : h('span', { className: 'wy-rc__time' }, o.time),
+        h('span', { className: 'wy-rc__acts' }, o.sug ? h(F, null, h(W.IconButton, { icon: 'check', label: 'Accept', size: 'sm' }), h(W.IconButton, { icon: 'close', label: 'Reject', size: 'sm' })) : h(W.IconButton, { icon: 'check', label: 'Resolve', size: 'sm' }))),
+      o.what ? h('div', { className: 'wy-rc__what' }, o.what) : null,
+      o.text ? h('div', null, o.text) : null,
+      o.reply ? h('div', { className: 'wy-rc__reply' }, 'Reply or add others with @') : null);
+  }
+  function cap(t) { return h('p', { className: 'cap', style: { margin: '18px 0 34px' } }, t); }
+  var bank = h(F, null, blk('h3', h('h4', null, 'Bank details')), blk('callout', h('div', null, I('info'), h('p', null, 'Example Bank, Mecca Street branch', h('br'), 'IBAN ', mf('Company IBAN', ''), ' · SWIFT EXBKJOAM')), { cls: 'is-note' }));
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 24, alignItems: 'start' } },
+    h('article', { className: 'wy-edx__sheet', style: { maxWidth: 'none', margin: 0, padding: '8px 40px 40px 56px' } },
+      cap('Plugin block, verified: native, with Whity components (E.17)'),
+      h('div', { className: 'wy-blk wy-blk--plugin is-selected' },
+        h('div', { className: 'wy-blk__src' }, h(W.TenantLogo, { name: 'Delivery Tracker', size: 16, showName: false, color: '#35aa76', fg: '#fff' }), h('b', null, 'Delivery Tracker'), I('success', 12), 'Verified', h('span', { className: 'wy-edx__sep' }), 'Prints'),
+        h('div', { className: 'wy-plug' }, h('div', { className: 'wy-plug__head' }, I('send'), h('b', null, 'Order SO-2207'), h('span', null, 'Example Clinic · 3 boxes')),
+          h(W.Stepper, { label: 'Delivery', steps: [{ label: 'Packed' }, { label: 'Out for delivery' }, { label: 'Delivered' }], current: 1 }))),
+      cap('Plugin block, not verified: sandboxed frame, same UI kit'),
+      h('div', { className: 'wy-blk wy-blk--plugin is-selected' },
+        h('div', { className: 'wy-blk__src' }, h(W.TenantLogo, { name: 'Route Maps', size: 16, showName: false, color: '#3a3a3a', fg: '#fff' }), h('b', null, 'Route Maps'), 'by Example Labs', h('span', { className: 'wy-edx__sep' }), I('lock', 12), 'Sandboxed', h('span', { className: 'wy-edx__sep' }), 'Notes only'),
+        h('div', { className: 'wy-plug wy-plug--frame' }, h('div', { className: 'wy-plug__bar' }, I('lock', 12), 'Runs in a sandbox · reads delivery:read', h('span', { className: 'wy-edx__grow' }), 'Resize ↕'),
+          h('div', { className: 'wy-plug__map' }, h('svg', { viewBox: '0 0 400 150', preserveAspectRatio: 'none', 'aria-hidden': 'true' }, h('path', { d: 'M0 40 H400 M0 100 H400 M90 0 V150 M220 0 V150 M330 0 V150', stroke: 'var(--border)', strokeWidth: 6, fill: 'none' }), h('path', { d: 'M40 120 L90 100 L220 100 L220 40 L330 40', stroke: 'var(--primary)', strokeWidth: 3, fill: 'none', strokeLinecap: 'round', strokeLinejoin: 'round' }), h('circle', { cx: 40, cy: 120, r: 6, fill: 'var(--foreground)' }), h('circle', { cx: 330, cy: 40, r: 6, fill: 'var(--primary)' }))))),
+      cap('Plugin off: placeholder, data kept (E.19)'),
+      h('div', { className: 'wy-blk wy-blk--missing' }, h('div', { className: 'wy-miss' }, h('span', { className: 'wy-miss__ic' }, I('plugin')), h('div', { className: 'wy-miss__t' }, h('b', { style: { fontWeight: 500 } }, 'Needs the Delivery Tracker plugin'), h('span', null, 'Its data is kept. This template can’t be published until it’s on.')), h(W.Button, { variant: 'outline', size: 'sm' }, 'Enable')))),
+    h('article', { className: 'wy-edx__sheet', style: { maxWidth: 'none', margin: 0, padding: '8px 40px 40px 56px' } },
+      cap('Several blocks selected: save them as one block'),
+      h('div', { style: { position: 'relative' } }, h('div', { className: 'wy-blk wy-blk--h3 is-multi' }, h('h4', { style: { margin: 0 } }, 'Bank details')),
+        h('div', { className: 'wy-blk wy-blk--callout is-note is-multi' }, h('div', null, I('info'), h('p', null, 'Example Bank, Mecca Street branch', h('br'), 'IBAN ', mf('Company IBAN', ''), ' · SWIFT EXBKJOAM'))),
+        h('div', { style: { marginTop: 10 } }, h('div', { className: 'wy-multibar' }, h('span', null, '2 blocks'), h(W.Button, { variant: 'ghost', size: 'sm', icon: 'plus' }, 'Save as block'), h(W.IconButton, { icon: 'comment-add', label: 'Comment', size: 'sm' }), h(W.IconButton, { icon: 'copy', label: 'Duplicate', size: 'sm' }), h(W.IconButton, { icon: 'delete', label: 'Delete', size: 'sm' })))),
+      cap('Save as block'),
+      h(W.Dialog, { inline: true, title: 'Save as block', description: 'It appears in the / menu under Saved blocks.', footer: h(F, null, h(W.Button, { variant: 'ghost' }, 'Cancel'), h(W.Button, null, 'Save block')) },
+        h(W.Input, { label: 'Name', defaultValue: 'Bank details' }),
+        h(W.RadioGroup, { label: 'When inserted', defaultValue: 'synced', options: [{ value: 'synced', label: 'Synced', hint: 'Edit it once, every document that uses it updates' }, { value: 'copy', label: 'Copy', hint: 'Inserts a copy people can change freely' }] }),
+        h(W.RadioGroup, { label: 'Who can use it', defaultValue: 'all', options: [{ value: 'me', label: 'Only me' }, { value: 'all', label: 'Everyone in Example Bakery' }] })),
+      cap('A synced block in a document, with a part filled per document (E.21, E.23)'),
+      h('div', { className: 'wy-blk is-synced is-selected', style: { marginTop: 8 } },
+        h('div', { className: 'wy-blk__src' }, I('sync', 12), h('b', null, 'Bank details'), 'Synced · used in 12 documents', h('span', { className: 'wy-edx__sep' }), h('a', { href: '#', className: 'wy-lnk' }, 'Edit original'), h('span', { className: 'wy-edx__sep' }), h('a', { href: '#', className: 'wy-lnk' }, 'Detach')),
+        blk('h3', h('h4', null, 'Bank details')),
+        blk('callout', h('div', null, I('info'), h('p', null, 'Example Bank, ', h('span', { className: 'wy-fill' }, 'Mecca Street branch'), h('br'), 'IBAN ', mf('Company IBAN', ''), ' · SWIFT EXBKJOAM')), { cls: 'is-note' })))));
+</script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+<!-- @dsCard group="Actions" height=130 subtitle="Every icon button names itself on hover and focus" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Tooltip</title><style>#root{padding:16px 24px} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px 32px;align-items:start} .ar{font-family:var(--font-arabic)} </style></head>
+<body>
+<div id="root" class=""></div>
+<script>
+  var W = window.Whity, h = React.createElement; 
+  function cap(t) { return h('p', { className: 'cap' }, t); }
+  function col() { return h.apply(null, ['div', { style: { display: 'grid', gap: 12, alignContent: 'start' } }].concat([].slice.call(arguments))); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'wy-stage', style: { paddingTop: 44, gap: 20 } },
+  h(W.Tooltip, { label: 'Download as PDF', open: true }, h(W.Button, { variant: 'outline', icon: 'download' }, 'Download')),
+  h(W.Tooltip, { label: 'Search', shortcut: '⌘K', open: true }, h(W.IconButton, { icon: 'search', label: 'Search', tooltip: false })),
+  h(W.IconButton, { icon: 'notification', label: 'Notifications' }), h(W.IconButton, { icon: 'help', label: 'Help' }), h(W.IconButton, { icon: 'more', label: 'More actions', variant: 'outline' }), h(W.IconButton, { icon: 'edit', label: 'Edit', size: 'sm' })));
+</script>
+</body>
+</html>

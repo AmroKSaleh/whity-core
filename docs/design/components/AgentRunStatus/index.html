@@ -1,0 +1,23 @@
+<!-- @dsCard group="Agent UI" height=520 subtitle="Running, waiting for approval, done, failed" -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../bundle.css"><script src="../../preview-runtime/react.production.min.js"></script><script src="../../preview-runtime/react-dom.production.min.js"></script><script src="../bundle.js"></script><script>(function(){var t=(location.hash.match(/theme=(dark|light)/)||[])[1]||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);})();</script><style>body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font-sans);width:960px;min-height:520px}</style><meta charset="utf-8"><title>Agent run status</title><style>#root{padding:16px 24px} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px 32px;align-items:start} .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;align-items:start} .ar{font-family:var(--font-arabic)} .panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-card);padding:16px}</style></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  function cap(t) { return h('p', { className: 'cap' }, t); }
+  function col() { return h.apply(null, ['div', { style: { display: 'grid', gap: 12, alignContent: 'start' } }].concat([].slice.call(arguments))); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { style: { display: 'grid', gap: 20 } },
+    h('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' } },
+      h(W.AgentRunStatus, { status: 'running', agent: 'Billing assistant', onBehalfOf: 'Rana', title: 'Reading 48 open invoices', progress: { done: 31, total: 48 }, time: 'Started 1 min ago', onStop: function () {} }),
+      h(W.AgentRunStatus, { status: 'waiting', agent: 'Billing assistant', onBehalfOf: 'Rana', title: 'Send payment reminders to 12 customers', detail: 'Waiting since 14:02 · uses invoice:remind', time: 'Asked 3 min ago', onReview: function () {} }),
+      h(W.AgentRunStatus, { status: 'done', agent: 'Front desk', onBehalfOf: 'Omar', title: 'Booked 3 deliveries for tomorrow', detail: 'Example Clinic, Example Hotel and Example School', time: 'Finished 14:20 · took 40 s' }),
+      h(W.AgentRunStatus, { status: 'failed', agent: 'HR assistant', onBehalfOf: 'Lina', title: 'Couldn’t prepare October payslips', next: 'Two employees have no bank account. Add them in People, then try again.', time: 'Stopped 13:55', onRetry: function () {} })),
+    col(cap('Compact, in the top bar'), h('div', { className: 'wy-row' },
+      h(W.AgentRunStatus, { compact: true, status: 'running', agent: 'Billing assistant', title: 'Reading 48 invoices' }),
+      h(W.AgentRunStatus, { compact: true, status: 'done', agent: 'Front desk', title: 'Booked 3 deliveries' }),
+      h(W.AgentRunStatus, { compact: true, status: 'failed', agent: 'HR assistant', title: 'Payslips stopped' })))));
+</script>
+</body>
+</html>

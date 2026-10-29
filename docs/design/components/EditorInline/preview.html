@@ -1,0 +1,86 @@
+<!-- @dsCard group="Document editor" height=760 width=1280 subtitle="Selection bubble, links, merge fields and the field picker" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Inline tools</title><style>html,body{height:100%} #root{height:100%} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} #root{padding:24px;box-sizing:border-box;height:auto}</style></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement, F = React.Fragment;
+  function I(n, s) { return h(W.Icon, { name: n, size: s || 16 }); }
+  function tb(icon, label, on, sc) { return h(W.IconButton, { icon: icon, label: label, size: 'sm', shortcut: sc, className: on ? 'is-on' : undefined, tooltip: 'bottom' }); }
+  function sep() { return h('span', { className: 'wy-edx__sep', 'aria-hidden': 'true' }); }
+  function mf(label, sample, preview) { return h('span', { className: 'wy-mf' + (preview ? ' is-preview' : ''), contentEditable: false, 'data-field': label }, preview ? sample : label); }
+  function blk(type, kids, extra) { extra = extra || {}; return h('div', { className: 'wy-blk wy-blk--' + type + (extra.cls ? ' ' + extra.cls : ''), 'data-type': type }, extra.gutter ? h('div', { className: 'wy-blk__gutter' }, h('button', { className: 'wy-blk__g', 'aria-label': 'Add a block below' }, I('plus')), h('button', { className: 'wy-blk__g wy-blk__g--drag', 'aria-label': 'Drag to move, click for options' }, I('drag'))) : null, extra.toolbar || null, kids); }
+  function head(o) { o = o || {};
+    return h('div', { className: 'wy-edx__head' },
+      h(W.IconButton, { icon: 'chevron-left', label: o.back || 'Back to templates', tooltip: 'bottom' }),
+      h('span', { className: 'wy-edx__doc', 'aria-hidden': 'true' }, I(o.icon || 'template')),
+      h('div', { className: 'wy-edx__titles' }, h('input', { className: 'wy-edx__title', defaultValue: o.title || 'Payment reminder', 'aria-label': 'Document title', size: 22 }),
+        h('div', { className: 'wy-edx__meta' }, o.where || 'Templates · Letters', h('span', null, '·'), I('check', 12), o.saved || 'Saved 14:02')),
+      h('div', { className: 'wy-edx__acts' },
+        h('button', { className: 'wy-edx__mode' + (o.mode === 'suggest' ? ' is-suggest' : ''), 'aria-haspopup': 'menu' }, I(o.mode === 'suggest' ? 'suggest' : o.mode === 'view' ? 'view' : 'edit', 14), o.mode === 'suggest' ? 'Suggesting' : o.mode === 'view' ? 'Viewing' : 'Editing', I('chevron-down', 14)),
+        h('span', { className: 'wy-edx__count' }, h(W.IconButton, { icon: 'comment', label: 'Comments and suggestions', tooltip: 'bottom' }), h('b', null, o.count || '3')),
+        h(W.Button, { variant: 'outline', size: 'sm', icon: 'download' }, 'PDF'),
+        o.main === false ? null : h(W.Button, { size: 'sm', icon: 'check' }, o.mainLabel || 'Publish')));
+  }
+  function bar(o) { o = o || {};
+    return h('div', { className: 'wy-edx__bar' + (o.readonly ? ' is-readonly' : ''), role: 'toolbar', 'aria-label': 'Formatting' },
+      tb('undo', 'Undo', false, '⌘Z'), tb('redo', 'Redo', false, '⇧⌘Z'), sep(),
+      h('button', { className: 'wy-edx__drop wy-edx__style', 'aria-haspopup': 'menu' }, o.style || 'Normal text', I('chevron-down', 14)), sep(),
+      tb('bold', 'Bold', o.bold, '⌘B'), tb('italic', 'Italic', false, '⌘I'), tb('underline', 'Underline', false, '⌘U'), tb('strike', 'Strikethrough', false, '⇧⌘X'), sep(),
+      tb('link', 'Link', false, '⌘K'), tb('highlight', 'Highlight'), sep(),
+      tb('list-bullet', 'Bulleted list', false, '⇧⌘8'), tb('list-numbered', 'Numbered list', false, '⇧⌘7'), tb('list-todo', 'Checklist', false, '⇧⌘9'), sep(),
+      h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu' }, I('plus', 14), 'Insert', I('chevron-down', 14)),
+      h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu' }, I('field', 14), 'Field', I('chevron-down', 14)),
+      tb('comment-add', 'Comment', false, '⌥⌘M'), sep(),
+      h('button', { className: 'wy-edx__ask' }, I('robot', 14), 'Ask an agent'),
+      h('span', { className: 'wy-edx__grow' }),
+      o.page ? h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu', 'aria-label': 'Zoom' }, o.zoom || '75%', I('chevron-down', 14)) : null,
+      h(W.ToggleGroup, { size: 'sm', label: 'View', required: true, defaultValue: o.page ? 'page' : 'continuous', options: [{ value: 'continuous', label: 'Continuous', icon: 'continuous', iconOnly: true }, { value: 'page', label: 'Page view', icon: 'page', iconOnly: true }] }),
+      tb('outline', 'Outline', o.outline !== false));
+  }
+  function outline(items) { return h('nav', { className: 'wy-edx__outline', 'aria-label': 'Outline' }, h('div', { className: 'wy-edx__outline-h' }, 'Outline'), items.map(function (it, i) { return h('a', { key: i, href: '#', className: 'l' + it[0] + (it[2] ? ' is-on' : '') }, it[1]); })); }
+  function status(t) { return h('div', { className: 'wy-edx__status' }, t.map(function (x, i) { return x === '|' ? h('span', { key: i, className: 'wy-edx__grow' }) : h('span', { key: i }, x); })); }
+  function rcard(top, o) {
+    return h('div', { className: 'wy-rc' + (o.agent ? ' is-agent' : '') + (o.active ? ' is-active' : ''), style: { top: top } },
+      h('div', { className: 'wy-rc__who' }, o.agent ? h(W.ActorChip, { kind: 'agent', name: o.agent, onBehalfOf: o.for }) : h(F, null, h(W.Avatar, { name: o.name, size: 24 }), h('span', { className: 'wy-rc__name' }, o.name)),
+        o.agent ? null : h('span', { className: 'wy-rc__time' }, o.time),
+        h('span', { className: 'wy-rc__acts' }, o.sug ? h(F, null, h(W.IconButton, { icon: 'check', label: 'Accept', size: 'sm' }), h(W.IconButton, { icon: 'close', label: 'Reject', size: 'sm' })) : h(W.IconButton, { icon: 'check', label: 'Resolve', size: 'sm' }))),
+      o.what ? h('div', { className: 'wy-rc__what' }, o.what) : null,
+      o.text ? h('div', null, o.text) : null,
+      o.reply ? h('div', { className: 'wy-rc__reply' }, 'Reply or add others with @') : null);
+  }
+  function cap(t, m) { return h('p', { className: 'cap', style: { margin: m || '0 0 14px' } }, t); }
+  function rel(st, kids) { return h('div', { style: Object.assign({ position: 'relative' }, st || {}) }, kids); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 24, alignItems: 'start' } },
+    h('article', { className: 'wy-edx__sheet', style: { maxWidth: 'none', margin: 0, padding: '28px 40px 40px' } },
+      cap('Selection bubble: format, link, comment, ask an agent to rewrite'),
+      rel({ paddingTop: 52 }, [h('div', { key: 'b', className: 'wy-bubble', style: { top: 0, left: 150 }, role: 'toolbar', 'aria-label': 'Selection' },
+          tb('bold', 'Bold', true, '⌘B'), tb('italic', 'Italic', false, '⌘I'), tb('underline', 'Underline', false, '⌘U'), tb('strike', 'Strikethrough'), tb('code', 'Code', false, '⌘E'), sep(), tb('link', 'Link', false, '⌘K'), tb('highlight', 'Highlight'), sep(), tb('comment-add', 'Comment', false, '⌥⌘M'), sep(),
+          h('button', { className: 'wy-edx__ask', style: { height: 28 } }, I('robot', 14), 'Rewrite')),
+        h('p', { key: 'p', style: { margin: 0, fontSize: 16, lineHeight: 1.5 } }, 'Please pay ', h('span', { className: 'wy-sel' }, h('b', null, 'within 14 days')), ' of this letter, by bank transfer or online.')]),
+      cap('Adding a link (⌘K)', '28px 0 14px'),
+      rel({ paddingTop: 48 }, [h('div', { key: 'l', className: 'wy-float wy-linkpop', style: { top: 0, left: 60 } }, I('link'), h('input', { className: 'wy-input', defaultValue: 'example.jo/pay', 'aria-label': 'Link address' }), h(W.Button, { size: 'sm', variant: 'outline' }, 'Apply')),
+        h('p', { key: 'p', style: { margin: 0, fontSize: 16 } }, 'Or pay ', h('span', { className: 'wy-sel' }, 'online'), ' with a card.')]),
+      cap('A link: hover shows where it goes', '28px 0 14px'),
+      rel({ paddingTop: 44 }, [h('div', { key: 'c', className: 'wy-float wy-linkcard', style: { top: 0, left: 48 } }, I('external', 14), h('a', { href: '#' }, 'https://example.jo/pay/INV-1042'), h(W.IconButton, { icon: 'copy', label: 'Copy link', size: 'sm' }), h(W.IconButton, { icon: 'edit', label: 'Edit link', size: 'sm' }), h(W.IconButton, { icon: 'close', label: 'Remove link', size: 'sm' })),
+        h('p', { key: 'p', style: { margin: 0, fontSize: 16 } }, 'Or pay ', h('a', { className: 'wy-lnk', href: '#' }, 'online'), ' with a card.')])),
+    h('article', { className: 'wy-edx__sheet', style: { maxWidth: 'none', margin: 0, padding: '28px 40px 40px' } },
+      cap('Merge fields: chip, hover, selected; in preview, a value or a missing value'),
+      rel({ paddingTop: 40 }, [h('div', { key: 't', className: 'wy-tipbox', style: { top: 0, left: 68 } }, 'Customer › Name ', h('code', null, 'customer.name')),
+        h('p', { key: 'p', style: { margin: 0, fontSize: 16, lineHeight: 1.9 } }, 'Dear ', h('span', { className: 'wy-mf is-hover' }, 'Customer name'), ', invoice ', h('span', { className: 'wy-mf' }, 'Invoice number'), h('span', { className: 'wy-caret' }), ' ', h('span', { className: 'wy-mf is-selected' }, 'Invoice total'))]),
+      h('p', { style: { margin: '10px 0 0', fontSize: 16, lineHeight: 1.9 } }, 'Dear ', h('span', { className: 'wy-mf is-preview' }, 'Example Clinic'), ', tax number ', h('span', { className: 'wy-mf is-missing', title: 'No value for this record' }, I('alert', 12), ' Customer tax number'), '.'),
+      cap('The field picker: Field ▾ in the toolbar, or type {{', '28px 0 14px'),
+      rel({ minHeight: 330 }, [h('p', { key: 'p', style: { margin: 0, fontSize: 16 } }, 'Due on ', h('span', { className: 'wy-slashq' }, '{{due'), h('span', { className: 'wy-caret' })),
+        h('div', { key: 'f', className: 'wy-float wy-fpick', style: { top: 32, left: 40 } },
+          h('div', { className: 'wy-slash__q' }, I('search', 14), h('b', null, 'due')),
+          h('div', { className: 'wy-slash__h' }, 'Invoice'),
+          h('div', { className: 'wy-fpick__it is-active' }, h('span', { className: 'wy-mf' }, 'Due date'), h('span', { className: 'wy-fpick__s' }, '14 Oct 2026')),
+          h('div', { className: 'wy-fpick__it' }, h('span', { className: 'wy-mf' }, 'Days overdue'), h('span', { className: 'wy-fpick__s' }, '15')),
+          h('div', { className: 'wy-fpick__it' }, h('span', { className: 'wy-mf' }, 'Amount due'), h('span', { className: 'wy-fpick__s' }, 'JOD 301.600')),
+          h('div', { className: 'wy-slash__h' }, 'Statement'),
+          h('div', { className: 'wy-fpick__it' }, h('span', { className: 'wy-mf' }, 'Overdue total'), h('span', { className: 'wy-fpick__s' }, 'JOD 397.600')),
+          h('div', { className: 'wy-slash__foot' }, h('span', null, '↑↓ to move'), h('span', null, 'Enter to insert'), h('span', null, 'Esc to close')))]))));
+</script>
+</body>
+</html>

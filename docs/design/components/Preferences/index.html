@@ -1,0 +1,14 @@
+<!-- @dsCard group="Navigation" height=130 subtitle="Segmented, the selected option tinted" -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../bundle.css"><script src="../../preview-runtime/react.production.min.js"></script><script src="../../preview-runtime/react-dom.production.min.js"></script><script src="../bundle.js"></script><script>(function(){var t=(location.hash.match(/theme=(dark|light)/)||[])[1]||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);})();</script><style>body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font-sans);width:960px;min-height:130px}</style><meta charset="utf-8"><title>Language and theme</title><style>#root{padding:16px 24px} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px 32px;align-items:start} .ar{font-family:var(--font-arabic)} </style></head>
+<body>
+<div id="root" class=""></div>
+<script>
+  var W = window.Whity, h = React.createElement; 
+  function cap(t) { return h('p', { className: 'cap' }, t); }
+  function col() { return h.apply(null, ['div', { style: { display: 'grid', gap: 12, alignContent: 'start' } }].concat([].slice.call(arguments))); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'wy-stage', style: { gap: 24 } }, h('div', null, cap('Language'), h(W.LanguageSwitch, { value: 'en' })), h('div', null, cap('Theme'), h(W.ThemeSwitch, { value: 'system' })), h('div', null, cap('Theme, compact'), h(W.ThemeSwitch, { value: 'dark', compact: true }))));
+</script>
+</body>
+</html>

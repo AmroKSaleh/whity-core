@@ -1,0 +1,99 @@
+<!-- @dsCard group="Document editor" height=910 width=1280 subtitle="Modes, suggesting, a new comment, a thread, suggestion cards, resolved, and the drawer under 1024px" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Comments and suggestions</title><style>html,body{height:100%} #root{height:100%} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} #root{padding:24px;box-sizing:border-box;height:auto}</style></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement, F = React.Fragment;
+  function I(n, s) { return h(W.Icon, { name: n, size: s || 16 }); }
+  function tb(icon, label, on, sc) { return h(W.IconButton, { icon: icon, label: label, size: 'sm', shortcut: sc, className: on ? 'is-on' : undefined, tooltip: 'bottom' }); }
+  function sep() { return h('span', { className: 'wy-edx__sep', 'aria-hidden': 'true' }); }
+  function mf(label, sample, preview) { return h('span', { className: 'wy-mf' + (preview ? ' is-preview' : ''), contentEditable: false, 'data-field': label }, preview ? sample : label); }
+  function blk(type, kids, extra) { extra = extra || {}; return h('div', { className: 'wy-blk wy-blk--' + type + (extra.cls ? ' ' + extra.cls : ''), 'data-type': type }, extra.gutter ? h('div', { className: 'wy-blk__gutter' }, h('button', { className: 'wy-blk__g', 'aria-label': 'Add a block below' }, I('plus')), h('button', { className: 'wy-blk__g wy-blk__g--drag', 'aria-label': 'Drag to move, click for options' }, I('drag'))) : null, extra.toolbar || null, kids); }
+  function head(o) { o = o || {};
+    return h('div', { className: 'wy-edx__head' },
+      h(W.IconButton, { icon: 'chevron-left', label: o.back || 'Back to templates', tooltip: 'bottom' }),
+      h('span', { className: 'wy-edx__doc', 'aria-hidden': 'true' }, I(o.icon || 'template')),
+      h('div', { className: 'wy-edx__titles' }, h('input', { className: 'wy-edx__title', defaultValue: o.title || 'Payment reminder', 'aria-label': 'Document title', size: 22 }),
+        h('div', { className: 'wy-edx__meta' }, o.where || 'Templates · Letters', h('span', null, '·'), I('check', 12), o.saved || 'Saved 14:02')),
+      h('div', { className: 'wy-edx__acts' },
+        h('button', { className: 'wy-edx__mode' + (o.mode === 'suggest' ? ' is-suggest' : ''), 'aria-haspopup': 'menu' }, I(o.mode === 'suggest' ? 'suggest' : o.mode === 'view' ? 'view' : 'edit', 14), o.mode === 'suggest' ? 'Suggesting' : o.mode === 'view' ? 'Viewing' : 'Editing', I('chevron-down', 14)),
+        h('span', { className: 'wy-edx__count' }, h(W.IconButton, { icon: 'comment', label: 'Comments and suggestions', tooltip: 'bottom' }), h('b', null, o.count || '3')),
+        h(W.Button, { variant: 'outline', size: 'sm', icon: 'download' }, 'PDF'),
+        o.main === false ? null : h(W.Button, { size: 'sm', icon: 'check' }, o.mainLabel || 'Publish')));
+  }
+  function bar(o) { o = o || {};
+    return h('div', { className: 'wy-edx__bar' + (o.readonly ? ' is-readonly' : ''), role: 'toolbar', 'aria-label': 'Formatting' },
+      tb('undo', 'Undo', false, '⌘Z'), tb('redo', 'Redo', false, '⇧⌘Z'), sep(),
+      h('button', { className: 'wy-edx__drop wy-edx__style', 'aria-haspopup': 'menu' }, o.style || 'Normal text', I('chevron-down', 14)), sep(),
+      tb('bold', 'Bold', o.bold, '⌘B'), tb('italic', 'Italic', false, '⌘I'), tb('underline', 'Underline', false, '⌘U'), tb('strike', 'Strikethrough', false, '⇧⌘X'), sep(),
+      tb('link', 'Link', false, '⌘K'), tb('highlight', 'Highlight'), sep(),
+      tb('list-bullet', 'Bulleted list', false, '⇧⌘8'), tb('list-numbered', 'Numbered list', false, '⇧⌘7'), tb('list-todo', 'Checklist', false, '⇧⌘9'), sep(),
+      h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu' }, I('plus', 14), 'Insert', I('chevron-down', 14)),
+      h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu' }, I('field', 14), 'Field', I('chevron-down', 14)),
+      tb('comment-add', 'Comment', false, '⌥⌘M'), sep(),
+      h('button', { className: 'wy-edx__ask' }, I('robot', 14), 'Ask an agent'),
+      h('span', { className: 'wy-edx__grow' }),
+      o.page ? h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu', 'aria-label': 'Zoom' }, o.zoom || '75%', I('chevron-down', 14)) : null,
+      h(W.ToggleGroup, { size: 'sm', label: 'View', required: true, defaultValue: o.page ? 'page' : 'continuous', options: [{ value: 'continuous', label: 'Continuous', icon: 'continuous', iconOnly: true }, { value: 'page', label: 'Page view', icon: 'page', iconOnly: true }] }),
+      tb('outline', 'Outline', o.outline !== false));
+  }
+  function outline(items) { return h('nav', { className: 'wy-edx__outline', 'aria-label': 'Outline' }, h('div', { className: 'wy-edx__outline-h' }, 'Outline'), items.map(function (it, i) { return h('a', { key: i, href: '#', className: 'l' + it[0] + (it[2] ? ' is-on' : '') }, it[1]); })); }
+  function status(t) { return h('div', { className: 'wy-edx__status' }, t.map(function (x, i) { return x === '|' ? h('span', { key: i, className: 'wy-edx__grow' }) : h('span', { key: i }, x); })); }
+  function rcard(top, o) {
+    return h('div', { className: 'wy-rc' + (o.agent ? ' is-agent' : '') + (o.active ? ' is-active' : ''), style: { top: top } },
+      h('div', { className: 'wy-rc__who' }, o.agent ? h(W.ActorChip, { kind: 'agent', name: o.agent, onBehalfOf: o.for }) : h(F, null, h(W.Avatar, { name: o.name, size: 24 }), h('span', { className: 'wy-rc__name' }, o.name)),
+        o.agent ? null : h('span', { className: 'wy-rc__time' }, o.time),
+        h('span', { className: 'wy-rc__acts' }, o.sug ? h(F, null, h(W.IconButton, { icon: 'check', label: 'Accept', size: 'sm' }), h(W.IconButton, { icon: 'close', label: 'Reject', size: 'sm' })) : h(W.IconButton, { icon: 'check', label: 'Resolve', size: 'sm' }))),
+      o.what ? h('div', { className: 'wy-rc__what' }, o.what) : null,
+      o.text ? h('div', null, o.text) : null,
+      o.reply ? h('div', { className: 'wy-rc__reply' }, 'Reply or add others with @') : null);
+  }
+  function cap(t, m) { return h('p', { className: 'cap', style: { margin: m || '0 0 10px' } }, t); }
+  function who(n, t) { return h('div', { className: 'wy-rc__who' }, h(W.Avatar, { name: n, size: 24 }), h('span', { className: 'wy-rc__name' }, n), h('span', { className: 'wy-rc__time' }, t)); }
+  function scard(o) { return h('div', { className: 'wy-rc wy-rc--static' + (o.agent ? ' is-agent' : '') },
+      h('div', { className: 'wy-rc__who' }, o.agent ? h(W.ActorChip, { kind: 'agent', name: o.agent, onBehalfOf: o.for }) : h(F, null, h(W.Avatar, { name: o.name, size: 24 }), h('span', { className: 'wy-rc__name' }, o.name), h('span', { className: 'wy-rc__time' }, o.time)),
+        h('span', { className: 'wy-rc__acts' }, h(W.IconButton, { icon: 'check', label: 'Accept', size: 'sm' }), h(W.IconButton, { icon: 'close', label: 'Reject', size: 'sm' }))), h('div', { className: 'wy-rc__what' }, o.what)); }
+  var modes = h('div', { style: { display: 'grid', gap: 10 } }, cap('The mode menu (E.10)'),
+      h('div', { className: 'wy-float wy-modemenu', style: { position: 'relative', width: 'auto' } },
+        h('div', { className: 'wy-modemenu__it' }, I('edit'), h('div', { className: 'wy-modemenu__t' }, 'Editing', h('span', null, 'Change the document directly'))),
+        h('div', { className: 'wy-modemenu__it is-on' }, I('suggest'), h('div', { className: 'wy-modemenu__t' }, 'Suggesting', h('span', null, 'Your edits become suggestions to accept')), I('check')),
+        h('div', { className: 'wy-modemenu__it' }, I('view'), h('div', { className: 'wy-modemenu__t' }, 'Viewing', h('span', null, 'Read and comment, nothing changes')))),
+      cap('Someone who can’t edit', '14px 0 10px'),
+      h('div', { className: 'wy-float wy-modemenu', style: { position: 'relative', width: 'auto' } },
+        h('div', { className: 'wy-modemenu__it is-off' }, I('lock'), h('div', { className: 'wy-modemenu__t' }, 'Editing', h('span', null, 'Ask an owner for edit access'))),
+        h('div', { className: 'wy-modemenu__it is-on' }, I('suggest'), h('div', { className: 'wy-modemenu__t' }, 'Suggesting', h('span', null, 'An editor accepts your changes')), I('check'))),
+      cap('Under 1024px: the same cards in a drawer (E.6)', '18px 0 10px'),
+      h('div', { className: 'wy-edx__sheet', style: { maxWidth: 'none', margin: 0, padding: 12, display: 'grid', gap: 10 } },
+        h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } }, h('b', { style: { fontWeight: 600 } }, 'Comments and suggestions'), h(W.IconButton, { icon: 'close', label: 'Close', size: 'sm' })),
+        h(W.ToggleGroup, { size: 'sm', label: 'Show', required: true, defaultValue: 'all', options: [{ value: 'all', label: 'All' }, { value: 'c', label: 'Comments' }, { value: 's', label: 'Suggestions' }] }),
+        h('div', { className: 'wy-drawerlist' },
+          h('div', { className: 'wy-rc wy-rc--static' }, who('Omar Khalil', '13:40'), h('div', { className: 'wy-rc__q' }, 'Please pay within'), h('div', null, 'Should we mention the 2% late fee here?'), h('div', { className: 'wy-rc__time' }, '1 reply')),
+          scard({ agent: 'Billing assistant', for: 'Rana', what: h(F, null, 'Delete ', h('b', null, '“usually”')) }))));
+  var sheet = h('article', { className: 'wy-edx__sheet', style: { maxWidth: 'none', margin: 0, padding: '24px 32px 32px' } },
+      cap('Suggesting: typing adds, deleting strikes through, all dashed until accepted'),
+      h('p', { style: { margin: '0 0 12px', fontSize: 16, lineHeight: 1.6 } }, 'Invoice INV-1042 was due on 14 October. ', h('mark', { className: 'wy-cmt is-active' }, 'Please pay within '), h('del', { className: 'wy-sug-del' }, '30 days'), h('ins', { className: 'wy-sug-ins' }, '14 days'), ' of this letter', h('ins', { className: 'wy-sug-ins' }, ', or call us on 06 555 0100'), h('span', { className: 'wy-caret' }), '.'),
+      h('p', { style: { margin: 0, fontSize: 16, lineHeight: 1.6 } }, 'Payments ', h('del', { className: 'wy-sug-del' }, 'usually '), 'take two working days to reach us.'),
+      cap('A new comment on a selection, with @ to mention a person or an agent', '28px 0 10px'),
+      h('div', { style: { display: 'flex', gap: 16, alignItems: 'flex-start' } },
+        h('div', { className: 'wy-rc wy-rc--static', style: { width: 300, flex: 'none' } }, who('Rana Haddad', 'now'), h('div', { className: 'wy-rc__q' }, 'Please pay within'),
+          h('div', { className: 'wy-rc__box' }, h('span', { className: 'wy-mention' }, '@Omar Khalil'), ' can you check the late fee wording?'),
+          h('div', { className: 'wy-rc__foot' }, h(W.Button, { variant: 'ghost', size: 'sm' }, 'Cancel'), h(W.Button, { variant: 'outline', size: 'sm' }, 'Comment'))),
+        h('div', { className: 'wy-float wy-mentionpop', style: { position: 'relative', marginTop: 60 } },
+          h('div', { className: 'wy-slash__h' }, 'People'), h('div', { className: 'wy-fpick__it is-active' }, h(W.Avatar, { name: 'Omar Khalil', size: 20 }), 'Omar Khalil', h('span', { className: 'wy-fpick__s' }, 'Accounts')), h('div', { className: 'wy-fpick__it' }, h(W.Avatar, { name: 'Lina Saad', size: 20 }), 'Lina Saad', h('span', { className: 'wy-fpick__s' }, 'HR')),
+          h('div', { className: 'wy-slash__h' }, 'Agents'), h('div', { className: 'wy-fpick__it' }, h(W.Avatar, { kind: 'agent', name: 'Billing assistant', size: 20 }), 'Billing assistant', h('span', { className: 'wy-fpick__s' }, 'replies with a suggestion')))));
+  var rail = h('div', { style: { display: 'grid', gap: 10 } }, cap('Rail: a thread, suggestions, resolved'),
+      h('div', { className: 'wy-edx__railhead', style: { margin: 0 } }, h('span', null, '3 suggestions · 1 comment'), h(W.Button, { variant: 'ghost', size: 'sm', iconEnd: 'chevron-down' }, 'All')),
+      h('div', { className: 'wy-rc wy-rc--static is-active' }, h('div', { className: 'wy-rc__who' }, h(W.Avatar, { name: 'Omar Khalil', size: 24 }), h('span', { className: 'wy-rc__name' }, 'Omar Khalil'), h('span', { className: 'wy-rc__time' }, '13:40'), h('span', { className: 'wy-rc__acts' }, h(W.IconButton, { icon: 'check', label: 'Resolve', size: 'sm' }), h(W.IconButton, { icon: 'more', label: 'More', size: 'sm' }))),
+        h('div', null, 'Should we mention the 2% late fee here?'),
+        h('div', { className: 'wy-rc__replies' }, h('div', null, who('Rana Haddad', '13:44'), h('div', { style: { marginTop: 4 } }, 'Yes, after the due date sentence.'))),
+        h('div', { className: 'wy-rc__reply' }, 'Reply or add others with @')),
+      scard({ name: 'Rana Haddad', time: '13:52', what: h(F, null, 'Replace ', h('b', null, '30 days'), ' with ', h('b', null, '14 days')) }),
+      scard({ name: 'Rana Haddad', time: '13:53', what: h(F, null, 'Add ', h('b', null, '“, or call us on 06 555 0100”')) }),
+      scard({ agent: 'Billing assistant', for: 'Rana', what: h(F, null, 'Delete ', h('b', null, '“usually”')) }),
+      h('div', { className: 'wy-rc wy-rc--static is-resolved' }, h('div', { className: 'wy-rc__resolved' }, I('success', 14), 'Resolved by Rana · 12:10'), h('div', { className: 'wy-rc__what' }, 'Use the customer’s legal name'), h('div', null, h(W.Button, { variant: 'ghost', size: 'sm' }, 'Reopen'))));
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { style: { display: 'grid', gridTemplateColumns: '280px minmax(0,1fr) 300px', gap: 24, alignItems: 'start' } }, modes, sheet, rail));
+</script>
+</body>
+</html>

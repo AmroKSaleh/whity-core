@@ -16,6 +16,7 @@ build/
 docs/*
 !docs/wiki/
 !docs/adr/
+!docs/design/
 .worktrees/
 .phpunit.cache/
 # PHPStan result cache (project-local tmpDir; restored across CI runs for a fast

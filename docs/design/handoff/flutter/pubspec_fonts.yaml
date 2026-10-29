@@ -1,0 +1,17 @@
+# Add to pubspec.yaml (fonts copied from fonts/ into assets/fonts/)
+flutter:
+  fonts:
+    - family: Noto Sans
+      fonts:
+        - { asset: assets/fonts/noto-sans-latin-400.woff2, weight: 400 }
+        - { asset: assets/fonts/noto-sans-latin-500.woff2, weight: 500 }
+        - { asset: assets/fonts/noto-sans-latin-600.woff2, weight: 600 }
+    - family: Noto Sans Arabic
+      fonts:
+        - { asset: assets/fonts/noto-sans-arabic-400.woff2, weight: 400 }
+        - { asset: assets/fonts/noto-sans-arabic-600.woff2, weight: 600 }
+    - family: Geist Mono
+      fonts:
+        - { asset: assets/fonts/geist-mono-400.woff2, weight: 400 }
+        - { asset: assets/fonts/geist-mono-500.woff2, weight: 500 }
+# Flutter needs TTF/OTF on some platforms: convert the woff2 files once (fonttools) if your target requires it.

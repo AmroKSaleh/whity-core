@@ -1,0 +1,18 @@
+<!-- @dsCard group="Feedback" height=490 subtitle="Where a plan unlocks a feature; names and prices are placeholders" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Plan gate</title><style>#root{padding:16px 24px} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px 32px;align-items:start} .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;align-items:start} .ar{font-family:var(--font-arabic)} .panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-card);padding:16px}</style></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  function cap(t) { return h('p', { className: 'cap' }, t); }
+  function col() { return h.apply(null, ['div', { style: { display: 'grid', gap: 12, alignContent: 'start' } }].concat([].slice.call(arguments))); }
+  var bars = [{ label: 'May', value: 3120 }, { label: 'Jun', value: 3480 }, { label: 'Jul', value: 2950 }, { label: 'Aug', value: 4010 }, { label: 'Sep', value: 4380 }, { label: 'Oct', value: 4860 }];
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'grid2' },
+    col(cap('An owner sees the upgrade'), h(W.PlanGate, { feature: 'Sales reports', description: 'Monthly revenue, top customers and ageing, sent as a PDF on the 1st.', includes: ['Scheduled reports', 'Export to Excel', 'Up to [n] agents'], price: '[price] per workspace per month' },
+      h('div', { className: 'panel' }, h(W.BarChart, { title: 'Revenue', subtitle: 'Example Bakery', data: bars, height: 330, label: false })))),
+    col(cap('Everyone else is told who can'), h(W.PlanGate, { variant: 'inline', canUpgrade: false, feature: 'Scheduled reports', description: 'Reports can be sent on a schedule on a higher plan.' }))));
+</script>
+</body>
+</html>
