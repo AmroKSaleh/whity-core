@@ -180,8 +180,8 @@ export function PluginsPage() {
               <CardHeader>
                 <CardTitle className="flex items-center justify-between gap-2 text-sm">
                   {name}
-                  {isLoaded && <Badge variant="success-solid">Loaded</Badge>}
-                  {quarantineReason && <Badge variant="destructive-solid">Quarantined</Badge>}
+                  {isLoaded && <Badge variant="success">Loaded</Badge>}
+                  {quarantineReason && <Badge variant="destructive">Quarantined</Badge>}
                 </CardTitle>
                 {loaded && <CardDescription>v{loaded.version}</CardDescription>}
               </CardHeader>
