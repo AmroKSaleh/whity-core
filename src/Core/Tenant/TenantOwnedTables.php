@@ -178,6 +178,9 @@ final class TenantOwnedTables
         // stored as the WhityDocument contract's JSON. Same visibility columns as
         // document_templates, filtered by the same DocumentAccessPolicy.
         'document_sources' => '160_create_document_sources.php',
+        // Editor M3: images and files placed in those documents (migration
+        // 161). Bound to their document; read only through it.
+        'document_source_files' => '161_create_document_source_files.php',
 
         // #947 item 1 — issued documents and their stored render output
         // (migration 108). `documents` is the record; `document_artifacts` is

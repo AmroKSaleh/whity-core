@@ -185,6 +185,7 @@ export function blockToPm(block: Block): JSONContent {
     case "chart":
       return { type: "chart", attrs: { ...common(block), chart: block.chart, source: block.source, title: block.title ?? null } }
     case "signature":
+      // @date-display-ignore: the signature date is text the author typed or a merge field (Inline[]), not a record timestamp.
       return { type: "signature", attrs: { ...common(block), signers: block.signers, date: block.date, stamp: block.stamp } }
     case "barcode":
       return {

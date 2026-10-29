@@ -252,6 +252,7 @@ function SignatureView(props: ReactNodeViewProps) {
           </div>
         ))}
         <div className="wy-sign-line">
+          {/* @date-display-ignore: the signature date is text the author typed or a merge field (Inline[]), not a record timestamp; this is its label. */}
           <b>{labels.signatureDate}</b>
           <span dir="auto">{inlineText(date)}</span>
         </div>

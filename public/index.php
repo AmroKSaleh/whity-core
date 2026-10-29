@@ -2911,13 +2911,18 @@ $documentSourcesHandler = new \Whity\Api\DocumentSourcesApiHandler(
     new \Whity\Core\Document\DocumentSourceRepository($db->getPdo()),
     $documentAccessPolicy,
     $roleChecker,
-    $ouReachResolver
+    $ouReachResolver,
+    // Images and files placed in the documents (editor M3, migration 161),
+    // in the tenant's own storage.
+    new \Whity\Core\Document\DocumentSourceFileStore($storageDriver, $db->getPdo())
 );
 $router->register('GET',    '/api/document-sources',                [$documentSourcesHandler, 'list'],      null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('POST',   '/api/document-sources',                [$documentSourcesHandler, 'create'],    null, null, CorePermissions::DOCUMENTS_WRITE);
 $router->register('GET',    '/api/document-sources/{id:\d+}',       [$documentSourcesHandler, 'show'],      null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('PUT',    '/api/document-sources/{id:\d+}/draft', [$documentSourcesHandler, 'saveDraft'], null, null, CorePermissions::DOCUMENTS_WRITE);
 $router->register('DELETE', '/api/document-sources/{id:\d+}',       [$documentSourcesHandler, 'delete'],    null, null, CorePermissions::DOCUMENTS_WRITE);
+$router->register('POST',   '/api/document-sources/{id:\d+}/files',  [$documentSourcesHandler, 'uploadFile'], null, null, CorePermissions::DOCUMENTS_WRITE);
+$router->register('GET',    '/api/document-sources/{id:\d+}/files/{fileId:\d+}/content', [$documentSourcesHandler, 'fileContent'], null, null, CorePermissions::DOCUMENTS_READ);
 
 // 13a-nonies. Server-side document/label render (ADR 0012 / WC-docdesigner
 // Track 2): POST /api/document-templates/{id}/render calls out to the separate
@@ -3076,6 +3081,18 @@ $documentVisibilityPolicy = new \Whity\Core\Document\DocumentVisibilityPolicy(
     $routeRecipientRepository,
     $resourceRoleAssignmentRepository
 );
+
+// The editor's live Record and Chart blocks (editor M3, E.16). Each answer is
+// for the reader, checked by the provider: issued documents use the same
+// visibility as the document library. Plugins register their own record types
+// and chart sources on $documentEmbedRegistry.
+$documentEmbedRegistry = new \Whity\Core\Document\Embed\DocumentEmbedRegistry();
+$documentEmbedRegistry->addRecordProvider(new \Whity\Core\Document\Embed\IssuedDocumentRecordProvider($documentRepository, $documentVisibilityPolicy));
+$documentEmbedRegistry->addChartSource(new \Whity\Core\Document\Embed\IssuedDocumentsByMonthChartSource($documentRepository, $documentVisibilityPolicy));
+$documentEmbedsHandler = new \Whity\Api\DocumentEmbedsApiHandler($documentEmbedRegistry, $roleChecker);
+$router->register('GET', '/api/document-embeds',                                        [$documentEmbedsHandler, 'catalogue'], null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('GET', '/api/document-embeds/records/{type:[a-z0-9._-]+}/{id:[A-Za-z0-9._-]+}', [$documentEmbedsHandler, 'record'], null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('GET', '/api/document-embeds/charts/{key:[a-z0-9._-]+}',               [$documentEmbedsHandler, 'chart'],     null, null, CorePermissions::DOCUMENTS_READ);
 
 // Still 13a-nonies-bis: THE DOCUMENT ORGANIZER's registries (#978, implementing
 // #947 item 5). They are built here rather than at a step of their own because

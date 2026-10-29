@@ -1287,6 +1287,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/document-embeds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List what Record and Chart blocks can show
+         * @description The record types and chart sources registered by core and enabled plugins (editor M3, E.16).
+         */
+        get: operations["get_api_v1_document_embeds"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/document-embeds/charts/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Load the series a Chart block draws, counted within the caller permissions
+         * @description Query-string values are passed to the source as the block `source.params`.
+         */
+        get: operations["get_api_v1_document_embeds_charts_key"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/document-embeds/records/{type}/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Show one record in a Record block, as the caller may see it
+         * @description Answered for the CALLER, not for the document: a Record block in a shared document shows each reader only what that reader may see. A record that does not exist and one the caller may not see are the same 404.
+         */
+        get: operations["get_api_v1_document_embeds_records_type_id"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/document-route-templates": {
         parameters: {
             query?: never;
@@ -1390,6 +1450,46 @@ export interface paths {
          * @description Send If-Match with the draft version the edit was made against (the ETag of the last GET or save). When someone saved in between, the save is refused with 409 and the current version in details.draft_version, so newer work is never overwritten. Only the fields sent are changed.
          */
         put: operations["put_api_v1_document_sources_id_draft"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/document-sources/{id}/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload an image or file into an editor document
+         * @description MULTIPART, one part named `file`, for an Image or File block (editor M3). The caller must be able to see the document. ACCEPTS application/pdf, image/png and image/jpeg ONLY, decided by the LEADING BYTES (a declared type that contradicts them is a 422); SVG is refused because an SVG served from this origin is a script. MAXIMUM 10 MiB. Returns the file id and the address it is served from, never the storage key.
+         */
+        post: operations["post_api_v1_document_sources_id_files"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/document-sources/{id}/files/{fileId}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download a file placed in an editor document
+         * @description Readable exactly when the document is. The file id is bound to the document and the tenant. Images are served inline, anything else as an attachment, with nosniff and a private immutable cache.
+         */
+        get: operations["get_api_v1_document_sources_id_files_fileid_content"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -5939,6 +6039,41 @@ export interface components {
                 reason?: "declined" | "disabled" | "persist_disabled" | "rejected" | "unavailable" | "storage_unavailable" | null;
             };
         };
+        DocumentEmbedCatalogueResponse: {
+            data: {
+                record_types: {
+                    key: string;
+                    label: string;
+                }[];
+                chart_sources: {
+                    key: string;
+                    label: string;
+                }[];
+            };
+        };
+        DocumentEmbedChartResponse: {
+            data: {
+                points: {
+                    label: string;
+                    value: number;
+                }[];
+                value_label?: string;
+            };
+        };
+        DocumentEmbedRecordResponse: {
+            data: {
+                type_label: string;
+                title: string;
+                subtitle?: string | null;
+                amount?: string | null;
+                status?: {
+                    label: string;
+                    /** @enum {string} */
+                    tone: "success" | "warning" | "destructive" | "info" | "secondary";
+                } | null;
+                href?: string | null;
+            };
+        };
         DocumentListResponse: {
             data: components["schemas"]["Document"][];
             pagination: components["schemas"]["Pagination"];
@@ -6184,6 +6319,17 @@ export interface components {
             blocks?: {
                 [key: string]: unknown;
             }[];
+        };
+        DocumentSourceFileResponse: {
+            data: {
+                id: number;
+                /** @description Where the file is served, relative to the API origin */
+                url: string;
+                filename?: string | null;
+                content_type: string;
+                byte_size: number;
+                checksum_sha256: string;
+            };
         };
         DocumentSourceListResponse: {
             data: components["schemas"]["DocumentSource"][];
@@ -15835,6 +15981,206 @@ export interface operations {
             };
         };
     };
+    get_api_v1_document_embeds: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record types and chart sources */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentEmbedCatalogueResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_document_embeds_charts_key: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One series of labelled values */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentEmbedChartResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unknown chart source, or one the caller may not use */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_document_embeds_records_type_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                type: string;
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentEmbedRecordResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Record not found, not visible to the caller, or an unknown type */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     get_api_v1_document_route_templates: {
         parameters: {
             query?: {
@@ -16716,6 +17062,189 @@ export interface operations {
             };
             /** @description Internal server error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_document_sources_id_files: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /**
+                     * Format: binary
+                     * @description The image or file. PDF, PNG or JPEG, decided by MAGIC BYTES rather than by filename or Content-Type. Maximum 10 MiB.
+                     */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The stored file and where it is served from */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentSourceFileResponse"];
+                };
+            };
+            /** @description No file part, or the multipart body could not be read */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Document not found or not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too large, empty, or not an accepted kind */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The file could not be stored */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_document_sources_id_files_fileid_content: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+                fileId: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The stored bytes, with the content type they were stored under */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                    "image/jpeg": string;
+                    "application/pdf": string;
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Document or file not found, or not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The stored file could not be read from storage */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

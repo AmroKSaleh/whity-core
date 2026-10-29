@@ -373,6 +373,7 @@ function BlockToolbar({ editor, labels, container }: { editor: Editor; labels: E
           {labels.addSigner}
         </Button>
         <Button variant="ghost" size="sm" onClick={() => edit("date", labels.signatureDate, inlineText(attrs.date as Inline[]), (v) => set({ date: textToInline(v, attrs.date as Inline[]) }))}>
+          {/* @date-display-ignore: the signature date is text the author typed or a merge field (Inline[]), not a record timestamp; this is its label. */}
           {labels.signatureDate}
         </Button>
         <Button variant="ghost" size="sm" active={Boolean(attrs.stamp)} onClick={() => set({ stamp: !attrs.stamp })}>
