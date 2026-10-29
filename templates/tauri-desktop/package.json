@@ -15,15 +15,15 @@
     "@whity-org/features": "file:../../packages/features",
     "@whity-org/tokens": "file:../../packages/tokens",
     "@whity-org/ui": "file:../../packages/ui",
-    "@hookform/resolvers": "^5.9.1",
+    "@hookform/resolvers": "^6.0.0",
     "@tabler/icons-react": "^3.49.0",
     "@tauri-apps/api": "^2.12.4",
     "@tauri-apps/plugin-opener": "^2.7.2",
-    "katex": "^0.19.0",
+    "katex": "^0.19.1",
     "radix-ui": "^1.8.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "react-hook-form": "^7.90.0",
+    "react-hook-form": "^7.91.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
