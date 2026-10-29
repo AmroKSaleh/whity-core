@@ -3,10 +3,10 @@
  * Do not edit manually - run: npm run tokens:generate
  *
  * Binaries live in ../fonts (relative to this file once published —
- * see package.json "files"). Noto Sans + Noto Sans Arabic + Geist Mono,
- * OFL-licensed (packages/tokens/fonts/LICENSE-*.txt). Import this once,
- * anywhere before first paint; `--font-sans` / `--font-mono` in
- * theme.css already reference these family names.
+ * see package.json "files"). Noto Sans, Noto Sans Arabic, Geist Mono and
+ * Readex Pro, OFL-licensed (packages/tokens/fonts/LICENSE-*.txt). Import
+ * this once, anywhere before first paint; `--font-sans`, `--font-mono` and
+ * `--font-display` in theme.css already reference these family names.
  */
 
 @font-face {
@@ -34,14 +34,6 @@
 }
 
 @font-face {
-  font-family: 'Noto Sans';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('../fonts/noto-sans-latin-700.woff2') format('woff2');
-}
-
-@font-face {
   font-family: 'Noto Sans Arabic';
   font-style: normal;
   font-weight: 400;
@@ -66,14 +58,6 @@
 }
 
 @font-face {
-  font-family: 'Noto Sans Arabic';
-  font-style: normal;
-  font-weight: 700;
-  font-display: swap;
-  src: url('../fonts/noto-sans-arabic-700.woff2') format('woff2');
-}
-
-@font-face {
   font-family: 'Geist Mono';
   font-style: normal;
   font-weight: 400;
@@ -90,17 +74,18 @@
 }
 
 @font-face {
-  font-family: 'Geist Mono';
+  font-family: 'Readex Pro';
   font-style: normal;
   font-weight: 600;
   font-display: swap;
-  src: url('../fonts/geist-mono-600.woff2') format('woff2');
+  src: url('../fonts/readex-pro-latin-600.woff2') format('woff2');
 }
 
 @font-face {
-  font-family: 'Geist Mono';
+  font-family: 'Readex Pro';
   font-style: normal;
-  font-weight: 700;
+  font-weight: 600;
   font-display: swap;
-  src: url('../fonts/geist-mono-700.woff2') format('woff2');
+  src: url('../fonts/readex-pro-arabic-600.woff2') format('woff2');
+  unicode-range: U+0600-06FF,U+0750-077F,U+0870-088E,U+0890-0891,U+0897-08E1,U+08E3-08FF,U+200C-200E,U+2010-2011,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FE74,U+FE76-FEFC;
 }

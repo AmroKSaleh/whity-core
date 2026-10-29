@@ -14,18 +14,10 @@ const meta = {
         "default",
         "secondary",
         "info",
-        "info-solid",
         "success",
-        "success-solid",
         "warning",
-        "warning-solid",
         "destructive",
-        "destructive-solid",
-        "purple",
-        "purple-solid",
         "outline",
-        "ghost",
-        "link",
       ],
     },
   },
@@ -41,18 +33,10 @@ const VARIANTS = [
   "default",
   "secondary",
   "info",
-  "info-solid",
   "success",
-  "success-solid",
   "warning",
-  "warning-solid",
   "destructive",
-  "destructive-solid",
-  "purple",
-  "purple-solid",
   "outline",
-  "ghost",
-  "link",
 ] as const
 
 export const AllVariants: Story = {
@@ -75,7 +59,7 @@ export const SubtleVsSolid: Story = {
           <IconInfoCircle data-icon="inline-start" />
           Info Subtle
         </Badge>
-        <Badge variant="info-solid">
+        <Badge variant="info">
           <IconInfoCircle data-icon="inline-start" />
           Info Solid
         </Badge>
@@ -83,7 +67,7 @@ export const SubtleVsSolid: Story = {
           <IconCheck data-icon="inline-start" />
           Success Subtle
         </Badge>
-        <Badge variant="success-solid">
+        <Badge variant="success">
           <IconCheck data-icon="inline-start" />
           Success Solid
         </Badge>
@@ -93,7 +77,7 @@ export const SubtleVsSolid: Story = {
           <IconAlertTriangle data-icon="inline-start" />
           Warning Subtle
         </Badge>
-        <Badge variant="warning-solid">
+        <Badge variant="warning">
           <IconAlertTriangle data-icon="inline-start" />
           Warning Solid
         </Badge>
@@ -101,17 +85,17 @@ export const SubtleVsSolid: Story = {
           <IconAlertTriangle data-icon="inline-start" />
           Destructive Subtle
         </Badge>
-        <Badge variant="destructive-solid">
+        <Badge variant="destructive">
           <IconAlertTriangle data-icon="inline-start" />
           Destructive Solid
         </Badge>
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <Badge variant="purple">
+        <Badge variant="secondary">
           <IconSparkles data-icon="inline-start" />
           Purple Subtle
         </Badge>
-        <Badge variant="purple-solid">
+        <Badge variant="secondary">
           <IconSparkles data-icon="inline-start" />
           Purple Solid
         </Badge>

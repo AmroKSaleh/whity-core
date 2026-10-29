@@ -77,3 +77,6 @@ __pycache__/
 # watchdog state that has nothing to do with the deployed namespace, and reading
 # it is already a trap that cost two misdiagnoses.
 ops/watchdog/.wrangler/
+
+# Design-card screenshot check output (scripts/design-cards-compare.mjs)
+/.design-check/

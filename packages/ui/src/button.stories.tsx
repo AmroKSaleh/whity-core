@@ -1,5 +1,4 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import { IconAlertTriangle, IconArrowRight, IconCheck, IconInfoCircle, IconPlus, IconSparkles } from "@tabler/icons-react"
 
 import { Button } from "./button"
 
@@ -10,23 +9,7 @@ const meta = {
   argTypes: {
     variant: {
       control: "select",
-      options: [
-        "default",
-        "outline",
-        "secondary",
-        "ghost",
-        "info",
-        "info-solid",
-        "success",
-        "success-solid",
-        "warning",
-        "warning-solid",
-        "destructive",
-        "destructive-solid",
-        "purple",
-        "purple-solid",
-        "link",
-      ],
+      options: ["default", "outline", "secondary", "ghost", "destructive", "link"],
     },
     size: {
       control: "select",
@@ -44,23 +27,7 @@ type Story = StoryObj<typeof meta>
 
 export const Playground: Story = {}
 
-const VARIANTS = [
-  "default",
-  "outline",
-  "secondary",
-  "ghost",
-  "info",
-  "info-solid",
-  "success",
-  "success-solid",
-  "warning",
-  "warning-solid",
-  "destructive",
-  "destructive-solid",
-  "purple",
-  "purple-solid",
-  "link",
-] as const
+const VARIANTS = ["default", "outline", "secondary", "ghost", "destructive", "link"] as const
 
 const SIZES = ["xs", "sm", "default", "lg"] as const
 
@@ -72,29 +39,6 @@ export const AllVariants: Story = {
           {variant}
         </Button>
       ))}
-    </div>
-  ),
-}
-
-export const SemanticVariants: Story = {
-  render: () => (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <Button variant="info"><IconInfoCircle /> Info</Button>
-        <Button variant="info-solid"><IconInfoCircle /> Info Solid</Button>
-        <Button variant="success"><IconCheck /> Success</Button>
-        <Button variant="success-solid"><IconCheck /> Success Solid</Button>
-      </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <Button variant="warning"><IconAlertTriangle /> Warning</Button>
-        <Button variant="warning-solid"><IconAlertTriangle /> Warning Solid</Button>
-        <Button variant="destructive"><IconAlertTriangle /> Destructive</Button>
-        <Button variant="destructive-solid"><IconAlertTriangle /> Destructive Solid</Button>
-      </div>
-      <div className="flex flex-wrap items-center gap-3">
-        <Button variant="purple"><IconSparkles /> Purple Subtle</Button>
-        <Button variant="purple-solid"><IconSparkles /> Purple Solid</Button>
-      </div>
     </div>
   ),
 }
@@ -114,10 +58,10 @@ export const Sizes: Story = {
 export const IconSizes: Story = {
   render: () => (
     <div className="flex flex-wrap items-center gap-3">
-      <Button size="icon-xs" aria-label="Add"><IconPlus /></Button>
-      <Button size="icon-sm" aria-label="Add"><IconPlus /></Button>
-      <Button size="icon" aria-label="Add"><IconPlus /></Button>
-      <Button size="icon-lg" aria-label="Add"><IconPlus /></Button>
+      <Button size="icon-xs" aria-label="Add" icon="plus" />
+      <Button size="icon-sm" aria-label="Add" icon="plus" />
+      <Button size="icon" aria-label="Add" icon="plus" />
+      <Button size="icon-lg" aria-label="Add" icon="plus" />
     </div>
   ),
 }
@@ -125,8 +69,8 @@ export const IconSizes: Story = {
 export const WithIcons: Story = {
   render: () => (
     <div className="flex flex-wrap items-center gap-3">
-      <Button><IconPlus data-icon="inline-start" /> New Item</Button>
-      <Button variant="outline">Continue <IconArrowRight data-icon="inline-end" /></Button>
+      <Button icon="plus">New invoice</Button>
+      <Button variant="outline" iconEnd="arrow-right">Continue</Button>
     </div>
   ),
 }

@@ -282,7 +282,7 @@ export function TopNav({
                     className="size-8 rounded-full border border-border object-cover shadow-2xs"
                   />
                 ) : (
-                  <div className="flex size-8 items-center justify-center rounded-full bg-primary/10 text-primary font-bold text-xs ring-1 ring-border shadow-2xs">
+                  <div className="flex size-8 items-center justify-center rounded-full bg-primary/10 text-primary font-semibold text-xs ring-1 ring-border shadow-2xs">
                     {userInitials}
                   </div>
                 )}

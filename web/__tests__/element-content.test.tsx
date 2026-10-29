@@ -52,7 +52,7 @@ describe('ElementContent — text: backward compatibility (no runs)', () => {
     const { container, getByTestId } = render(<ElementContent el={el} data={{}} preview />);
     const box = getByTestId('doc-textbox');
     expect(box.textContent).toBe('Hello world');
-    expect(box).toHaveStyle({ fontWeight: 'bold', fontStyle: 'italic' });
+    expect(box).toHaveStyle({ fontWeight: '600', fontStyle: 'italic' });
     // No per-run spans are introduced when `runs` is absent.
     expect(container.querySelectorAll('span')).toHaveLength(0);
   });
@@ -79,7 +79,7 @@ describe('ElementContent — text: rich-text runs', () => {
     const spans = box.querySelectorAll('span');
     expect(spans).toHaveLength(5);
     expect(spans[1].textContent).toBe('bold');
-    expect(spans[1]).toHaveStyle({ fontWeight: 'bold' });
+    expect(spans[1]).toHaveStyle({ fontWeight: '600' });
     expect(spans[3].textContent).toBe('italic');
     expect(spans[3]).toHaveStyle({ fontStyle: 'italic' });
     // Runs that never set bold/italic don't force an explicit "normal" either —
@@ -118,7 +118,7 @@ describe('ElementContent — dynamicText: rich-text runs + interpolation', () =>
     const { getByTestId } = render(<ElementContent el={el} data={data} preview={false} />);
     const box = getByTestId('doc-textbox');
     expect(box.textContent).toBe('Hello {{name}}');
-    expect(box.querySelectorAll('span')[1]).toHaveStyle({ fontWeight: 'bold' });
+    expect(box.querySelectorAll('span')[1]).toHaveStyle({ fontWeight: '600' });
   });
 
   it('interpolates each run in Preview, preserving that run\'s formatting', () => {
@@ -134,7 +134,7 @@ describe('ElementContent — dynamicText: rich-text runs + interpolation', () =>
     expect(box.textContent).toBe('Hello Acme');
     const spans = box.querySelectorAll('span');
     expect(spans[1].textContent).toBe('Acme');
-    expect(spans[1]).toHaveStyle({ fontWeight: 'bold' });
+    expect(spans[1]).toHaveStyle({ fontWeight: '600' });
   });
 });
 

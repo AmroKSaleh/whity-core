@@ -321,7 +321,7 @@ function EmailSettingsForm({
               <IconMail className="w-5 h-5" />
             </span>
             <div>
-              <CardTitle className="text-lg font-bold font-heading">
+              <CardTitle className="text-lg font-semibold font-heading">
                 <h2>{t('settings.email.delivery.title', 'Delivery')}</h2>
               </CardTitle>
               <CardDescription className="text-sm">
@@ -356,7 +356,7 @@ function EmailSettingsForm({
       {transport === 'smtp' && (
         <Card className="border border-border bg-card shadow-sm" data-testid="email-smtp-card">
           <CardHeader>
-            <CardTitle className="text-lg font-bold font-heading">
+            <CardTitle className="text-lg font-semibold font-heading">
               <h2>{t('settings.email.smtp.title', 'SMTP connection')}</h2>
             </CardTitle>
             <CardDescription className="text-sm">
@@ -430,7 +430,7 @@ function EmailSettingsForm({
       {/* Notifications */}
       <Card className="border border-border bg-card shadow-sm" data-testid="email-notifications-card">
         <CardHeader>
-          <CardTitle className="text-lg font-bold font-heading">
+          <CardTitle className="text-lg font-semibold font-heading">
             <h2>{t('settings.email.notifications.title', 'Notifications')}</h2>
           </CardTitle>
           <CardDescription className="text-sm">
@@ -463,7 +463,7 @@ function EmailSettingsForm({
       {/* Send test */}
       <Card className="border border-border bg-card shadow-sm" data-testid="email-test-card">
         <CardHeader>
-          <CardTitle className="text-lg font-bold font-heading">
+          <CardTitle className="text-lg font-semibold font-heading">
             <h2>{t('settings.email.test.title', 'Send a test email')}</h2>
           </CardTitle>
           <CardDescription className="text-sm">

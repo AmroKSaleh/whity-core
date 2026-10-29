@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Noto_Sans, Noto_Sans_Arabic, Geist_Mono } from "next/font/google";
+import { Noto_Sans, Noto_Sans_Arabic, Geist_Mono, Readex_Pro } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { AuthProvider } from "@/lib/auth-context";
@@ -25,16 +25,30 @@ import { UiPreferencesProvider } from "@/lib/ui-preferences-context";
 // the composed stack in globals.css), Geist Mono drives --font-mono. Loading
 // both scripts unconditionally — rather than swapping fonts on `dir` — lets
 // the browser fall through per-glyph, which is correct for bidi/mixed-script
-// content (e.g. an Arabic name inside an English sentence).
-const notoSans = Noto_Sans({ subsets: ["latin"], variable: "--font-noto-sans" });
+// content (e.g. an Arabic name inside an English sentence). Only the weights
+// design system 2.2 declares are loaded: no 700 anywhere (decision 3.6).
+// Readex Pro 600 is for document titles and brand headlines only (3.1, E.35).
+const notoSans = Noto_Sans({
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
+  variable: "--font-noto-sans",
+});
 const notoSansArabic = Noto_Sans_Arabic({
   subsets: ["arabic"],
+  weight: ["400", "500", "600"],
   variable: "--font-noto-sans-arabic",
 });
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
+  weight: ["400", "500"],
   subsets: ["latin"],
+});
+
+const readexPro = Readex_Pro({
+  variable: "--font-readex-pro",
+  weight: "600",
+  subsets: ["latin", "arabic"],
 });
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -82,6 +96,7 @@ export default async function RootLayout({
         notoSans.variable,
         notoSansArabic.variable,
         geistMono.variable,
+        readexPro.variable,
         "font-sans"
       )}
       // The blocking init scripts (see <head> below) set the `dark` class and

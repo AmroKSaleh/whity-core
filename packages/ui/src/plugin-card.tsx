@@ -227,7 +227,7 @@ export function PluginStoreCard({
               {plugin.icon ?? <IconPuzzle />}
             </div>
             <div className="min-w-0 flex-1">
-              <CardTitle className="text-sm font-bold truncate">{plugin.name}</CardTitle>
+              <CardTitle className="text-sm font-semibold truncate">{plugin.name}</CardTitle>
               <CardDescription className="text-xs truncate">
                 by {plugin.author} · v{plugin.version}
               </CardDescription>
@@ -319,7 +319,7 @@ export function InstalledPluginCard({
     active: {
       cardVariant: "success" as const,
       borderStyle: "solid" as const,
-      badge: <Badge variant="success-solid">{text.active}</Badge>,
+      badge: <Badge variant="success">{text.active}</Badge>,
       disabled: false,
     },
     inactive: {
@@ -331,13 +331,13 @@ export function InstalledPluginCard({
     disabled: {
       cardVariant: "destructive" as const,
       borderStyle: "dotted" as const,
-      badge: <Badge variant="destructive-solid">{text.disabledBySystem}</Badge>,
+      badge: <Badge variant="destructive">{text.disabledBySystem}</Badge>,
       disabled: true,
     },
     "update-available": {
       cardVariant: "info" as const,
       borderStyle: "solid" as const,
-      badge: <Badge variant="info-solid">{text.updateAvailable(plugin.latestVersion)}</Badge>,
+      badge: <Badge variant="info">{text.updateAvailable(plugin.latestVersion)}</Badge>,
       disabled: false,
     },
   }[state]
@@ -365,7 +365,7 @@ export function InstalledPluginCard({
               {plugin.icon ?? <IconPuzzle />}
             </div>
             <div className="min-w-0 flex-1">
-              <CardTitle className="text-sm font-bold truncate">{plugin.name}</CardTitle>
+              <CardTitle className="text-sm font-semibold truncate">{plugin.name}</CardTitle>
               <CardDescription className="text-xs truncate">
                 Installed v{plugin.version} · by {plugin.author}
               </CardDescription>
@@ -432,7 +432,7 @@ export function InstalledPluginCard({
             {state === "update-available" && (
               <Button
                 size="sm"
-                variant="info-solid"
+                variant="outline"
                 onClick={() => onUpdate?.(plugin)}
               >
                 <IconRefresh data-icon="inline-start" />
@@ -454,7 +454,7 @@ export function InstalledPluginCard({
             {state === "inactive" && (
               <Button
                 size="sm"
-                variant="success-solid"
+                variant="outline"
                 onClick={() => onToggleState?.(plugin, "active")}
               >
                 <IconCheck data-icon="inline-start" />
@@ -521,7 +521,7 @@ export function InstalledPluginCard({
                 {text.cancel}
               </Button>
               <Button
-                variant="warning-solid"
+                variant="default"
                 onClick={() => {
                   if (rollbackTarget) {
                     onRollback?.(plugin, rollbackTarget)
@@ -583,7 +583,7 @@ function PluginDetailsModal({
               {plugin.icon ?? <IconPuzzle />}
             </div>
             <div>
-              <DialogTitle className="text-lg font-bold flex items-center gap-2">
+              <DialogTitle className="text-lg font-semibold flex items-center gap-2">
                 {plugin.name}
                 {plugin.verified && <Badge variant="default" className="text-[10px]">{text.verified}</Badge>}
               </DialogTitle>

@@ -87,12 +87,12 @@ export const PluginStoreCard: Story = {
               <IconPuzzle className="size-5" />
             </div>
             <div>
-              <CardTitle className="text-sm font-bold">AI Document Summarizer</CardTitle>
+              <CardTitle className="text-sm font-semibold">AI Document Summarizer</CardTitle>
               <CardDescription className="text-xs">by Whity AI Labs · v2.4.0</CardDescription>
             </div>
           </div>
           <CardAction>
-            <Badge variant="purple-solid" className="text-[10px]">Verified</Badge>
+            <Badge variant="secondary" className="text-[10px]">Verified</Badge>
           </CardAction>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -110,7 +110,7 @@ export const PluginStoreCard: Story = {
         </CardContent>
         <CardFooter className="border-t border-border/40 pt-3 flex items-center justify-between">
           <span className="text-xs font-semibold text-foreground">Free Tier Included</span>
-          <Button size="sm" variant="purple-solid">
+          <Button size="sm" variant="outline">
             <IconDownload data-icon="inline-start" />
             Install Plugin
           </Button>
@@ -124,12 +124,12 @@ export const PluginStoreCard: Story = {
               <IconCloudUpload className="size-5" />
             </div>
             <div>
-              <CardTitle className="text-sm font-bold">S3 Storage Connector</CardTitle>
+              <CardTitle className="text-sm font-semibold">S3 Storage Connector</CardTitle>
               <CardDescription className="text-xs">by CloudSync Inc · v1.8.2</CardDescription>
             </div>
           </div>
           <CardAction>
-            <Badge variant="info-solid" className="text-[10px]">Installed</Badge>
+            <Badge variant="info" className="text-[10px]">Installed</Badge>
           </CardAction>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -165,12 +165,12 @@ export const FeatureInstallCard: Story = {
             <IconCpu className="size-6" />
           </div>
           <div>
-            <CardTitle className="text-base font-bold">Advanced Audit Logging</CardTitle>
+            <CardTitle className="text-base font-semibold">Advanced Audit Logging</CardTitle>
             <CardDescription className="text-xs">Immutable security and access audit telemetry</CardDescription>
           </div>
         </div>
         <CardAction>
-          <Badge variant="success-solid">Ready to Enable</Badge>
+          <Badge variant="success">Ready to Enable</Badge>
         </CardAction>
       </CardHeader>
 
@@ -200,7 +200,7 @@ export const FeatureInstallCard: Story = {
 
       <CardFooter className="border-t border-border/40 pt-4 flex items-center justify-between">
         <span className="text-xs font-medium text-muted-foreground">No restart required</span>
-        <Button size="default" variant="success-solid">
+        <Button size="default" variant="default">
           <IconCheck data-icon="inline-start" />
           Enable Feature Module
         </Button>
@@ -213,7 +213,7 @@ export const InteractiveWithInputFieldCard: Story = {
   render: () => (
     <Card variant="default" className="w-full max-w-md">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-sm font-bold">
+        <CardTitle className="flex items-center gap-2 text-sm font-semibold">
           <IconKey className="size-4 text-purple-600 dark:text-purple-400" />
           API Access Token
         </CardTitle>
@@ -234,7 +234,7 @@ export const InteractiveWithInputFieldCard: Story = {
       </CardContent>
       <CardFooter className="border-t border-border/40 pt-3 flex items-center justify-between">
         <span className="text-[11px] text-muted-foreground">Expires in 90 days</span>
-        <Button size="sm" variant="purple-solid">
+        <Button size="sm" variant="outline">
           Regenerate Key
         </Button>
       </CardFooter>
@@ -247,48 +247,48 @@ export const InformationalCard: Story = {
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl">
       <Card variant="purple" className="w-full">
         <CardHeader>
-          <CardTitle className="text-xs uppercase tracking-wider text-purple-800 dark:text-purple-300 font-bold">
+          <CardTitle className="text-xs uppercase tracking-wider text-purple-800 dark:text-purple-300 font-semibold">
             Total Requests
           </CardTitle>
           <CardDescription>Last 30 days telemetry</CardDescription>
           <CardAction>
-            <Badge variant="purple-solid">+14.2%</Badge>
+            <Badge variant="secondary">+14.2%</Badge>
           </CardAction>
         </CardHeader>
         <CardContent>
-          <div className="text-2xl font-bold text-foreground font-heading">1.42 M</div>
+          <div className="text-2xl font-semibold text-foreground font-heading">1.42 M</div>
           <p className="text-[11px] text-muted-foreground mt-1">Average 48.2k requests / day</p>
         </CardContent>
       </Card>
 
       <Card variant="info" className="w-full">
         <CardHeader>
-          <CardTitle className="text-xs uppercase tracking-wider text-blue-800 dark:text-blue-300 font-bold">
+          <CardTitle className="text-xs uppercase tracking-wider text-blue-800 dark:text-blue-300 font-semibold">
             Active Subscriptions
           </CardTitle>
           <CardDescription>Tenant billing telemetry</CardDescription>
           <CardAction>
-            <Badge variant="info-solid">Healthy</Badge>
+            <Badge variant="info">Healthy</Badge>
           </CardAction>
         </CardHeader>
         <CardContent>
-          <div className="text-2xl font-bold text-foreground font-heading">328</div>
+          <div className="text-2xl font-semibold text-foreground font-heading">328</div>
           <p className="text-[11px] text-muted-foreground mt-1">24 new tenants signed up this week</p>
         </CardContent>
       </Card>
 
       <Card variant="success" className="w-full">
         <CardHeader>
-          <CardTitle className="text-xs uppercase tracking-wider text-emerald-800 dark:text-emerald-300 font-bold">
+          <CardTitle className="text-xs uppercase tracking-wider text-emerald-800 dark:text-emerald-300 font-semibold">
             System Availability
           </CardTitle>
           <CardDescription>All services operational</CardDescription>
           <CardAction>
-            <Badge variant="success-solid">99.99%</Badge>
+            <Badge variant="success">99.99%</Badge>
           </CardAction>
         </CardHeader>
         <CardContent>
-          <div className="text-2xl font-bold text-foreground font-heading">0 Incidents</div>
+          <div className="text-2xl font-semibold text-foreground font-heading">0 Incidents</div>
           <p className="text-[11px] text-muted-foreground mt-1">Zero downtime over 90 days</p>
         </CardContent>
       </Card>
@@ -343,7 +343,7 @@ export const BorderStylesAndStates: Story = {
           </CardTitle>
           <CardDescription>Selected state with primary ring focus</CardDescription>
           <CardAction>
-            <Badge variant="purple-solid">Selected</Badge>
+            <Badge variant="secondary">Selected</Badge>
           </CardAction>
         </CardHeader>
         <CardContent>
@@ -365,7 +365,7 @@ export const ColorVariants: Story = {
           <CardDescription>Subtle purple brand accent tint</CardDescription>
         </CardHeader>
         <CardContent>
-          <Badge variant="purple-solid">AI Engine Active</Badge>
+          <Badge variant="secondary">AI Engine Active</Badge>
         </CardContent>
       </Card>
 
@@ -375,7 +375,7 @@ export const ColorVariants: Story = {
           <CardDescription>Subtle blue informational tint</CardDescription>
         </CardHeader>
         <CardContent>
-          <Badge variant="info-solid">Syncing Data</Badge>
+          <Badge variant="info">Syncing Data</Badge>
         </CardContent>
       </Card>
 
@@ -385,7 +385,7 @@ export const ColorVariants: Story = {
           <CardDescription>Subtle emerald success tint</CardDescription>
         </CardHeader>
         <CardContent>
-          <Badge variant="success-solid">Operational</Badge>
+          <Badge variant="success">Operational</Badge>
         </CardContent>
       </Card>
 
@@ -395,7 +395,7 @@ export const ColorVariants: Story = {
           <CardDescription>Subtle amber warning tint</CardDescription>
         </CardHeader>
         <CardContent>
-          <Badge variant="warning-solid">High Load</Badge>
+          <Badge variant="warning">High Load</Badge>
         </CardContent>
       </Card>
 
@@ -405,7 +405,7 @@ export const ColorVariants: Story = {
           <CardDescription>Subtle red error tint</CardDescription>
         </CardHeader>
         <CardContent>
-          <Badge variant="destructive-solid">2 Failures</Badge>
+          <Badge variant="destructive">2 Failures</Badge>
         </CardContent>
       </Card>
 

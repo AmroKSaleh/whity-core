@@ -164,7 +164,9 @@ describe('generated outputs', () => {
     for (const size of ['xs', 'sm', 'base', 'lg', 'xl', '2xl', '3xl', '4xl']) {
       expect(css).toContain(`--text-${size}:`);
     }
-    expect(css).toContain('--font-weight-bold: 700');
+    // Decision 3.6: no 700 in the product.
+    expect(css).not.toContain('--font-weight-bold');
+    expect(css).not.toMatch(/font-weight[^;]*: 700/);
     expect(css).toContain('--leading-normal: 1.5');
     expect(css).toContain('--tracking-tight: -0.025em');
   });
