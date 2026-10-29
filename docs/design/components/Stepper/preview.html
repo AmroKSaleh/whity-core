@@ -1,0 +1,19 @@
+<!-- @dsCard group="Navigation" height=360 subtitle="3–6 steps; the count on narrow screens" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Stepper</title><style>#root{padding:16px 24px} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px 32px;align-items:start} .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;align-items:start} .ar{font-family:var(--font-arabic)} .panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-card);padding:16px}</style></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  function cap(t) { return h('p', { className: 'cap' }, t); }
+  function col() { return h.apply(null, ['div', { style: { display: 'grid', gap: 12, alignContent: 'start' } }].concat([].slice.call(arguments))); }
+  var steps = [{ label: 'Company', hint: 'Name and tax number' }, { label: 'Branding', hint: 'Logo and colour' }, { label: 'Team', hint: 'Invite people' }, { label: 'Agents', hint: 'Connect an AI client' }];
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { style: { display: 'grid', gap: 28 } },
+    col(cap('Set up your workspace'), h(W.Stepper, { label: 'Workspace setup', steps: steps, current: 2 })),
+    h('div', { className: 'grid2' },
+      col(cap('Vertical, beside a long form'), h(W.Stepper, { orientation: 'vertical', label: 'Import', steps: [{ label: 'Upload file' }, { label: 'Match columns', hint: '12 of 14 matched' }, { label: 'Review and import' }], current: 1 })),
+      col(cap('بالعربية'), h('div', { dir: 'rtl', lang: 'ar', className: 'ar' }, h(W.Stepper, { label: 'إعداد', labels: { step: 'الخطوة {n} من {total}' }, steps: [{ label: 'الشركة' }, { label: 'الهوية' }, { label: 'الفريق' }], current: 1 }))))));
+</script>
+</body>
+</html>

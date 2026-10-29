@@ -1,0 +1,14 @@
+<!-- @dsCard group="Data" height=330 -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../bundle.css"><script src="../../preview-runtime/react.production.min.js"></script><script src="../../preview-runtime/react-dom.production.min.js"></script><script src="../bundle.js"></script><script>(function(){var t=(location.hash.match(/theme=(dark|light)/)||[])[1]||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);})();</script><style>body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font-sans);width:960px;min-height:330px}</style><meta charset="utf-8"><title>DataTable</title><style>#root{padding:16px 24px}</style></head>
+<body>
+<div id="root" class=""></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h(W.DataTable, { columns: [{ key: 'name', label: 'Tenant' }, { key: 'plan', label: 'Plan', render: function (r) { return h(W.Badge, { variant: 'outline' }, r.plan); } }, { key: 'users', label: 'Users', align: 'end' }, { key: 'status', label: 'Status', render: function (r) { return h(W.Badge, { variant: r.status === 'Active' ? 'success' : 'warning' }, r.status); } }, { key: 'mrr', label: 'Monthly', align: 'end', render: function (r) { return h(W.Money, { amount: r.mrr }); } }],
+    rows: [{ id: 1, name: 'Example Bakery', plan: 'Pro', users: 12, status: 'Active', mrr: 49 }, { id: 2, name: 'Example Trading', plan: 'Free', users: 3, status: 'Trial', mrr: 0 }, { id: 3, name: 'Example Clinic', plan: 'Pro', users: 28, status: 'Active', mrr: 89 }],
+    footer: h(W.Pagination, { from: 1, to: 3, total: 3 }) }));
+</script>
+</body>
+</html>

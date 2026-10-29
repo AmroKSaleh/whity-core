@@ -1,0 +1,12 @@
+<!-- @dsCard group="Status" height=64 -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Badge</title></head>
+<body>
+<div id="root" class="wy-stage"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h(React.Fragment, null, h(W.Badge, null, 'Pro plan'), h(W.Badge, { variant: 'secondary' }, 'Draft'), h(W.Badge, { variant: 'outline' }, '12 seats'), h(W.Badge, { variant: 'success', icon: 'check' }, 'Active'), h(W.Badge, { variant: 'info' }, 'Syncing'), h(W.Badge, { variant: 'warning' }, 'Trial ends in 3 days'), h(W.Badge, { variant: 'destructive' }, 'Failed')));
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+<!-- @dsCard group="Agent UI" height=470 -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>AgentActivity</title></head>
+<body>
+<div id="root" class="wy-stack"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h(W.AgentActivity, { filter: true, items: [{ kind: 'read', actor: 'Front desk', onBehalfOf: 'Omar', text: 'Read 3 quote requests', time: '13:40', tool: 'leads.list' }, { kind: 'read', actor: 'Billing assistant', onBehalfOf: 'Rana', text: 'Read 48 open invoices', time: '13:58', tool: 'invoices.list' }, { kind: 'propose', actor: 'Billing assistant', onBehalfOf: 'Rana', text: 'Asked to send 12 reminders', time: '13:59', tool: 'invoices.remind' }, { kind: 'approve', actorKind: 'person', actor: 'Rana Haddad', text: 'Approved the reminders', time: '14:02' }, { kind: 'act', actor: 'Billing assistant', onBehalfOf: 'Rana', text: 'Sent 12 reminders', time: '14:02', tool: 'invoices.remind' }, { kind: 'error', actor: 'Billing assistant', text: '1 email bounced: address not found', time: '14:03' }] }));
+</script>
+</body>
+</html>

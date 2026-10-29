@@ -1,0 +1,12 @@
+<!-- @dsCard group="Actions" height=126 -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Button</title></head>
+<body>
+<div id="root" class="wy-stage"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h(React.Fragment, null, h(W.Button, { icon: 'send' }, 'Send invoice'), h(W.Button, { variant: 'outline' }, 'Save draft'), h(W.Button, { variant: 'secondary' }, 'Duplicate'), h(W.Button, { variant: 'ghost' }, 'Cancel'), h(W.Button, { variant: 'destructive', icon: 'delete' }, 'Delete tenant'), h(W.Button, { variant: 'link' }, 'View history'), h(W.Button, { size: 'sm', loading: true }, 'Saving'), h(W.Button, { size: 'lg' }, 'Create workspace')));
+</script>
+</body>
+</html>

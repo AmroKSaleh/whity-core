@@ -1,0 +1,19 @@
+<!-- @dsCard group="Navigation" height=536 subtitle="⌘K: pages, records, actions, and asking an agent" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Command palette</title><style>#root{padding:16px 24px} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px 32px;align-items:start} .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;align-items:start} .ar{font-family:var(--font-arabic)} .panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-card);padding:16px}</style></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  function cap(t) { return h('p', { className: 'cap' }, t); }
+  function col() { return h.apply(null, ['div', { style: { display: 'grid', gap: 12, alignContent: 'start' } }].concat([].slice.call(arguments))); }
+  var go = function (l, i, hnt) { return { label: l, icon: i, hint: hnt }; };
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', null, h(W.CommandPalette, { inline: true, defaultQuery: 'inv', groups: [
+    { heading: 'Records', items: [{ label: 'INV-1042 · Example Clinic', icon: 'invoice', hint: 'JOD 301.600 · overdue', keywords: 'invoice' }, { label: 'INV-1038 · Example Hotel', icon: 'invoice', hint: 'JOD 1,240.000 · paid', keywords: 'invoice' }] },
+    { heading: 'Go to', items: [go('Invoices', 'invoice', 'Sales'), go('Inbox', 'inbox'), go('Approvals', 'approval'), go('Audit log', 'audit')] },
+    { heading: 'Actions', items: [{ label: 'Create invoice', icon: 'plus', shortcut: 'C I' }, { label: 'Send payment reminders', icon: 'send', keywords: 'invoice overdue' }] },
+    { heading: 'Ask an agent', always: true, items: [{ label: 'Ask Billing assistant: “{q}”', agent: true, hint: 'It proposes; you approve' }] }] })));
+</script>
+</body>
+</html>

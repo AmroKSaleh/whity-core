@@ -1,0 +1,19 @@
+{
+ "name": "approve-set-down",
+ "duration": 200,
+ "easing": "cubic-bezier(0.2, 0, 0, 1)",
+ "from": {
+  "border": "1.5px dashed color-mix(brand 60%, border)",
+  "boxShadow": "none",
+  "badge": "Waiting for your approval"
+ },
+ "to": {
+  "border": "1.5px solid brand",
+  "boxShadow": "plane-rest (-3px 3px 0 0 brand)",
+  "marginLeft": "plane-offset",
+  "marginBottom": "plane-offset",
+  "badge": "Approved \u00b7 <time>"
+ },
+ "reverse": "Undo plays it backwards in 200 ms",
+ "reducedMotion": "jump to the final state"
+}
