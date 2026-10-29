@@ -1069,7 +1069,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2]
 
     # Its own Postgres service per shard, like postgres-integration: the template
     # database and the throwaway clones are per-server state, so two shards
