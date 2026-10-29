@@ -41,7 +41,7 @@ import { Input } from "./input"
  *
  * FETCHES NOTHING, TRANSLATES NOTHING. People arrive as a prop and every visible
  * string is a label prop with an English default, like every other
- * `@amroksaleh/ui` input.
+ * `@whity-org/ui` input.
  */
 
 /** One person who may be named. */

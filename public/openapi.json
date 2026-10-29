@@ -2,7 +2,7 @@
     "openapi": "3.0.0",
     "info": {
         "title": "Whity Core API",
-        "version": "0.2.17",
+        "version": "0.2.18",
         "description": "Request bodies are declared, not implied: where an operation accepts one, it is described here. An operation with no `requestBody` accepts none \u2014 a reviewed contract, not a gap in this document. The exception is an operation marked `x-whity-undocumented: true`: that one carries no authored contract at all, its summary and responses are generated defaults, and it may well take a body. Every CORE operation in the published `public/openapi.json` is authored, so the marker appears there only on plugin routes that declare no schema of their own; a document served live by a running instance may mark core routes too."
     },
     "servers": [
@@ -38386,7 +38386,8 @@
                 "properties": {
                     "body_key": {
                         "type": "string",
-                        "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$"
+                        "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$",
+                        "description": "Short permanent key (lower-case letters, digits, `-`, `_`). Quoted in every decision number, and cannot be changed later."
                     },
                     "name": {
                         "oneOf": [
@@ -38396,15 +38397,18 @@
                             {
                                 "$ref": "#/components/schemas/LocalizedLabel"
                             }
-                        ]
+                        ],
+                        "description": "Name of the body (council, committee), as text or as a `{language: text}` map."
                     },
                     "ou_id": {
                         "type": "integer",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Organizational unit the body belongs to; null for none."
                     },
                     "description": {
                         "type": "string",
-                        "maxLength": 10000
+                        "maxLength": 10000,
+                        "description": "What the body is for."
                     }
                 },
                 "required": [
@@ -38514,7 +38518,8 @@
                 "type": "object",
                 "properties": {
                     "profile_id": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "Profile id of the person to add as a member."
                     },
                     "member_role": {
                         "type": "string",
@@ -38522,7 +38527,8 @@
                             "chair",
                             "secretary",
                             "member"
-                        ]
+                        ],
+                        "description": "Their role in the body: `chair`, `secretary` or `member`."
                     }
                 },
                 "required": [
@@ -38551,18 +38557,22 @@
                             {
                                 "$ref": "#/components/schemas/LocalizedLabel"
                             }
-                        ]
+                        ],
+                        "description": "New name, as text or as a `{language: text}` map."
                     },
                     "ou_id": {
                         "type": "integer",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Organizational unit the body belongs to; null for none."
                     },
                     "description": {
                         "type": "string",
-                        "maxLength": 10000
+                        "maxLength": 10000,
+                        "description": "New description."
                     },
                     "is_active": {
-                        "type": "boolean"
+                        "type": "boolean",
+                        "description": "false retires the body: it keeps its history but convenes no new meetings."
                     }
                 },
                 "minProperties": 1
@@ -39111,21 +39121,25 @@
                         "enum": [
                             "role",
                             "user"
-                        ]
+                        ],
+                        "description": "Who receives the permissions: `role` (everyone holding a role) or `user` (one person)."
                     },
                     "granteeId": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "Id of the role, or the profile id of the user, named by `granteeType`."
                     },
                     "permissions": {
                         "type": "array",
                         "items": {
                             "type": "string"
                         },
-                        "minItems": 1
+                        "minItems": 1,
+                        "description": "Permission names (`resource:action`) to delegate. You can only delegate permissions you hold yourself."
                     },
                     "ouId": {
                         "type": "integer",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Limit the delegation to this organizational unit and the units below it. Null or omitted applies tenant-wide."
                     }
                 },
                 "required": [
@@ -39956,11 +39970,13 @@
                 "type": "object",
                 "properties": {
                     "document_template_id": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "Template to issue the document from (see GET /api/document-templates)."
                     },
                     "title": {
                         "type": "string",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Document title; defaults from the template."
                     },
                     "dataRows": {
                         "type": "array",
@@ -39969,16 +39985,19 @@
                             "additionalProperties": {
                                 "type": "string"
                             }
-                        }
+                        },
+                        "description": "Values for the template's placeholders: one object per label or page, mapping placeholder key to text. A key the template does not declare is refused."
                     },
                     "sheet": {
                         "type": "object",
                         "additionalProperties": true,
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Optional label-sheet layout for printing several labels per page; null for one per page."
                     },
                     "render": {
                         "type": "boolean",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Omit to render when this server can; true to require a rendered file (503 if rendering is unavailable); false to record without rendering."
                     }
                 },
                 "required": [
@@ -40100,20 +40119,24 @@
                             "additionalProperties": {
                                 "type": "string"
                             }
-                        }
+                        },
+                        "description": "Values for the template's placeholders: one object per label or page, mapping placeholder key to text. Omitted or empty renders one copy with the template's sample values."
                     },
                     "sheet": {
                         "type": "object",
                         "additionalProperties": true,
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Optional label-sheet layout for printing several labels per page; null for one per page."
                     },
                     "persist": {
                         "type": "boolean",
-                        "default": false
+                        "default": false,
+                        "description": "true to record the result as a document (returns the record); false (default) returns the PDF as a preview only."
                     },
                     "title": {
                         "type": "string",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Title of the recorded document. Used only when `persist` is true."
                     }
                 }
             },
@@ -40127,12 +40150,14 @@
                             "additionalProperties": {
                                 "type": "string"
                             }
-                        }
+                        },
+                        "description": "Values for the template's placeholders: one object per label or page, mapping placeholder key to text."
                     },
                     "sheet": {
                         "type": "object",
                         "additionalProperties": true,
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Optional label-sheet layout for printing several labels per page; null for one per page."
                     }
                 }
             },
@@ -40215,11 +40240,13 @@
                             "acknowledged",
                             "returned",
                             "noted"
-                        ]
+                        ],
+                        "description": "What you did with the document: `forwarded`, `acknowledged`, `returned` or `noted`."
                     },
                     "note": {
                         "type": "string",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Comment for the trail. Required for `noted`."
                     },
                     "verdict": {
                         "type": "string",
@@ -40227,7 +40254,8 @@
                             "approved",
                             "rejected"
                         ],
-                        "nullable": true
+                        "nullable": true,
+                        "description": "`approved` or `rejected`. Required with `acknowledged` on a decision step; refused anywhere else."
                     }
                 },
                 "required": [
@@ -40266,7 +40294,8 @@
                 "properties": {
                     "title": {
                         "type": "string",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Name of this circulation; defaults from the document."
                     },
                     "steps": {
                         "type": "array",
@@ -40316,7 +40345,8 @@
                             "required": [
                                 "rule_kind"
                             ]
-                        }
+                        },
+                        "description": "Ordered steps, at least one. Each names a `rule_kind` (see GET /api/routing-rules) and its `rule_config`, deciding who receives the document at that step. A step with `decision: true` is an approval gate whose `on_approved`/`on_rejected` name 1-based step positions."
                     }
                 },
                 "required": [
@@ -40358,11 +40388,13 @@
                 "type": "object",
                 "properties": {
                     "template_id": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "Route template (saved design) to apply (see GET /api/document-route-templates)."
                     },
                     "title": {
                         "type": "string",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Name of this circulation; defaults to the route template name."
                     }
                 },
                 "required": [
@@ -40631,11 +40663,13 @@
                 "type": "object",
                 "properties": {
                     "name": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Template name."
                     },
                     "data": {
                         "type": "object",
-                        "additionalProperties": true
+                        "additionalProperties": true,
+                        "description": "The template design as produced by the document designer (pages, elements, placeholders)."
                     },
                     "scope": {
                         "type": "string",
@@ -40644,15 +40678,18 @@
                             "tenant",
                             "global",
                             "system"
-                        ]
+                        ],
+                        "description": "Who can use it: `personal` (you), `tenant`, `global` or `system`. Anything but `personal` needs documents:publish."
                     },
                     "required_permission": {
                         "type": "string",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Permission a user must hold to use the template; null for none. Needs documents:publish."
                     },
                     "owner_ou_id": {
                         "type": "integer",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Organizational unit the template is filed under; null files it tenant-wide. Needs documents:publish."
                     }
                 },
                 "required": [
@@ -40689,11 +40726,13 @@
                 "type": "object",
                 "properties": {
                     "name": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "New template name."
                     },
                     "data": {
                         "type": "object",
-                        "additionalProperties": true
+                        "additionalProperties": true,
+                        "description": "Replacement template design."
                     },
                     "scope": {
                         "type": "string",
@@ -40702,15 +40741,18 @@
                             "tenant",
                             "global",
                             "system"
-                        ]
+                        ],
+                        "description": "Who can use it: `personal` (you), `tenant`, `global` or `system`. Anything but `personal` needs documents:publish."
                     },
                     "required_permission": {
                         "type": "string",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Permission a user must hold to use the template; null for none."
                     },
                     "owner_ou_id": {
                         "type": "integer",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Organizational unit the template is filed under; null files it tenant-wide."
                     }
                 }
             },
@@ -41368,7 +41410,8 @@
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 128,
-                        "pattern": "^[a-z][a-z0-9_-]*$"
+                        "pattern": "^[a-z][a-z0-9_-]*$",
+                        "description": "Permanent key for the form: a lower-case letter, then letters, digits, `_` or `-`."
                     },
                     "name": {
                         "type": "object",
@@ -41380,15 +41423,18 @@
                             "en": {
                                 "type": "string"
                             }
-                        }
+                        },
+                        "description": "Form name as `{\"en\": ..., \"ar\": ...}`; a plain string is read as English."
                     },
                     "description": {
                         "type": "string",
-                        "maxLength": 10000
+                        "maxLength": 10000,
+                        "description": "What the form is for."
                     },
                     "route_template_id": {
                         "type": "integer",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Route template that circulates each submission for approval (see GET /api/document-route-templates); null for none."
                     }
                 },
                 "required": [
@@ -41531,7 +41577,8 @@
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 128,
-                        "pattern": "^[a-z][a-z0-9_]*$"
+                        "pattern": "^[a-z][a-z0-9_]*$",
+                        "description": "Permanent key the answers are stored under: a lower-case letter, then letters, digits or `_`."
                     },
                     "field_type": {
                         "type": "string",
@@ -41546,7 +41593,8 @@
                             "file",
                             "profile_ref",
                             "ou_ref"
-                        ]
+                        ],
+                        "description": "Kind of input: text, textarea, number, date, select, multiselect, checkbox, file, profile_ref (a person) or ou_ref (a unit)."
                     },
                     "label": {
                         "type": "object",
@@ -41558,34 +41606,42 @@
                             "en": {
                                 "type": "string"
                             }
-                        }
+                        },
+                        "description": "Field label as `{\"en\": ..., \"ar\": ...}`; a plain string is read as English."
                     },
                     "help_text": {
                         "type": "string",
-                        "maxLength": 10000
+                        "maxLength": 10000,
+                        "description": "Hint shown under the field."
                     },
                     "is_required": {
-                        "type": "boolean"
+                        "type": "boolean",
+                        "description": "Whether a submission must answer this field."
                     },
                     "options": {
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/FormFieldOption"
-                        }
+                        },
+                        "description": "Choices for select and multiselect fields."
                     },
                     "validation": {
-                        "$ref": "#/components/schemas/FormFieldValidation"
+                        "$ref": "#/components/schemas/FormFieldValidation",
+                        "description": "Extra checks on the answer (length, range, pattern)."
                     },
                     "prefill_source": {
                         "type": "string",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Fill the field in advance from the submitter's profile; sources are listed in the field list's `meta.prefill_sources`."
                     },
                     "section_key": {
                         "type": "string",
-                        "maxLength": 255
+                        "maxLength": 255,
+                        "description": "Section to group the field under; fields sharing a key form one section."
                     },
                     "position": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "Position in the form; omitted appends it at the end."
                     }
                 },
                 "required": [
@@ -41679,7 +41735,8 @@
                             "file",
                             "profile_ref",
                             "ou_ref"
-                        ]
+                        ],
+                        "description": "Kind of input: text, textarea, number, date, select, multiselect, checkbox, file, profile_ref (a person) or ou_ref (a unit)."
                     },
                     "label": {
                         "type": "object",
@@ -41691,34 +41748,42 @@
                             "en": {
                                 "type": "string"
                             }
-                        }
+                        },
+                        "description": "New label as `{\"en\": ..., \"ar\": ...}`; a plain string is read as English."
                     },
                     "help_text": {
                         "type": "string",
-                        "maxLength": 10000
+                        "maxLength": 10000,
+                        "description": "New hint shown under the field."
                     },
                     "is_required": {
-                        "type": "boolean"
+                        "type": "boolean",
+                        "description": "Whether a submission must answer this field."
                     },
                     "options": {
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/FormFieldOption"
-                        }
+                        },
+                        "description": "Replacement choices for select and multiselect fields."
                     },
                     "validation": {
-                        "$ref": "#/components/schemas/FormFieldValidation"
+                        "$ref": "#/components/schemas/FormFieldValidation",
+                        "description": "Replacement checks on the answer."
                     },
                     "prefill_source": {
                         "type": "string",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Profile detail to prefill from; null for none."
                     },
                     "section_key": {
                         "type": "string",
-                        "maxLength": 255
+                        "maxLength": 255,
+                        "description": "Section to group the field under."
                     },
                     "position": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "New position in the form."
                     }
                 },
                 "minProperties": 1
@@ -41951,7 +42016,8 @@
                 "properties": {
                     "data": {
                         "type": "object",
-                        "additionalProperties": true
+                        "additionalProperties": true,
+                        "description": "Answers keyed by field key, each typed by its field: text, number, boolean, or a list for multiselect."
                     }
                 },
                 "required": [
@@ -42045,15 +42111,18 @@
                             "en": {
                                 "type": "string"
                             }
-                        }
+                        },
+                        "description": "New name as `{\"en\": ..., \"ar\": ...}`; a plain string is read as English."
                     },
                     "description": {
                         "type": "string",
-                        "maxLength": 10000
+                        "maxLength": 10000,
+                        "description": "New description."
                     },
                     "route_template_id": {
                         "type": "integer",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Route template for approving submissions; null removes it."
                     }
                 },
                 "minProperties": 1
@@ -42867,16 +42936,20 @@
                 "type": "object",
                 "properties": {
                     "email": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Email address to invite into this tenant."
                     },
                     "role": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Role to grant on acceptance, by name. Absent means the global `user` role."
                     },
                     "role_id": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "Role to grant on acceptance, by id (see GET /api/roles)."
                     },
                     "ou_id": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "Organizational unit to place the person in on acceptance (see GET /api/ous)."
                     }
                 },
                 "required": [
@@ -43815,18 +43888,22 @@
                             {
                                 "$ref": "#/components/schemas/LocalizedLabel"
                             }
-                        ]
+                        ],
+                        "description": "Agenda item title, as text or as a `{language: text}` map."
                     },
                     "document_id": {
                         "type": "integer",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Document the item is about, if any. A decision on the item can then advance the document's approval route."
                     },
                     "notes": {
                         "type": "string",
-                        "maxLength": 10000
+                        "maxLength": 10000,
+                        "description": "Notes for the item."
                     },
                     "allow_held": {
-                        "type": "boolean"
+                        "type": "boolean",
+                        "description": "Must be true to add an item to a meeting that has already been held."
                     }
                 },
                 "required": [
@@ -43866,7 +43943,8 @@
                         "items": {
                             "type": "integer"
                         },
-                        "minItems": 1
+                        "minItems": 1,
+                        "description": "Every agenda item id of the meeting, each exactly once, in the new order."
                     }
                 },
                 "required": [
@@ -43943,7 +44021,8 @@
                         "items": {
                             "$ref": "#/components/schemas/MeetingAttendanceEntryRequest"
                         },
-                        "maxItems": 1000
+                        "maxItems": 1000,
+                        "description": "The complete attendance list, replacing the stored one; `[]` records that nobody attended. Each entry names a person and their capacity."
                     }
                 },
                 "required": [
@@ -44035,7 +44114,8 @@
                 "type": "object",
                 "properties": {
                     "body_id": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "Convening body holding the meeting (see GET /api/convening-bodies)."
                     },
                     "title": {
                         "oneOf": [
@@ -44045,7 +44125,8 @@
                             {
                                 "$ref": "#/components/schemas/LocalizedLabel"
                             }
-                        ]
+                        ],
+                        "description": "Meeting title, as text or as a `{language: text}` map."
                     }
                 },
                 "required": [
@@ -44136,18 +44217,22 @@
                             "approved",
                             "rejected",
                             "deferred"
-                        ]
+                        ],
+                        "description": "The decision: `approved`, `rejected` or `deferred`."
                     },
                     "rationale": {
                         "type": "string",
-                        "maxLength": 10000
+                        "maxLength": 10000,
+                        "description": "Reasoning recorded with the decision."
                     },
                     "decision_number": {
                         "type": "string",
-                        "maxLength": 64
+                        "maxLength": 64,
+                        "description": "The institution's own decision number, in any format. Omit to allocate the next number from the body's yearly counter; a number already used in this tenant is refused."
                     },
                     "decided_at": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Date the decision was taken, if different from the meeting date."
                     }
                 },
                 "required": [
@@ -44271,7 +44356,8 @@
                 "type": "object",
                 "properties": {
                     "held_at": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "When the meeting actually took place. Send the real date when minuting a past meeting; omitted means now. Decision numbers use its year."
                     }
                 }
             },
@@ -44410,11 +44496,13 @@
                 "type": "object",
                 "properties": {
                     "scheduled_at": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "When the meeting will take place, as a date and time (e.g. `2026-11-04 10:00`). Rescheduling notifies invitees."
                     },
                     "location": {
                         "type": "string",
-                        "maxLength": 255
+                        "maxLength": 255,
+                        "description": "Where it will take place."
                     }
                 },
                 "required": [
@@ -44894,7 +44982,8 @@
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/NotificationPreferenceEntry"
-                        }
+                        },
+                        "description": "Entries of `{type, channel, enabled}` to set for the signed-in user. Transactional notification types cannot be turned off."
                     }
                 },
                 "required": [
@@ -44964,11 +45053,13 @@
                     "name": {
                         "type": "string",
                         "maxLength": 255,
-                        "minLength": 1
+                        "minLength": 1,
+                        "description": "Name of the organizational unit."
                     },
                     "description": {
                         "type": "string",
-                        "maxLength": 10000
+                        "maxLength": 10000,
+                        "description": "What the unit is."
                     },
                     "parent_id": {
                         "type": "integer",
@@ -44977,7 +45068,8 @@
                             "resource": "/api/v1/ous",
                             "valueField": "id",
                             "labelField": "name"
-                        }
+                        },
+                        "description": "Parent unit (see GET /api/ous). Omitted or null creates a root unit."
                     },
                     "ou_type_id": {
                         "type": "integer",
@@ -44986,13 +45078,15 @@
                             "resource": "/api/v1/ou-types",
                             "valueField": "id",
                             "labelField": "label"
-                        }
+                        },
+                        "description": "Kind of unit, by id (see GET /api/ou-types). Send this or `type`, not both."
                     },
                     "type": {
                         "type": "string",
                         "nullable": true,
                         "maxLength": 128,
-                        "pattern": "^[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)?$"
+                        "pattern": "^[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)?$",
+                        "description": "Kind of unit, by its stable key (see GET /api/ou-types). Send this or `ou_type_id`, not both."
                     }
                 },
                 "required": [
@@ -45123,7 +45217,8 @@
                             "valueField": "id",
                             "labelField": "name"
                         },
-                        "minimum": 1
+                        "minimum": 1,
+                        "description": "Role to attach to this unit (see GET /api/roles)."
                     }
                 },
                 "required": [
@@ -45318,11 +45413,13 @@
                     "name": {
                         "type": "string",
                         "maxLength": 255,
-                        "minLength": 1
+                        "minLength": 1,
+                        "description": "New name."
                     },
                     "description": {
                         "type": "string",
-                        "maxLength": 10000
+                        "maxLength": 10000,
+                        "description": "New description."
                     },
                     "parent_id": {
                         "type": "integer",
@@ -45331,7 +45428,8 @@
                             "resource": "/api/v1/ous",
                             "valueField": "id",
                             "labelField": "name"
-                        }
+                        },
+                        "description": "New parent unit. An explicit null makes this a root unit."
                     },
                     "ou_type_id": {
                         "type": "integer",
@@ -45340,13 +45438,15 @@
                             "resource": "/api/v1/ou-types",
                             "valueField": "id",
                             "labelField": "label"
-                        }
+                        },
+                        "description": "New kind of unit, by id. An explicit null removes the type. Send this or `type`, not both."
                     },
                     "type": {
                         "type": "string",
                         "nullable": true,
                         "maxLength": 128,
-                        "pattern": "^[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)?$"
+                        "pattern": "^[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)?$",
+                        "description": "New kind of unit, by stable key. An explicit null removes the type. Send this or `ou_type_id`, not both."
                     }
                 },
                 "not": {
@@ -45864,7 +45964,8 @@
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/PermittedActionCheck"
-                        }
+                        },
+                        "description": "Actions to test, each `{ref, method, path}` with optional `resourceType`/`resourceId`/`scopedPermission`. Answers come back keyed by `ref`."
                     }
                 },
                 "required": [
@@ -47454,11 +47555,13 @@
                     "name": {
                         "type": "string",
                         "maxLength": 255,
-                        "minLength": 1
+                        "minLength": 1,
+                        "description": "Role name, unique among the roles this tenant can see."
                     },
                     "description": {
                         "type": "string",
-                        "maxLength": 10000
+                        "maxLength": 10000,
+                        "description": "What the role is for."
                     },
                     "permissions": {
                         "type": "array",
@@ -47471,13 +47574,16 @@
                                     "type": "string"
                                 }
                             ]
-                        }
+                        },
+                        "description": "Permissions to grant, each as an id or a `resource:action` name (see GET /api/permissions). Unknown entries are ignored."
                     },
                     "tenant_id": {
-                        "type": "integer"
+                        "type": "integer",
+                        "description": "Tenant that owns the role. Platform administrators only; others get their own tenant."
                     },
                     "global": {
-                        "type": "boolean"
+                        "type": "boolean",
+                        "description": "Create a platform-wide role visible to every tenant. Platform administrators only; cannot be combined with `tenant_id`."
                     }
                 },
                 "required": [
@@ -47613,7 +47719,8 @@
                                     "type": "string"
                                 }
                             ]
-                        }
+                        },
+                        "description": "Permissions to add (POST) or remove (DELETE), each as an id or a `resource:action` name. Other grants are untouched."
                     }
                 },
                 "required": [
@@ -47726,11 +47833,13 @@
                     "name": {
                         "type": "string",
                         "maxLength": 255,
-                        "minLength": 1
+                        "minLength": 1,
+                        "description": "New role name."
                     },
                     "description": {
                         "type": "string",
-                        "maxLength": 10000
+                        "maxLength": 10000,
+                        "description": "New description."
                     },
                     "permissions": {
                         "type": "array",
@@ -47743,7 +47852,8 @@
                                     "type": "string"
                                 }
                             ]
-                        }
+                        },
+                        "description": "The complete new permission set, replacing the current one: `[]` revokes everything, omitting the key leaves grants unchanged."
                     }
                 }
             },
@@ -48905,14 +49015,17 @@
                 "type": "object",
                 "properties": {
                     "name": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "Display name of the new tenant (workspace)."
                     },
                     "slug": {
                         "type": "string",
-                        "pattern": "^[a-z0-9-]+$"
+                        "pattern": "^[a-z0-9-]+$",
+                        "description": "URL-safe identifier: lower-case letters, digits and dashes. Generated from the name when omitted; must be unique."
                     },
                     "admin": {
-                        "$ref": "#/components/schemas/TenantInitialAdmin"
+                        "$ref": "#/components/schemas/TenantInitialAdmin",
+                        "description": "Optional first administrator, created in the same transaction: `{email, password, role?}`. Without it no one can sign in to the new tenant."
                     }
                 },
                 "required": [
@@ -49362,11 +49475,13 @@
                 "type": "object",
                 "properties": {
                     "name": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "New display name."
                     },
                     "slug": {
                         "type": "string",
-                        "pattern": "^[a-z0-9-]+$"
+                        "pattern": "^[a-z0-9-]+$",
+                        "description": "New URL-safe identifier (lower-case letters, digits, dashes); must be unique."
                     }
                 }
             },
@@ -50818,13 +50933,15 @@
                     "email": {
                         "type": "string",
                         "format": "email",
-                        "maxLength": 255
+                        "maxLength": 255,
+                        "description": "Sign-in email address of the new user."
                     },
                     "password": {
                         "type": "string",
                         "format": "password",
                         "minLength": 8,
-                        "maxLength": 72
+                        "maxLength": 72,
+                        "description": "Initial password; must satisfy the site password policy."
                     },
                     "role": {
                         "oneOf": [
@@ -50834,7 +50951,8 @@
                             {
                                 "type": "string"
                             }
-                        ]
+                        ],
+                        "description": "Role to grant in this tenant, by name or numeric id. Absent means the global `user` role; present but empty is refused."
                     },
                     "role_id": {
                         "type": "integer",
@@ -50842,7 +50960,8 @@
                             "resource": "/api/v1/roles",
                             "valueField": "id",
                             "labelField": "name"
-                        }
+                        },
+                        "description": "Role to grant, by id (see GET /api/roles). Takes precedence over `role`."
                     },
                     "ou_id": {
                         "type": "integer",
@@ -50851,7 +50970,8 @@
                             "resource": "/api/v1/ous",
                             "valueField": "id",
                             "labelField": "name"
-                        }
+                        },
+                        "description": "Organizational unit to place the user in (see GET /api/ous). Omitted or null leaves them unassigned."
                     }
                 },
                 "required": [
@@ -51120,13 +51240,15 @@
                     "email": {
                         "type": "string",
                         "format": "email",
-                        "maxLength": 255
+                        "maxLength": 255,
+                        "description": "New sign-in email address."
                     },
                     "password": {
                         "type": "string",
                         "format": "password",
                         "minLength": 8,
-                        "maxLength": 72
+                        "maxLength": 72,
+                        "description": "New password; must satisfy the site password policy."
                     },
                     "role": {
                         "oneOf": [
@@ -51136,7 +51258,8 @@
                             {
                                 "type": "string"
                             }
-                        ]
+                        ],
+                        "description": "Replacement role in this tenant, by name or numeric id."
                     },
                     "role_id": {
                         "type": "integer",
@@ -51144,7 +51267,8 @@
                             "resource": "/api/v1/roles",
                             "valueField": "id",
                             "labelField": "name"
-                        }
+                        },
+                        "description": "Replacement role, by id (see GET /api/roles). Takes precedence over `role`."
                     },
                     "ou_id": {
                         "type": "integer",
@@ -51153,17 +51277,20 @@
                             "resource": "/api/v1/ous",
                             "valueField": "id",
                             "labelField": "name"
-                        }
+                        },
+                        "description": "Organizational unit to move the user to. An explicit null removes them from their unit."
                     },
                     "accountStatus": {
                         "type": "string",
                         "enum": [
                             "active",
                             "inactive"
-                        ]
+                        ],
+                        "description": "`inactive` blocks sign-in for this person everywhere; `active` restores it."
                     },
                     "allowLocalPasswordOnIdpAccount": {
-                        "type": "boolean"
+                        "type": "boolean",
+                        "description": "Required to set `password` on an account that signs in through an identity provider; otherwise that is refused."
                     }
                 }
             },

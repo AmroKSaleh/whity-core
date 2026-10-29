@@ -2,9 +2,9 @@
 
 /**
  * Backward-compatible re-export shim: the Document & Label Designer moved to
- * `@amroksaleh/features/document-designer` so the same code renders in the
+ * `@whity-org/features/document-designer` so the same code renders in the
  * Next.js app and in the Tauri desktop template, rather than being forked into
  * a hand-maintained twin. Every existing `@/components/documents/editor-top-bar` import
  * keeps working unchanged.
  */
-export { EditorTopBar, ShortcutsDialog, useModLabel } from '@amroksaleh/features/document-designer';
+export { EditorTopBar, ShortcutsDialog, useModLabel } from '@whity-org/features/document-designer';

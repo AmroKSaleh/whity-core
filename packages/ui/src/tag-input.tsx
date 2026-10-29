@@ -17,7 +17,7 @@ export interface TagInputProps {
   /**
    * The full option collection to pick from (already fetched by the caller —
    * this primitive does no data-fetching of its own, matching every other
-   * `@amroksaleh/ui` input).
+   * `@whity-org/ui` input).
    */
   options: TagOption[]
   /** Selected option values, in selection order. */

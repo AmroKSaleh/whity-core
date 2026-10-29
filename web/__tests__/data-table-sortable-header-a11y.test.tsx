@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { DataTable, type DataTableColumn } from '@amroksaleh/ui/data-table';
+import { DataTable, type DataTableColumn } from '@whity-org/ui/data-table';
 
 /**
  * The sortable column header, for people who are not holding a mouse (#1129).

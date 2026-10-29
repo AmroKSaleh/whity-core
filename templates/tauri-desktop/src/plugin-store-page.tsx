@@ -2,12 +2,12 @@ import * as React from "react"
 import { invoke } from "@tauri-apps/api/core"
 import { listen } from "@tauri-apps/api/event"
 
-import { Alert, AlertDescription } from "@amroksaleh/ui/alert"
-import { Badge } from "@amroksaleh/ui/badge"
-import { Button } from "@amroksaleh/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@amroksaleh/ui/card"
-import { EmptyState } from "@amroksaleh/ui/empty-state"
-import { Skeleton } from "@amroksaleh/ui/skeleton"
+import { Alert, AlertDescription } from "@whity-org/ui/alert"
+import { Badge } from "@whity-org/ui/badge"
+import { Button } from "@whity-org/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@whity-org/ui/card"
+import { EmptyState } from "@whity-org/ui/empty-state"
+import { Skeleton } from "@whity-org/ui/skeleton"
 
 import { remoteRequest } from "./remote-client"
 
@@ -206,8 +206,8 @@ function PluginCard({ entry, installedVersion }: { entry: CatalogEntry; installe
         <CardTitle className="flex items-center justify-between gap-2 text-sm">
           {entry.name}
           {!isInstalled && <Badge variant="secondary">Available</Badge>}
-          {isInstalled && !updateAvailable && <Badge variant="success-solid">Installed</Badge>}
-          {updateAvailable && <Badge variant="warning-solid">Update available</Badge>}
+          {isInstalled && !updateAvailable && <Badge variant="success">Installed</Badge>}
+          {updateAvailable && <Badge variant="warning">Update available</Badge>}
         </CardTitle>
         <CardDescription>
           Latest v{entry.latestVersion}

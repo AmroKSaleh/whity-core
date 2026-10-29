@@ -9,11 +9,11 @@
 
 /**
  * Configuration for the serial/sequence generator. The type itself lives in
- * `@amroksaleh/ui/documents/types` (it's just a data shape referenced by the
+ * `@whity-org/ui/documents/types` (it's just a data shape referenced by the
  * portable `DocTemplate.sequence` field, WC doc-designer-ui-extraction); this
  * module keeps owning the generator logic + defaults below.
  */
-import type { SequenceConfig } from '@amroksaleh/ui/documents/types';
+import type { SequenceConfig } from '@whity-org/ui/documents/types';
 export type { SequenceConfig };
 
 /** Hard cap on generated rows — a runaway-input backstop, not a product limit. */

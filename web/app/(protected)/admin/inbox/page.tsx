@@ -56,10 +56,10 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Badge } from '@amroksaleh/ui/badge';
-import { Button } from '@amroksaleh/ui/button';
-import { useTranslation } from '@amroksaleh/features/i18n';
-import { useDateDisplay } from '@amroksaleh/features/datetime';
+import { Badge } from '@whity-org/ui/badge';
+import { Button } from '@whity-org/ui/button';
+import { useTranslation } from '@whity-org/features/i18n';
+import { useDateDisplay } from '@whity-org/features/datetime';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { useAuth } from '@/lib/auth-context';
@@ -187,7 +187,7 @@ export default function InboxPage() {
                   waiting.
                 */}
                 {meta !== null && meta.decision && meta.open && (
-                  <Badge variant="warning-solid" data-slot="inbox-decision">
+                  <Badge variant="warning" data-slot="inbox-decision">
                     {t('inbox.decision.badge', 'Decision')}
                   </Badge>
                 )}
@@ -221,7 +221,7 @@ export default function InboxPage() {
             meta !== null && !meta.open
               ? 'secondary'
               : meta !== null && meta.decision
-                ? 'warning-solid'
+                ? 'warning'
                 : 'warning';
           return <Badge variant={variant}>{row.status}</Badge>;
         },

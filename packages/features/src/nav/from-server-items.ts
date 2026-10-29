@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
 
-import type { AppSidebarNavGroup } from "@amroksaleh/ui/app-sidebar"
+import type { AppSidebarNavGroup } from "@whity-org/ui/app-sidebar"
 
 /**
  * Shape `GET /api/navigation`'s flat, RBAC-filtered item list into the

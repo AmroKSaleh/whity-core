@@ -334,6 +334,7 @@ use Whity\Core\RateLimit\RateLimitMiddleware;
 use Whity\Core\RateLimit\RateLimitRule;
 use Whity\Core\Settings\SettingsRegistry;
 use Whity\Mcp\Auth\McpTokenHandler;
+use Whity\Mcp\Auth\OAuth\ProtectedResource;
 use Whity\Mcp\Connect\McpConnectHandler;
 use Whity\Mcp\Auth\McpTokenService;
 use Whity\Mcp\JsonRpc\Dispatcher;
@@ -343,6 +344,7 @@ use Whity\Mcp\Notifications\CatalogSignature;
 use Whity\Mcp\Notifications\ListChangedNotifier;
 use Whity\Mcp\RateLimit\McpRateLimiter;
 use Whity\Mcp\Lifecycle\InitializeHandler;
+use Whity\Mcp\Lifecycle\DiscoverHandler;
 use Whity\Mcp\Lifecycle\PingHandler;
 use Whity\Mcp\Prompts\CorePrompts;
 use Whity\Mcp\Prompts\PromptRegistry;
@@ -355,6 +357,7 @@ use Whity\Mcp\Tools\AuthoredToolRegistry;
 use Whity\Mcp\Tools\ToolDeriver;
 use Whity\Mcp\Tools\ToolsCallHandler;
 use Whity\Mcp\Tools\ToolsListHandler;
+use Whity\Mcp\Tools\Discovery\DiscoveryTools;
 use Whity\Mcp\Transport\McpTransportHandler;
 use Whity\OpenAPI\CoreApiSchemas;
 
@@ -3291,7 +3294,7 @@ $router->register('POST', '/api/documents/{id:\d+}/render',                     
 // gets the same 404 the id route gives them. Holding the paper is not reach.
 $router->register('GET',    '/api/documents/by-verification/{token}',                  [$documentQrHandler, 'resolveToken'], null, null, CorePermissions::DOCUMENTS_READ);
 // The record page's panel: the live code, its URL (so the client draws the
-// symbol with the barcode renderer already in @amroksaleh/ui) and the scan
+// symbol with the barcode renderer already in @whity-org/ui) and the scan
 // trail. Read gate matches the region's declaration in
 // DocumentsApiHandler::recordSections() — #975's rule that a region's dedicated
 // route carries the same gate as the region.
@@ -4481,25 +4484,67 @@ $mcpListChangedNotifier = new ListChangedNotifier(
 $authoredMcpTools = new AuthoredToolRegistry();
 $mcpToolsListHandler = new ToolsListHandler($toolDeriver, $roleChecker, $tokenValidator, $authoredMcpTools);
 $mcpServerEnabled = (bool) filter_var($_ENV['MCP_ENABLED'] ?? 'false', FILTER_VALIDATE_BOOLEAN);
-$mcpTransportHandler = new McpTransportHandler(
-    new Dispatcher([
-        'initialize'              => new InitializeHandler(listChanged: true),
-        'ping'                    => new PingHandler(),
-        'notifications/cancelled' => new CancelledNotificationHandler(),
-        'tools/list'              => $mcpToolsListHandler,
-        'tools/call'              => new ToolsCallHandler($toolDeriver, $router, $roleChecker, $tokenValidator, auditLogger: $auditLogger, authoredTools: $authoredMcpTools),
-        'resources/list'          => new ResourcesListHandler($resourceDeriver, $roleChecker, $tokenValidator),
-        'resources/read'          => new ResourcesReadHandler($router, $roleChecker, $tokenValidator, auditLogger: $auditLogger, resourceDeriver: $resourceDeriver),
-        'prompts/list'            => new PromptsListHandler($promptRegistry, $roleChecker, $tokenValidator),
-        'prompts/get'             => new PromptsGetHandler($promptRegistry, $roleChecker, $tokenValidator),
-    ], $tokenValidator, $mcpRateLimiter, $tenantMcpEnabled, $mcpListChangedNotifier,
-        // WHIT-697: "last used", which the connect wizard waits on.
-        static function (\Whity\Mcp\Auth\McpPrincipal $principal) use ($mcpTokenService): void {
-            $mcpTokenService->recordUse($principal->jti, $principal->tenantId);
-        },
+$mcpToolsCallHandler = new ToolsCallHandler($toolDeriver, $router, $roleChecker, $tokenValidator, auditLogger: $auditLogger, authoredTools: $authoredMcpTools);
+$mcpHandlers = [
+    'initialize'              => new InitializeHandler(listChanged: true),
+    // WHIT-708: required of every 2026-07-28 server.
+    'server/discover'         => new DiscoverHandler(),
+    'ping'                    => new PingHandler(),
+    'notifications/cancelled' => new CancelledNotificationHandler(),
+    'tools/list'              => $mcpToolsListHandler,
+    'tools/call'              => $mcpToolsCallHandler,
+    'resources/list'          => new ResourcesListHandler($resourceDeriver, $roleChecker, $tokenValidator),
+    'resources/read'          => new ResourcesReadHandler($router, $roleChecker, $tokenValidator, auditLogger: $auditLogger, resourceDeriver: $resourceDeriver),
+    'prompts/list'            => new PromptsListHandler($promptRegistry, $roleChecker, $tokenValidator),
+    'prompts/get'             => new PromptsGetHandler($promptRegistry, $roleChecker, $tokenValidator),
+];
+// WHIT-697: "last used", which the connect wizard waits on.
+$mcpRecordTokenUse = static function (\Whity\Mcp\Auth\McpPrincipal $principal) use ($mcpTokenService): void {
+    $mcpTokenService->recordUse($principal->jti, $principal->tenantId);
+};
+// WHIT-707: /mcp?tools=discover answers tools/list with three discovery tools
+// that search, describe and call the real catalogue through the handlers
+// above. Everything else -- auth, the tenant switch, rate limits, resources,
+// prompts -- is the same. Its tool list never changes, so it announces no
+// list_changed.
+// WHIT-709: where an OAuth client signs in (MCP_OAUTH_ISSUER). Off when unset.
+$mcpProtectedResource = ProtectedResource::fromEnv(McpConnectHandler::endpointFor((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: '')));
+// ...and accept the access tokens it issues, mapped to a profile through the
+// SSO links (external_identities) and checked against a live membership.
+$mcpOAuthVerifier = \Whity\Mcp\Auth\OAuth\OAuthAccessTokenVerifier::fromEnv(
+    $mcpProtectedResource,
+    new \Whity\Core\Http\HttpFetcher(),
+    new \Whity\Auth\Oidc\JwksProvider(
+        static fn(string $uri): array => (new \Whity\Core\Http\HttpFetcher())->getJson($uri) ?? [],
+        minRefreshSeconds: 60,
     ),
-    enabled: $mcpServerEnabled,
+    $db->getPdo(),
 );
+if ($mcpOAuthVerifier !== null) {
+    $tokenValidator->acceptOAuthAccessTokens($mcpOAuthVerifier);
+}
+$mcpDiscovery = new DiscoveryTools($mcpToolsListHandler, $mcpToolsCallHandler, $tokenValidator);
+$mcpTransportHandler = new McpTransportHandler(
+    new Dispatcher($mcpHandlers, $tokenValidator, $mcpRateLimiter, $tenantMcpEnabled, $mcpListChangedNotifier, $mcpRecordTokenUse),
+    enabled: $mcpServerEnabled,
+    discoveryDispatcher: new Dispatcher(
+        array_merge($mcpHandlers, [
+            'initialize' => new InitializeHandler(listChanged: false),
+            'server/discover' => new DiscoverHandler(
+                'This server offers its actions through search_tools: search for what you need, describe_tool to see its arguments, then call_tool.',
+            ),
+            'tools/list' => $mcpDiscovery->listHandler(),
+            'tools/call' => $mcpDiscovery->callHandler(),
+        ]),
+        $tokenValidator,
+        $mcpRateLimiter,
+        $tenantMcpEnabled,
+        recordTokenUse: $mcpRecordTokenUse,
+    ),
+    protectedResource: $mcpProtectedResource,
+);
+$router->registerUnversioned('GET', '/.well-known/oauth-protected-resource', [$mcpProtectedResource, 'metadata']);
+$router->registerUnversioned('GET', '/.well-known/oauth-protected-resource/mcp', [$mcpProtectedResource, 'metadata']);
 $router->registerUnversioned('POST', '/mcp', [$mcpTransportHandler, 'handlePost']);
 $router->registerUnversioned('GET',  '/mcp', [$mcpTransportHandler, 'handleGet']);
 

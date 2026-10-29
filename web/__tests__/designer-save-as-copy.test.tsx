@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { DocumentDesignerScreen } from '@amroksaleh/features/document-designer';
-import type { DocumentDesignerAdapter } from '@amroksaleh/features/document-designer';
+import { DocumentDesignerScreen } from '@whity-org/features/document-designer';
+import type { DocumentDesignerAdapter } from '@whity-org/features/document-designer';
 
 /**
  * "Save as a copy" — starting from an existing template without overwriting it.

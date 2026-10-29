@@ -1,6 +1,6 @@
 import { api } from '@/lib/api/client';
 import { deleteBlock, listBlocks, saveBlock } from '@/lib/documents/blocks';
-import type { DocBlock } from '@amroksaleh/ui/documents/blocks';
+import type { DocBlock } from '@whity-org/ui/documents/blocks';
 
 jest.mock('@/lib/api/client', () => ({
   api: { GET: jest.fn(), POST: jest.fn(), PATCH: jest.fn(), DELETE: jest.fn() },

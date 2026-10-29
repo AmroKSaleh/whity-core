@@ -4,15 +4,15 @@
 /* The @theme inline mapping + :root/.dark token values, the base-reset layer,
    and the fonts below used to be hand-maintained here in parity with
    web/app/globals.css's generated region + its own font-face rules — now all
-   sourced from @amroksaleh/tokens (generated from the same base.json, see
+   sourced from @whity-org/tokens (generated from the same base.json, see
    src/design/tokens/generate-tokens.js's `tokensPackage` target) so there is
    exactly one place tokens/base-layer/fonts are authored, not several kept in
    sync by hand. Storybook has no next/font pipeline (that's Next.js-only, see
    web/app/layout.tsx), so it uses the package's self-hosted @font-face fonts
    directly instead of a Google Fonts CDN import. */
-@import "@amroksaleh/tokens/css";
-@import "@amroksaleh/tokens/base.css";
-@import "@amroksaleh/tokens/fonts.css";
+@import "@whity-org/tokens/css";
+@import "@whity-org/tokens/base.css";
+@import "@whity-org/tokens/fonts.css";
 
 /* katex dark-mode overrides */
 .dark .katex { color: var(--foreground); }

@@ -20,12 +20,15 @@ namespace Whity\Mcp\JsonRpc;
 final class McpException extends \RuntimeException
 {
     /**
-     * @param int    $errorCode JSON-RPC error code (see ErrorCode constants).
-     * @param string $message   Human-readable message forwarded to the caller.
+     * @param int        $errorCode JSON-RPC error code (see ErrorCode constants).
+     * @param string     $message   Human-readable message forwarded to the caller.
+     * @param mixed|null $data      The JSON-RPC error `data` member, when the code defines one
+     *                              (UnsupportedProtocolVersion lists the supported versions).
      */
     public function __construct(
         public readonly int $errorCode,
         string $message = '',
+        public readonly mixed $data = null,
     ) {
         parent::__construct($message, $errorCode);
     }

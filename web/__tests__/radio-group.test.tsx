@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 
-import { RadioGroup, RadioGroupItem } from '@amroksaleh/ui/radio-group';
+import { RadioGroup, RadioGroupItem } from '@whity-org/ui/radio-group';
 
 function Harness({ onChange }: { onChange: (v: string) => void }) {
   const [value, setValue] = useState('mine');

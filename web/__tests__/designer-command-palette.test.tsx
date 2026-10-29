@@ -1,8 +1,8 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { DocumentDesignerScreen } from '@amroksaleh/features/document-designer';
-import type { DocumentDesignerAdapter } from '@amroksaleh/features/document-designer';
-import type { DocBlock } from '@amroksaleh/ui/documents/blocks';
+import { DocumentDesignerScreen } from '@whity-org/features/document-designer';
+import type { DocumentDesignerAdapter } from '@whity-org/features/document-designer';
+import type { DocBlock } from '@whity-org/ui/documents/blocks';
 
 /**
  * The `/` command palette in the document designer.

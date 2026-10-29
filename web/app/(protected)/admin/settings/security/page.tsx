@@ -8,21 +8,21 @@ import { useCapabilities } from '@/hooks/useCapabilities';
 import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
-import { Button } from '@amroksaleh/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
+import { Button } from '@whity-org/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity-org/ui/card';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@amroksaleh/ui/badge';
-import { AccessDenied } from '@amroksaleh/ui/access-denied';
+import { Badge } from '@whity-org/ui/badge';
+import { AccessDenied } from '@whity-org/ui/access-denied';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@amroksaleh/ui/select';
+} from '@whity-org/ui/select';
 import { IconPlus, IconShieldLock, IconTrash } from '@tabler/icons-react';
-import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
-import { useDateDisplay } from '@amroksaleh/features/datetime';
+import { useTranslation, type TranslateFn } from '@whity-org/features/i18n';
+import { useDateDisplay } from '@whity-org/features/datetime';
 import { SettingsTabs } from '../settings-tabs';
 import { SECURITY_MANAGE, errorMessage, type AddToast } from '../settings-shared';
 import type { components } from '@/lib/api/schema';
@@ -193,7 +193,7 @@ function TwoFactorPoliciesSection({
     <Card className="border border-border bg-card shadow-sm" data-testid="two-factor-policies-card">
       <CardHeader className="flex flex-row items-start justify-between gap-4">
         <div>
-          <CardTitle className="text-lg font-bold font-heading">
+          <CardTitle className="text-lg font-semibold font-heading">
             <h2>{t('settings.security.policies.title', '2FA policies')}</h2>
           </CardTitle>
           <CardDescription className="text-sm">
@@ -571,7 +571,7 @@ function EnrollmentStatusSection({ refreshKey }: { refreshKey: number }) {
   return (
     <Card className="border border-border bg-card shadow-sm" data-testid="two-factor-status-card">
       <CardHeader>
-        <CardTitle className="text-lg font-bold font-heading">
+        <CardTitle className="text-lg font-semibold font-heading">
           <h2>{t('settings.security.status.title', 'Enrollment status')}</h2>
         </CardTitle>
         <CardDescription className="text-sm">

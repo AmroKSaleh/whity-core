@@ -147,7 +147,7 @@ than most training data — so always read the relevant guide in
 [`web/AGENTS.md`](web/AGENTS.md).
 
 The JS side is an **npm workspace** (`web` + the shared UI library
-`packages/ui`, published as `@amroksaleh/ui`). There is a **single lockfile at
+`packages/ui`, published as `@whity-org/ui`). There is a **single lockfile at
 the repo root** — always `npm ci` at the **root**, never inside `web/`. A
 `web/`-level install leaves `web/node_modules/next` absent and Turbopack fails
 with `couldn't find next/package.json`. If you have a stale `web/node_modules`
@@ -170,7 +170,7 @@ edges. Drop the pin once `@hookform/resolvers` stops advertising the abandoned
 npm ci                    # clean install of ALL workspaces, from the repo root
 npm run dev -w web        # dev server on http://localhost:3000
 # Component galleries (Storybook), decoupled from the app:
-npm run storybook -w @amroksaleh/ui   # UI primitives  → :6006
+npm run storybook -w @whity-org/ui   # UI primitives  → :6006
 npm run storybook -w web              # app components → :7007
 ```
 
@@ -260,19 +260,43 @@ Why it is shaped this way:
 Pushing a `vX.Y.Z` tag by hand still works, as an escape hatch for re-running a
 release whose publish step failed.
 
-**The back-merge PR has a window.** Strict protection requires a PR's HEAD to be
-up to date with its BASE. The back-merge's head is `main` against a base of
-`develop`, so it is mergeable only while nothing new has landed on `develop` —
-merge it immediately, or close it.
+**The back-merge PR comes from a branch off `develop`.** `release.yml` builds
+`chore/back-merge-vX.Y.Z` as a merge of `develop` and `main` and opens the PR
+from it. Merge it with a **merge commit**; a squash would drop the very commit
+it exists to carry. If `develop` moves first, **Update branch** brings it up to
+date, and nothing ever pushes to `main`. Until v0.2.17 the PR's head was `main`
+itself, which strict protection (enforced for admins) let merge only while
+`develop` had not moved, so most back-merges had to be rebuilt by hand. The PR
+normally changes no files; when it does, `main` carries something that never
+went through `develop` (a hotfix), and the PR says so. If the two branches
+conflict, the job stops and asks for a person.
 
-Closing it is fine. The commit it carries has a tree identical to its
-develop-side parent, which `develop` already contains, so `main` introduces no
-content `develop` lacks and every later `develop → main` merge is still clean.
-The only cost is cosmetic: `git` reports `develop` as N behind after N releases,
-which misleads a reader but breaks nothing.
+#### The release token
 
-Do NOT "fix" a stale one with `gh pr update-branch` — that merges `develop` into
-`main`, pushing unreleased work onto the release line.
+Every PR the pipeline opens (the release PR, the develop → main PR and the
+back-merge) needs its CI to run before it can merge. GitHub holds the workflow
+runs of a PR opened with the built-in `github.token` until someone with write
+access approves them, so with no release token configured each release PR sits
+at **Approve workflows to run**. The jobs still work, and each one's summary
+names the PR waiting for approval.
+
+To make release PRs start their CI on their own, give the workflows a release
+token. Use **one** of these:
+
+- **A GitHub App (preferred).** It is not tied to a person and its tokens last
+  one hour. Create an App owned by the account that owns the repository, with
+  repository permissions **Contents: Read and write**, **Pull requests: Read
+  and write** and **Workflows: Read and write**, and no webhook. Install it on
+  this repository only. Then add its **Client ID** as the Actions *variable*
+  `RELEASE_APP_CLIENT_ID` and a generated private key as the Actions *secret*
+  `RELEASE_APP_PRIVATE_KEY`.
+- **A fine-grained personal access token.** Scoped to this repository only,
+  with the same three permissions, stored as the Actions secret
+  `RELEASE_TOKEN`. Release PRs are then authored by that person, and the token
+  stops working when it expires or they leave.
+
+Workflows is needed because a back-merge can carry a workflow-file change made
+on `main`. The App wins when both are configured.
 
 ### Branch naming
 

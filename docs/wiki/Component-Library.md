@@ -619,7 +619,7 @@ pixel-accurate. A toolbar **light/dark** switch toggles the token set.
 
 | Gallery | Location | Framework | Run |
 |---------|----------|-----------|-----|
-| **UI primitives** (`@amroksaleh/ui`) | `packages/ui/.storybook` | `@storybook/react-vite` | `npm run storybook -w @amroksaleh/ui` → `:6006` |
+| **UI primitives** (`@whity-org/ui`) | `packages/ui/.storybook` | `@storybook/react-vite` | `npm run storybook -w @whity-org/ui` → `:6006` |
 | **App components** (`web`) | `web/.storybook` | `@storybook/nextjs-vite` | `npm run storybook -w web` → `:7007` |
 
 - The **primitives** gallery imports the package's own `src/globals.css` and covers every
@@ -631,7 +631,7 @@ pixel-accurate. A toolbar **light/dark** switch toggles the token set.
   handlers live in `web/.storybook/mocks.ts`.
 
 > [!NOTE]
-> The shared primitives now live in the **`@amroksaleh/ui`** workspace package
+> The shared primitives now live in the **`@whity-org/ui`** workspace package
 > (`packages/ui/src/`), consumed by `web` via npm workspaces (root `package.json`
 > `workspaces: ["web", "packages/*"]`). A single `npm install` at the repo root installs
 > both. The per-component **Source:** paths above (`web/components/ui/…`) predate this

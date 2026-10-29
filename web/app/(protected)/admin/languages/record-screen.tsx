@@ -40,7 +40,7 @@ import { useCallback, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { api } from '@/lib/api/client';
 import type { components } from '@/lib/api/schema';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 import {
   RecordCollectionPanel,
   RecordList,
@@ -53,18 +53,18 @@ import {
   type RecordBadge,
   type RecordFactsFn,
   type RecordResource,
-} from '@amroksaleh/features/record';
-import { Button } from '@amroksaleh/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
+} from '@whity-org/features/record';
+import { Button } from '@whity-org/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity-org/ui/card';
 import { Input } from '@/components/ui/input';
-import { Switch } from '@amroksaleh/ui/switch';
+import { Switch } from '@whity-org/ui/switch';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@amroksaleh/ui/select';
+} from '@whity-org/ui/select';
 import { IconLanguage } from '@tabler/icons-react';
 import { errorMessage } from './shared';
 import type { Language } from './types';

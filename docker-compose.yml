@@ -49,6 +49,9 @@ services:
       # Public base URL of the app — used to build the SSO OAuth redirect_uri and
       # email-verification links. Dev default targets the Next proxy on :3000.
       APP_URL: ${APP_URL:-http://localhost:3000}
+      # Master switch for the /mcp transport. Off by default, as everywhere; the
+      # e2e job turns it on to drive the connect wizard end to end (WHIT-697).
+      MCP_ENABLED: ${MCP_ENABLED:-false}
       DB_USER: ${DB_USER:-whity}
       DB_PASSWORD: ${DB_PASSWORD:-whity_dev}
       DB_NAME: ${DB_NAME:-whity_core}

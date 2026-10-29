@@ -1,0 +1,86 @@
+<!-- @dsCard group="Document editor" height=760 width=1280 subtitle="The / menu (also the + inserter), filtering, the empty-block hint and Markdown shortcuts" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Inserting</title><style>html,body{height:100%} #root{height:100%} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} #root{padding:24px;box-sizing:border-box;height:auto}</style></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement, F = React.Fragment;
+  function I(n, s) { return h(W.Icon, { name: n, size: s || 16 }); }
+  function tb(icon, label, on, sc) { return h(W.IconButton, { icon: icon, label: label, size: 'sm', shortcut: sc, className: on ? 'is-on' : undefined, tooltip: 'bottom' }); }
+  function sep() { return h('span', { className: 'wy-edx__sep', 'aria-hidden': 'true' }); }
+  function mf(label, sample, preview) { return h('span', { className: 'wy-mf' + (preview ? ' is-preview' : ''), contentEditable: false, 'data-field': label }, preview ? sample : label); }
+  function blk(type, kids, extra) { extra = extra || {}; return h('div', { className: 'wy-blk wy-blk--' + type + (extra.cls ? ' ' + extra.cls : ''), 'data-type': type }, extra.gutter ? h('div', { className: 'wy-blk__gutter' }, h('button', { className: 'wy-blk__g', 'aria-label': 'Add a block below' }, I('plus')), h('button', { className: 'wy-blk__g wy-blk__g--drag', 'aria-label': 'Drag to move, click for options' }, I('drag'))) : null, extra.toolbar || null, kids); }
+  function head(o) { o = o || {};
+    return h('div', { className: 'wy-edx__head' },
+      h(W.IconButton, { icon: 'chevron-left', label: o.back || 'Back to templates', tooltip: 'bottom' }),
+      h('span', { className: 'wy-edx__doc', 'aria-hidden': 'true' }, I(o.icon || 'template')),
+      h('div', { className: 'wy-edx__titles' }, h('input', { className: 'wy-edx__title', defaultValue: o.title || 'Payment reminder', 'aria-label': 'Document title', size: 22 }),
+        h('div', { className: 'wy-edx__meta' }, o.where || 'Templates · Letters', h('span', null, '·'), I('check', 12), o.saved || 'Saved 14:02')),
+      h('div', { className: 'wy-edx__acts' },
+        h('button', { className: 'wy-edx__mode' + (o.mode === 'suggest' ? ' is-suggest' : ''), 'aria-haspopup': 'menu' }, I(o.mode === 'suggest' ? 'suggest' : o.mode === 'view' ? 'view' : 'edit', 14), o.mode === 'suggest' ? 'Suggesting' : o.mode === 'view' ? 'Viewing' : 'Editing', I('chevron-down', 14)),
+        h('span', { className: 'wy-edx__count' }, h(W.IconButton, { icon: 'comment', label: 'Comments and suggestions', tooltip: 'bottom' }), h('b', null, o.count || '3')),
+        h(W.Button, { variant: 'outline', size: 'sm', icon: 'download' }, 'PDF'),
+        o.main === false ? null : h(W.Button, { size: 'sm', icon: 'check' }, o.mainLabel || 'Publish')));
+  }
+  function bar(o) { o = o || {};
+    return h('div', { className: 'wy-edx__bar' + (o.readonly ? ' is-readonly' : ''), role: 'toolbar', 'aria-label': 'Formatting' },
+      tb('undo', 'Undo', false, '⌘Z'), tb('redo', 'Redo', false, '⇧⌘Z'), sep(),
+      h('button', { className: 'wy-edx__drop wy-edx__style', 'aria-haspopup': 'menu' }, o.style || 'Normal text', I('chevron-down', 14)), sep(),
+      tb('bold', 'Bold', o.bold, '⌘B'), tb('italic', 'Italic', false, '⌘I'), tb('underline', 'Underline', false, '⌘U'), tb('strike', 'Strikethrough', false, '⇧⌘X'), sep(),
+      tb('link', 'Link', false, '⌘K'), tb('highlight', 'Highlight'), sep(),
+      tb('list-bullet', 'Bulleted list', false, '⇧⌘8'), tb('list-numbered', 'Numbered list', false, '⇧⌘7'), tb('list-todo', 'Checklist', false, '⇧⌘9'), sep(),
+      h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu' }, I('plus', 14), 'Insert', I('chevron-down', 14)),
+      h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu' }, I('field', 14), 'Field', I('chevron-down', 14)),
+      tb('comment-add', 'Comment', false, '⌥⌘M'), sep(),
+      h('button', { className: 'wy-edx__ask' }, I('robot', 14), 'Ask an agent'),
+      h('span', { className: 'wy-edx__grow' }),
+      o.page ? h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu', 'aria-label': 'Zoom' }, o.zoom || '75%', I('chevron-down', 14)) : null,
+      h(W.ToggleGroup, { size: 'sm', label: 'View', required: true, defaultValue: o.page ? 'page' : 'continuous', options: [{ value: 'continuous', label: 'Continuous', icon: 'continuous', iconOnly: true }, { value: 'page', label: 'Page view', icon: 'page', iconOnly: true }] }),
+      tb('outline', 'Outline', o.outline !== false));
+  }
+  function outline(items) { return h('nav', { className: 'wy-edx__outline', 'aria-label': 'Outline' }, h('div', { className: 'wy-edx__outline-h' }, 'Outline'), items.map(function (it, i) { return h('a', { key: i, href: '#', className: 'l' + it[0] + (it[2] ? ' is-on' : '') }, it[1]); })); }
+  function status(t) { return h('div', { className: 'wy-edx__status' }, t.map(function (x, i) { return x === '|' ? h('span', { key: i, className: 'wy-edx__grow' }) : h('span', { key: i }, x); })); }
+  function rcard(top, o) {
+    return h('div', { className: 'wy-rc' + (o.agent ? ' is-agent' : '') + (o.active ? ' is-active' : ''), style: { top: top } },
+      h('div', { className: 'wy-rc__who' }, o.agent ? h(W.ActorChip, { kind: 'agent', name: o.agent, onBehalfOf: o.for }) : h(F, null, h(W.Avatar, { name: o.name, size: 24 }), h('span', { className: 'wy-rc__name' }, o.name)),
+        o.agent ? null : h('span', { className: 'wy-rc__time' }, o.time),
+        h('span', { className: 'wy-rc__acts' }, o.sug ? h(F, null, h(W.IconButton, { icon: 'check', label: 'Accept', size: 'sm' }), h(W.IconButton, { icon: 'close', label: 'Reject', size: 'sm' })) : h(W.IconButton, { icon: 'check', label: 'Resolve', size: 'sm' }))),
+      o.what ? h('div', { className: 'wy-rc__what' }, o.what) : null,
+      o.text ? h('div', null, o.text) : null,
+      o.reply ? h('div', { className: 'wy-rc__reply' }, 'Reply or add others with @') : null);
+  }
+  function cap(t, m) { return h('p', { className: 'cap', style: { margin: m || '0 0 14px' } }, t); }
+  function it(icon, label, hint, o) { o = o || {}; return h('div', { className: 'wy-slash__it' + (o.on ? ' is-active' : '') + (o.agent ? ' is-agent' : '') }, o.logo || h('span', { className: 'wy-slash__ic' }, I(icon)), h('span', { className: 'wy-slash__txt' }, label, h('span', null, hint)), o.md ? h('span', { className: 'wy-slash__md' }, o.md) : null); }
+  function grp(t) { return h('div', { className: 'wy-slash__h' }, t); }
+  var plugLogo = h('span', { className: 'wy-slash__ic' }, h(W.TenantLogo, { name: 'Delivery Tracker', size: 20, showName: false, color: '#35aa76', fg: '#fff' }));
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { style: { display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) minmax(0,1fr)', gap: 24, alignItems: 'start' } },
+    h('article', { className: 'wy-edx__sheet', style: { maxWidth: 'none', margin: 0, padding: '28px 32px 32px', minHeight: 700 } },
+      cap('Type / : every block, grouped'),
+      h('div', { style: { position: 'relative' } }, h('p', { style: { margin: 0, fontSize: 16 } }, h('span', { className: 'wy-slashq' }, '/'), h('span', { className: 'wy-caret' })),
+        h('div', { className: 'wy-float wy-slash', style: { top: 30, left: 0, width: 300, maxHeight: 'none' } },
+          grp('Basic'), it('text', 'Text', 'Plain paragraph', { on: true }), it('heading-1', 'Heading 1', 'Big section heading', { md: '#' }), it('heading-2', 'Heading 2', 'Medium heading', { md: '##' }), it('list-bullet', 'Bulleted list', 'A simple list', { md: '-' }), it('list-todo', 'Checklist', 'Tasks with checkboxes', { md: '[]' }),
+          grp('Whity'), it('invoice', 'Record', 'A live invoice, customer or any record'), it('chart', 'Chart', 'A live chart'), it('edit', 'Signature and stamp', 'For letters and contracts'),
+          grp('Saved blocks'), it('sync', 'Bank details', 'Synced · Example Bakery'),
+          grp('Delivery Tracker'), it('', 'Delivery status', 'Live progress of an order', { logo: plugLogo }),
+          it('robot', 'Ask an agent', 'Describe what to write; it comes back as a suggestion', { agent: true }),
+          h('div', { className: 'wy-slash__foot' }, h('span', null, '↑↓ to move'), h('span', null, 'Enter to insert'), h('span', null, 'Esc to close'))))),
+    h('article', { className: 'wy-edx__sheet', style: { maxWidth: 'none', margin: 0, padding: '28px 32px 32px', minHeight: 700 } },
+      cap('Keep typing to filter: /tab'),
+      h('div', { style: { position: 'relative' } }, h('p', { style: { margin: 0, fontSize: 16 } }, 'Open invoices ', h('span', { className: 'wy-slashq' }, '/tab'), h('span', { className: 'wy-caret' })),
+        h('div', { className: 'wy-float wy-slash', style: { top: 30, left: 40, width: 300 } },
+          grp('Media'), it('table', 'Table', 'Rows and columns', { on: true }),
+          grp('Saved blocks'), it('sync', 'Price table', 'Copy · Only me'),
+          h('div', { className: 'wy-slash__foot' }, 'Enter inserts after this line'))),
+      cap('An empty line says what it takes', '250px 0 14px'),
+      h('p', { style: { margin: 0, fontSize: 16 } }, h('span', { className: 'wy-caret' }), h('span', { className: 'wy-ph' }, 'Type / for blocks, {{ for fields, or just write')),
+      cap('The + in the gutter opens the same menu, with a search box', '28px 0 14px'),
+      h('div', { className: 'wy-blk wy-blk--p is-hover', style: { marginInlineStart: 48 } }, h('div', { className: 'wy-blk__gutter' }, h('button', { className: 'wy-blk__g', style: { background: 'var(--muted)', color: 'var(--foreground)' }, 'aria-label': 'Add a block below' }, I('plus')), h('button', { className: 'wy-blk__g wy-blk__g--drag', 'aria-label': 'Drag' }, I('drag'))), h('p', null, 'Kind regards,'))),
+    h('article', { className: 'wy-edx__sheet', style: { maxWidth: 'none', margin: 0, padding: '28px 32px 32px', minHeight: 700 } },
+      cap('Markdown shortcuts, at the start of a line'),
+      h('table', { className: 'wy-mdtable' }, h('tbody', null,
+        [['# ', 'Heading 1'], ['## ', 'Heading 2'], ['### ', 'Heading 3'], ['- or * ', 'Bulleted list'], ['1. ', 'Numbered list'], ['[] ', 'Checklist'], ['> ', 'Quote'], ['```', 'Code'], ['---', 'Divider'], ['**text**', 'Bold'], ['_text_', 'Italic'], ['`text`', 'Code'], ['{{', 'Merge field']].map(function (r, i) { return h('tr', { key: i }, h('td', null, r[0]), h('td', null, r[1])); }))),
+      h('p', { className: 'cap', style: { margin: '14px 0 0', lineHeight: 1.5 } }, 'Right after a shortcut, ', h('kbd', { className: 'wy-kbd' }, '⌘Z'), ' turns it back into what you typed.'))));
+</script>
+</body>
+</html>

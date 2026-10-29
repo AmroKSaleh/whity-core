@@ -9,14 +9,14 @@ import { useAuth } from '@/lib/auth-context';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Button } from '@amroksaleh/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
+import { Button } from '@whity-org/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity-org/ui/card';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@amroksaleh/ui/badge';
-import { AccessDenied } from '@amroksaleh/ui/access-denied';
-import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
+import { Badge } from '@whity-org/ui/badge';
+import { AccessDenied } from '@whity-org/ui/access-denied';
+import { Alert, AlertDescription } from '@whity-org/ui/alert';
 import { IconAlertTriangle, IconBug, IconDeviceFloppy, IconInbox } from '@tabler/icons-react';
-import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
+import { useTranslation, type TranslateFn } from '@whity-org/features/i18n';
 import { SettingsTabs } from '../settings-tabs';
 import {
   SETTINGS_MANAGE,
@@ -276,7 +276,7 @@ function ErrorTrackingSettingsForm({
               <IconBug className="w-5 h-5" />
             </span>
             <div>
-              <CardTitle className="text-lg font-bold font-heading">
+              <CardTitle className="text-lg font-semibold font-heading">
                 <h2>{t('settings.errorTracking.collection.title', 'Collection')}</h2>
               </CardTitle>
               <CardDescription className="text-sm">
@@ -330,7 +330,7 @@ function ErrorTrackingSettingsForm({
       {enabled && provider === 'sentry' && (
         <Card className="border border-border bg-card shadow-sm" data-testid="error-tracking-dsn-card">
           <CardHeader>
-            <CardTitle className="text-lg font-bold font-heading">
+            <CardTitle className="text-lg font-semibold font-heading">
               <h2>{t('settings.errorTracking.dsn.title', 'Sentry DSN')}</h2>
             </CardTitle>
             <CardDescription className="text-sm">
@@ -414,7 +414,7 @@ function ErrorTrackingSettingsForm({
               <IconInbox className="w-5 h-5" />
             </span>
             <div>
-              <CardTitle className="text-lg font-bold font-heading">
+              <CardTitle className="text-lg font-semibold font-heading">
                 <h2>{t('settings.errorTracking.alerts.title', 'Alerts and retention')}</h2>
               </CardTitle>
               <CardDescription className="text-sm">

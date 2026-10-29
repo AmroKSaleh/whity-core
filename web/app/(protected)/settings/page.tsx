@@ -1,12 +1,12 @@
 ﻿'use client';
 
 import { useAuth } from '@/lib/auth-context';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity-org/ui/card';
 import { TwoFactorSettings } from '@/components/TwoFactorSettings';
 import { SessionsSettings } from '@/components/SessionsSettings';
 import { DevicesSettings } from '@/components/DevicesSettings';
 import { EmailAddressesSettings } from '@/components/EmailAddressesSettings';
-import { LanguageSwitcher, useI18nEnabled, useTranslation } from '@amroksaleh/features/i18n';
+import { LanguageSwitcher, useI18nEnabled, useTranslation } from '@whity-org/features/i18n';
 import { ProfileForm } from './profile-form';
 
 export default function SettingsPage() {
@@ -19,7 +19,7 @@ export default function SettingsPage() {
     <div className="space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-4xl font-bold">{t('settings.title', 'Settings')}</h1>
+        <h1 className="text-4xl font-semibold">{t('settings.title', 'Settings')}</h1>
         <p className="text-muted-foreground mt-2">
           {t('settings.subtitle', 'Manage your account and security preferences')}
         </p>

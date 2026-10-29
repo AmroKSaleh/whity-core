@@ -334,7 +334,7 @@ const TimePicker = React.forwardRef<HTMLDivElement, TimePickerProps>(
             </button>
 
             {/* Row 3 (CENTERED LENS) */}
-            <div className="relative z-10 flex h-8 w-full items-center justify-center text-sm font-bold text-primary-foreground">
+            <div className="relative z-10 flex h-8 w-full items-center justify-center text-sm font-semibold text-primary-foreground">
               {items[centerIdx]}
             </div>
 
@@ -417,7 +417,7 @@ const TimePicker = React.forwardRef<HTMLDivElement, TimePickerProps>(
                   }}
                   className={cn(
                     "px-1.5 py-0.5 rounded transition-colors",
-                    activeFormat === "12h" ? "bg-card text-foreground shadow-2xs font-bold" : "text-muted-foreground hover:text-foreground"
+                    activeFormat === "12h" ? "bg-card text-foreground shadow-2xs font-semibold" : "text-muted-foreground hover:text-foreground"
                   )}
                 >
                   12H
@@ -435,7 +435,7 @@ const TimePicker = React.forwardRef<HTMLDivElement, TimePickerProps>(
                   }}
                   className={cn(
                     "px-1.5 py-0.5 rounded transition-colors",
-                    activeFormat === "24h" ? "bg-card text-foreground shadow-2xs font-bold" : "text-muted-foreground hover:text-foreground"
+                    activeFormat === "24h" ? "bg-card text-foreground shadow-2xs font-semibold" : "text-muted-foreground hover:text-foreground"
                   )}
                 >
                   24H
@@ -449,7 +449,7 @@ const TimePicker = React.forwardRef<HTMLDivElement, TimePickerProps>(
                     onClick={() => updateTime(hour, minute, "AM", activeFormat)}
                     className={cn(
                       "px-1.5 py-0.5 rounded transition-colors",
-                      period === "AM" ? "bg-card text-foreground shadow-2xs font-bold" : "text-muted-foreground hover:text-foreground"
+                      period === "AM" ? "bg-card text-foreground shadow-2xs font-semibold" : "text-muted-foreground hover:text-foreground"
                     )}
                   >
                     {amLabel}
@@ -459,7 +459,7 @@ const TimePicker = React.forwardRef<HTMLDivElement, TimePickerProps>(
                     onClick={() => updateTime(hour, minute, "PM", activeFormat)}
                     className={cn(
                       "px-1.5 py-0.5 rounded transition-colors",
-                      period === "PM" ? "bg-card text-foreground shadow-2xs font-bold" : "text-muted-foreground hover:text-foreground"
+                      period === "PM" ? "bg-card text-foreground shadow-2xs font-semibold" : "text-muted-foreground hover:text-foreground"
                     )}
                   >
                     {pmLabel}
@@ -488,7 +488,7 @@ const TimePicker = React.forwardRef<HTMLDivElement, TimePickerProps>(
               },
               handleHourWheel
             )}
-            <span className="text-sm font-bold text-muted-foreground pt-5">:</span>
+            <span className="text-sm font-semibold text-muted-foreground pt-5">:</span>
             {renderDrumColumn(
               "Minute",
               minutesList,
@@ -540,7 +540,7 @@ const TimePicker = React.forwardRef<HTMLDivElement, TimePickerProps>(
               {hasHeader && (
                 <div className="flex items-center gap-1 text-xs font-semibold text-foreground">
                   {label && <span>{label}</span>}
-                  {required && <span className="text-destructive font-bold ms-0.5">*</span>}
+                  {required && <span className="text-destructive font-semibold ms-0.5">*</span>}
                   {tooltip && (
                     <TooltipProvider>
                       <Tooltip>
@@ -580,7 +580,7 @@ const TimePicker = React.forwardRef<HTMLDivElement, TimePickerProps>(
         {hasHeader && (
           <div className="flex items-center gap-1 text-xs font-semibold text-foreground">
             {label && <span>{label}</span>}
-            {required && <span className="text-destructive font-bold ms-0.5">*</span>}
+            {required && <span className="text-destructive font-semibold ms-0.5">*</span>}
             {tooltip && (
               <TooltipProvider>
                 <Tooltip>

@@ -93,7 +93,7 @@ import { IconDownload, IconFileText } from '@tabler/icons-react';
 import { apiClient } from '@/lib/api-client';
 // NOTE THE IMPORT PATH: the dedicated `record/format` subpath, not the slice's
 // barrel, and it is load-bearing rather than stylistic — the same reason
-// `print-document.tsx` documents for its own subpath. `@amroksaleh/features/record`
+// `print-document.tsx` documents for its own subpath. `@whity-org/features/record`
 // re-exports the whole record slice (`RecordPageShell` and friends), and pulling
 // that barrel in here for one date formatter put it into web's Storybook preview
 // graph for the first time, where react-docgen's TS resolution recursed until
@@ -101,20 +101,20 @@ import { apiClient } from '@/lib/api-client';
 // alternative was a third private copy of a nine-line formatter, which `format.ts`
 // exists specifically to prevent — two copies had already disagreed about whether
 // an empty string is a date.
-import { useDateDisplay } from '@amroksaleh/features/datetime';
-import { useTranslation } from '@amroksaleh/features/i18n';
-import { Alert, AlertDescription, AlertTitle } from '@amroksaleh/ui/alert';
-import { Badge } from '@amroksaleh/ui/badge';
-import { Button } from '@amroksaleh/ui/button';
-import { EmptyState } from '@amroksaleh/ui/empty-state';
-import { Skeleton } from '@amroksaleh/ui/skeleton';
+import { useDateDisplay } from '@whity-org/features/datetime';
+import { useTranslation } from '@whity-org/features/i18n';
+import { Alert, AlertDescription, AlertTitle } from '@whity-org/ui/alert';
+import { Badge } from '@whity-org/ui/badge';
+import { Button } from '@whity-org/ui/button';
+import { EmptyState } from '@whity-org/ui/empty-state';
+import { Skeleton } from '@whity-org/ui/skeleton';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@amroksaleh/ui/select';
+} from '@whity-org/ui/select';
 
 /** One immutable artifact, as `DocumentPresenter::artifact()` puts it on the wire. */
 export interface DocumentArtifact {

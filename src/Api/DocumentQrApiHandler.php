@@ -90,7 +90,7 @@ final class DocumentQrApiHandler
      * `GET /api/v1/documents/{id}/qr` — the record page's verification panel.
      *
      * Returns the live code (including its URL, so the client can draw the
-     * symbol itself with the barcode renderer already in `@amroksaleh/ui`), how
+     * symbol itself with the barcode renderer already in `@whity-org/ui`), how
      * many times the document has been scanned, and the most recent scans.
      *
      * THE URL — and therefore the token — IS RETURNED HERE, to a caller who has

@@ -22,8 +22,9 @@ use Whity\Mcp\JsonRpc\McpException;
  * Arguments are modified in-place when coercion occurs, so the caller's array
  * reflects the coerced types before path substitution and Request synthesis.
  *
- * Malformed arguments throw McpException(INVALID_PARAMS) so the Dispatcher can
- * return the correct JSON-RPC error code (-32602) to the AI client.
+ * Malformed arguments throw McpException(INVALID_PARAMS). ToolsCallHandler turns
+ * that into an isError tool result, which is where MCP puts input validation
+ * errors so the model can correct its call (WHIT-710).
  */
 final class InputSchemaValidator
 {

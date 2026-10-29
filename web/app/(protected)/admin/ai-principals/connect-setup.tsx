@@ -1,21 +1,21 @@
 'use client';
 
-import { CopyBlock } from '@amroksaleh/ui/copy-block';
-import { Button } from '@amroksaleh/ui/button';
-import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
+import { CopyBlock } from '@whity-org/ui/copy-block';
+import { Button } from '@whity-org/ui/button';
+import { Alert, AlertDescription } from '@whity-org/ui/alert';
 import { IconAlertCircle, IconExternalLink } from '@tabler/icons-react';
-import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
+import { useTranslation, type TranslateFn } from '@whity-org/features/i18n';
 import {
   mcpClient,
   type McpClientId,
   type McpConnection,
   type McpFormField,
-} from '@amroksaleh/features/mcp';
+} from '@whity-org/features/mcp';
 import { useToast } from '@/lib/toast-context';
 
 /**
  * Step 3 of the connect wizard (WHIT-697): the setup for one app, built by
- * `@amroksaleh/features/mcp` and explained here in the user's language.
+ * `@whity-org/features/mcp` and explained here in the user's language.
  *
  * The order is easiest first. A one-click link comes first when the app has
  * one, but the copy-paste setup is always shown under it: the link schemes are
@@ -26,6 +26,7 @@ export function ConnectSetup({ clientId, connection }: { clientId: McpClientId; 
   const t = useTranslation('admin');
   const { addToast } = useToast();
   const client = mcpClient(clientId);
+  const app = client.id === 'other' ? t('aiPrincipals.connect.app.other', 'Another app') : client.name;
   const setup = client.setup?.(connection);
   if (setup === undefined) return null;
 
@@ -57,16 +58,16 @@ export function ConnectSetup({ clientId, connection }: { clientId: McpClientId; 
           <Button asChild className="gap-2">
             <a href={setup.install.href}>
               <IconExternalLink size={16} />
-              {t('aiPrincipals.connect.oneClick.button', 'Open in {app}', { app: client.name })}
+              {t('aiPrincipals.connect.oneClick.button', 'Open in {app}', { app })}
             </a>
           </Button>
           <p className="text-xs text-muted-foreground">
             {setup.install.verified
-              ? t('aiPrincipals.connect.oneClick.help', '{app} opens and asks you to confirm.', { app: client.name })
+              ? t('aiPrincipals.connect.oneClick.help', '{app} opens and asks you to confirm.', { app })
               : t(
                   'aiPrincipals.connect.oneClick.unverifiedHelp',
                   '{app} opens and asks you to confirm. If nothing happens, use the steps below instead.',
-                  { app: client.name }
+                  { app }
                 )}
           </p>
         </section>
@@ -89,7 +90,7 @@ export function ConnectSetup({ clientId, connection }: { clientId: McpClientId; 
       {setup.fields && (
         <section className="space-y-2">
           <h3 className="text-sm font-semibold">
-            {t('aiPrincipals.connect.fields.title', 'Fill in these settings in {app}', { app: client.name })}
+            {t('aiPrincipals.connect.fields.title', 'Fill in these settings in {app}', { app })}
           </h3>
           {setup.fields.map((field) => (
             <CopyBlock
@@ -115,7 +116,7 @@ export function ConnectSetup({ clientId, connection }: { clientId: McpClientId; 
               ? t(
                   'aiPrincipals.connect.file.help',
                   'Open {path} (create it if it does not exist), paste this in, save, and restart {app}. If the file already lists other servers, add this one beside them.',
-                  { path: setup.file.paths.join(' · '), app: client.name }
+                  { path: setup.file.paths.join(' · '), app }
                 )
               : t(
                   'aiPrincipals.connect.file.helpGeneric',

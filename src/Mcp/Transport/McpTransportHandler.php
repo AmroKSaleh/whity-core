@@ -6,6 +6,7 @@ namespace Whity\Mcp\Transport;
 
 use Whity\Core\Request;
 use Whity\Core\Response;
+use Whity\Mcp\Auth\OAuth\ProtectedResource;
 use Whity\Mcp\McpFeatureDisabledException;
 use Whity\Mcp\RateLimit\McpRateLimitException;
 
@@ -37,6 +38,14 @@ final class McpTransportHandler
     public function __construct(
         private readonly McpRequestHandlerInterface $dispatcher,
         private readonly bool $enabled = true,
+        // WHIT-707: serves `/mcp?tools=discover`, three discovery tools in
+        // place of the whole catalogue. Its own dispatcher rather than a flag
+        // threaded through every handler, so the mode never sits in state a
+        // persistent worker would carry into the next request.
+        private readonly ?McpRequestHandlerInterface $discoveryDispatcher = null,
+        // WHIT-709: names the Protected Resource Metadata in the 401 challenge,
+        // so an OAuth client learns where to sign in. Null: a bare challenge.
+        private readonly ?ProtectedResource $protectedResource = null,
     ) {}
 
     /**
@@ -55,11 +64,22 @@ final class McpTransportHandler
             return Response::error('Content-Type must be application/json', 415);
         }
 
-        $bearer  = $this->extractBearer($request);
-        $rawBody = $request->getBody();
+        $bearer     = $this->extractBearer($request);
+        $rawBody    = $request->getBody();
+        $dispatcher = $this->dispatcherFor($request);
+
+        // WHIT-708: the headers 2026-07-28 mirrors from the body, for the
+        // dispatcher to check against it. Earlier versions send only the first.
+        $mcpHeaders = [];
+        foreach (['MCP-Protocol-Version', 'Mcp-Method', 'Mcp-Name'] as $name) {
+            $value = $request->getHeader($name);
+            if ($value !== null) {
+                $mcpHeaders[strtolower($name)] = trim($value);
+            }
+        }
 
         try {
-            $rawResponse = $this->dispatcher->handle($rawBody, $bearer);
+            $rawResponse = $dispatcher->handle($rawBody, $bearer, $mcpHeaders);
         } catch (McpRateLimitException $e) {
             return new Response(429, '', ['Retry-After' => (string) $e->getRetryAfterSeconds()]);
         } catch (McpFeatureDisabledException) {
@@ -74,8 +94,8 @@ final class McpTransportHandler
         // finding nowhere to put them would lose the change permanently, so a
         // client that did not offer to read an event stream is simply left alone.
         $notifications = [];
-        if ($acceptsSse && $this->dispatcher instanceof McpNotificationSource) {
-            $notifications = $this->dispatcher->drainNotifications();
+        if ($acceptsSse && $dispatcher instanceof McpNotificationSource) {
+            $notifications = $dispatcher->drainNotifications();
         }
 
         if ($notifications !== []) {
@@ -86,7 +106,17 @@ final class McpTransportHandler
             ]);
         }
 
+        // A notification has no response: the spec's answer is 202 with no
+        // body (every version since 2025-03-26).
+        if ($rawResponse === '') {
+            return new Response(202, '', []);
+        }
+
+        $status  = $dispatcher instanceof McpHttpStatusSource ? $dispatcher->httpStatus() : 200;
         $headers = ['Content-Type' => 'application/json'];
+        if ($status === 401) {
+            $headers['WWW-Authenticate'] = $this->protectedResource?->challenge() ?? 'Bearer';
+        }
 
         // When the client signals it can consume an SSE stream (long-running
         // tool calls), disable reverse-proxy buffering now so the first event
@@ -95,7 +125,7 @@ final class McpTransportHandler
             $headers['X-Accel-Buffering'] = 'no';
         }
 
-        return new Response(200, $rawResponse, $headers);
+        return new Response($status, $rawResponse, $headers);
     }
 
     /**
@@ -161,6 +191,25 @@ final class McpTransportHandler
      * Returns null when the header is absent or does not follow the
      * `Bearer <token>` format. Auth validation is the dispatcher's responsibility.
      */
+    /**
+     * The discovery dispatcher when the URL asks for it (`?tools=discover`),
+     * else the full one. An unknown value gets the full catalogue: it is what
+     * every client got before discovery mode existed.
+     */
+    private function dispatcherFor(Request $request): McpRequestHandlerInterface
+    {
+        if ($this->discoveryDispatcher === null) {
+            return $this->dispatcher;
+        }
+        // Request::fromGlobals() keeps only the path, so in production the query
+        // is in $_GET (reset per request by the worker); a Request built with
+        // the query in its path (tests, internal callers) is read too. The same
+        // two sources AuditLogApiHandler reads.
+        parse_str((string) parse_url($request->getPath(), PHP_URL_QUERY), $query);
+        $mode = $query['tools'] ?? $_GET['tools'] ?? null;
+        return $mode === 'discover' ? $this->discoveryDispatcher : $this->dispatcher;
+    }
+
     private function extractBearer(Request $request): ?string
     {
         $header = $request->getHeader('Authorization');

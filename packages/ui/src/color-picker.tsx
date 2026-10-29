@@ -350,7 +350,7 @@ const ColorPicker = React.forwardRef<HTMLDivElement, ColorPickerProps>(
               {hasHeader && (
                 <div className="flex items-center gap-1 text-xs font-semibold text-foreground">
                   {label && <span>{label}</span>}
-                  {required && <span className="text-destructive font-bold ms-0.5">*</span>}
+                  {required && <span className="text-destructive font-semibold ms-0.5">*</span>}
                   {tooltip && (
                     <TooltipProvider>
                       <Tooltip>
@@ -390,7 +390,7 @@ const ColorPicker = React.forwardRef<HTMLDivElement, ColorPickerProps>(
         {hasHeader && (
           <div className="flex items-center gap-1 text-xs font-semibold text-foreground">
             {label && <span>{label}</span>}
-            {required && <span className="text-destructive font-bold ms-0.5">*</span>}
+            {required && <span className="text-destructive font-semibold ms-0.5">*</span>}
             {tooltip && (
               <TooltipProvider>
                 <Tooltip>

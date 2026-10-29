@@ -1,4 +1,4 @@
-import { collectBlockIds } from '@amroksaleh/ui/documents/blocks';
+import { collectBlockIds } from '@whity-org/ui/documents/blocks';
 import {
   describeAudience,
   needsPublish,

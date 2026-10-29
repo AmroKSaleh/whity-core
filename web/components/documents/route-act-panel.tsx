@@ -111,12 +111,12 @@
  */
 
 import { useMemo, useState } from 'react';
-import { Button } from '@amroksaleh/ui/button';
-import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
-import { Badge } from '@amroksaleh/ui/badge';
-import { Textarea } from '@amroksaleh/ui/textarea';
+import { Button } from '@whity-org/ui/button';
+import { Alert, AlertDescription } from '@whity-org/ui/alert';
+import { Badge } from '@whity-org/ui/badge';
+import { Textarea } from '@whity-org/ui/textarea';
 import { IconCheck, IconX } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import {
@@ -529,7 +529,7 @@ export function RouteActPanel({
             ? t('routing.act.decision.heading', 'Your decision on this route')
             : t('routing.act.heading', 'Your action on this route')}
           {isDecision && (
-            <Badge variant="warning-solid" data-slot="route-act-decision-badge">
+            <Badge variant="warning" data-slot="route-act-decision-badge">
               {t('routing.act.decision.badge', 'Decision')}
             </Badge>
           )}
@@ -923,7 +923,7 @@ function VerdictButton({
     <div className="flex flex-col">
       <span className="inline-flex" title={reason ?? undefined}>
         <Button
-          variant={verdict === 'approved' ? 'success-solid' : 'destructive'}
+          variant={verdict === 'approved' ? 'default' : 'destructive'}
           disabled={disabled}
           aria-disabled={disabled}
           onClick={disabled ? undefined : onClick}

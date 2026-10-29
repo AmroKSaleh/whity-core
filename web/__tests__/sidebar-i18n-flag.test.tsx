@@ -15,7 +15,7 @@
 
 import React from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
-import { LanguageProvider } from '@amroksaleh/features/i18n';
+import { LanguageProvider } from '@whity-org/features/i18n';
 
 jest.mock('next/navigation', () => ({
   usePathname: () => '/dashboard',

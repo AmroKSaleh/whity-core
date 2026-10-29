@@ -201,7 +201,7 @@ function Footer() {
  *
  * Add this to packages/spa-harness/src/main.tsx:
  *
- *   import { AppWithI18n } from '@amroksaleh/features/i18n'
+ *   import { AppWithI18n } from '@whity-org/features/i18n'
  *   import { createRoot } from 'react-dom/client'
  *
  *   createRoot(document.getElementById('root')!).render(

@@ -1,6 +1,6 @@
 import * as React from "react"
 import type { Meta, StoryObj } from "@storybook/nextjs-vite"
-import { Button } from "@amroksaleh/ui/button"
+import { Button } from "@whity-org/ui/button"
 
 import { ToastContainer } from "./toast-container"
 import { useToast, type ToastType } from "@/lib/toast-context"

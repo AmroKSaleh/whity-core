@@ -1,5 +1,5 @@
-import { canvasToFlow, describeSwitch, flowToCanvas } from '@amroksaleh/features/document-designer';
-import type { DocTemplate } from '@amroksaleh/ui/documents/types';
+import { canvasToFlow, describeSwitch, flowToCanvas } from '@whity-org/features/document-designer';
+import type { DocTemplate } from '@whity-org/ui/documents/types';
 
 /**
  * Switching a template between canvas and flow (#1186 slice 2).

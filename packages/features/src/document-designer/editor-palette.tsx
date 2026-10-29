@@ -1,6 +1,6 @@
-import type { CommandPaletteItem } from '@amroksaleh/ui/command-palette';
-import { FLOW_BLOCK_TYPES, type FlowBlockType } from '@amroksaleh/ui/documents/flow';
-import type { MenuBarMenu, MenuBarNode } from '@amroksaleh/ui/menu-bar';
+import type { CommandPaletteItem } from '@whity-org/ui/command-palette';
+import { FLOW_BLOCK_TYPES, type FlowBlockType } from '@whity-org/ui/documents/flow';
+import type { MenuBarMenu, MenuBarNode } from '@whity-org/ui/menu-bar';
 
 /**
  * The editor's command palette items, FLATTENED FROM THE MENU REGISTRY.

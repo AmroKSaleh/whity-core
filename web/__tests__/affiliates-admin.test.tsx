@@ -36,7 +36,7 @@ jest.mock('@/lib/toast-context', () => ({
   useToast: () => ({ addToast }),
 }));
 
-jest.mock('@amroksaleh/features/i18n', () => ({
+jest.mock('@whity-org/features/i18n', () => ({
   // The fallback text with its placeholders filled, so assertions read as the
   // English an operator actually sees.
   useTranslation:

@@ -16,6 +16,7 @@ build/
 docs/*
 !docs/wiki/
 !docs/adr/
+!docs/design/
 .worktrees/
 .phpunit.cache/
 # PHPStan result cache (project-local tmpDir; restored across CI runs for a fast
@@ -76,3 +77,6 @@ __pycache__/
 # watchdog state that has nothing to do with the deployed namespace, and reading
 # it is already a trap that cost two misdiagnoses.
 ops/watchdog/.wrangler/
+
+# Design-card screenshot check output (scripts/design-cards-compare.mjs)
+/.design-check/

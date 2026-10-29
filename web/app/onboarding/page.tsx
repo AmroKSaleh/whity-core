@@ -8,9 +8,9 @@ import { useToast } from '@/lib/toast-context';
 import { useAuth } from '@/lib/auth-context';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { useFetch } from '@/hooks/useFetch';
-import { Button } from '@amroksaleh/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
-import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
+import { Button } from '@whity-org/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity-org/ui/card';
+import { useTranslation, type TranslateFn } from '@whity-org/features/i18n';
 import {
   IconAlertCircle,
   IconArrowLeft,
@@ -426,7 +426,7 @@ export default function OnboardingPage() {
           <div className="mb-4 rounded-full bg-destructive/10 p-4 text-destructive">
             <IconAlertCircle size={40} />
           </div>
-          <h1 className="mb-2 text-xl font-bold">
+          <h1 className="mb-2 text-xl font-semibold">
             {t('denied.title', 'Setup is operator-only')}
           </h1>
           <p className="mb-6 text-sm text-muted-foreground">
@@ -599,7 +599,7 @@ function OnboardingWizard() {
               <IconRocket className="h-5 w-5" />
             </span>
             <div>
-              <h1 className="text-2xl font-bold text-foreground">
+              <h1 className="text-2xl font-semibold text-foreground">
                 {t('title', 'Set up your instance')}
               </h1>
               <p className="text-sm text-muted-foreground">
@@ -615,7 +615,7 @@ function OnboardingWizard() {
 
         <Card className="border border-border bg-card shadow-sm">
           <CardHeader>
-            <CardTitle className="text-lg font-bold font-heading">
+            <CardTitle className="text-lg font-semibold font-heading">
               <h2>{t(step.title.key, step.title.text)}</h2>
             </CardTitle>
             <CardDescription className="text-sm">{stepDescription(t, step.id)}</CardDescription>

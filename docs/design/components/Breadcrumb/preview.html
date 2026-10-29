@@ -1,0 +1,12 @@
+<!-- @dsCard group="Navigation" height=129 -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Breadcrumb</title></head>
+<body>
+<div id="root" class="wy-stack"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h(React.Fragment, null, h(W.Breadcrumb, { items: [{ label: 'Admin' }, { label: 'Tenants' }, { label: 'Example Bakery' }] }), h(W.Pagination, { from: 1, to: 20, total: 148 })));
+</script>
+</body>
+</html>

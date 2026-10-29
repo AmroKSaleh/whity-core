@@ -397,7 +397,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Login to GHCR
-        uses: docker/login-action@v4.6.0
+        uses: docker/login-action@v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -497,7 +497,7 @@ jobs:
 
     steps:
       - name: Login to GHCR
-        uses: docker/login-action@v4.6.0
+        uses: docker/login-action@v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -1008,21 +1008,36 @@ jobs:
     if: needs.resolve.outputs.go == 'true'
 
     permissions:
-      contents: read
+      # The back-merge is a branch this job pushes, not main itself.
+      contents: write
       pull-requests: write
 
     steps:
+      # See release-prepare.yml: a PR opened with github.token has its CI held
+      # for approval. Setup: CONTRIBUTING.md, "The release token".
+      - name: Mint the release token
+        id: app-token
+        if: vars.RELEASE_APP_CLIENT_ID != ''
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
       - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token || secrets.RELEASE_TOKEN || github.token }}
 
-      - name: Open develop <- main if they have diverged
+      - name: Open the back-merge PR from a branch off develop
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.RELEASE_TOKEN || github.token }}
+          TOKEN_KIND: ${{ steps.app-token.outputs.token != '' && 'app' || secrets.RELEASE_TOKEN != '' && 'pat' || 'builtin' }}
           RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           git fetch --quiet origin develop main
+          DEVELOP=$(git rev-parse origin/develop)
+          MAIN=$(git rev-parse origin/main)
 
           # The release merge commit lives only on main, so develop reads as
           # "behind" the moment a release ships even though the trees are
@@ -1030,49 +1045,91 @@ jobs:
           # merge commits develop has never seen and "is main ahead?" stops
           # being answerable at a glance. Closing that loop here is what makes
           # it a step nobody has to remember.
-          BEHIND=$(git rev-list --count origin/develop..origin/main)
+          BEHIND=$(git rev-list --count "${DEVELOP}..${MAIN}")
           if [ "$BEHIND" = "0" ]; then
             echo "::notice::develop already contains main. Nothing to back-merge."
             exit 0
           fi
 
-          EXISTING=$(gh pr list --base develop --head main --state open --json number --jq '.[0].number // empty')
+          # The PR comes from a branch built on develop, NOT from main. A PR whose
+          # head is main can merge only while develop has not moved since the
+          # release: strict protection (enforced for admins) requires the head
+          # to be up to date with the base, and the only way to update main is
+          # to merge unreleased develop work onto the release line. Every
+          # back-merge through v0.2.17 hit this and had to be rebuilt by hand
+          # (#1375 -> #1389, #1392 -> #1393). A branch off develop can always
+          # be brought up to date with update-branch.
+          BRANCH="chore/back-merge-${RELEASE_TAG}"
+          EXISTING=$(gh pr list --base develop --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
           if [ -n "$EXISTING" ]; then
-            echo "::notice::PR #${EXISTING} already back-merges main into develop."
+            echo "::notice::PR #${EXISTING} already back-merges ${RELEASE_TAG} into develop."
             exit 0
           fi
 
-          # The body goes through a FILE, not an inline --body string. Two bugs lived
-          # in the inline version and only one of them was visible:
-          #
-          #  - it used a literal \n where a line continuation was meant, so `gh` got
-          #    four bare `n` arguments and refused. This step therefore failed on EVERY
-          #    release since it was added, which is why main's ancestry had to be
-          #    repaired by hand rather than by the job that exists to prevent that;
-          #  - a multi-line string inside this block scalar carries the step's own
-          #    indentation into the body, and Markdown reads indented lines as a code
-          #    block. The whole explanation would have rendered as monospace even after
-          #    the quoting was fixed -- so fixing only the visible bug would have looked
-          #    done without being done.
-          #
-          # Heredoc body lines sit at this step's indentation on purpose: YAML strips it,
-          # so the shell (and the rendered Markdown) see column 0.
+          # The merge is computed without a checkout: a conflict here means main
+          # carries a change develop contradicts, which no bot should resolve.
+          if ! TREE=$(git merge-tree --write-tree "$DEVELOP" "$MAIN"); then
+            echo "::error::main and develop conflict, so the back-merge needs a person. Merge origin/main into a branch off develop by hand, resolve, and open the PR."
+            exit 1
+          fi
+
+          # Normally the result is develop's own tree: the release merge commit
+          # adds nothing develop lacks. It differs only when something reached
+          # main without passing through develop (a hotfix cut from main), and
+          # then this PR is what carries it back -- so it is opened either way,
+          # but says which case it is.
+          CHANGED=$(git diff --name-only "$DEVELOP" "$TREE")
+          if [ -z "$CHANGED" ]; then
+            CONTENT="Expect **zero file changes**: the merge tree is identical to develop's. This carries main's release merge commit back onto develop so git stops reporting develop as behind."
+          else
+            COUNT=$(printf '%s\n' "$CHANGED" | wc -l | tr -d ' ')
+            CONTENT="This carries **${COUNT} changed file(s)** from main that never went through develop (a hotfix cut from main?). Review them like any other change before merging."
+            echo "::warning::The back-merge carries ${COUNT} file(s) develop does not have."
+          fi
+
+          COMMIT=$(GIT_AUTHOR_NAME='github-actions[bot]' \
+            GIT_AUTHOR_EMAIL='41898282+github-actions[bot]@users.noreply.github.com' \
+            GIT_COMMITTER_NAME='github-actions[bot]' \
+            GIT_COMMITTER_EMAIL='41898282+github-actions[bot]@users.noreply.github.com' \
+            git commit-tree "$TREE" -p "$DEVELOP" -p "$MAIN" \
+              -m "chore: back-merge main into develop after ${RELEASE_TAG}")
+
+          # Force: a re-run builds a new commit, and this branch belongs to the
+          # job (an open PR for it already returned above).
+          git push --force origin "${COMMIT}:refs/heads/${BRANCH}"
+
+          # The body goes through a FILE, not an inline --body string: an inline
+          # multi-line string inside this block scalar keeps the step's
+          # indentation, and Markdown renders indented lines as a code block.
+          # Heredoc body lines sit at this step's indentation on purpose: YAML
+          # strips it, so the shell (and the rendered Markdown) see column 0.
           cat > "${RUNNER_TEMP}/back-merge-body.md" <<EOF
           Opened automatically after **${RELEASE_TAG}** published.
 
-          Expect **zero file changes**. This carries main's release merge commit back onto develop so git stops reporting develop as behind.
+          ${CONTENT}
 
-          ## Merge this NOW, or close it
+          ## Merge with a MERGE COMMIT
 
-          Strict branch protection requires the HEAD branch to be up to date with the BASE. Here the head is main and the base is develop, so this is mergeable ONLY while nothing new has landed on develop. Once something has, this PR can never merge — and update-branch would push unreleased work from develop onto the release line, the opposite of the intent.
+          A squash would drop main's release commit from develop's history, which is the one thing this PR exists to carry.
 
-          ## If that window closed, closing this is correct
+          ## If develop moves before you merge
 
-          The merge commit it carries has a tree IDENTICAL to its develop-side parent, which develop already contains. main introduces no content develop lacks, so every future develop-to-main merge is still clean. What you lose by closing is cosmetic: git reports develop as N behind after N releases, which misleads a reader but breaks nothing.
+          The head is a branch off develop, so **Update branch** (or \`gh pr update-branch\`) brings it up to date and it stays mergeable. Nothing here ever pushes to main.
           EOF
 
-          gh pr create \
+          URL=$(gh pr create \
             --base develop \
-            --head main \
+            --head "$BRANCH" \
             --title "chore: back-merge main into develop after ${RELEASE_TAG}" \
-            --body-file "${RUNNER_TEMP}/back-merge-body.md"
+            --body-file "${RUNNER_TEMP}/back-merge-body.md")
+          echo "Opened ${URL}"
+          if [ "$TOKEN_KIND" = "builtin" ]; then
+            echo "::warning::The back-merge PR was opened with github.token, so GitHub holds its CI for approval. Approve the runs on ${URL}, or configure the release token (CONTRIBUTING.md, 'The release token')."
+            {
+              echo "### CI on ${URL} is waiting for approval"
+              echo ""
+              echo "This PR was opened with github.token, and GitHub holds the workflow runs of such PRs until someone with write access approves them: open the PR and choose **Approve workflows to run**."
+              echo ""
+              echo "Configure the release token (CONTRIBUTING.md, *The release token*) and release PRs start their CI on their own."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi

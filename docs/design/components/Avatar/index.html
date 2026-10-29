@@ -1,0 +1,18 @@
+<!-- @dsCard group="Data" height=140 subtitle="Person, agent and system" -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../bundle.css"><script src="../../preview-runtime/react.production.min.js"></script><script src="../../preview-runtime/react-dom.production.min.js"></script><script src="../bundle.js"></script><script>(function(){var t=(location.hash.match(/theme=(dark|light)/)||[])[1]||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);})();</script><style>body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font-sans);width:960px;min-height:140px}</style><meta charset="utf-8"><title>Avatar</title><style>#root{padding:16px 24px} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px 32px;align-items:start} .ar{font-family:var(--font-arabic)} </style></head>
+<body>
+<div id="root" class=""></div>
+<script>
+  var W = window.Whity, h = React.createElement; 
+  function cap(t) { return h('p', { className: 'cap' }, t); }
+  function col() { return h.apply(null, ['div', { style: { display: 'grid', gap: 12, alignContent: 'start' } }].concat([].slice.call(arguments))); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'wy-stage', style: { gap: 28, alignItems: 'flex-end' } },
+  h('div', { style: { display: 'grid', gap: 6, justifyItems: 'center' } }, h('div', { className: 'wy-row' }, h(W.Avatar, { name: 'Rana Haddad', size: 40, status: 'online' }), h(W.Avatar, { name: 'Omar Saleh', size: 32 }), h(W.Avatar, { name: 'Lina', size: 24 })), cap('People: initials')),
+  h('div', { style: { display: 'grid', gap: 6, justifyItems: 'center' } }, h('div', { className: 'wy-row' }, h(W.Avatar, { name: 'Billing assistant', kind: 'agent', size: 40 }), h(W.Avatar, { name: 'HR assistant', kind: 'agent', size: 32 }), h(W.Avatar, { name: 'Reports assistant', kind: 'agent', size: 24 })), cap('Agents: the robot face, tinted')),
+  h('div', { style: { display: 'grid', gap: 6, justifyItems: 'center' } }, h('div', { className: 'wy-row' }, h(W.Avatar, { name: 'Whity', kind: 'system', size: 40 }), h(W.Avatar, { name: 'Whity', kind: 'system', size: 32 })), cap('The system: the mark')),
+  h('div', { style: { display: 'grid', gap: 6 } }, h(W.ActorChip, { name: 'Whity', kind: 'system' }), cap('Actor chip, system'))));
+</script>
+</body>
+</html>

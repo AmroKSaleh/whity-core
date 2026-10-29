@@ -46,8 +46,8 @@
  */
 
 import { useMemo, useState } from 'react';
-import { Badge } from '@amroksaleh/ui/badge';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { Badge } from '@whity-org/ui/badge';
+import { useTranslation } from '@whity-org/features/i18n';
 import type { DocumentRoute, RouteRecipient, RouteStep } from './routing-wire';
 import { configuredRoleId } from './routing-wire';
 

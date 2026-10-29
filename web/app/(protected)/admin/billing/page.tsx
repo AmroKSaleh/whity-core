@@ -10,17 +10,17 @@ import { useFetch } from '@/hooks/useFetch';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { PLANS_MANAGE } from '@/lib/capabilities';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Button } from '@amroksaleh/ui/button';
+import { Button } from '@whity-org/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@amroksaleh/ui/badge';
-import { EmptyState } from '@amroksaleh/ui/empty-state';
+import { Badge } from '@whity-org/ui/badge';
+import { EmptyState } from '@whity-org/ui/empty-state';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@amroksaleh/ui/select';
+} from '@whity-org/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -30,7 +30,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { IconPlus } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 
 /**
  * BILLING: the plan catalogue and what each plan costs.

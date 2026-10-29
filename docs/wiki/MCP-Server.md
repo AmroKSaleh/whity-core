@@ -92,11 +92,35 @@ The `description` field is taken from `schema['summary']` when present. When abs
 
 The result is `"{prefix} {path}"`, e.g. `Get /api/users`.
 
+### Annotations (read-only, destructive, idempotent)
+
+Every derived tool carries MCP `annotations`, so a client can run reads without asking and confirm before destructive calls (WHIT-706). `title` is the route's summary. The hints come from the HTTP method:
+
+| Method | readOnlyHint | destructiveHint | idempotentHint |
+|---|---|---|---|
+| GET | true | — | — |
+| PUT | false | true | true |
+| DELETE | false | true | true |
+| POST, PATCH | false | *unset* | false |
+
+`openWorldHint` is `false` on every tool: they act on this server's own data.
+
+`destructiveHint` is left unset on POST and PATCH on purpose. The spec reads an unset hint as `true`, and a POST here is as often an action (trash, revoke, disable two-factor) as a create, so these keep their confirmation prompt. A route that is genuinely additive declares it:
+
+```php
+'schema' => [
+    'summary'         => 'Add a comment',
+    'mcp_annotations' => ['destructiveHint' => false],
+],
+```
+
+`mcp_annotations` overrides any derived hint, and its `title` replaces the summary. A plugin-authored tool (`PluginMcpToolsInterface`, SDK 1.45) declares `annotations` in its descriptor. Nothing is derived for it, since it has no HTTP method. Unknown keys and non-boolean hints are dropped. Annotations are hints: RBAC, scope and the per-call checks are unchanged.
+
 ### inputSchema construction
 
 `buildInputSchema()` assembles a flat JSON Schema `object` by merging three sources in order:
 
-1. **Path parameters** — extracted from `{name}` or `{name:constraint}` segments of the route path. Always required. Type is `integer` when the constraint is `\d+` or `[0-9]+`; `string` otherwise.
+1. **Path parameters** — extracted from `{name}` or `{name:constraint}` segments of the route path. Always required. Type is `integer` when the constraint is `\d+` or `[0-9]+`; `string` otherwise. Each is described: by the route's own `in: path` entry in `schema['parameters']` when it has one, otherwise from the collection segment before it (`/api/users/{id}` gives "ID of the user.", `/api/meetings/{id}/agenda/{itemId}` gives "ID of the agenda item.").
 
 2. **Query parameters** — declared in `schema['parameters']` with `in: query`. Optional unless `required: true`. Each parameter's type and description come from its `schema` sub-key.
 
@@ -108,6 +132,8 @@ The result is `"{prefix} {path}"`, e.g. `Get /api/users`.
 
 The final result always has `"type": "object"`. A `properties` key is omitted when the tool has no declared parameters. A `required` array is omitted when no parameters are required.
 
+**Argument descriptions** (WHIT-711): an agent fills a tool in from its argument descriptions, so every argument of a core tool must have one. Describe a body field in its `CoreApiSchemas` component, with `'description' => '...'` inside a literal or `+ ['description' => '...']` after a helper such as `self::int()`. `ToolArgumentDescriptionsTest` fails on an undescribed argument. Its `KNOWN_UNDOCUMENTED` list holds the backlog that existed when the gate was added. It may only shrink: describing a listed field fails the test until the entry is removed.
+
 **Lint warning**: when a `POST`, `PUT`, or `PATCH` route has no resolvable request body, `ToolDeriver` emits a warning via `error_log()` (or the injected `$warn` closure). This surfaces missing schema coverage at derivation time rather than silently producing a parameter-free tool.
 
 ### Worker-boot cache
@@ -117,6 +143,26 @@ The final result always has `"type": "object"`. A `properties` key is omitted wh
 Call `ToolDeriver::clearCache()` after registering plugin routes to ensure the next `tools/list` or `tools/call` request picks up the freshly registered tools.
 
 ---
+
+## Discovery mode (`?tools=discover`)
+
+Core alone derives over 300 tools, about 22k tokens of definitions every agent loads before it does anything. Several clients handle far fewer: Cursor is widely reported to drop every tool past 40, and agents reportedly pick tools less reliably past about 50 (WHIT-707).
+
+A client that connects to **`/mcp?tools=discover`** gets three tools in place of the catalogue:
+
+| Tool | Does |
+|---|---|
+| `search_tools` | Finds tools by what they do: `{query, limit?}`, returning name, title, description and whether each reads or deletes |
+| `describe_tool` | Returns one tool's full definition, including its input schema and annotations |
+| `call_tool` | Calls one tool by name: `{name, arguments}` |
+
+The catalogue is unchanged and reached on demand, so the cost stays the same at 50 tools or 5,000.
+
+**Nothing here decides access.** `search_tools` and `describe_tool` read the list through `ToolsListHandler::listFor()`, the same filter `tools/list` applies (exposure, scope, RBAC), so a tool the caller couldn't see in the full list can't be found either. Hidden and unknown names answer alike. `call_tool` hands the call to the real `ToolsCallHandler`, which re-checks everything and audits it, and a real tool called by its own name works too.
+
+The transport picks a separate `Dispatcher` for this URL, so the mode never sits in worker-global state. Resources, prompts, auth, the tenant switch and rate limits are identical. The discovery list never changes, so this dispatcher announces no `list_changed`.
+
+The connect wizard turns tool search on when the access chosen exposes more tools than the app is reported to handle (40 for Cursor), or more than about 60 for any app, and lets the user override it.
 
 ## Authentication
 
@@ -128,7 +174,27 @@ Every call to `POST /mcp` must carry an MCP bearer token:
 Authorization: Bearer <mcp-token>
 ```
 
-The `Dispatcher` checks auth before JSON parsing, so an unauthenticated caller learns nothing about the request shape (`UNAUTHENTICATED` error code `-32001` is returned immediately).
+The `Dispatcher` checks auth before JSON parsing, so an unauthenticated caller learns nothing about the request shape. It gets HTTP **401** with `WWW-Authenticate` and the `UNAUTHENTICATED` (-32001) JSON-RPC error.
+
+### OAuth sign-in (ADR-0015)
+
+Apps such as Claude and ChatGPT connect by pasting the URL and signing in, which needs OAuth. whity-core is the **protected resource**; the authorization server is configuration:
+
+- `MCP_OAUTH_ISSUER` names it (default plan: Whity-Auth). Unset means OAuth is off.
+- With it set (and `APP_URL` known), `/.well-known/oauth-protected-resource` and `/.well-known/oauth-protected-resource/mcp` serve RFC 9728 metadata. Fields: `resource` = `APP_URL/mcp`, `authorization_servers` = the issuer, `scopes_supported` = the MCP capabilities, `bearer_methods_supported` = `header`.
+- The 401 challenge names that metadata: `Bearer resource_metadata="…/.well-known/oauth-protected-resource/mcp", scope="tools:call resources:read prompts:read"`.
+- The web tier forwards both documents when the bundled admin serves the public origin.
+
+The access tokens it issues are accepted on `/mcp` alongside MCP tokens (`OAuthAccessTokenVerifier`):
+
+- **Signature:** firebase/php-jwt against the issuer's JWKS. The JWKS location comes from `MCP_OAUTH_JWKS_URI`, or from the issuer's RFC 8414 metadata, falling back to OIDC discovery; either document's `issuer` must match. Keys are cached and refreshed once when a token names an unknown `kid`. Only asymmetric keys (RSA, EC, OKP) are used.
+- **Claims:** `exp` is required, `iss` must equal the issuer, and `aud` must include `APP_URL/mcp`. A token for another resource is refused.
+- **Who:** `(iss, sub)` is looked up in the global-trust links of `external_identities`, the table single sign-on keeps. So the issuer must also be configured as an operator (system-tenant) identity provider, and each person signs in to Whity with it once. A tenant's own identity provider never answers here.
+- **Which workspace:** the `tenant_id` claim (renamed with `MCP_OAUTH_TENANT_CLAIM`) when present, else the person's only active workspace. An active membership is always required. The system tenant cannot be reached with an OAuth token.
+- **Scope:** `scope` (or `scp`), keeping only `tools:call`, `resources:read` and `prompts:read`.
+- **Answers:** a token that fails verification gets the usual 401, so the app signs in again. A genuine token that can't be used (no linked account, several workspaces and no claim, no MCP scope) gets **403** with a message that says what to fix, because signing in again would not help.
+
+The principal's `principalKind` is `oauth`; RBAC, the per-tenant MCP switch, rate limits and audit apply exactly as for an MCP token.
 
 MCP tokens are 90-day HS256 JWTs with `aud: mcp` and `type: mcp`. They are issued, listed, and revoked through a dedicated REST sub-API:
 
@@ -241,6 +307,16 @@ Fixed-window semantics: the TTL is set once on the first call in the window and 
 
 Arguments are redacted before storage: any key whose name contains `password`, `secret`, `token`, `code`, `hash`, `backup_code`, or `two_factor_secret` is stripped. This matches the redaction logic in `AuditLogger` (defense-in-depth).
 
+### Argument errors
+
+Arguments that fail the tool's inputSchema come back as a tool result with `isError: true`, not as JSON-RPC -32602, because MCP classes input validation errors as tool execution errors so the model can correct its call (WHIT-710). The text names the problem and lists the expected arguments:
+
+```
+Invalid arguments for post_api_users: Missing required argument: email. Expected: email (string, required), name (string).
+```
+
+The route handler never runs and the call is audited as before. An unknown tool name is still -32601 at the top level. Under discovery mode, `call_tool` with an unknown name returns a tool error pointing at `search_tools`.
+
 ### Application error containment
 
 When a route handler throws inside `ToolsCallHandler::executeResolved()`, the exception is caught and `isError: true` content with the message `"Internal error"` is returned as an MCP result — the caller knows the tool failed but learns nothing about the underlying cause.
@@ -275,21 +351,46 @@ Built-in prompts are registered via `CorePrompts::register()` (`src/Mcp/Prompts/
 
 ## Protocol
 
-The `initialize` response declares the server's capabilities and protocol version:
+The endpoint serves every MCP version from **2025-03-26** to **2026-07-28** (WHIT-708). Both eras share one endpoint and need no per-connection memory. `McpProtocol` (`src/Mcp/Protocol/McpProtocol.php`) holds the version list and what each version changes.
+
+### Which version a request speaks
+
+The Dispatcher reads it from each request, never from an earlier one:
+
+1. A version in `params._meta["io.modelcontextprotocol/protocolVersion"]` makes it a **2026-07-28** request. It must be a version this server speaks, and its headers must match the body: `MCP-Protocol-Version`, `Mcp-Method`, and `Mcp-Name` for `tools/call`, `prompts/get` and `resources/read` (a `=?base64?…?=` value is decoded first). Otherwise the request gets HTTP 400 with `HeaderMismatch` (-32020) or `UnsupportedProtocolVersion` (-32022, `data.supported` lists the versions).
+2. Otherwise the `MCP-Protocol-Version` header names a legacy version (2025-06-18 or 2025-11-25), as negotiated by `initialize`.
+3. A request with neither speaks 2025-03-26, whose clients send no header.
+
+The version is then written into the request's `params._meta`, where every handler can read it.
+
+### Legacy versions: `initialize`
+
+`initialize` answers with the client's requested version when the server speaks it, else the newest legacy version (2025-11-25):
 
 ```json
 {
-  "protocolVersion": "2025-03-26",
+  "protocolVersion": "2025-06-18",
   "capabilities": {
     "tools":     { "listChanged": true },
     "resources": { "subscribe": false, "listChanged": true },
     "prompts":   { "listChanged": true }
   },
-  "serverInfo": { "name": "whity-core", "version": "1.0" }
+  "serverInfo": { "name": "whity-core", "version": "<CoreVersion>" }
 }
 ```
 
-Batch requests are supported: a JSON array of request objects returns a JSON array of responses. Notifications (objects without an `id` member) are processed but produce no response.
+Batches work only on 2025-03-26, since 2025-06-18 removed them. A batch sent with a later version header gets 400. A notification gets `202 Accepted` with no body.
+
+### What each version adds to a response
+
+| From | Added |
+|---|---|
+| 2025-06-18 | Tools carry a top-level `title` (also kept in `annotations.title`). A `tools/call` result whose text is a JSON object also carries it as `structuredContent`; the text block stays. |
+| 2026-07-28 | Every result has `resultType: "complete"` and `_meta["io.modelcontextprotocol/serverInfo"]`. List results and `resources/read` carry `ttlMs: 60000` and `cacheScope: "private"`. `structuredContent` may be any JSON value. Resource-not-found is -32602. `initialize`, `ping` and `logging/setLevel` don't exist (404). `server/discover` returns the supported versions, capabilities and identity. |
+
+**No `outputSchema` is declared.** A declared schema obliges every result to conform, and the route response schemas aren't yet checked against what handlers return (WHIT-120). Clients that validate would reject correct data.
+
+**No `subscriptions/listen`.** It holds a response stream open indefinitely, and under FrankenPHP that pins a worker; this is also why GET `/mcp` answers 405. A 2026 client is therefore offered no `listChanged`, gets no `list_changed` pushes, and refreshes lists using `ttlMs`. Legacy clients keep their notifications on POST responses, as before.
 
 ---
 

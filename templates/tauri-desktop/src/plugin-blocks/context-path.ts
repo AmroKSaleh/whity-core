@@ -12,10 +12,10 @@
  * nothing left for the three of them to disagree about.
  *
  * WHY THIS IS A COPY OF WEB'S AND NOT AN IMPORT OF IT. This template ships to
- * consumers who get `@amroksaleh/*` from the registry and no `web/` at all, and
+ * consumers who get `@whity-org/*` from the registry and no `web/` at all, and
  * web's copy lives in the unpublished Next app — `templates/tauri-desktop` is
  * its own Vite bundle with its own tsconfig, and nothing in `src/` can reach
- * across into it. Hoisting the helper into `@amroksaleh/features` would make it
+ * across into it. Hoisting the helper into `@whity-org/features` would make it
  * importable from both, at the cost of a packaging change (a published surface
  * for a private helper, and a version bump the template would have to take) —
  * the same trade already recorded in `fetch-all-pages.ts`, and answered the same

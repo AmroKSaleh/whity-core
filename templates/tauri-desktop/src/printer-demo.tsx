@@ -1,9 +1,9 @@
 import * as React from "react"
 import { invoke } from "@tauri-apps/api/core"
 
-import { Button } from "@amroksaleh/ui/button"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@amroksaleh/ui/card"
-import { Textarea } from "@amroksaleh/ui/textarea"
+import { Button } from "@whity-org/ui/button"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@whity-org/ui/card"
+import { Textarea } from "@whity-org/ui/textarea"
 
 /**
  * Worked example of the "custom function" extension pattern the brief asked

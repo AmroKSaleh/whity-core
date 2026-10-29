@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { FlowEditor } from '@amroksaleh/features/document-designer';
-import { newFlowBlock, type FlowBlock, type FlowContent } from '@amroksaleh/ui/documents/flow';
+import { FlowEditor } from '@whity-org/features/document-designer';
+import { newFlowBlock, type FlowBlock, type FlowContent } from '@whity-org/ui/documents/flow';
 
 /**
  * Document mode's editor (#1186 slice 1).
@@ -182,7 +182,7 @@ describe('every new block is renderable the instant it exists', () => {
    * resolves to nothing. It must never appear in the author's block list.
    */
   it('does not offer qr as an authorable block', async () => {
-    const { FLOW_BLOCK_TYPES } = await import('@amroksaleh/ui/documents/flow');
+    const { FLOW_BLOCK_TYPES } = await import('@whity-org/ui/documents/flow');
     expect(FLOW_BLOCK_TYPES).not.toContain('qr');
   });
 });

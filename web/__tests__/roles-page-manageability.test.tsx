@@ -10,15 +10,15 @@
  * the manageability gate BOTH apply.
  *
  * Post Path-B extraction, this gating lives in the data-source-agnostic
- * `RolesScreen` (@amroksaleh/features/roles), so the test drives it directly
+ * `RolesScreen` (@whity-org/features/roles), so the test drives it directly
  * through injected props (adapter/can/t) rather than web's provider stack.
  */
 
 import React from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { RolesScreen } from '@amroksaleh/features/roles';
-import type { Role, RolesAdapter } from '@amroksaleh/features/roles';
+import { RolesScreen } from '@whity-org/features/roles';
+import type { Role, RolesAdapter } from '@whity-org/features/roles';
 
 const MANAGEABLE_ROLE: Role = {
   id: 10,

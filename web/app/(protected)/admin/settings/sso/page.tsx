@@ -7,12 +7,12 @@ import { useAuth } from '@/lib/auth-context';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Button } from '@amroksaleh/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
+import { Button } from '@whity-org/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity-org/ui/card';
 import { Input } from '@/components/ui/input';
-import { Switch } from '@amroksaleh/ui/switch';
-import { Badge } from '@amroksaleh/ui/badge';
-import { AccessDenied } from '@amroksaleh/ui/access-denied';
+import { Switch } from '@whity-org/ui/switch';
+import { Badge } from '@whity-org/ui/badge';
+import { AccessDenied } from '@whity-org/ui/access-denied';
 import {
   IconAlertCircle,
   IconCopy,
@@ -21,7 +21,7 @@ import {
   IconShieldLock,
   IconTrash,
 } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 import { SettingsTabs } from '../settings-tabs';
 import { api } from '@/lib/api/client';
 import {
@@ -642,7 +642,7 @@ function ProviderFormCard({
   return (
     <Card className="border border-primary/30 bg-card shadow-sm" data-testid="sso-form">
       <CardHeader>
-        <CardTitle className="text-lg font-bold font-heading">
+        <CardTitle className="text-lg font-semibold font-heading">
           <h2>
             {editing
               ? t('settings.sso.form.editTitle', 'Edit {name}', { name: editing.display_name })

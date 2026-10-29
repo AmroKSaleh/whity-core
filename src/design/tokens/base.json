@@ -1,7 +1,7 @@
 {
   "name": "Whity Core Design Tokens",
-  "description": "Master design token definitions for web, mobile, and desktop platforms. This file is the single source of truth — run `npm run tokens:generate` to regenerate all platform outputs (web globals.css, tokens.json, tokens.dart).",
-  "version": "2.0.0",
+  "description": "Master design token definitions for web, mobile, and desktop platforms, at tokens v3 (docs/design/tokens.json, design system 2.2). This file is the single source of truth for code — run `npm run tokens:generate` to regenerate all platform outputs (web globals.css, tokens.json, tokens.dart). Every value traces to docs/design/00-decision-register.md; change the register first.",
+  "version": "3.0.0",
   "platforms": {
     "web": {
       "type": "css-custom-properties",
@@ -26,7 +26,7 @@
     "tokensPackage": {
       "type": "npm-package",
       "location": "../../../packages/tokens/generated/{tokens.json,theme.css}",
-      "description": "@amroksaleh/tokens — standalone, Next.js-independent JSON + Tailwind v4 theme CSS for non-Next clients (Tauri/Vite SPAs, etc.)."
+      "description": "@whity-org/tokens — standalone, Next.js-independent JSON + Tailwind v4 theme CSS for non-Next clients (Tauri/Vite SPAs, etc.)."
     }
   },
   "colors": {
@@ -38,41 +38,60 @@
       "popover": "oklch(1 0 0)",
       "popover-foreground": "oklch(0.145 0 0)",
       "primary": "oklch(0.5 0.16 255)",
-      "primary-foreground": "oklch(0.985 0 0)",
+      "primary-foreground": "oklch(1 0 0)",
       "secondary": "oklch(0.97 0 0)",
       "secondary-foreground": "oklch(0.205 0 0)",
       "muted": "oklch(0.97 0 0)",
-      "muted-foreground": "oklch(0.556 0 0)",
+      "muted-foreground": "oklch(0.52 0 0)",
       "accent": "oklch(0.97 0 0)",
       "accent-foreground": "oklch(0.205 0 0)",
       "brand": "oklch(0.5 0.16 255)",
-      "brand-foreground": "oklch(0.985 0 0)",
-      "destructive": "oklch(0.577 0.245 27.325)",
-      "success": "oklch(0.52 0.15 150)",
-      "success-foreground": "oklch(0.985 0 0)",
-      "warning": "oklch(0.7 0.17 75)",
-      "warning-foreground": "oklch(0.205 0 0)",
-      "error": "oklch(0.55 0.2 27)",
-      "error-foreground": "oklch(0.985 0 0)",
-      "info": "oklch(0.52 0.15 240)",
-      "info-foreground": "oklch(0.985 0 0)",
+      "brand-foreground": "oklch(1 0 0)",
+      "destructive": "oklch(0.5494 0.1994 27.1)",
+      "success": "oklch(0.5197 0.1394 150.14)",
+      "success-foreground": "oklch(1 0 0)",
+      "warning": "oklch(0.7998 0.1501 78.05)",
+      "warning-foreground": "oklch(0.1889 0.026 77.5)",
+      "error": "oklch(0.5494 0.1994 27.1)",
+      "error-foreground": "oklch(1 0 0)",
+      "info": "oklch(0.4495 0 0)",
+      "info-foreground": "oklch(1 0 0)",
       "border": "oklch(0.922 0 0)",
-      "input": "oklch(0.922 0 0)",
+      "input": "oklch(0.66 0 0)",
       "ring": "oklch(0.5 0.16 255)",
       "chart-1": "oklch(0.5 0.16 255)",
-      "chart-2": "oklch(0.556 0 0)",
-      "chart-3": "oklch(0.439 0 0)",
-      "chart-4": "oklch(0.371 0 0)",
-      "chart-5": "oklch(0.269 0 0)",
+      "chart-2": "oklch(0.7788 0.16 69.88)",
+      "chart-3": "oklch(0.8509 0.0799 219.47)",
+      "chart-4": "oklch(0.5005 0.2006 329.92)",
+      "chart-5": "oklch(0.6599 0.13 159.92)",
       "sidebar": "oklch(0.985 0 0)",
       "sidebar-foreground": "oklch(0.145 0 0)",
-      "sidebar-primary": "oklch(0.5 0.16 255)",
-      "sidebar-primary-foreground": "oklch(0.985 0 0)",
+      "sidebar-primary": "oklch(0.9607 0.0148 251.16)",
+      "sidebar-primary-foreground": "oklch(0.5 0.16 255)",
       "sidebar-accent": "oklch(0.97 0 0)",
       "sidebar-accent-foreground": "oklch(0.205 0 0)",
       "sidebar-border": "oklch(0.922 0 0)",
       "sidebar-ring": "oklch(0.5 0.16 255)",
-      "overlay": "oklch(0 0 0 / 45%)"
+      "overlay": "oklch(0 0 0 / 0.45)",
+      "mark-sheet": "oklch(1 0 0)",
+      "blueprint": "oklch(0.5 0.16 255)",
+      "blueprint-line": "oklch(1 0 0 / 0.12)",
+      "blueprint-line-strong": "oklch(1 0 0 / 0.24)",
+      "plane-deep": "oklch(0.3 0.1 255)",
+      "divider": "oklch(0.94 0 0)",
+      "table-header": "oklch(0.975 0 0)",
+      "success-text": "oklch(0.4986 0.1343 150.06)",
+      "success-tint": "oklch(0.9603 0.0399 149.82)",
+      "warning-text": "oklch(0.5202 0.1204 59.76)",
+      "warning-tint": "oklch(0.9694 0.0296 85.56)",
+      "error-text": "oklch(0.5204 0.2004 26.99)",
+      "error-tint": "oklch(0.9596 0.0154 27.28)",
+      "info-text": "oklch(0.4495 0 0)",
+      "info-tint": "oklch(0.9551 0 0)",
+      "destructive-foreground": "oklch(1 0 0)",
+      "primary-tint": "oklch(0.9607 0.0148 251.16)",
+      "primary-tint-foreground": "oklch(0.5 0.16 255)",
+      "chart-6": "oklch(0.3485 0 0)"
     },
     "dark": {
       "background": "oklch(0.145 0 0)",
@@ -91,61 +110,120 @@
       "accent-foreground": "oklch(0.985 0 0)",
       "brand": "oklch(0.7 0.15 255)",
       "brand-foreground": "oklch(0.205 0 0)",
-      "destructive": "oklch(0.704 0.191 22.216)",
-      "success": "oklch(0.72 0.16 150)",
-      "success-foreground": "oklch(0.205 0 0)",
-      "warning": "oklch(0.82 0.16 80)",
-      "warning-foreground": "oklch(0.205 0 0)",
-      "error": "oklch(0.7 0.18 25)",
-      "error-foreground": "oklch(0.205 0 0)",
-      "info": "oklch(0.72 0.15 240)",
-      "info-foreground": "oklch(0.205 0 0)",
-      "border": "oklch(1 0 0 / 10%)",
-      "input": "oklch(1 0 0 / 15%)",
+      "destructive": "oklch(0.7005 0.1697 24.93)",
+      "success": "oklch(0.7407 0.1507 149.85)",
+      "success-foreground": "oklch(0.1448 0 0)",
+      "warning": "oklch(0.8207 0.1504 79.92)",
+      "warning-foreground": "oklch(0.1448 0 0)",
+      "error": "oklch(0.7005 0.1697 24.93)",
+      "error-foreground": "oklch(0.1448 0 0)",
+      "info": "oklch(0.7508 0 0)",
+      "info-foreground": "oklch(0.1448 0 0)",
+      "border": "oklch(1 0 0 / 0.1)",
+      "input": "oklch(0.52 0 0)",
       "ring": "oklch(0.7 0.15 255)",
       "chart-1": "oklch(0.7 0.15 255)",
-      "chart-2": "oklch(0.556 0 0)",
-      "chart-3": "oklch(0.708 0 0)",
-      "chart-4": "oklch(0.439 0 0)",
-      "chart-5": "oklch(0.371 0 0)",
+      "chart-2": "oklch(0.7788 0.16 69.88)",
+      "chart-3": "oklch(0.8509 0.0799 219.47)",
+      "chart-4": "oklch(0.6597 0.1993 329.88)",
+      "chart-5": "oklch(0.7407 0.1306 159.84)",
       "sidebar": "oklch(0.17 0 0)",
       "sidebar-foreground": "oklch(0.985 0 0)",
-      "sidebar-primary": "oklch(0.7 0.15 255)",
-      "sidebar-primary-foreground": "oklch(0.205 0 0)",
+      "sidebar-primary": "oklch(0.2987 0.06 255.91)",
+      "sidebar-primary-foreground": "oklch(0.6995 0.1498 255.09)",
       "sidebar-accent": "oklch(0.269 0 0)",
       "sidebar-accent-foreground": "oklch(0.985 0 0)",
-      "sidebar-border": "oklch(1 0 0 / 10%)",
+      "sidebar-border": "oklch(1 0 0 / 0.1)",
       "sidebar-ring": "oklch(0.7 0.15 255)",
-      "overlay": "oklch(0 0 0 / 45%)"
+      "overlay": "oklch(0 0 0 / 0.45)",
+      "mark-sheet": "oklch(1 0 0)",
+      "blueprint": "oklch(0.5 0.16 255)",
+      "blueprint-line": "oklch(1 0 0 / 0.12)",
+      "blueprint-line-strong": "oklch(1 0 0 / 0.24)",
+      "plane-deep": "oklch(0.42 0.13 255)",
+      "divider": "oklch(1 0 0 / 0.07)",
+      "table-header": "oklch(0.23 0 0)",
+      "success-text": "oklch(0.7407 0.1507 149.85)",
+      "success-tint": "oklch(0.2998 0.0601 150.03)",
+      "warning-text": "oklch(0.8207 0.1504 79.92)",
+      "warning-tint": "oklch(0.3206 0.0605 80.03)",
+      "error-text": "oklch(0.7005 0.1697 24.93)",
+      "error-tint": "oklch(0.3006 0.0805 25.3)",
+      "info-text": "oklch(0.7508 0 0)",
+      "info-tint": "oklch(0.2686 0 0)",
+      "destructive-foreground": "oklch(0.1448 0 0)",
+      "primary-tint": "oklch(0.2987 0.06 255.91)",
+      "primary-tint-foreground": "oklch(0.6995 0.1498 255.09)",
+      "chart-6": "oklch(0.6167 0 0)"
     }
   },
   "typography": {
     "fontFamily": {
       "sans": "'Noto Sans', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
       "mono": "'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
-      "heading": "'Noto Sans', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+      "heading": "'Noto Sans', 'Noto Sans Arabic', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      "arabic": "'Noto Sans Arabic', 'Noto Sans', sans-serif",
+      "display": "'Readex Pro', 'Noto Sans', sans-serif"
     },
     "fontFamilyDart": {
       "sans": "Noto Sans",
       "mono": "Geist Mono",
-      "heading": "Noto Sans"
+      "heading": "Noto Sans",
+      "arabic": "Noto Sans Arabic",
+      "display": "Readex Pro"
     },
-    "scaleRationale": "Modular type scale anchored at 1rem (16px) base, stepping on an approximate minor-third (~1.2) ratio. Sizes expressed in rem for web (respects user zoom / root font-size) and resolved to px for Dart/Flutter (logical pixels).",
+    "scaleRationale": "Product scale (decision 3.5a): 12 caption, 14 text (the default), 16 large, 18 card title, 20 section, 24 page title; 11px (2xs) is the floor, for counters and badges only. Sizes in rem for web, px for Dart/Flutter. Line heights (decision 3.6): 1.5 for text and captions, 1.25 for titles, 1.1 for the largest display size.",
     "fontSize": {
-      "xs": { "rem": "0.75rem", "px": 12 },
-      "sm": { "rem": "0.875rem", "px": 14 },
-      "base": { "rem": "1rem", "px": 16 },
-      "lg": { "rem": "1.125rem", "px": 18 },
-      "xl": { "rem": "1.25rem", "px": 20 },
-      "2xl": { "rem": "1.5rem", "px": 24 },
-      "3xl": { "rem": "1.875rem", "px": 30 },
-      "4xl": { "rem": "2.25rem", "px": 36 }
+      "2xs": {
+        "rem": "0.6875rem",
+        "px": 11,
+        "lineHeight": 1.5
+      },
+      "xs": {
+        "rem": "0.75rem",
+        "px": 12,
+        "lineHeight": 1.5
+      },
+      "sm": {
+        "rem": "0.875rem",
+        "px": 14,
+        "lineHeight": 1.5
+      },
+      "base": {
+        "rem": "1rem",
+        "px": 16,
+        "lineHeight": 1.5
+      },
+      "lg": {
+        "rem": "1.125rem",
+        "px": 18,
+        "lineHeight": 1.25
+      },
+      "xl": {
+        "rem": "1.25rem",
+        "px": 20,
+        "lineHeight": 1.25
+      },
+      "2xl": {
+        "rem": "1.5rem",
+        "px": 24,
+        "lineHeight": 1.25
+      },
+      "3xl": {
+        "rem": "1.875rem",
+        "px": 30,
+        "lineHeight": 1.25
+      },
+      "4xl": {
+        "rem": "2.25rem",
+        "px": 36,
+        "lineHeight": 1.1
+      }
     },
     "fontWeight": {
       "normal": 400,
       "medium": 500,
-      "semibold": 600,
-      "bold": 700
+      "semibold": 600
     },
     "lineHeight": {
       "none": 1,
@@ -176,14 +254,57 @@
     }
   },
   "borderRadius": {
-    "base": "0.625rem",
+    "base": "0.5625rem",
     "sm": "4px",
-    "md": "6px",
-    "lg": "8px",
+    "md": "7px",
+    "lg": "10px",
     "xl": "12px",
     "2xl": "16px",
-    "3xl": "20px",
-    "4xl": "24px"
+    "control-sm": "7px",
+    "control": "9px",
+    "control-lg": "10px",
+    "card": "12px",
+    "dialog": "16px",
+    "full": "999px"
+  },
+  "shadow": {
+    "description": "The plane (hard, no blur, down-left) appears in three places only: the main button, approved agent work, a hovered clickable card (decision 4.3). Everything floating uses shadow-float. Cards have a border and no shadow.",
+    "light": {
+      "plane-rest": "-3px 3px 0 0 oklch(0.5 0.16 255)",
+      "plane-hover": "-5px 5px 0 0 oklch(0.5 0.16 255)",
+      "plane-primary-rest": "-3px 3px 0 0 oklch(0.3 0.1 255)",
+      "plane-primary-hover": "-5px 5px 0 0 oklch(0.3 0.1 255)",
+      "shadow-float": "0 8px 24px -6px oklch(0 0 0 / 0.18), 0 2px 6px -2px oklch(0 0 0 / 0.10)"
+    },
+    "dark": {
+      "plane-rest": "-3px 3px 0 0 oklch(0.7 0.15 255)",
+      "plane-hover": "-5px 5px 0 0 oklch(0.7 0.15 255)",
+      "plane-primary-rest": "-3px 3px 0 0 oklch(0.42 0.13 255)",
+      "plane-primary-hover": "-5px 5px 0 0 oklch(0.42 0.13 255)",
+      "shadow-float": "0 8px 24px -6px oklch(0 0 0 / 0.55), 0 2px 6px -2px oklch(0 0 0 / 0.35)"
+    }
+  },
+  "plane": {
+    "plane-offset": "0.1875rem",
+    "plane-lift": "0.3125rem"
+  },
+  "size": {
+    "control-h-sm": "28px",
+    "control-h": "36px",
+    "control-h-lg": "40px",
+    "row-h": "44px",
+    "icon": "16px",
+    "sidebar-w": "240px",
+    "sidebar-w-collapsed": "56px",
+    "content-max": "1280px",
+    "form-max": "720px",
+    "gutter": "24px"
+  },
+  "motion": {
+    "dur-fast": "120ms",
+    "dur-base": "180ms",
+    "dur-slow": "250ms",
+    "ease-out": "cubic-bezier(0.2, 0, 0, 1)"
   },
   "accessibility": {
     "contrastRatio": "WCAG AA+",
@@ -192,11 +313,7 @@
   },
   "brandAccent": {
     "hue": 255,
-    "description": "Single restrained professional blue used for primary CTAs, links, active and focus states (drives primary, ring, sidebar-primary, chart-1). This is the white-label-overridable DEFAULT — tenants override --primary / --brand / --ring per docs/wiki/Theme-Customization.md. Light oklch(0.5 0.16 255) vs near-white foreground = 5.83:1; dark oklch(0.7 0.15 255) vs dark foreground = 6.68:1.",
-    "verifiedContrast": {
-      "lightOnForeground": 5.83,
-      "darkOnForeground": 6.68
-    }
+    "description": "Whity Blue #0961bb, oklch(0.5 0.16 255) (decision 2.1), on dark #59a0f9, oklch(0.70 0.15 255) (2.2). Drives primary, ring, sidebar-primary, chart-1. This is the white-label-overridable DEFAULT — tenants override --primary / --brand / --ring per docs/wiki/Theme-Customization.md. White label on Whity Blue is 6.1:1; on dark, buttons take a dark label."
   },
   "whiteLabelSupport": {
     "enabled": true,

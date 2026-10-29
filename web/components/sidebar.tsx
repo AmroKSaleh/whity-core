@@ -8,11 +8,11 @@ import { useNavigation } from '@/lib/navigation-context';
 import { useBranding } from '@/lib/branding-context';
 import { useThemeMode } from '@/lib/theme-mode-context';
 import { useToast } from '@/lib/toast-context';
-import { Button } from '@amroksaleh/ui/button';
-import { Switcher } from '@amroksaleh/ui/switcher';
-import { AppSidebar } from '@amroksaleh/ui/app-sidebar';
-import { navGroupsFromServerItems } from '@amroksaleh/features/nav';
-import { LanguageSwitcher, useI18nEnabled, useTranslation } from '@amroksaleh/features/i18n';
+import { Button } from '@whity-org/ui/button';
+import { Switcher } from '@whity-org/ui/switcher';
+import { AppSidebar } from '@whity-org/ui/app-sidebar';
+import { navGroupsFromServerItems } from '@whity-org/features/nav';
+import { LanguageSwitcher, useI18nEnabled, useTranslation } from '@whity-org/features/i18n';
 import * as TablerIcons from '@tabler/icons-react';
 import {
   IconLogout,
@@ -89,7 +89,7 @@ function prettifyGroupId(groupId: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// TenantSwitcher — uses the shared Switcher primitive from @amroksaleh/ui.
+// TenantSwitcher — uses the shared Switcher primitive from @whity-org/ui.
 // ---------------------------------------------------------------------------
 
 interface TenantSwitcherProps {
@@ -266,7 +266,7 @@ export function Sidebar() {
         className="mx-auto h-8 w-8 object-contain"
       />
     ) : (
-      <div className="text-center text-xl font-black">
+      <div className="text-center text-xl font-semibold">
         {branding.siteName.charAt(0).toUpperCase()}
       </div>
     )
@@ -279,7 +279,7 @@ export function Sidebar() {
           className="h-8 w-auto max-w-[180px] object-contain"
         />
       ) : (
-        <h1 className="text-2xl font-bold">{branding.siteName}</h1>
+        <h1 className="text-2xl font-semibold">{branding.siteName}</h1>
       )}
       <p className="mt-1 text-sm text-muted-foreground">{t('sidebar.subtitle', 'Admin')}</p>
     </>

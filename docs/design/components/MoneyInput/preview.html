@@ -1,0 +1,16 @@
+<!-- @dsCard group="Forms" height=320 subtitle="JOD with fils, the amount in words, Arabic digits accepted" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>MoneyInput</title><style>#root{padding:16px 24px} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px 32px;align-items:start} .ar{font-family:var(--font-arabic)} </style></head>
+<body>
+<div id="root" class=""></div>
+<script>
+  var W = window.Whity, h = React.createElement; 
+  function cap(t) { return h('p', { className: 'cap' }, t); }
+  function col() { return h.apply(null, ['div', { style: { display: 'grid', gap: 12, alignContent: 'start' } }].concat([].slice.call(arguments))); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'grid2' },
+  col(h(W.MoneyInput, { label: 'Amount received', defaultValue: 301.6, showWords: true }), h(W.MoneyInput, { label: 'Unit price', defaultValue: '12.5005' }), h(W.MoneyInput, { label: 'Credit limit', defaultValue: 2000, readOnly: true, helperText: 'Set by your accountant.' })),
+  h('div', { dir: 'rtl', lang: 'ar', className: 'ar' }, col(h(W.MoneyInput, { label: 'المبلغ المستلم', defaultValue: '٢٠٣٫٠٠٠', showWords: true, wordsLang: 'ar', labels: { decimals: 'للدينار 3 خانات عشرية (فلس).' } })))));
+</script>
+</body>
+</html>

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.44).
+ * SDK identity (v1.45).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -761,13 +761,23 @@ namespace Whity\Sdk;
  * HTML is loaded by a real browser in the render container in order to be
  * printed.
  *
- * Purely additive. A block without runs renders exactly as it always did.)
+ * Purely additive. A block without runs renders exactly as it always did.) ->
+ * 1.45 (MCP TOOL ANNOTATIONS: an authored tool descriptor
+ * ({@see PluginMcpToolsInterface}) may carry `annotations` — `title` plus the
+ * boolean `readOnlyHint`, `destructiveHint`, `idempotentHint` and
+ * `openWorldHint` of the MCP spec — and a route schema may carry
+ * `mcp_annotations` in the same shape to override what the host derives from
+ * the HTTP method. Clients read these to run reads without asking and to
+ * confirm before destructive calls. They are hints only: nothing about
+ * enforcement changes. Malformed entries are dropped, never passed on.
+ *
+ * Purely additive. On an older host both keys are ignored.)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.44.0';
+    public const VERSION = '1.45.0';
 
     /**
      * Static identity only — never instantiated.

@@ -8,11 +8,11 @@ import { useAuth } from '@/lib/auth-context';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Button } from '@amroksaleh/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
-import { AccessDenied } from '@amroksaleh/ui/access-denied';
+import { Button } from '@whity-org/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity-org/ui/card';
+import { AccessDenied } from '@whity-org/ui/access-denied';
 import { IconDeviceFloppy } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 import { SettingsTabs } from '../settings-tabs';
 import {
   SETTINGS_MANAGE,
@@ -179,7 +179,7 @@ function SignupSettingsForm({ addToast }: { addToast: AddToast }) {
     return (
       <Card className="border border-border bg-card shadow-sm">
         <CardHeader>
-          <CardTitle className="text-lg font-bold font-heading">
+          <CardTitle className="text-lg font-semibold font-heading">
             <h2>{t('settings.signup.form.title', 'Sign-up governance')}</h2>
           </CardTitle>
         </CardHeader>
@@ -201,7 +201,7 @@ function SignupSettingsForm({ addToast }: { addToast: AddToast }) {
           className="border border-border bg-card shadow-sm"
         >
           <CardHeader>
-            <CardTitle className="text-lg font-bold font-heading">
+            <CardTitle className="text-lg font-semibold font-heading">
               <h2>{section.title}</h2>
             </CardTitle>
             {section.description && (

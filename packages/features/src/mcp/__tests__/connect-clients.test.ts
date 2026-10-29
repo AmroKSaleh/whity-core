@@ -1,4 +1,4 @@
-import { MCP_CLIENTS, mcpClient, mcpServerName, type McpClientId } from '../connect-clients'
+import { MCP_CLIENTS, mcpClient, mcpEndpoint, mcpServerName, recommendsToolSearch, type McpClientId } from '../connect-clients'
 
 /**
  * Expected values are written out by hand, or recovered by decoding what the
@@ -176,5 +176,22 @@ describe('quoting', () => {
 
     const toml = mcpClient('codex').setup?.({ ...CONNECTION, url: 'https://x.test/"a"\\b' }).file?.text ?? ''
     expect(toml).toContain('url = "https://x.test/\\"a\\"\\\\b"')
+  })
+})
+
+describe('tool search (WHIT-707)', () => {
+  it('is recommended when the access exceeds the app limit or the general budget', () => {
+    expect(recommendsToolSearch(mcpClient('cursor'), 40)).toBe(false)
+    expect(recommendsToolSearch(mcpClient('cursor'), 41)).toBe(true)
+    expect(recommendsToolSearch(mcpClient('claude-code'), 60)).toBe(false)
+    expect(recommendsToolSearch(mcpClient('claude-code'), 313)).toBe(true)
+    // An app reported to hold more still gets the general budget.
+    expect(recommendsToolSearch(mcpClient('windsurf'), 80)).toBe(true)
+  })
+
+  it('appends tools=discover only when asked, keeping any existing query', () => {
+    expect(mcpEndpoint('https://api.acme.test/mcp')).toBe('https://api.acme.test/mcp')
+    expect(mcpEndpoint('https://api.acme.test/mcp', { toolSearch: true })).toBe('https://api.acme.test/mcp?tools=discover')
+    expect(mcpEndpoint('https://api.acme.test/mcp?x=1', { toolSearch: true })).toBe('https://api.acme.test/mcp?x=1&tools=discover')
   })
 })

@@ -1,4 +1,4 @@
-# @amroksaleh/features
+# @whity-org/features
 
 Client-safe, data-source-agnostic feature UI extracted from `web/` — reusable
 by non-Next clients (a Tauri/Vite SPA, a future Flutter app) so they inherit
@@ -13,14 +13,14 @@ mirroring `packages/ui`'s guard).
 
 ## App-shell nav contract
 
-`AppSidebar` (from `@amroksaleh/ui/app-sidebar`, shipped in PR #598) already
+`AppSidebar` (from `@whity-org/ui/app-sidebar`, shipped in PR #598) already
 takes plain `groups`/`items` data and an injectable `linkComponent` — no
 `next/navigation` baked in. This package formalizes the config a client
 authors once, on top of that:
 
 ```tsx
-import { resolveNavGroups, type NavConfig, type NavLinkAdapter } from "@amroksaleh/features/nav"
-import { AppSidebar } from "@amroksaleh/ui/app-sidebar"
+import { resolveNavGroups, type NavConfig, type NavLinkAdapter } from "@whity-org/features/nav"
+import { AppSidebar } from "@whity-org/ui/app-sidebar"
 
 // 1. Author the nav once, as plain data (see `exampleNavConfig` for a full example):
 const navConfig: NavConfig = {
@@ -63,7 +63,7 @@ domain — see the `DemoCatalog` plugin in `plugins/DemoCatalog`) proving the
 whole pattern end to end:
 
 ```tsx
-import { DemoCatalogList, type DemoCatalogAdapter } from "@amroksaleh/features/demo-catalog"
+import { DemoCatalogList, type DemoCatalogAdapter } from "@whity-org/features/demo-catalog"
 
 // Implement once per data source. web/ wires this to the DemoCatalog plugin's
 // REST API via its own api-client; a desktop client wires the same interface

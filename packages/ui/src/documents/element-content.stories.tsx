@@ -43,7 +43,7 @@ const meta = {
     docs: {
       description: {
         component:
-          "The single shared leaf renderer for one DocElement's visual content — the canvas, block-instance content and the print renderer all delegate to it. See GitHub issue #532 (schema-driven UI components) for a related-but-distinct effort building rich-text/math primitives for the plugin block DSL; this component reuses the same `@amroksaleh/ui/math-text` primitive rather than inventing a second one.",
+          "The single shared leaf renderer for one DocElement's visual content — the canvas, block-instance content and the print renderer all delegate to it. See GitHub issue #532 (schema-driven UI components) for a related-but-distinct effort building rich-text/math primitives for the plugin block DSL; this component reuses the same `@whity-org/ui/math-text` primitive rather than inventing a second one.",
       },
     },
   },

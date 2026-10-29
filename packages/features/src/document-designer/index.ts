@@ -8,7 +8,7 @@
  *
  * NOT re-exported from `../index.ts`. That barrel is `export *`, and this
  * slice and the roles slice both export `Transport`/`TransportResponse`, which
- * would collide. Consume it by subpath: `@amroksaleh/features/document-designer`.
+ * would collide. Consume it by subpath: `@whity-org/features/document-designer`.
  * `print-document` additionally has its OWN subpath export so the render
  * service can pull just the renderer without dragging the editor's dependency
  * graph (radix, icons, canvas) into a production PDF bundle.

@@ -1,6 +1,6 @@
 /**
  * The desktop implementation of the shared Roles feature's `RolesAdapter`
- * (@amroksaleh/features/roles), the Path-B twin of web's
+ * (@whity-org/features/roles), the Path-B twin of web's
  * `web/lib/roles-adapter.ts`. The factory below is lifted VERBATIM from that
  * file — the only thing that differs between the two clients is the
  * {@link Transport}: web maps a cookie-authenticated `fetch` into `{status,
@@ -29,7 +29,7 @@ import type {
   RoleWithPermissions,
   RolesAdapter,
   Transport,
-} from "@amroksaleh/features/roles"
+} from "@whity-org/features/roles"
 
 import { remoteRequest } from "./remote-client"
 

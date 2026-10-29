@@ -1,7 +1,7 @@
 {
   "$schema": "https://ui.shadcn.com/schema/registry.json",
   "name": "whity",
-  "homepage": "https://github.com/AmroKSaleh/whity-core",
+  "homepage": "https://github.com/whity-org/whity-core",
   "items": [
     {
       "name": "access-denied",
@@ -60,7 +60,7 @@
       "name": "badge",
       "type": "registry:ui",
       "title": "Badge",
-      "description": "Small status descriptor with variant styles.",
+      "description": "Tinted status pill: the status tint behind the status text colour.",
       "dependencies": [
         "class-variance-authority",
         "radix-ui"
@@ -70,6 +70,9 @@
           "path": "../packages/ui/src/badge.tsx",
           "type": "registry:ui"
         }
+      ],
+      "registryDependencies": [
+        "@whity/icon"
       ]
     },
     {
@@ -210,14 +213,16 @@
       "description": "Button with variants, sizes and icon support.",
       "dependencies": [
         "class-variance-authority",
-        "radix-ui",
-        "@tabler/icons-react"
+        "radix-ui"
       ],
       "files": [
         {
           "path": "../packages/ui/src/button.tsx",
           "type": "registry:ui"
         }
+      ],
+      "registryDependencies": [
+        "@whity/icon"
       ]
     },
     {
@@ -707,7 +712,7 @@
       "title": "Admin Data Table",
       "description": "Generic sortable data table with loading skeletons and row actions.",
       "dependencies": [
-        "@amroksaleh/ui"
+        "@whity-org/ui"
       ],
       "files": [
         {
@@ -942,6 +947,118 @@
       "files": [
         {
           "path": "../packages/ui/src/view-toggle.tsx",
+          "type": "registry:ui"
+        }
+      ]
+    },
+    {
+      "name": "icon",
+      "type": "registry:ui",
+      "title": "Icon",
+      "description": "The 116 curated Tabler outline icons by Whity name, with RTL mirroring.",
+      "dependencies": [
+        "@tabler/icons-react"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/icon.tsx",
+          "type": "registry:ui"
+        },
+        {
+          "path": "../packages/ui/src/icon-map.ts",
+          "type": "registry:ui"
+        }
+      ]
+    },
+    {
+      "name": "icon-button",
+      "type": "registry:ui",
+      "title": "Icon button",
+      "description": "An icon-only button whose label is its name and its tooltip.",
+      "registryDependencies": [
+        "@whity/button",
+        "@whity/icon"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/icon-button.tsx",
+          "type": "registry:ui"
+        }
+      ]
+    },
+    {
+      "name": "mark",
+      "type": "registry:ui",
+      "title": "Mark",
+      "description": "The Whity mark with its pixel-fitted small cuts.",
+      "files": [
+        {
+          "path": "../packages/ui/src/mark.tsx",
+          "type": "registry:ui"
+        }
+      ]
+    },
+    {
+      "name": "avatar",
+      "type": "registry:ui",
+      "title": "Avatar",
+      "description": "Initials or a photo for people, the robot face for agents, the mark for the system.",
+      "registryDependencies": [
+        "@whity/icon",
+        "@whity/mark"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/avatar.tsx",
+          "type": "registry:ui"
+        }
+      ]
+    },
+    {
+      "name": "actor-chip",
+      "type": "registry:ui",
+      "title": "Actor chip",
+      "description": "Who did something: a person, an agent and who it acts for, or the system.",
+      "registryDependencies": [
+        "@whity/avatar",
+        "@whity/icon",
+        "@whity/mark"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/actor-chip.tsx",
+          "type": "registry:ui"
+        }
+      ]
+    },
+    {
+      "name": "agent-run-status",
+      "type": "registry:ui",
+      "title": "Agent run status",
+      "description": "What an agent is doing now: running, waiting for approval, done or failed.",
+      "registryDependencies": [
+        "@whity/actor-chip",
+        "@whity/button",
+        "@whity/icon"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/agent-run-status.tsx",
+          "type": "registry:ui"
+        }
+      ]
+    },
+    {
+      "name": "toggle-group",
+      "type": "registry:ui",
+      "title": "Toggle group",
+      "description": "Buttons that stay pressed, on the tint, for view switches and filters.",
+      "registryDependencies": [
+        "@whity/icon"
+      ],
+      "files": [
+        {
+          "path": "../packages/ui/src/toggle-group.tsx",
           "type": "registry:ui"
         }
       ]

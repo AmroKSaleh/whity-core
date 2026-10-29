@@ -10,8 +10,8 @@
  * table, and no call site can reach it.
  */
 
-import { useTranslation } from '@amroksaleh/features/i18n';
-import { DataTable as BaseDataTable } from '@amroksaleh/ui/data-table';
+import { useTranslation } from '@whity-org/features/i18n';
+import { DataTable as BaseDataTable } from '@whity-org/ui/data-table';
 
 export type {
   DataTableColumn,
@@ -22,7 +22,7 @@ export type {
   DataTableQuery,
   DataTableQueryRequest,
   UseDataTableQueryOptions,
-} from '@amroksaleh/ui/data-table';
+} from '@whity-org/ui/data-table';
 // Re-exported through this wrapper so a screen reaches the table and the state
 // that drives it from ONE import, rather than half from here and half from the
 // package the wrapper exists to hide.
@@ -31,7 +31,7 @@ export {
   DEFAULT_DATA_TABLE_PER_PAGE,
   dataTableQueryString,
   useDataTableQuery,
-} from '@amroksaleh/ui/data-table';
+} from '@whity-org/ui/data-table';
 
 export function DataTable<TData>(props: React.ComponentProps<typeof BaseDataTable<TData>>) {
   const t = useTranslation('common');

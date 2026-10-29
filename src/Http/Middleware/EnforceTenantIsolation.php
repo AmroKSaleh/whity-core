@@ -173,6 +173,11 @@ class EnforceTenantIsolation
         // TenantContext inside the dispatcher. The standard access-token flow
         // would reject an mcp token here, so /mcp bypasses tenant resolution.
         '/mcp',
+        // WHIT-709: OAuth Protected Resource Metadata (RFC 9728). Read by an MCP
+        // client BEFORE it has any credential, to learn where to sign in; it
+        // names no tenant and holds nothing tenant-specific.
+        '/.well-known/oauth-protected-resource',
+        '/.well-known/oauth-protected-resource/mcp',
         // i18n: public endpoints for language/translation discovery. Clients must
         // fetch available languages and translations before auth is possible
         // (to render the UI in the correct language during login). The settings

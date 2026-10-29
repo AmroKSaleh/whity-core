@@ -8,18 +8,18 @@ import { useAuth } from '@/lib/auth-context';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Button } from '@amroksaleh/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
+import { Button } from '@whity-org/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity-org/ui/card';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@amroksaleh/ui/badge';
-import { AccessDenied } from '@amroksaleh/ui/access-denied';
-import { Alert, AlertDescription } from '@amroksaleh/ui/alert';
+import { Badge } from '@whity-org/ui/badge';
+import { AccessDenied } from '@whity-org/ui/access-denied';
+import { Alert, AlertDescription } from '@whity-org/ui/alert';
 import {
   IconDeviceFloppy,
   IconMail,
   IconSend,
 } from '@tabler/icons-react';
-import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
+import { useTranslation, type TranslateFn } from '@whity-org/features/i18n';
 import { SettingsTabs } from '../settings-tabs';
 import {
   SETTINGS_MANAGE,
@@ -321,7 +321,7 @@ function EmailSettingsForm({
               <IconMail className="w-5 h-5" />
             </span>
             <div>
-              <CardTitle className="text-lg font-bold font-heading">
+              <CardTitle className="text-lg font-semibold font-heading">
                 <h2>{t('settings.email.delivery.title', 'Delivery')}</h2>
               </CardTitle>
               <CardDescription className="text-sm">
@@ -356,7 +356,7 @@ function EmailSettingsForm({
       {transport === 'smtp' && (
         <Card className="border border-border bg-card shadow-sm" data-testid="email-smtp-card">
           <CardHeader>
-            <CardTitle className="text-lg font-bold font-heading">
+            <CardTitle className="text-lg font-semibold font-heading">
               <h2>{t('settings.email.smtp.title', 'SMTP connection')}</h2>
             </CardTitle>
             <CardDescription className="text-sm">
@@ -430,7 +430,7 @@ function EmailSettingsForm({
       {/* Notifications */}
       <Card className="border border-border bg-card shadow-sm" data-testid="email-notifications-card">
         <CardHeader>
-          <CardTitle className="text-lg font-bold font-heading">
+          <CardTitle className="text-lg font-semibold font-heading">
             <h2>{t('settings.email.notifications.title', 'Notifications')}</h2>
           </CardTitle>
           <CardDescription className="text-sm">
@@ -463,7 +463,7 @@ function EmailSettingsForm({
       {/* Send test */}
       <Card className="border border-border bg-card shadow-sm" data-testid="email-test-card">
         <CardHeader>
-          <CardTitle className="text-lg font-bold font-heading">
+          <CardTitle className="text-lg font-semibold font-heading">
             <h2>{t('settings.email.test.title', 'Send a test email')}</h2>
           </CardTitle>
           <CardDescription className="text-sm">

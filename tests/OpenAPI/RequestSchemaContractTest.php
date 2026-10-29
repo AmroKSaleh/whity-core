@@ -203,6 +203,9 @@ final class RequestSchemaContractTest extends TestCase
             // Not the generator's: McpExposure reads it to offer an ungated
             // route to agents (ADR-0006 Amendment 1).
             'mcp',
+            // ...and ToolAnnotations reads this one to override the hints it
+            // derives from the HTTP method (WHIT-706).
+            'mcp_annotations',
         ];
 
         $ignored = [];

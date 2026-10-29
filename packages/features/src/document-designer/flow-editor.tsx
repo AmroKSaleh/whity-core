@@ -12,10 +12,10 @@ import {
   type FlowBlock,
   type FlowContent,
   type FlowHeadingLevel,
-} from '@amroksaleh/ui/documents/flow';
-import { Button } from '@amroksaleh/ui/button';
+} from '@whity-org/ui/documents/flow';
+import { Button } from '@whity-org/ui/button';
 import { Input } from './ui-i18n';
-import { Textarea } from '@amroksaleh/ui/textarea';
+import { Textarea } from '@whity-org/ui/textarea';
 import {
   IconChevronDown,
   IconChevronUp,

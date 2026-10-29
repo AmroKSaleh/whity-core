@@ -29,7 +29,11 @@ interface McpRequestHandlerInterface
      * @param string      $rawBody     Raw UTF-8 request body from the HTTP layer.
      * @param string|null $bearerToken Bearer token from the Authorization header,
      *                                 or null when the header is absent/malformed.
+     * @param array<string, string> $headers The MCP request headers, lower-cased:
+     *                                 `mcp-protocol-version`, `mcp-method`, `mcp-name`
+     *                                 (WHIT-708). A 2026-07-28 request is checked
+     *                                 against them; earlier versions only read the version.
      * @return string                  Raw JSON-RPC response string (UTF-8 JSON).
      */
-    public function handle(string $rawBody, ?string $bearerToken): string;
+    public function handle(string $rawBody, ?string $bearerToken, array $headers = []): string;
 }

@@ -8,15 +8,15 @@ import { useFetch } from '@/hooks/useFetch';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { USERS_READ, USERS_WRITE } from '@/lib/capabilities';
 import { DataTable, type DataTableColumn } from '@/components/ui/data-table';
-import { Button } from '@amroksaleh/ui/button';
-import { Badge } from '@amroksaleh/ui/badge';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
+import { Button } from '@whity-org/ui/button';
+import { Badge } from '@whity-org/ui/badge';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity-org/ui/card';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@amroksaleh/ui/dropdown-menu';
+} from '@whity-org/ui/dropdown-menu';
 import {
   Dialog,
   DialogContent,
@@ -33,20 +33,20 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-} from '@amroksaleh/ui/form';
+} from '@whity-org/ui/form';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@amroksaleh/ui/select';
+} from '@whity-org/ui/select';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { IconMenu2, IconSend } from '@tabler/icons-react';
-import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
-import { useDateDisplay } from '@amroksaleh/features/datetime';
+import { useTranslation, type TranslateFn } from '@whity-org/features/i18n';
+import { useDateDisplay } from '@whity-org/features/datetime';
 import { useRoleOptions } from './use-role-options';
 
 /**

@@ -22,7 +22,7 @@ export interface BetaWarningProps extends Omit<React.ComponentProps<"div">, "tit
   title?: React.ReactNode
   /** Description message explaining the beta/experimental status. */
   description?: React.ReactNode
-  /** Badge text label (defaults to "BETA"). */
+  /** Badge text label (defaults to "Beta"). */
   badgeText?: string
   /** Badge color scheme variant. Defaults to "amber". */
   color?: "amber" | "blue" | "purple"
@@ -47,7 +47,7 @@ export function BetaWarning({
   className,
   title = "Experimental Feature",
   description = "This feature is currently in Beta preview. Interfaces and behaviors may be refined based on feedback.",
-  badgeText = "BETA",
+  badgeText = "Beta",
   color = "amber",
   variant = "card",
   action,
@@ -65,24 +65,23 @@ export function BetaWarning({
     onDismiss?.()
   }
 
+  // Status tints only (decision 7.4): warning for amber, the selected tint for
+  // blue and purple, since blue is kept for action and the brand (2.5b).
   const colorStyles = {
     amber: {
-      card: "border-amber-500/35 bg-amber-500/10 text-amber-950 dark:bg-amber-950/50 dark:text-amber-100 dark:border-amber-500/35",
-      badge: "warning-solid" as const,
-      icon: "text-amber-600 dark:text-amber-400",
-      btnVariant: "warning" as const,
+      card: "border-transparent bg-warning-tint text-foreground",
+      badge: "warning" as const,
+      icon: "text-warning-text",
     },
     blue: {
-      card: "border-blue-500/30 bg-blue-500/10 text-blue-950 dark:bg-blue-950/40 dark:text-blue-100 dark:border-blue-500/30",
-      badge: "info-solid" as const,
-      icon: "text-blue-600 dark:text-blue-400",
-      btnVariant: "info" as const,
+      card: "border-transparent bg-primary-tint text-foreground",
+      badge: "secondary" as const,
+      icon: "text-primary-tint-foreground",
     },
     purple: {
-      card: "border-primary/30 bg-primary/10 text-foreground dark:bg-primary/20 dark:border-primary/30",
-      badge: "default" as const,
-      icon: "text-primary",
-      btnVariant: "default" as const,
+      card: "border-transparent bg-primary-tint text-foreground",
+      badge: "secondary" as const,
+      icon: "text-primary-tint-foreground",
     },
   }[color]
 
@@ -99,7 +98,7 @@ export function BetaWarning({
         )}
         {...props}
       >
-        <Badge variant={colorStyles.badge} className="text-[9px] uppercase font-bold px-1.5 py-0 shrink-0">
+        <Badge variant={colorStyles.badge} className="shrink-0">
           {badgeText}
         </Badge>
         <span className="truncate">{title}</span>
@@ -139,7 +138,7 @@ export function BetaWarning({
         </div>
         <div className="space-y-0.5 min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={colorStyles.badge} className="text-[9px] uppercase font-bold px-1.5 py-0 shrink-0">
+            <Badge variant={colorStyles.badge} className="shrink-0">
               {badgeText}
             </Badge>
             <span className="font-semibold text-foreground text-xs">{title}</span>

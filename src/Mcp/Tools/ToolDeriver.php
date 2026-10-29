@@ -337,6 +337,9 @@ final class ToolDeriver
             'name'        => $name,
             'description' => $description,
             'inputSchema' => $inputSchema,
+            // WHIT-706: read-only / destructive hints from the method, so a
+            // client can run reads unasked and confirm before deletes.
+            'annotations' => ToolAnnotations::forRoute($method, $schema, $description),
         ];
     }
 
@@ -406,7 +409,23 @@ final class ToolDeriver
         $properties = [];
         $required   = [];
 
-        // 1. Path parameters — always required.
+        $declaredParams = $schema['parameters'] ?? null;
+
+        // 1. Path parameters — always required. Described by the route's own
+        // `in: path` declaration when it has one, else by the generated text
+        // from sanitizePath(): an agent should never meet a bare `id` and have
+        // to guess whose id it is (WHIT-711).
+        $declaredPathDescriptions = [];
+        if (is_array($declaredParams)) {
+            foreach ($declaredParams as $param) {
+                if (is_array($param) && ($param['in'] ?? null) === 'path'
+                    && is_string($param['name'] ?? null) && is_string($param['description'] ?? null)
+                    && trim($param['description']) !== ''
+                ) {
+                    $declaredPathDescriptions[$param['name']] = $param['description'];
+                }
+            }
+        }
         foreach ($pathParams as $param) {
             $name = (string) ($param['name'] ?? '');
             if ($name === '') {
@@ -414,11 +433,14 @@ final class ToolDeriver
             }
             $type = (string) ($param['schema']['type'] ?? 'string');
             $properties[$name] = ['type' => $type];
+            $description = $declaredPathDescriptions[$name] ?? $param['description'] ?? null;
+            if (is_string($description) && $description !== '') {
+                $properties[$name]['description'] = $description;
+            }
             $required[] = $name;
         }
 
         // 2. Declared query parameters from schema['parameters'].
-        $declaredParams = $schema['parameters'] ?? null;
         if (is_array($declaredParams)) {
             foreach ($declaredParams as $param) {
                 if (!is_array($param)) {
@@ -533,10 +555,77 @@ final class ToolDeriver
             $path
         );
 
+        $clean = is_string($clean) ? $clean : $path;
+
+        // Describe each parameter by the collection it sits under:
+        // `/api/users/{id}` is "ID of the user", `/api/meetings/{id}/agenda/{itemId}`
+        // gives "ID of the meeting" and "ID of the agenda item".
+        $previous = '';
+        $index = 0;
+        foreach (explode('/', $clean) as $segment) {
+            if (preg_match('#^\{(\w+)\}$#', $segment, $m) === 1) {
+                if (isset($parameters[$index]) && $parameters[$index]['name'] === $m[1]) {
+                    $parameters[$index]['description'] = self::describePathParameter($m[1], $previous);
+                }
+                $index++;
+            } elseif ($segment !== '') {
+                $previous = $segment;
+            }
+        }
+
         return [
-            'path'       => is_string($clean) ? $clean : $path,
+            'path'       => $clean,
             'parameters' => $parameters,
         ];
+    }
+
+    /**
+     * Generated description for a path parameter the route did not describe.
+     *
+     * @param string $name       Parameter name, e.g. `id`, `ouId`, `key`.
+     * @param string $collection The literal path segment before it, e.g. `users`.
+     */
+    private static function describePathParameter(string $name, string $collection): string
+    {
+        $noun = self::humanize(self::singular($collection));
+        if ($name === 'id') {
+            return $noun === '' ? 'ID of the record.' : "ID of the {$noun}.";
+        }
+
+        $words = self::humanize((string) preg_replace('/(?<=[a-z0-9])(?=[A-Z])/', ' ', $name));
+        if (preg_match('/^(.+?)[ _]id$/i', $words, $m) === 1) {
+            $subject = strtolower(trim($m[1], ' _'));
+            // `itemId` under `agenda` reads as the agenda item; `ouId` under
+            // `ous` is just the OU.
+            if ($noun !== '' && $subject !== strtolower($noun) && !str_contains(strtolower($noun), $subject)) {
+                $subject = strtolower($noun) . ' ' . $subject;
+            }
+            return 'ID of the ' . self::humanize($subject) . '.';
+        }
+
+        return $noun === '' ? ucfirst($words) . '.' : ucfirst($words) . " of the {$noun}.";
+    }
+
+    private static function singular(string $word): string
+    {
+        if (str_ends_with($word, 'ies')) {
+            return substr($word, 0, -3) . 'y';
+        }
+        if (str_ends_with($word, 's') && !str_ends_with($word, 'ss')) {
+            return substr($word, 0, -1);
+        }
+        return $word;
+    }
+
+    /** Lower-case words, with the acronyms the API uses kept upper-case. */
+    private static function humanize(string $text): string
+    {
+        $words = preg_split('/[-_ ]+/', strtolower($text), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $words = array_map(
+            static fn (string $w): string => in_array($w, ['ou', '2fa', 'qr', 'id'], true) ? strtoupper($w) : $w,
+            $words,
+        );
+        return implode(' ', $words);
     }
 
     /**

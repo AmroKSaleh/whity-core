@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import { LockedScreen } from '@amroksaleh/ui/locked-screen';
+import { LockedScreen } from '@whity-org/ui/locked-screen';
 
 describe('LockedScreen', () => {
   it('renders as an alert with the default title, description, and action', async () => {
