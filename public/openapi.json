@@ -41179,36 +41179,43 @@
                             "note",
                             "wiki",
                             "label"
-                        ]
+                        ],
+                        "description": "What the document is: a `template`, `letter`, `report`, `note`, `wiki` page or `label` sheet. Templates and printed kinds open in the page view, notes and wiki pages in the continuous view."
                     },
                     "title": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "The title, at most 255 characters."
                     },
                     "lang": {
                         "type": "string",
                         "enum": [
                             "en",
                             "ar"
-                        ]
+                        ],
+                        "description": "The language the document is written in: `en` or `ar`. Each block also follows the direction of its own text."
                     },
                     "default_view": {
                         "type": "string",
                         "enum": [
                             "page",
                             "continuous"
-                        ]
+                        ],
+                        "description": "How the document opens: `page` (the A4 view of what prints) or `continuous`. Defaults by kind."
                     },
                     "full_width": {
-                        "type": "boolean"
+                        "type": "boolean",
+                        "description": "For wiki pages with wide tables: use the full width instead of the 760px sheet."
                     },
                     "page": {
                         "type": "object",
                         "nullable": true,
-                        "additionalProperties": true
+                        "additionalProperties": true,
+                        "description": "Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`. Null for none."
                     },
                     "record_type": {
                         "type": "string",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "For templates: the record type its merge fields come from, for example `invoice`."
                     },
                     "blocks": {
                         "type": "array",
@@ -41225,15 +41232,18 @@
                             "tenant",
                             "global",
                             "system"
-                        ]
+                        ],
+                        "description": "Who can see the document: `personal` (only its creator, the default), `tenant`, `global` or `system`. Anything but personal needs documents:publish."
                     },
                     "required_permission": {
                         "type": "string",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "Optionally, a permission a reader must also hold to see a shared document. Setting one needs documents:publish."
                     },
                     "owner_ou_id": {
                         "type": "integer",
-                        "nullable": true
+                        "nullable": true,
+                        "description": "The organizational unit the document is filed under, which narrows who reaches it. Null files it tenant-wide."
                     }
                 },
                 "required": [
@@ -41244,29 +41254,34 @@
                 "type": "object",
                 "properties": {
                     "title": {
-                        "type": "string"
+                        "type": "string",
+                        "description": "The title, at most 255 characters."
                     },
                     "lang": {
                         "type": "string",
                         "enum": [
                             "en",
                             "ar"
-                        ]
+                        ],
+                        "description": "The language the document is written in: `en` or `ar`. Each block also follows the direction of its own text."
                     },
                     "default_view": {
                         "type": "string",
                         "enum": [
                             "page",
                             "continuous"
-                        ]
+                        ],
+                        "description": "How the document opens: `page` (the A4 view of what prints) or `continuous`. Defaults by kind."
                     },
                     "full_width": {
-                        "type": "boolean"
+                        "type": "boolean",
+                        "description": "For wiki pages with wide tables: use the full width instead of the 760px sheet."
                     },
                     "page": {
                         "type": "object",
                         "nullable": true,
-                        "additionalProperties": true
+                        "additionalProperties": true,
+                        "description": "Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`. Null for none."
                     },
                     "blocks": {
                         "type": "array",

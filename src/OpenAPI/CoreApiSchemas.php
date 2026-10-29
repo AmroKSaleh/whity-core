@@ -5705,7 +5705,7 @@ final class CoreApiSchemas
             'DocumentSourceCreateRequest' => self::object([
                 'kind' => ['type' => 'string', 'enum' => ['template', 'letter', 'report', 'note', 'wiki', 'label']] + ['description' => 'What the document is: a `template`, `letter`, `report`, `note`, `wiki` page or `label` sheet. Templates and printed kinds open in the page view, notes and wiki pages in the continuous view.'],
                 'title' => self::str() + ['description' => 'The title, at most 255 characters.'],
-                'lang' => ['type' => 'string', 'enum' => ['en', 'ar']] + ['description' => 'The language the document is written in: `en` or `ar`. Each block also follows its own text's direction.'],
+                'lang' => ['type' => 'string', 'enum' => ['en', 'ar']] + ['description' => 'The language the document is written in: `en` or `ar`. Each block also follows the direction of its own text.'],
                 'default_view' => ['type' => 'string', 'enum' => ['page', 'continuous']] + ['description' => 'How the document opens: `page` (the A4 view of what prints) or `continuous`. Defaults by kind.'],
                 'full_width' => self::bool() + ['description' => 'For wiki pages with wide tables: use the full width instead of the 760px sheet.'],
                 'page' => ['type' => 'object', 'nullable' => true, 'additionalProperties' => true] + ['description' => 'Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`. Null for none.'],
@@ -5717,7 +5717,7 @@ final class CoreApiSchemas
             ], ['kind']),
             'DocumentSourceDraftRequest' => self::object([
                 'title' => self::str() + ['description' => 'The title, at most 255 characters.'],
-                'lang' => ['type' => 'string', 'enum' => ['en', 'ar']] + ['description' => 'The language the document is written in: `en` or `ar`. Each block also follows its own text's direction.'],
+                'lang' => ['type' => 'string', 'enum' => ['en', 'ar']] + ['description' => 'The language the document is written in: `en` or `ar`. Each block also follows the direction of its own text.'],
                 'default_view' => ['type' => 'string', 'enum' => ['page', 'continuous']] + ['description' => 'How the document opens: `page` (the A4 view of what prints) or `continuous`. Defaults by kind.'],
                 'full_width' => self::bool() + ['description' => 'For wiki pages with wide tables: use the full width instead of the 760px sheet.'],
                 'page' => ['type' => 'object', 'nullable' => true, 'additionalProperties' => true] + ['description' => 'Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`. Null for none.'],

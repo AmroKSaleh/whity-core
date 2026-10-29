@@ -6122,34 +6122,61 @@ export interface components {
             updated_at: string;
         };
         DocumentSourceCreateRequest: {
-            /** @enum {string} */
+            /**
+             * @description What the document is: a `template`, `letter`, `report`, `note`, `wiki` page or `label` sheet. Templates and printed kinds open in the page view, notes and wiki pages in the continuous view.
+             * @enum {string}
+             */
             kind: "template" | "letter" | "report" | "note" | "wiki" | "label";
+            /** @description The title, at most 255 characters. */
             title?: string;
-            /** @enum {string} */
+            /**
+             * @description The language the document is written in: `en` or `ar`. Each block also follows the direction of its own text.
+             * @enum {string}
+             */
             lang?: "en" | "ar";
-            /** @enum {string} */
+            /**
+             * @description How the document opens: `page` (the A4 view of what prints) or `continuous`. Defaults by kind.
+             * @enum {string}
+             */
             default_view?: "page" | "continuous";
+            /** @description For wiki pages with wide tables: use the full width instead of the 760px sheet. */
             full_width?: boolean;
+            /** @description Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`. Null for none. */
             page?: {
                 [key: string]: unknown;
             } | null;
+            /** @description For templates: the record type its merge fields come from, for example `invoice`. */
             record_type?: string | null;
             /** @description The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type */
             blocks?: {
                 [key: string]: unknown;
             }[];
-            /** @enum {string} */
+            /**
+             * @description Who can see the document: `personal` (only its creator, the default), `tenant`, `global` or `system`. Anything but personal needs documents:publish.
+             * @enum {string}
+             */
             scope?: "personal" | "tenant" | "global" | "system";
+            /** @description Optionally, a permission a reader must also hold to see a shared document. Setting one needs documents:publish. */
             required_permission?: string | null;
+            /** @description The organizational unit the document is filed under, which narrows who reaches it. Null files it tenant-wide. */
             owner_ou_id?: number | null;
         };
         DocumentSourceDraftRequest: {
+            /** @description The title, at most 255 characters. */
             title?: string;
-            /** @enum {string} */
+            /**
+             * @description The language the document is written in: `en` or `ar`. Each block also follows the direction of its own text.
+             * @enum {string}
+             */
             lang?: "en" | "ar";
-            /** @enum {string} */
+            /**
+             * @description How the document opens: `page` (the A4 view of what prints) or `continuous`. Defaults by kind.
+             * @enum {string}
+             */
             default_view?: "page" | "continuous";
+            /** @description For wiki pages with wide tables: use the full width instead of the 760px sheet. */
             full_width?: boolean;
+            /** @description Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`. Null for none. */
             page?: {
                 [key: string]: unknown;
             } | null;
