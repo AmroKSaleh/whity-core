@@ -1,0 +1,66 @@
+name: Storybook on storybook.whity.dev
+
+# The packages/ui component gallery, published to GitHub Pages at
+# https://storybook.whity.dev whenever develop changes something it shows.
+# It is a static build: no backend, no secrets, nothing but the components and
+# their stories (packages/ui/.storybook). The custom domain is the CNAME file
+# written into the build, plus a DNS CNAME storybook.whity.dev ->
+# whity-org.github.io on Cloudflare.
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - "packages/ui/**"
+      - "packages/tokens/**"
+      - "src/design/tokens/**"
+      - ".github/workflows/storybook-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time; a newer push replaces a queued one, but never cancels
+# a deploy already running (a half-published site is worse than a late one).
+concurrency:
+  group: storybook-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build Storybook
+        run: npm --prefix packages/ui run build-storybook -- --quiet -o "$GITHUB_WORKSPACE/storybook-static"
+
+      - name: Point the site at its domain
+        run: echo "storybook.whity.dev" > storybook-static/CNAME
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: storybook-static
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
