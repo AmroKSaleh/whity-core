@@ -29,7 +29,8 @@
     "phpunit/phpunit": "^10.0",
     "phpstan/phpstan": "^1.10",
     "infection/infection": "^0.29 || ^0.34 || ^0.35",
-    "nikic/php-parser": "^5.0"
+    "nikic/php-parser": "^5.0",
+    "brianium/paratest": "^7.4"
   },
   "scripts": {
     "phpstan": [
@@ -70,6 +71,9 @@
   "config": {
     "allow-plugins": {
       "infection/extension-installer": true
+    },
+    "platform": {
+      "php": "8.4.0"
     }
   }
 }
