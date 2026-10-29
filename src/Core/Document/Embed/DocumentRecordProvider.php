@@ -18,7 +18,7 @@ interface DocumentRecordProvider
     /** The `ref.type` this provider answers for, e.g. "document". */
     public function type(): string;
 
-    /** The type's name in English, for the record picker. */
+    /** The type's name in the reader's language, for the record picker. */
     public function label(): string;
 
     /**

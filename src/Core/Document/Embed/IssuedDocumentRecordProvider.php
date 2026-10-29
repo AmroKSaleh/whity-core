@@ -17,10 +17,14 @@ use Whity\Core\RBAC\CorePermissions;
  */
 final class IssuedDocumentRecordProvider implements DocumentRecordProvider
 {
+    private EmbedLabels $labels;
+
     public function __construct(
         private readonly DocumentRepository $documents,
         private readonly DocumentVisibilityPolicy $visibility,
+        ?EmbedLabels $labels = null,
     ) {
+        $this->labels = $labels ?? new EmbedLabels();
     }
 
     public function type(): string
@@ -30,7 +34,7 @@ final class IssuedDocumentRecordProvider implements DocumentRecordProvider
 
     public function label(): string
     {
-        return 'Issued document';
+        return $this->labels->get('embeds.record.document', 'Issued document');
     }
 
     public function resolve(int $tenantId, int $callerId, callable $hasPermission, string $id): ?array
@@ -46,7 +50,7 @@ final class IssuedDocumentRecordProvider implements DocumentRecordProvider
         $template = (string) ($document['template_name'] ?? '');
 
         return [
-            'type_label' => 'Issued document',
+            'type_label' => $this->label(),
             'title' => (string) $document['title'],
             'subtitle' => $template !== '' ? $template : null,
             'href' => '/admin/document-library/' . (int) $document['id'],

@@ -6,6 +6,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  LabelList,
   Legend,
   Line,
   LineChart,
@@ -55,6 +56,22 @@ export interface ChartProps extends React.ComponentProps<"div"> {
   xKey?: string
   /** Fixed render height in pixels (the width always fills the container). */
   height?: number
+  /** Show the legend. Defaults to on; a single series rarely needs one. */
+  legend?: boolean
+  /** For `bar`: the index of the one bar whose value is printed above it (BarChart card). */
+  highlight?: number
+  /** Formats the highlighted value. */
+  formatValue?: (value: number) => string
+  /** For `pie`: draw a ring instead of a full disc. */
+  donut?: boolean
+}
+
+/** The next round axis end at or above `value` (38.5 → 40, 5346 → 6000). */
+function niceCeil(value: number): number {
+  if (value <= 0) return 1
+  const step = 10 ** Math.floor(Math.log10(value))
+  const m = value / step
+  return ([1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].find((n) => m <= n) ?? 10) * step
 }
 
 function chartColorVar(color: ChartColor): string {
@@ -97,6 +114,10 @@ function Chart({
   series,
   xKey,
   height = 240,
+  legend = true,
+  highlight,
+  formatValue = String,
+  donut = false,
   className,
   ...props
 }: ChartProps) {
@@ -107,11 +128,20 @@ function Chart({
           <BarChart data={data}>
             <CartesianGrid vertical={false} stroke="var(--border)" />
             {xKey !== undefined && <XAxis dataKey={xKey} tickLine={false} axisLine={false} />}
-            <YAxis tickLine={false} axisLine={false} />
+            {/* Headroom above the tallest bar, so its printed value is not clipped. */}
+            <YAxis tickLine={false} axisLine={false} domain={highlight !== undefined ? [0, (max: number) => niceCeil(max * 1.1)] : undefined} />
             <Tooltip content={<ChartTooltipContent />} />
-            <Legend />
-            {series.map((s) => (
-              <Bar key={s.key} dataKey={s.key} name={s.label} fill={chartColorVar(s.color)} radius={4} />
+            {legend && <Legend />}
+            {series.map((s, i) => (
+              // At most 24px thick, rounded at the end and square on the baseline (BarChart card).
+              <Bar key={s.key} dataKey={s.key} name={s.label} fill={chartColorVar(s.color)} radius={[4, 4, 0, 0]} maxBarSize={24}>
+                {i === 0 && highlight !== undefined && (
+                  <LabelList
+                    dataKey={s.key}
+                    content={(p) => (p.index === highlight ? <text x={Number(p.x) + Number(p.width) / 2} y={Number(p.y) - 6} textAnchor="middle" className="fill-foreground text-xs font-semibold">{formatValue(Number(p.value))}</text> : null)}
+                  />
+                )}
+              </Bar>
             ))}
           </BarChart>
         )
@@ -122,7 +152,7 @@ function Chart({
             {xKey !== undefined && <XAxis dataKey={xKey} tickLine={false} axisLine={false} />}
             <YAxis tickLine={false} axisLine={false} />
             <Tooltip content={<ChartTooltipContent />} />
-            <Legend />
+            {legend && <Legend />}
             {series.map((s) => (
               <Line
                 key={s.key}
@@ -143,7 +173,7 @@ function Chart({
             {xKey !== undefined && <XAxis dataKey={xKey} tickLine={false} axisLine={false} />}
             <YAxis tickLine={false} axisLine={false} />
             <Tooltip content={<ChartTooltipContent />} />
-            <Legend />
+            {legend && <Legend />}
             {series.map((s) => (
               <Area
                 key={s.key}
@@ -163,12 +193,13 @@ function Chart({
         return (
           <PieChart>
             <Tooltip content={<ChartTooltipContent />} />
-            <Legend />
-            <Pie data={data} dataKey={first.key} nameKey={xKey} label>
+            {legend && <Legend />}
+            <Pie data={data} dataKey={first.key} nameKey={xKey} label={!donut} innerRadius={donut ? "60%" : 0}>
               {data.map((_, index) => (
                 <Cell
                   key={index}
-                  fill={chartColorVar(series[index % series.length]?.color ?? 1)}
+                  // A ring of one series takes the palette in its fixed order, one colour per slice.
+                  fill={chartColorVar(donut ? (((index % 5) + 1) as ChartColor) : (series[index % series.length]?.color ?? 1))}
                 />
               ))}
             </Pie>
@@ -176,7 +207,7 @@ function Chart({
         )
       }
     }
-  }, [type, data, series, xKey])
+  }, [type, data, series, xKey, legend, highlight, formatValue, donut])
 
   return (
     <div

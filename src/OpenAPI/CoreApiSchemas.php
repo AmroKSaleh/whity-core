@@ -5739,6 +5739,7 @@ final class CoreApiSchemas
                 'data' => self::object([
                     'points' => ['type' => 'array', 'items' => self::object(['label' => self::str(), 'value' => ['type' => 'number']], ['label', 'value'])],
                     'value_label' => self::str(),
+                    'subtitle' => self::str() + ['description' => 'What the series covers, for example Last 6 months, in the caller language'],
                 ], ['points']),
             ], ['data']),
             'DocumentSourceResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentSource')),

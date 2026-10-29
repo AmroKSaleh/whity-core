@@ -103,7 +103,7 @@ async function loadServices(id: string): Promise<EditorServices> {
       });
       if (response.status === 404) return null;
       if (chart === undefined) throw new Error(`Failed to load the chart (${response.status})`);
-      return { points: chart.data.points, valueLabel: chart.data.value_label };
+      return { points: chart.data.points, valueLabel: chart.data.value_label, subtitle: chart.data.subtitle };
     },
     async uploadFile(file): Promise<UploadedFile> {
       const body = new FormData();

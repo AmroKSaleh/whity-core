@@ -194,6 +194,13 @@ function RecordView_(props: ReactNodeViewProps) {
   )
 }
 
+/** 4860 → "4.9K": the one labelled bar (BarChart card). Western digits in every language. */
+function compact(value: number): string {
+  if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`
+  if (Math.abs(value) >= 1_000) return `${(value / 1_000).toFixed(1).replace(/\.0$/, "")}K`
+  return String(value)
+}
+
 function ChartView(props: ReactNodeViewProps) {
   const { services, labels } = useEditorServices()
   const source = props.node.attrs.source as { query: string; params?: Record<string, string> } | null
@@ -201,32 +208,73 @@ function ChartView(props: ReactNodeViewProps) {
   const title = props.node.attrs.title as string | null
   const key = source ? JSON.stringify(source) : ""
   const { state, data } = useLive<ChartData>(key, source && services.loadChart ? () => services.loadChart!(source) : null)
+  const [asTable, setAsTable] = React.useState(false)
   const rows = (data?.points ?? []).map((p) => ({ label: p.label, value: p.value }))
+  const valueLabel = data?.valueLabel ?? title ?? labels.blockChart
+  const highest = rows.reduce((best, r, i) => (r.value > (rows[best]?.value ?? -Infinity) ? i : best), 0)
+  const ready = state === "ready" && rows.length > 0
   return (
     <NodeViewWrapper {...blockAttrs(props, "chart")}>
       <div className="wy-embed">
-        <div className="wy-embed-head">
-          <Icon name="chart" size={14} />
-          {title || labels.blockChart}
-          <span className="flex-1" />
-          {state === "ready" && (
-            <>
-              <Icon name="sync" size={12} />
-              {labels.live}
-            </>
+        {/* The BarChart card's header: the title, what it covers and that it is live, and a table view. */}
+        <div className="wy-chart-head">
+          <div className="grid min-w-0">
+            <span className="wy-chart-title" dir="auto">
+              {title || (source ? services.chartSources?.find((s) => s.key === source.query)?.label : null) || labels.blockChart}
+            </span>
+            {state === "ready" && (
+              <span className="wy-chart-sub" dir="auto">
+                {data?.subtitle ? fill(labels.chartLiveRange, { range: data.subtitle }) : labels.live}
+              </span>
+            )}
+          </div>
+          {ready && (
+            <button
+              type="button"
+              className="wy-chart-toggle"
+              contentEditable={false}
+              aria-pressed={asTable}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => setAsTable((v) => !v)}
+            >
+              <Icon name={asTable ? "chart" : "table"} size={14} />
+              {asTable ? labels.chartShowChart : labels.chartShowTable}
+            </button>
           )}
         </div>
         {!source ? (
           <div className="wy-placeholder">{labels.chartEmpty}</div>
         ) : state === "loading" ? (
           <div className="wy-skeleton is-tall" aria-busy="true" />
-        ) : state === "ready" && rows.length > 0 ? (
+        ) : ready && asTable ? (
+          <table className="wy-chart-table">
+            <thead>
+              <tr>
+                <th scope="col">{labels.chartCategory}</th>
+                <th scope="col">{valueLabel}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.label}>
+                  <td dir="auto">{r.label}</td>
+                  <td dir="ltr">{r.value.toLocaleString("en")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : ready ? (
           <Chart
             type={chart === "donut" ? "pie" : chart}
             data={rows}
             xKey="label"
-            series={[{ key: "value", label: data?.valueLabel ?? title ?? labels.blockChart, color: 1 }]}
+            series={[{ key: "value", label: valueLabel, color: 1 }]}
             height={170}
+            // One series needs no legend; a ring needs one to name its slices.
+            legend={chart === "donut"}
+            highlight={chart === "bar" ? highest : undefined}
+            formatValue={compact}
+            donut={chart === "donut"}
           />
         ) : (
           <div className="wy-placeholder">

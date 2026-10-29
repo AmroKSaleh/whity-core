@@ -41,6 +41,7 @@ const SERVICES: EditorServices = {
         ? { points: [] }
         : {
             valueLabel: source.query === "revenue-by-month" ? "JOD" : "Documents",
+            subtitle: "Last 6 months",
             points: [
               { label: "May", value: 18 },
               { label: "Jun", value: 24 },
@@ -92,6 +93,7 @@ const BLOCKS: Block[] = [
   { id: "r11", type: "record", ref: { type: "invoice", id: "INV-0001" }, view: "card" },
   { id: "r12", type: "chart", chart: "bar", source: { query: "documents-by-month" }, title: "Documents issued per month" },
   { id: "r13", type: "chart", chart: "line", source: { query: "revenue-by-month" }, title: "Revenue per month" },
+  { id: "r13b", type: "chart", chart: "donut", source: { query: "documents-by-month" }, title: "Documents by month" },
   {
     id: "r14",
     type: "signature",

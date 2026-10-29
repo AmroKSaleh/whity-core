@@ -186,6 +186,7 @@ final class DocumentSourcesApiHandlerRealEngineTest extends TestCase
 
         $writer = $this->data($this->chart(self::WRITER, 'documents-by-month'));
         self::assertSame('Documents', $writer['value_label']);
+        self::assertSame('Last 6 months', $writer['subtitle']);
         self::assertSame(
             [['label' => 'May 2026', 'value' => 0], ['label' => 'Jun 2026', 'value' => 0], ['label' => 'Jul 2026', 'value' => 0],
              ['label' => 'Aug 2026', 'value' => 1], ['label' => 'Sep 2026', 'value' => 0], ['label' => 'Oct 2026', 'value' => 2]],

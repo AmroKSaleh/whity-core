@@ -260,10 +260,23 @@
 .wy-doc .wy-embed-main { display: grid; gap: 1px; flex: 1; min-width: 0; }
 
 /* Signature and stamp (stage 6). */
-.wy-doc .wy-sign { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 32px; align-items: end; padding-top: 28px; font-size: 0.8125rem; color: var(--muted-foreground); }
-.wy-doc .wy-sign-line { border-top: 1px solid var(--foreground); padding-top: 6px; display: grid; gap: 2px; }
+/* Signers and the date share one row, the stamp at its end (EditorBlocks card); narrow sheets wrap. */
+.wy-doc .wy-sign { display: flex; flex-wrap: wrap; gap: 32px; align-items: flex-end; padding-top: 28px; font-size: 0.8125rem; color: var(--muted-foreground); }
+.wy-doc .wy-sign-line { flex: 1 1 0; min-width: 120px; border-top: 1px solid var(--foreground); padding-top: 6px; display: grid; gap: 2px; }
 .wy-doc .wy-sign-line b { color: var(--foreground); font-weight: 500; }
-.wy-doc .wy-sign-stamp { width: 84px; height: 84px; border: 1.5px dashed var(--input); border-radius: 50%; display: grid; place-items: center; text-align: center; font-size: 0.6875rem; justify-self: end; }
+.wy-doc .wy-sign-stamp { flex: none; width: 84px; height: 84px; border: 1.5px dashed var(--input); border-radius: 50%; display: grid; place-items: center; text-align: center; font-size: 0.6875rem; }
+
+/* The chart block header and its table view (BarChart card: "Show as table" gives every value). */
+.wy-doc .wy-chart-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
+.wy-doc .wy-chart-title { font-size: 0.875rem; font-weight: 600; color: var(--foreground); }
+.wy-doc .wy-chart-sub { font-size: 0.75rem; color: var(--muted-foreground); }
+.wy-doc .wy-chart-toggle { margin-inline-start: auto; display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; padding: 2px 4px; border-radius: 4px; font: inherit; font-size: 0.75rem; color: var(--muted-foreground); cursor: pointer; }
+.wy-doc .wy-chart-toggle:hover { color: var(--foreground); background: var(--muted); }
+.wy-doc .wy-chart-toggle:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.wy-doc .wy-chart-table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+.wy-doc .wy-chart-table th { text-align: start; font-weight: 500; color: var(--muted-foreground); border-bottom: 1px solid var(--border); padding: 4px 6px; }
+.wy-doc .wy-chart-table td { border-bottom: 1px solid var(--border); padding: 4px 6px; }
+.wy-doc .wy-chart-table td:last-child, .wy-doc .wy-chart-table th:last-child { text-align: end; font-variant-numeric: tabular-nums; }
 
 /* Barcode, QR code and maths (E.40–E.42). Codes stay ink on white in both themes so they scan (mark-sheet is white in both). */
 .wy-doc .wy-code { margin: 0; display: grid; gap: 6px; justify-items: start; }

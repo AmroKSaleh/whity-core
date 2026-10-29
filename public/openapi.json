@@ -41138,6 +41138,10 @@
                             },
                             "value_label": {
                                 "type": "string"
+                            },
+                            "subtitle": {
+                                "type": "string",
+                                "description": "What the series covers, for example Last 6 months, in the caller language"
                             }
                         },
                         "required": [

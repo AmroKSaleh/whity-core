@@ -24,6 +24,8 @@ export interface ChartData {
   points: { label: string; value: number }[]
   /** What the values are, for the table view and screen readers. */
   valueLabel?: string
+  /** What the series covers, e.g. "Last 6 months". */
+  subtitle?: string
 }
 
 export interface UploadedFile {

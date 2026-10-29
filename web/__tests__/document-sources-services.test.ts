@@ -52,6 +52,7 @@ it('passes chart params as the query string', async () => {
   await expect(services.loadChart!({ query: 'documents-by-month', params: { ou: '3' } })).resolves.toEqual({
     points: [{ label: 'Oct 2026', value: 2 }],
     valueLabel: 'Documents',
+    subtitle: undefined,
   });
   const options = GET.mock.calls.at(-1)[1];
   expect(options.params).toEqual({ path: { key: 'documents-by-month' } });

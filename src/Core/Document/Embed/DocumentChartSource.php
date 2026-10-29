@@ -16,13 +16,13 @@ interface DocumentChartSource
     /** The `source.query` this answers for, e.g. "documents-by-month". */
     public function key(): string;
 
-    /** Its name in English, for the source menu. */
+    /** Its name in the reader's language, for the source menu. */
     public function label(): string;
 
     /**
      * @param callable(string): bool $hasPermission The reader's permissions in this tenant.
      * @param array<string, string>  $params        The block's `source.params`.
-     * @return array{points: list<array{label: string, value: int|float}>, value_label?: string}|null
+     * @return array{points: list<array{label: string, value: int|float}>, value_label?: string, subtitle?: string}|null
      */
     public function load(int $tenantId, int $callerId, callable $hasPermission, array $params): ?array;
 }

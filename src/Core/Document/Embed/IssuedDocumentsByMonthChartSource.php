@@ -26,6 +26,8 @@ final class IssuedDocumentsByMonthChartSource implements DocumentChartSource
     /** @var \Closure(): \DateTimeImmutable */
     private \Closure $now;
 
+    private EmbedLabels $labels;
+
     /**
      * @param (\Closure(): \DateTimeImmutable)|null $now For tests.
      */
@@ -33,7 +35,9 @@ final class IssuedDocumentsByMonthChartSource implements DocumentChartSource
         private readonly DocumentRepository $documents,
         private readonly DocumentVisibilityPolicy $visibility,
         ?\Closure $now = null,
+        ?EmbedLabels $labels = null,
     ) {
+        $this->labels = $labels ?? new EmbedLabels();
         $this->now = $now ?? static fn (): \DateTimeImmutable => new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
     }
 
@@ -44,7 +48,7 @@ final class IssuedDocumentsByMonthChartSource implements DocumentChartSource
 
     public function label(): string
     {
-        return 'Documents issued per month';
+        return $this->labels->get('embeds.chart.documentsByMonth', 'Documents issued per month');
     }
 
     public function load(int $tenantId, int $callerId, callable $hasPermission, array $params): ?array
@@ -60,9 +64,13 @@ final class IssuedDocumentsByMonthChartSource implements DocumentChartSource
         $points = [];
         for ($i = 0; $i < self::MONTHS; $i++) {
             $month = $first->modify("+{$i} months");
-            $points[] = ['label' => $month->format('M Y'), 'value' => $counts[$month->format('Y-m')] ?? 0];
+            $points[] = ['label' => $this->labels->month((int) $month->format('n')) . ' ' . $month->format('Y'), 'value' => $counts[$month->format('Y-m')] ?? 0];
         }
 
-        return ['points' => $points, 'value_label' => 'Documents'];
+        return [
+            'points' => $points,
+            'value_label' => $this->labels->get('embeds.chart.documentsByMonth.value', 'Documents'),
+            'subtitle' => $this->labels->get('embeds.chart.documentsByMonth.range', 'Last 6 months'),
+        ];
     }
 }

@@ -6058,6 +6058,8 @@ export interface components {
                     value: number;
                 }[];
                 value_label?: string;
+                /** @description What the series covers, for example Last 6 months, in the caller language */
+                subtitle?: string;
             };
         };
         DocumentEmbedRecordResponse: {
