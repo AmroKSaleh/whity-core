@@ -135,10 +135,13 @@ pending ──(start work: get_task)──> in_progress ──(PR merged)──>
 ### Working in parallel
 
 Multiple tasks proceed at once when they're **independent** — different flows or
-no shared files — each on its own branch (or git worktree) off `main`. A green CI
-check is treated as *stale* once `main` moves: re-baseline (`gh pr update-branch`)
-before merging so behavioural interactions between concurrently-developed branches
-are caught. Dependent tasks (e.g. anything blocked by the RBAC schema) wait for
+no shared files — each on its own branch (or git worktree) off `main`. PRs into
+`develop` merge through GitHub's **merge queue**: `gh pr merge <n> --merge` adds a
+green PR to the queue, which re-runs the required checks on `develop` plus the PRs
+queued ahead of it and merges only if they pass. That catches behavioural
+interactions between concurrently-developed branches without re-running every
+open PR each time `develop` moves, so there is no need to `gh pr update-branch`
+first. Dependent tasks (e.g. anything blocked by the RBAC schema) wait for
 the blocker to merge, then branch off the updated `main`.
 
 ### GitHub integration
