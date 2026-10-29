@@ -280,7 +280,7 @@ const DatePicker = React.forwardRef<HTMLDivElement, DatePickerProps>(
                   onClick={() => handleSelectDay(d)}
                   className={cn(
                     "flex h-7 w-full items-center justify-center rounded-md text-xs font-medium transition-colors hover:bg-accent hover:text-accent-foreground",
-                    isTodayDay && !isSelected && "border border-primary/40 font-bold text-primary",
+                    isTodayDay && !isSelected && "border border-primary/40 font-semibold text-primary",
                     isSelected && "bg-primary text-primary-foreground font-semibold shadow-2xs hover:bg-primary/90"
                   )}
                 >
@@ -347,7 +347,7 @@ const DatePicker = React.forwardRef<HTMLDivElement, DatePickerProps>(
               {hasHeader && (
                 <div className="flex items-center gap-1 text-xs font-semibold text-foreground">
                   {label && <span>{label}</span>}
-                  {required && <span className="text-destructive font-bold ms-0.5">*</span>}
+                  {required && <span className="text-destructive font-semibold ms-0.5">*</span>}
                   {tooltip && (
                     <TooltipProvider>
                       <Tooltip>
@@ -387,7 +387,7 @@ const DatePicker = React.forwardRef<HTMLDivElement, DatePickerProps>(
         {hasHeader && (
           <div className="flex items-center gap-1 text-xs font-semibold text-foreground">
             {label && <span>{label}</span>}
-            {required && <span className="text-destructive font-bold ms-0.5">*</span>}
+            {required && <span className="text-destructive font-semibold ms-0.5">*</span>}
             {tooltip && (
               <TooltipProvider>
                 <Tooltip>

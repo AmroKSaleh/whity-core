@@ -13,7 +13,7 @@ export default function DashboardPage() {
     <div className="space-y-8">
       {/* Welcome Section */}
       <div>
-        <h1 className="text-4xl font-bold">{t('dashboard.welcome', 'Welcome back!')}</h1>
+        <h1 className="text-4xl font-semibold">{t('dashboard.welcome', 'Welcome back!')}</h1>
         {/*
           NOT translated, deliberately: the address is emphasised with <span>
           inside the sentence, and `t()` returns a string — keeping the emphasis
@@ -35,7 +35,7 @@ export default function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{auth.user?.id}</div>
+            <div className="text-2xl font-semibold">{auth.user?.id}</div>
           </CardContent>
         </Card>
 

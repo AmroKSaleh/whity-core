@@ -99,7 +99,7 @@ export function BetaWarning({
         )}
         {...props}
       >
-        <Badge variant={colorStyles.badge} className="text-[9px] uppercase font-bold px-1.5 py-0 shrink-0">
+        <Badge variant={colorStyles.badge} className="text-[9px] uppercase font-semibold px-1.5 py-0 shrink-0">
           {badgeText}
         </Badge>
         <span className="truncate">{title}</span>
@@ -139,7 +139,7 @@ export function BetaWarning({
         </div>
         <div className="space-y-0.5 min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={colorStyles.badge} className="text-[9px] uppercase font-bold px-1.5 py-0 shrink-0">
+            <Badge variant={colorStyles.badge} className="text-[9px] uppercase font-semibold px-1.5 py-0 shrink-0">
               {badgeText}
             </Badge>
             <span className="font-semibold text-foreground text-xs">{title}</span>

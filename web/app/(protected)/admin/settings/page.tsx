@@ -201,7 +201,7 @@ function TenantSettingsSection({
   return (
     <Card className="border border-border bg-card shadow-sm">
       <CardHeader>
-        <CardTitle className="text-lg font-bold font-heading">
+        <CardTitle className="text-lg font-semibold font-heading">
           <h2>{t('settings.tenant.title', 'Tenant settings')}</h2>
         </CardTitle>
         <CardDescription className="text-sm">
@@ -379,7 +379,7 @@ function PlatformDefaultsSection({ addToast }: { addToast: AddToast }) {
     return (
       <Card className="border border-border bg-card shadow-sm">
         <CardHeader>
-          <CardTitle className="text-lg font-bold font-heading">
+          <CardTitle className="text-lg font-semibold font-heading">
             <h2>{t('settings.platform.title', 'Platform defaults')}</h2>
           </CardTitle>
         </CardHeader>
@@ -401,7 +401,7 @@ function PlatformDefaultsSection({ addToast }: { addToast: AddToast }) {
           className="border border-border bg-card shadow-sm"
         >
           <CardHeader>
-            <CardTitle className="text-lg font-bold font-heading">
+            <CardTitle className="text-lg font-semibold font-heading">
               <h2>
                 {section.id === 'general'
                   ? t('settings.platform.title', 'Platform defaults')

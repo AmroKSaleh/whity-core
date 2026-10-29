@@ -19,7 +19,7 @@ export default function SettingsPage() {
     <div className="space-y-8">
       {/* Header */}
       <div>
-        <h1 className="text-4xl font-bold">{t('settings.title', 'Settings')}</h1>
+        <h1 className="text-4xl font-semibold">{t('settings.title', 'Settings')}</h1>
         <p className="text-muted-foreground mt-2">
           {t('settings.subtitle', 'Manage your account and security preferences')}
         </p>

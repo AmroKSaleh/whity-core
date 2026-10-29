@@ -279,7 +279,7 @@ export function Sidebar() {
           className="h-8 w-auto max-w-[180px] object-contain"
         />
       ) : (
-        <h1 className="text-2xl font-bold">{branding.siteName}</h1>
+        <h1 className="text-2xl font-semibold">{branding.siteName}</h1>
       )}
       <p className="mt-1 text-sm text-muted-foreground">{t('sidebar.subtitle', 'Admin')}</p>
     </>

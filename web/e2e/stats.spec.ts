@@ -24,7 +24,7 @@ test.describe('System Statistics (admin)', () => {
     // placeholder (or the loading pulse). The bold value node is unique to the
     // four headline cards.
     const resolvedValues = page
-      .locator('div.text-2xl.font-bold')
+      .locator('div.text-2xl.font-semibold')
       .filter({ hasText: /^\d+$/ });
     await expect(resolvedValues).toHaveCount(4);
 
@@ -37,7 +37,7 @@ test.describe('System Statistics (admin)', () => {
       .locator('[data-slot="card"]', {
         has: page.getByText('Permissions', { exact: true }),
       })
-      .locator('div.text-2xl.font-bold');
+      .locator('div.text-2xl.font-semibold');
     const permissions = Number(await permissionsValue.innerText());
     expect(permissions).toBeGreaterThanOrEqual(28);
   });

@@ -281,7 +281,7 @@ export default function AdminStats() {
               <stat.icon className={`h-4 w-4 ${stat.color}`} />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">
+              <div className="text-2xl font-semibold">
                 {loading ? (
                   <div className="h-8 w-12 animate-pulse bg-muted rounded" />
                 ) : (

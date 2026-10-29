@@ -227,7 +227,7 @@ export function PluginStoreCard({
               {plugin.icon ?? <IconPuzzle />}
             </div>
             <div className="min-w-0 flex-1">
-              <CardTitle className="text-sm font-bold truncate">{plugin.name}</CardTitle>
+              <CardTitle className="text-sm font-semibold truncate">{plugin.name}</CardTitle>
               <CardDescription className="text-xs truncate">
                 by {plugin.author} · v{plugin.version}
               </CardDescription>
@@ -365,7 +365,7 @@ export function InstalledPluginCard({
               {plugin.icon ?? <IconPuzzle />}
             </div>
             <div className="min-w-0 flex-1">
-              <CardTitle className="text-sm font-bold truncate">{plugin.name}</CardTitle>
+              <CardTitle className="text-sm font-semibold truncate">{plugin.name}</CardTitle>
               <CardDescription className="text-xs truncate">
                 Installed v{plugin.version} · by {plugin.author}
               </CardDescription>
@@ -583,7 +583,7 @@ function PluginDetailsModal({
               {plugin.icon ?? <IconPuzzle />}
             </div>
             <div>
-              <DialogTitle className="text-lg font-bold flex items-center gap-2">
+              <DialogTitle className="text-lg font-semibold flex items-center gap-2">
                 {plugin.name}
                 {plugin.verified && <Badge variant="default" className="text-[10px]">{text.verified}</Badge>}
               </DialogTitle>

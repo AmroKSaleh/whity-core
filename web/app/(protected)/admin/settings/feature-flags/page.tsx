@@ -200,7 +200,7 @@ function FeatureFlagsForm({ addToast }: { addToast: AddToast }) {
     return (
       <Card className="border border-border bg-card shadow-sm">
         <CardHeader>
-          <CardTitle className="text-lg font-bold font-heading">
+          <CardTitle className="text-lg font-semibold font-heading">
             <h2>{t('settings.featureFlags.card.title', 'Feature flags')}</h2>
           </CardTitle>
         </CardHeader>
@@ -220,7 +220,7 @@ function FeatureFlagsForm({ addToast }: { addToast: AddToast }) {
         className="border border-border bg-card shadow-sm"
       >
         <CardHeader>
-          <CardTitle className="text-lg font-bold font-heading">
+          <CardTitle className="text-lg font-semibold font-heading">
             <h2>{t('settings.featureFlags.card.title', 'Feature flags')}</h2>
           </CardTitle>
           <CardDescription className="text-sm">

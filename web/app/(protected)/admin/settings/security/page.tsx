@@ -193,7 +193,7 @@ function TwoFactorPoliciesSection({
     <Card className="border border-border bg-card shadow-sm" data-testid="two-factor-policies-card">
       <CardHeader className="flex flex-row items-start justify-between gap-4">
         <div>
-          <CardTitle className="text-lg font-bold font-heading">
+          <CardTitle className="text-lg font-semibold font-heading">
             <h2>{t('settings.security.policies.title', '2FA policies')}</h2>
           </CardTitle>
           <CardDescription className="text-sm">
@@ -571,7 +571,7 @@ function EnrollmentStatusSection({ refreshKey }: { refreshKey: number }) {
   return (
     <Card className="border border-border bg-card shadow-sm" data-testid="two-factor-status-card">
       <CardHeader>
-        <CardTitle className="text-lg font-bold font-heading">
+        <CardTitle className="text-lg font-semibold font-heading">
           <h2>{t('settings.security.status.title', 'Enrollment status')}</h2>
         </CardTitle>
         <CardDescription className="text-sm">

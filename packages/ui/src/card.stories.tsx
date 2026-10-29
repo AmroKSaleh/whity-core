@@ -87,7 +87,7 @@ export const PluginStoreCard: Story = {
               <IconPuzzle className="size-5" />
             </div>
             <div>
-              <CardTitle className="text-sm font-bold">AI Document Summarizer</CardTitle>
+              <CardTitle className="text-sm font-semibold">AI Document Summarizer</CardTitle>
               <CardDescription className="text-xs">by Whity AI Labs · v2.4.0</CardDescription>
             </div>
           </div>
@@ -124,7 +124,7 @@ export const PluginStoreCard: Story = {
               <IconCloudUpload className="size-5" />
             </div>
             <div>
-              <CardTitle className="text-sm font-bold">S3 Storage Connector</CardTitle>
+              <CardTitle className="text-sm font-semibold">S3 Storage Connector</CardTitle>
               <CardDescription className="text-xs">by CloudSync Inc · v1.8.2</CardDescription>
             </div>
           </div>
@@ -165,7 +165,7 @@ export const FeatureInstallCard: Story = {
             <IconCpu className="size-6" />
           </div>
           <div>
-            <CardTitle className="text-base font-bold">Advanced Audit Logging</CardTitle>
+            <CardTitle className="text-base font-semibold">Advanced Audit Logging</CardTitle>
             <CardDescription className="text-xs">Immutable security and access audit telemetry</CardDescription>
           </div>
         </div>
@@ -213,7 +213,7 @@ export const InteractiveWithInputFieldCard: Story = {
   render: () => (
     <Card variant="default" className="w-full max-w-md">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-sm font-bold">
+        <CardTitle className="flex items-center gap-2 text-sm font-semibold">
           <IconKey className="size-4 text-purple-600 dark:text-purple-400" />
           API Access Token
         </CardTitle>
@@ -247,7 +247,7 @@ export const InformationalCard: Story = {
     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-4xl">
       <Card variant="purple" className="w-full">
         <CardHeader>
-          <CardTitle className="text-xs uppercase tracking-wider text-purple-800 dark:text-purple-300 font-bold">
+          <CardTitle className="text-xs uppercase tracking-wider text-purple-800 dark:text-purple-300 font-semibold">
             Total Requests
           </CardTitle>
           <CardDescription>Last 30 days telemetry</CardDescription>
@@ -256,14 +256,14 @@ export const InformationalCard: Story = {
           </CardAction>
         </CardHeader>
         <CardContent>
-          <div className="text-2xl font-bold text-foreground font-heading">1.42 M</div>
+          <div className="text-2xl font-semibold text-foreground font-heading">1.42 M</div>
           <p className="text-[11px] text-muted-foreground mt-1">Average 48.2k requests / day</p>
         </CardContent>
       </Card>
 
       <Card variant="info" className="w-full">
         <CardHeader>
-          <CardTitle className="text-xs uppercase tracking-wider text-blue-800 dark:text-blue-300 font-bold">
+          <CardTitle className="text-xs uppercase tracking-wider text-blue-800 dark:text-blue-300 font-semibold">
             Active Subscriptions
           </CardTitle>
           <CardDescription>Tenant billing telemetry</CardDescription>
@@ -272,14 +272,14 @@ export const InformationalCard: Story = {
           </CardAction>
         </CardHeader>
         <CardContent>
-          <div className="text-2xl font-bold text-foreground font-heading">328</div>
+          <div className="text-2xl font-semibold text-foreground font-heading">328</div>
           <p className="text-[11px] text-muted-foreground mt-1">24 new tenants signed up this week</p>
         </CardContent>
       </Card>
 
       <Card variant="success" className="w-full">
         <CardHeader>
-          <CardTitle className="text-xs uppercase tracking-wider text-emerald-800 dark:text-emerald-300 font-bold">
+          <CardTitle className="text-xs uppercase tracking-wider text-emerald-800 dark:text-emerald-300 font-semibold">
             System Availability
           </CardTitle>
           <CardDescription>All services operational</CardDescription>
@@ -288,7 +288,7 @@ export const InformationalCard: Story = {
           </CardAction>
         </CardHeader>
         <CardContent>
-          <div className="text-2xl font-bold text-foreground font-heading">0 Incidents</div>
+          <div className="text-2xl font-semibold text-foreground font-heading">0 Incidents</div>
           <p className="text-[11px] text-muted-foreground mt-1">Zero downtime over 90 days</p>
         </CardContent>
       </Card>

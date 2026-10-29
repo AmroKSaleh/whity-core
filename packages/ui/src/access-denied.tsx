@@ -223,7 +223,7 @@ function AccessDenied({
         {resolvedIcon}
       </div>
 
-      <h2 data-slot="access-denied-title" className="mb-2 text-xl font-bold tracking-tight text-foreground md:text-2xl">
+      <h2 data-slot="access-denied-title" className="mb-2 text-xl font-semibold tracking-tight text-foreground md:text-2xl">
         {resolvedTitle}
       </h2>
 

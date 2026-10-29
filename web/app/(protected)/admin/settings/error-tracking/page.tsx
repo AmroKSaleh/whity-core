@@ -276,7 +276,7 @@ function ErrorTrackingSettingsForm({
               <IconBug className="w-5 h-5" />
             </span>
             <div>
-              <CardTitle className="text-lg font-bold font-heading">
+              <CardTitle className="text-lg font-semibold font-heading">
                 <h2>{t('settings.errorTracking.collection.title', 'Collection')}</h2>
               </CardTitle>
               <CardDescription className="text-sm">
@@ -330,7 +330,7 @@ function ErrorTrackingSettingsForm({
       {enabled && provider === 'sentry' && (
         <Card className="border border-border bg-card shadow-sm" data-testid="error-tracking-dsn-card">
           <CardHeader>
-            <CardTitle className="text-lg font-bold font-heading">
+            <CardTitle className="text-lg font-semibold font-heading">
               <h2>{t('settings.errorTracking.dsn.title', 'Sentry DSN')}</h2>
             </CardTitle>
             <CardDescription className="text-sm">
@@ -414,7 +414,7 @@ function ErrorTrackingSettingsForm({
               <IconInbox className="w-5 h-5" />
             </span>
             <div>
-              <CardTitle className="text-lg font-bold font-heading">
+              <CardTitle className="text-lg font-semibold font-heading">
                 <h2>{t('settings.errorTracking.alerts.title', 'Alerts and retention')}</h2>
               </CardTitle>
               <CardDescription className="text-sm">
