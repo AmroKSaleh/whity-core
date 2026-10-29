@@ -45,7 +45,7 @@ concurrency:
 # ---------------------------------------------------------------------------
 # Job graph (WC-ci-wallclock)
 #
-#   changes ──┬─ test (SQLite shard 1..2, coverage) ─── coverage (merge + floor)
+#   changes ──┬─ test (SQLite shard 1..3, coverage) ─── coverage (merge + floor)
 #             ├─ static-analysis
 #             ├─ postgres-migrations
 #             ├─ postgres-integration (shard 1..5)
@@ -249,9 +249,9 @@ jobs:
   test:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
-    # Keep the `/2` here in step with the matrix below; the shard arithmetic
+    # Keep the `/3` here in step with the matrix below; the shard arithmetic
     # itself reads `strategy.job-total`, so only this label is manual.
-    name: Tests shard ${{ matrix.shard }}/2 (SQLite, coverage)
+    name: Tests shard ${{ matrix.shard }}/3 (SQLite, coverage)
     runs-on: ubuntu-latest
 
     strategy:
@@ -259,7 +259,7 @@ jobs:
       # every failing test, not just the first shard to trip.
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
 
     steps:
       - name: Checkout code
@@ -1059,7 +1059,7 @@ jobs:
   # on the runner.
   # ---------------------------------------------------------------------------
   postgres-dialect:
-    # Keep the `/2` here in step with the matrix below; the shard arithmetic
+    # Keep the `/3` here in step with the matrix below; the shard arithmetic
     # itself reads `strategy.job-total`, so only this label is manual.
     name: Dialect shard ${{ matrix.shard }}/2 (real-engine suites on PostgreSQL)
     needs: changes
@@ -1069,7 +1069,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
 
     # Its own Postgres service per shard, like postgres-integration: the template
     # database and the throwaway clones are per-server state, so two shards
