@@ -52,7 +52,7 @@ function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="alert-title"
       className={cn(
-        "text-sm font-bold tracking-tight group-has-[>svg]/alert:col-start-2 [&_a]:underline [&_a]:underline-offset-3 [&_a]:decoration-1 [&_a]:hover:decoration-2 [&_a]:active:decoration-4 [&_a]:hover:opacity-80 transition-all",
+        "text-sm font-semibold tracking-tight group-has-[>svg]/alert:col-start-2 [&_a]:underline [&_a]:underline-offset-3 [&_a]:decoration-1 [&_a]:hover:decoration-2 [&_a]:active:decoration-4 [&_a]:hover:opacity-80 transition-all",
         className
       )}
       {...props}

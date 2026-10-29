@@ -228,6 +228,7 @@ export function Sidebar() {
       documents: t('sidebar.item.documentDesigner', 'Document Designer'),
       'document-library': t('sidebar.item.documentLibrary', 'Documents'),
       'document-templates': t('sidebar.item.documentTemplates', 'Templates & Blocks'),
+      'document-sources': t('sidebar.item.documentSources', 'Notes and wiki'),
       'approval-gating': t('sidebar.item.approvalGating', 'Approval Gating'),
       'ai-principals': t('sidebar.item.aiPrincipals', 'AI Principals'),
       'mcp-tools': t('sidebar.item.mcpTools', 'MCP Tools'),
@@ -266,7 +267,7 @@ export function Sidebar() {
         className="mx-auto h-8 w-8 object-contain"
       />
     ) : (
-      <div className="text-center text-xl font-black">
+      <div className="text-center text-xl font-semibold">
         {branding.siteName.charAt(0).toUpperCase()}
       </div>
     )
@@ -279,7 +280,7 @@ export function Sidebar() {
           className="h-8 w-auto max-w-[180px] object-contain"
         />
       ) : (
-        <h1 className="text-2xl font-bold">{branding.siteName}</h1>
+        <h1 className="text-2xl font-semibold">{branding.siteName}</h1>
       )}
       <p className="mt-1 text-sm text-muted-foreground">{t('sidebar.subtitle', 'Admin')}</p>
     </>

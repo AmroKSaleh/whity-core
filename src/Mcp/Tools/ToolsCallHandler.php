@@ -11,6 +11,7 @@ use Whity\Core\Audit\AuditLoggerInterface;
 use Whity\Core\Router;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Mcp\Auth\McpPrincipal;
+use Whity\Sdk\Mcp\McpToolContext;
 use Whity\Mcp\JsonRpc\ErrorCode;
 use Throwable;
 use Whity\Mcp\JsonRpc\McpException;
@@ -111,8 +112,15 @@ final class ToolsCallHandler implements MethodHandler
         // ignore the role whenever a permission was also declared, which reads
         // as "belt and braces" in the descriptor and would be one of them.
 
+        // The tenant the gate above was checked in, and the caller, handed to
+        // the tool explicitly (SDK 1.46, #1419): without it a plugin's tool
+        // could only scope its queries by reaching into TenantContext, a core
+        // internal. A handler written for 1.43-1.45 takes one parameter and
+        // PHP ignores the extra argument.
+        $context = new McpToolContext($tenantId, $principal->profileId);
+
         try {
-            $result = ($tool['handler'])($arguments);
+            $result = ($tool['handler'])($arguments, $context);
         } catch (McpException $e) {
             // A handler that speaks the protocol deliberately (a domain refusal
             // as FORBIDDEN, say) is relayed as it meant it.

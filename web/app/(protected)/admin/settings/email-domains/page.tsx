@@ -425,7 +425,7 @@ function AddDomainCard({
   return (
     <Card className="border border-primary/30 bg-card shadow-sm" data-testid="email-domain-form">
       <CardHeader>
-        <CardTitle className="text-lg font-bold font-heading">
+        <CardTitle className="text-lg font-semibold font-heading">
           <h2>{t('settings.emailDomains.form.title', 'Add email domain')}</h2>
         </CardTitle>
         <CardDescription className="text-sm">

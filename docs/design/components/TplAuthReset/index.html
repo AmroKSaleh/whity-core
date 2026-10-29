@@ -1,0 +1,19 @@
+<!-- @dsCard group="Templates · Account" height=447 width=1280 subtitle="Forgot, check email, new password" -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../bundle.css"><script src="../../preview-runtime/react.production.min.js"></script><script src="../../preview-runtime/react-dom.production.min.js"></script><script src="../bundle.js"></script><script>(function(){var t=(location.hash.match(/theme=(dark|light)/)||[])[1]||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);})();</script><style>body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font-sans);width:1280px;min-height:447px}</style><meta charset="utf-8"><title>Reset password</title><style>html,body{height:100%} </style></head>
+<body>
+<div id="root" class=""></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  function tenantLogo(name) { return h('span', { className: 'wy-tenant-logo' }, h('span', { className: 'wy-tenant-logo__tile', 'aria-hidden': 'true' }, name.charAt(0)), name); }
+  function lang() { return h('div', { className: 'wy-auth__lang' }, h('b', null, 'English'), h('span', { lang: 'ar' }, 'العربية')); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'wy-panels' },
+    h('div', null, h('div', { className: 'wy-panel-label' }, '1 · FORGOT PASSWORD'), h('div', { className: 'wy-auth__card' }, h('h1', { className: 'wy-auth__title' }, 'Reset your password'), h('p', { className: 'wy-auth__sub' }, 'We’ll email you a link. It works for 1 hour.'), h(W.Input, { label: 'Email', type: 'email', defaultValue: 'rana@example.jo' }), h(W.Button, { size: 'lg' }, 'Send reset link'), h('p', { className: 'wy-auth__foot' }, h('a', { className: 'wy-link', href: '#' }, 'Back to sign in')))),
+    h('div', null, h('div', { className: 'wy-panel-label' }, '2 · CHECK YOUR EMAIL'), h('div', { className: 'wy-auth__card' }, h('div', { className: 'wy-icon-tile' }, h(W.Icon, { name: 'mail-open', size: 22 })), h('h1', { className: 'wy-auth__title' }, 'Check your email'), h('p', { className: 'wy-auth__sub', style: { margin: 0 } }, 'If rana@example.jo has an account, a reset link is on its way. Check spam if it hasn’t arrived in 5 minutes.'), h(W.Button, { variant: 'outline' }, 'Resend link'))),
+    h('div', null, h('div', { className: 'wy-panel-label' }, '3 · NEW PASSWORD'), h('div', { className: 'wy-auth__card' }, h('h1', { className: 'wy-auth__title' }, 'Choose a new password'), h(W.Input, { label: 'New password', type: 'password', defaultValue: 'longpassword' }),
+      h('ul', { className: 'wy-reqs' }, h('li', { className: 'is-ok' }, h(W.Icon, { name: 'check', size: 12 }), 'At least 12 characters'), h('li', { className: 'is-ok' }, h(W.Icon, { name: 'check', size: 12 }), 'Not a common password'), h('li', null, h(W.Icon, { name: 'close', size: 12 }), 'Not the same as your last one')),
+      h(W.Button, { size: 'lg' }, 'Save and sign in'), h('p', { className: 'wy-auth__foot' }, 'This signs you out on your other devices.')))));
+</script>
+</body>
+</html>

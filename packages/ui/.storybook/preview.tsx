@@ -8,6 +8,31 @@ import "../src/globals.css"
 const withTheme: Decorator = (Story, context) => {
   const isDark = context.globals.theme === "dark"
   const isRtl = context.globals.direction === "rtl"
+  // Design-card stories render edge to edge at the card's size, on the page
+  // ground, exactly as docs/design/components/<Name>/index.html does.
+  const designCard = context.parameters.designCard as { width: number; height: number } | undefined
+  if (context.parameters.fullBleed) {
+    return (
+      <div className={isDark ? "dark" : ""} dir={isRtl ? "rtl" : "ltr"}>
+        <div className="bg-background text-foreground font-sans">
+          <Story />
+        </div>
+      </div>
+    )
+  }
+  if (designCard) {
+    return (
+      <div className={isDark ? "dark" : ""} dir={isRtl ? "rtl" : "ltr"}>
+        <div
+          data-design-card
+          className="bg-background text-foreground font-sans"
+          style={{ width: designCard.width, minHeight: designCard.height }}
+        >
+          <Story />
+        </div>
+      </div>
+    )
+  }
   return (
     <div className={isDark ? "dark" : ""} dir={isRtl ? "rtl" : "ltr"}>
       <div className="bg-background text-foreground flex min-h-svh items-start p-8">

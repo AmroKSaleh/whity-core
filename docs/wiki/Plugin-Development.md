@@ -1039,6 +1039,41 @@ ToolDeriver::clearCache();
 plugins never need to call it directly. It is relevant when you register routes
 programmatically outside the normal plugin lifecycle.
 
+### Writing a tool by hand (`PluginMcpToolsInterface`)
+
+A derived tool exposes one route. For a workflow ("close the period and report
+what it refused"), implement `PluginMcpToolsInterface` and return descriptors
+from `getMcpTools()`. The interface's docblock has the full descriptor shape.
+
+The handler's second argument is an `McpToolContext` (SDK 1.46): the tenant the
+call is authorized in, and the calling profile. Scope every query to
+`$context->tenantId`, exactly as a route handler scopes to its request's tenant.
+Never read core's `TenantContext`, and never trust a tenant named in the
+arguments.
+
+```php
+use Whity\Sdk\Mcp\McpToolContext;
+
+public function getMcpTools(): array
+{
+    return [[
+        'name'               => 'hello_count_greetings',
+        'description'        => 'Count the greetings in this workspace.',
+        'inputSchema'        => ['type' => 'object'],
+        'requiredPermission' => 'hello:read',
+        'annotations'        => ['readOnlyHint' => true],
+        'handler'            => fn (array $arguments, McpToolContext $context): array => [
+            'count' => $this->greetings->countForTenant($context->tenantId),
+        ],
+    ]];
+}
+```
+
+Tool names share one namespace with every derived tool, and a derived name
+wins a collision, so prefix yours with your plugin's slug. A tool that uses the
+context needs SDK `^1.46` in `getSdkConstraint()`: an older host calls the
+handler with only the arguments.
+
 For the full MCP server architecture, authentication flow, and operator
 guidance see [MCP-Server.md](./MCP-Server.md).
 

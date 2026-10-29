@@ -1,0 +1,12 @@
+<!-- @dsCard group="Data" height=200 -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>PluginCard</title><style>#root{padding:16px 24px}</style></head>
+<body>
+<div id="root" class="wy-grid wy-grid--2"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h(React.Fragment, null, h(W.PluginCard, { icon: 'invoice', name: 'Front Office', by: 'by Whity', description: 'Leads, quotes and compliant invoices.', state: 'active', stateLabel: 'Active', price: '[price] / month' }), h(W.PluginCard, { icon: 'plugin', name: 'Inventory for Whity', by: 'by a partner', description: 'Stock levels, transfers and reorder alerts.', state: 'available', stateLabel: 'Available', price: '[price]' })));
+</script>
+</body>
+</html>

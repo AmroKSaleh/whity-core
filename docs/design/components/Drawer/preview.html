@@ -1,0 +1,23 @@
+<!-- @dsCard group="Surfaces" height=680 width=1000 subtitle="The record side panel" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Drawer</title><style>#root{padding:16px 24px} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px 32px;align-items:start} .ar{font-family:var(--font-arabic)} .wy-drawer--inline{min-height:640px}</style></head>
+<body>
+<div id="root" class=""></div>
+<script>
+  var W = window.Whity, h = React.createElement; 
+  function cap(t) { return h('p', { className: 'cap' }, t); }
+  function col() { return h.apply(null, ['div', { style: { display: 'grid', gap: 12, alignContent: 'start' } }].concat([].slice.call(arguments))); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h(W.Drawer, { inline: true, eyebrow: 'INV-1042', title: 'Example Clinic', width: 460,
+  behind: h(W.DataTable, { columns: [{ key: 'no', label: 'Invoice', sortable: true, render: function (r) { return h('span', { className: 'wy-mono' }, r.no); } }, { key: 'cust', label: 'Customer', sortable: true }, { key: 'date', label: 'Issued' },
+  { key: 'amt', label: 'Total', align: 'end', sortable: true, render: function (r) { return h(W.Money, { amount: r.amt, decimals: 3 }); } },
+  { key: 'st', label: 'Payment', render: function (r) { return h(W.Badge, { variant: r.st === 'Paid' ? 'success' : r.st === 'Overdue' ? 'destructive' : 'outline' }, r.st); } }], rows: [{"id": 1, "no": "INV-1042", "cust": "Example Clinic", "date": "27 Oct", "amt": 301.6, "st": "Paid"}, {"id": 2, "no": "INV-1041", "cust": "Example Trading", "date": "26 Oct", "amt": 1185.5, "st": "Unpaid"}, {"id": 3, "no": "INV-1036", "cust": "Example Café", "date": "12 Oct", "amt": 96, "st": "Overdue"}, {"id": 4, "no": "INV-1031", "cust": "Example Clinic", "date": "20 Oct", "amt": 96, "st": "Unpaid"}, {"id": 5, "no": "INV-1029", "cust": "Example Café", "date": "28 Sep", "amt": 148.5, "st": "Overdue"}] }),
+  subtitle: h(React.Fragment, null, h(W.Badge, { variant: 'success', icon: 'check' }, 'Paid'), h(W.Badge, { variant: 'info' }, 'JoFotara accepted'), h('span', null, 'JOD 301.600')),
+  actions: h(W.Menu, { label: 'Invoice actions', items: [{ label: 'Duplicate', icon: 'copy' }, { label: 'Download PDF', icon: 'download' }, { divider: true }, { label: 'Issue credit note', icon: 'receipt' }] }),
+  tabs: h(W.Tabs, { items: [{ value: 'd', label: 'Details' }, { value: 'a', label: 'Activity', count: 7 }, { value: 'f', label: 'Documents', count: 4 }] }),
+  footer: h(React.Fragment, null, h(W.Button, { variant: 'outline', icon: 'download' }, 'Download PDF'), h(W.Button, { icon: 'send' }, 'Send to customer')) },
+  h(W.DescriptionList, { items: [{"label": "Customer", "value": "Example Clinic"}, {"label": "Issued", "value": "27 Oct 2026"}, {"label": "Due", "value": "10 Nov 2026"}, {"label": "Quote", "value": "QUO-0318", "mono": true}, {"label": "JoFotara ref.", "value": "[UUID]", "mono": true, "copy": true}, {"label": "Total", "value": "JOD 301.600"}, {"label": "Paid", "value": "JOD 203.000 · credit JOD 98.600"}] }),
+  h('section', { className: 'wy-drawer__section' }, h('h3', null, 'Latest'), h(W.Timeline, { items: [{ kind: 'send', actor: 'Billing assistant', actorKind: 'agent', onBehalfOf: 'Rana', text: 'Emailed the invoice', time: '14:02' }, { kind: 'pay', actor: 'Example Clinic', text: 'Paid JOD 203.000 by CliQ', time: '30 Oct' }] }))));
+</script>
+</body>
+</html>

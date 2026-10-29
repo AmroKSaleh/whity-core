@@ -2,7 +2,7 @@
     "openapi": "3.0.0",
     "info": {
         "title": "Whity Core API",
-        "version": "0.2.17",
+        "version": "0.2.18",
         "description": "Request bodies are declared, not implied: where an operation accepts one, it is described here. An operation with no `requestBody` accepts none \u2014 a reviewed contract, not a gap in this document. The exception is an operation marked `x-whity-undocumented: true`: that one carries no authored contract at all, its summary and responses are generated defaults, and it may well take a body. Every CORE operation in the published `public/openapi.json` is authored, so the marker appears there only on plugin routes that declare no schema of their own; a document served live by a running instance may mark core routes too."
     },
     "servers": [
@@ -9095,6 +9095,507 @@
                     },
                     "422": {
                         "description": "A rule kind nothing registered, a config the rule refused, an edge naming a position that is not on the canvas, an edge leaving a step that is not a decision, or more steps than documents.routing_max_steps allows",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/document-sources": {
+            "get": {
+                "operationId": "get_api_v1_document_sources",
+                "summary": "List the editor documents visible to the caller, without their blocks",
+                "tags": [
+                    "documents"
+                ],
+                "parameters": [
+                    {
+                        "name": "kind",
+                        "in": "query",
+                        "required": false,
+                        "description": "Only documents of this kind: `template`, `letter`, `report`, `note`, `wiki` or `label`. Anything else is a 422.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The documents the caller may see (RBAC-filtered)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentSourceListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Unknown kind",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_v1_document_sources",
+                "summary": "Create an editor document",
+                "tags": [
+                    "documents"
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DocumentSourceCreateRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The created document; its ETag is the draft version",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentSourceResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Sharing a document requires documents:publish",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/document-sources/{id}": {
+            "delete": {
+                "operationId": "delete_api_v1_document_sources_id",
+                "summary": "Delete an editor document",
+                "tags": [
+                    "documents"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Document deleted"
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "get": {
+                "operationId": "get_api_v1_document_sources_id",
+                "summary": "Get an editor document with its draft blocks; the ETag is the draft version",
+                "tags": [
+                    "documents"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The document",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentSourceResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/document-sources/{id}/draft": {
+            "put": {
+                "operationId": "put_api_v1_document_sources_id_draft",
+                "summary": "Save the draft of an editor document",
+                "tags": [
+                    "documents"
+                ],
+                "description": "Send If-Match with the draft version the edit was made against (the ETag of the last GET or save). When someone saved in between, the save is refused with 409 and the current version in details.draft_version, so newer work is never overwritten. Only the fields sent are changed.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DocumentSourceDraftRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The saved document; its ETag is the new draft version",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentSourceResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The document changed since this edit was made",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "428": {
+                        "description": "If-Match with the draft version is required",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -40554,6 +41055,267 @@
                     "decision",
                     "satisfied_by",
                     "rejection_count"
+                ]
+            },
+            "DocumentSource": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "tenant_id": {
+                        "type": "integer"
+                    },
+                    "kind": {
+                        "type": "string",
+                        "enum": [
+                            "template",
+                            "letter",
+                            "report",
+                            "note",
+                            "wiki",
+                            "label"
+                        ]
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "lang": {
+                        "type": "string",
+                        "enum": [
+                            "en",
+                            "ar"
+                        ]
+                    },
+                    "default_view": {
+                        "type": "string",
+                        "enum": [
+                            "page",
+                            "continuous"
+                        ]
+                    },
+                    "full_width": {
+                        "type": "boolean"
+                    },
+                    "page": {
+                        "type": "object",
+                        "nullable": true,
+                        "additionalProperties": true
+                    },
+                    "record_type": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "blocks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                        },
+                        "description": "The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type"
+                    },
+                    "draft_version": {
+                        "type": "integer"
+                    },
+                    "published_version": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "scope": {
+                        "type": "string",
+                        "enum": [
+                            "personal",
+                            "tenant",
+                            "global",
+                            "system"
+                        ]
+                    },
+                    "required_permission": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "created_by": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "owner_ou_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "updated_by": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "created_at": {
+                        "type": "string"
+                    },
+                    "updated_at": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "id",
+                    "tenant_id",
+                    "kind",
+                    "title",
+                    "lang",
+                    "default_view",
+                    "full_width",
+                    "draft_version",
+                    "scope",
+                    "created_at",
+                    "updated_at"
+                ]
+            },
+            "DocumentSourceCreateRequest": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": [
+                            "template",
+                            "letter",
+                            "report",
+                            "note",
+                            "wiki",
+                            "label"
+                        ],
+                        "description": "What the document is: a `template`, `letter`, `report`, `note`, `wiki` page or `label` sheet. Templates and printed kinds open in the page view, notes and wiki pages in the continuous view."
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "The title, at most 255 characters."
+                    },
+                    "lang": {
+                        "type": "string",
+                        "enum": [
+                            "en",
+                            "ar"
+                        ],
+                        "description": "The language the document is written in: `en` or `ar`. Each block also follows the direction of its own text."
+                    },
+                    "default_view": {
+                        "type": "string",
+                        "enum": [
+                            "page",
+                            "continuous"
+                        ],
+                        "description": "How the document opens: `page` (the A4 view of what prints) or `continuous`. Defaults by kind."
+                    },
+                    "full_width": {
+                        "type": "boolean",
+                        "description": "For wiki pages with wide tables: use the full width instead of the 760px sheet."
+                    },
+                    "page": {
+                        "type": "object",
+                        "nullable": true,
+                        "additionalProperties": true,
+                        "description": "Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`. Null for none."
+                    },
+                    "record_type": {
+                        "type": "string",
+                        "nullable": true,
+                        "description": "For templates: the record type its merge fields come from, for example `invoice`."
+                    },
+                    "blocks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                        },
+                        "description": "The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "enum": [
+                            "personal",
+                            "tenant",
+                            "global",
+                            "system"
+                        ],
+                        "description": "Who can see the document: `personal` (only its creator, the default), `tenant`, `global` or `system`. Anything but personal needs documents:publish."
+                    },
+                    "required_permission": {
+                        "type": "string",
+                        "nullable": true,
+                        "description": "Optionally, a permission a reader must also hold to see a shared document. Setting one needs documents:publish."
+                    },
+                    "owner_ou_id": {
+                        "type": "integer",
+                        "nullable": true,
+                        "description": "The organizational unit the document is filed under, which narrows who reaches it. Null files it tenant-wide."
+                    }
+                },
+                "required": [
+                    "kind"
+                ]
+            },
+            "DocumentSourceDraftRequest": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "The title, at most 255 characters."
+                    },
+                    "lang": {
+                        "type": "string",
+                        "enum": [
+                            "en",
+                            "ar"
+                        ],
+                        "description": "The language the document is written in: `en` or `ar`. Each block also follows the direction of its own text."
+                    },
+                    "default_view": {
+                        "type": "string",
+                        "enum": [
+                            "page",
+                            "continuous"
+                        ],
+                        "description": "How the document opens: `page` (the A4 view of what prints) or `continuous`. Defaults by kind."
+                    },
+                    "full_width": {
+                        "type": "boolean",
+                        "description": "For wiki pages with wide tables: use the full width instead of the 760px sheet."
+                    },
+                    "page": {
+                        "type": "object",
+                        "nullable": true,
+                        "additionalProperties": true,
+                        "description": "Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`. Null for none."
+                    },
+                    "blocks": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": true
+                        },
+                        "description": "The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type"
+                    }
+                }
+            },
+            "DocumentSourceListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DocumentSource"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "DocumentSourceResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/DocumentSource"
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "DocumentStarResponse": {

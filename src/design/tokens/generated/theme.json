@@ -1,5 +1,5 @@
 {
-  "version": "2.0.0",
+  "version": "3.0.0",
   "description": "Master color theme — every semantic color token used across the design system, light + dark, oklch (source of truth) plus a resolved hex preview. Generated from base.json; do not edit by hand — run `npm run tokens:generate`.",
   "colors": {
     "accent": {
@@ -20,9 +20,27 @@
       "lightHex": "#eeeeee",
       "darkHex": "#0a0a0a"
     },
+    "blueprint": {
+      "light": "oklch(0.5 0.16 255)",
+      "dark": "oklch(0.5 0.16 255)",
+      "lightHex": "#0961bb",
+      "darkHex": "#0961bb"
+    },
+    "blueprint-line": {
+      "light": "oklch(1 0 0 / 0.12)",
+      "dark": "oklch(1 0 0 / 0.12)",
+      "lightHex": "#ffffff1f",
+      "darkHex": "#ffffff1f"
+    },
+    "blueprint-line-strong": {
+      "light": "oklch(1 0 0 / 0.24)",
+      "dark": "oklch(1 0 0 / 0.24)",
+      "lightHex": "#ffffff3d",
+      "darkHex": "#ffffff3d"
+    },
     "border": {
       "light": "oklch(0.922 0 0)",
-      "dark": "oklch(1 0 0 / 10%)",
+      "dark": "oklch(1 0 0 / 0.1)",
       "lightHex": "#e5e5e5",
       "darkHex": "#ffffff1a"
     },
@@ -33,9 +51,9 @@
       "darkHex": "#59a0f9"
     },
     "brand-foreground": {
-      "light": "oklch(0.985 0 0)",
+      "light": "oklch(1 0 0)",
       "dark": "oklch(0.205 0 0)",
-      "lightHex": "#fafafa",
+      "lightHex": "#ffffff",
       "darkHex": "#171717"
     },
     "card": {
@@ -57,46 +75,76 @@
       "darkHex": "#59a0f9"
     },
     "chart-2": {
-      "light": "oklch(0.556 0 0)",
-      "dark": "oklch(0.556 0 0)",
-      "lightHex": "#737373",
-      "darkHex": "#737373"
+      "light": "oklch(0.7788 0.16 69.88)",
+      "dark": "oklch(0.7788 0.16 69.88)",
+      "lightHex": "#f7a224",
+      "darkHex": "#f7a224"
     },
     "chart-3": {
-      "light": "oklch(0.439 0 0)",
-      "dark": "oklch(0.708 0 0)",
-      "lightHex": "#525252",
-      "darkHex": "#a1a1a1"
+      "light": "oklch(0.8509 0.0799 219.47)",
+      "dark": "oklch(0.8509 0.0799 219.47)",
+      "lightHex": "#91dbf2",
+      "darkHex": "#91dbf2"
     },
     "chart-4": {
-      "light": "oklch(0.371 0 0)",
-      "dark": "oklch(0.439 0 0)",
-      "lightHex": "#404040",
-      "darkHex": "#525252"
+      "light": "oklch(0.5005 0.2006 329.92)",
+      "dark": "oklch(0.6597 0.1993 329.88)",
+      "lightHex": "#9d2398",
+      "darkHex": "#d25bcb"
     },
     "chart-5": {
-      "light": "oklch(0.269 0 0)",
-      "dark": "oklch(0.371 0 0)",
-      "lightHex": "#262626",
-      "darkHex": "#404040"
+      "light": "oklch(0.6599 0.13 159.92)",
+      "dark": "oklch(0.7407 0.1306 159.84)",
+      "lightHex": "#35aa76",
+      "darkHex": "#53c48e"
+    },
+    "chart-6": {
+      "light": "oklch(0.3485 0 0)",
+      "dark": "oklch(0.6167 0 0)",
+      "lightHex": "#3a3a3a",
+      "darkHex": "#858585"
     },
     "destructive": {
-      "light": "oklch(0.577 0.245 27.325)",
-      "dark": "oklch(0.704 0.191 22.216)",
-      "lightHex": "#e7000b",
-      "darkHex": "#ff6467"
+      "light": "oklch(0.5494 0.1994 27.1)",
+      "dark": "oklch(0.7005 0.1697 24.93)",
+      "lightHex": "#cc2827",
+      "darkHex": "#f66d67"
+    },
+    "destructive-foreground": {
+      "light": "oklch(1 0 0)",
+      "dark": "oklch(0.1448 0 0)",
+      "lightHex": "#ffffff",
+      "darkHex": "#0a0a0a"
+    },
+    "divider": {
+      "light": "oklch(0.94 0 0)",
+      "dark": "oklch(1 0 0 / 0.07)",
+      "lightHex": "#ebebeb",
+      "darkHex": "#ffffff12"
     },
     "error": {
-      "light": "oklch(0.55 0.2 27)",
-      "dark": "oklch(0.7 0.18 25)",
+      "light": "oklch(0.5494 0.1994 27.1)",
+      "dark": "oklch(0.7005 0.1697 24.93)",
       "lightHex": "#cc2827",
-      "darkHex": "#fa6863"
+      "darkHex": "#f66d67"
     },
     "error-foreground": {
-      "light": "oklch(0.985 0 0)",
-      "dark": "oklch(0.205 0 0)",
-      "lightHex": "#fafafa",
-      "darkHex": "#171717"
+      "light": "oklch(1 0 0)",
+      "dark": "oklch(0.1448 0 0)",
+      "lightHex": "#ffffff",
+      "darkHex": "#0a0a0a"
+    },
+    "error-text": {
+      "light": "oklch(0.5204 0.2004 26.99)",
+      "dark": "oklch(0.7005 0.1697 24.93)",
+      "lightHex": "#c2181d",
+      "darkHex": "#f66d67"
+    },
+    "error-tint": {
+      "light": "oklch(0.9596 0.0154 27.28)",
+      "dark": "oklch(0.3006 0.0805 25.3)",
+      "lightHex": "#fceeec",
+      "darkHex": "#4f1a18"
     },
     "foreground": {
       "light": "oklch(0.145 0 0)",
@@ -105,22 +153,40 @@
       "darkHex": "#fafafa"
     },
     "info": {
-      "light": "oklch(0.52 0.15 240)",
-      "dark": "oklch(0.72 0.15 240)",
-      "lightHex": "#0070b5",
-      "darkHex": "#30aff8"
+      "light": "oklch(0.4495 0 0)",
+      "dark": "oklch(0.7508 0 0)",
+      "lightHex": "#555555",
+      "darkHex": "#aeaeae"
     },
     "info-foreground": {
-      "light": "oklch(0.985 0 0)",
-      "dark": "oklch(0.205 0 0)",
-      "lightHex": "#fafafa",
-      "darkHex": "#171717"
+      "light": "oklch(1 0 0)",
+      "dark": "oklch(0.1448 0 0)",
+      "lightHex": "#ffffff",
+      "darkHex": "#0a0a0a"
+    },
+    "info-text": {
+      "light": "oklch(0.4495 0 0)",
+      "dark": "oklch(0.7508 0 0)",
+      "lightHex": "#555555",
+      "darkHex": "#aeaeae"
+    },
+    "info-tint": {
+      "light": "oklch(0.9551 0 0)",
+      "dark": "oklch(0.2686 0 0)",
+      "lightHex": "#f0f0f0",
+      "darkHex": "#262626"
     },
     "input": {
-      "light": "oklch(0.922 0 0)",
-      "dark": "oklch(1 0 0 / 15%)",
-      "lightHex": "#e5e5e5",
-      "darkHex": "#ffffff26"
+      "light": "oklch(0.66 0 0)",
+      "dark": "oklch(0.52 0 0)",
+      "lightHex": "#929292",
+      "darkHex": "#696969"
+    },
+    "mark-sheet": {
+      "light": "oklch(1 0 0)",
+      "dark": "oklch(1 0 0)",
+      "lightHex": "#ffffff",
+      "darkHex": "#ffffff"
     },
     "muted": {
       "light": "oklch(0.97 0 0)",
@@ -129,16 +195,22 @@
       "darkHex": "#262626"
     },
     "muted-foreground": {
-      "light": "oklch(0.556 0 0)",
+      "light": "oklch(0.52 0 0)",
       "dark": "oklch(0.708 0 0)",
-      "lightHex": "#737373",
+      "lightHex": "#696969",
       "darkHex": "#a1a1a1"
     },
     "overlay": {
-      "light": "oklch(0 0 0 / 45%)",
-      "dark": "oklch(0 0 0 / 45%)",
+      "light": "oklch(0 0 0 / 0.45)",
+      "dark": "oklch(0 0 0 / 0.45)",
       "lightHex": "#00000073",
       "darkHex": "#00000073"
+    },
+    "plane-deep": {
+      "light": "oklch(0.3 0.1 255)",
+      "dark": "oklch(0.42 0.13 255)",
+      "lightHex": "#002c5e",
+      "darkHex": "#0b4c92"
     },
     "popover": {
       "light": "oklch(1 0 0)",
@@ -159,10 +231,22 @@
       "darkHex": "#59a0f9"
     },
     "primary-foreground": {
-      "light": "oklch(0.985 0 0)",
+      "light": "oklch(1 0 0)",
       "dark": "oklch(0.205 0 0)",
-      "lightHex": "#fafafa",
+      "lightHex": "#ffffff",
       "darkHex": "#171717"
+    },
+    "primary-tint": {
+      "light": "oklch(0.9607 0.0148 251.16)",
+      "dark": "oklch(0.2987 0.06 255.91)",
+      "lightHex": "#ebf3fc",
+      "darkHex": "#182e4b"
+    },
+    "primary-tint-foreground": {
+      "light": "oklch(0.5 0.16 255)",
+      "dark": "oklch(0.6995 0.1498 255.09)",
+      "lightHex": "#0961bb",
+      "darkHex": "#59a0f9"
     },
     "ring": {
       "light": "oklch(0.5 0.16 255)",
@@ -202,7 +286,7 @@
     },
     "sidebar-border": {
       "light": "oklch(0.922 0 0)",
-      "dark": "oklch(1 0 0 / 10%)",
+      "dark": "oklch(1 0 0 / 0.1)",
       "lightHex": "#e5e5e5",
       "darkHex": "#ffffff1a"
     },
@@ -213,16 +297,16 @@
       "darkHex": "#fafafa"
     },
     "sidebar-primary": {
-      "light": "oklch(0.5 0.16 255)",
-      "dark": "oklch(0.7 0.15 255)",
-      "lightHex": "#0961bb",
-      "darkHex": "#59a0f9"
+      "light": "oklch(0.9607 0.0148 251.16)",
+      "dark": "oklch(0.2987 0.06 255.91)",
+      "lightHex": "#ebf3fc",
+      "darkHex": "#182e4b"
     },
     "sidebar-primary-foreground": {
-      "light": "oklch(0.985 0 0)",
-      "dark": "oklch(0.205 0 0)",
-      "lightHex": "#fafafa",
-      "darkHex": "#171717"
+      "light": "oklch(0.5 0.16 255)",
+      "dark": "oklch(0.6995 0.1498 255.09)",
+      "lightHex": "#0961bb",
+      "darkHex": "#59a0f9"
     },
     "sidebar-ring": {
       "light": "oklch(0.5 0.16 255)",
@@ -231,28 +315,58 @@
       "darkHex": "#59a0f9"
     },
     "success": {
-      "light": "oklch(0.52 0.15 150)",
-      "dark": "oklch(0.72 0.16 150)",
-      "lightHex": "#007f35",
-      "darkHex": "#4ac06c"
+      "light": "oklch(0.5197 0.1394 150.14)",
+      "dark": "oklch(0.7407 0.1507 149.85)",
+      "lightHex": "#0a7e3a",
+      "darkHex": "#5ac576"
     },
     "success-foreground": {
-      "light": "oklch(0.985 0 0)",
-      "dark": "oklch(0.205 0 0)",
-      "lightHex": "#fafafa",
-      "darkHex": "#171717"
+      "light": "oklch(1 0 0)",
+      "dark": "oklch(0.1448 0 0)",
+      "lightHex": "#ffffff",
+      "darkHex": "#0a0a0a"
+    },
+    "success-text": {
+      "light": "oklch(0.4986 0.1343 150.06)",
+      "dark": "oklch(0.7407 0.1507 149.85)",
+      "lightHex": "#087736",
+      "darkHex": "#5ac576"
+    },
+    "success-tint": {
+      "light": "oklch(0.9603 0.0399 149.82)",
+      "dark": "oklch(0.2998 0.0601 150.03)",
+      "lightHex": "#e0fae4",
+      "darkHex": "#14361d"
+    },
+    "table-header": {
+      "light": "oklch(0.975 0 0)",
+      "dark": "oklch(0.23 0 0)",
+      "lightHex": "#f7f7f7",
+      "darkHex": "#1d1d1d"
     },
     "warning": {
-      "light": "oklch(0.7 0.17 75)",
-      "dark": "oklch(0.82 0.16 80)",
-      "lightHex": "#da8b00",
-      "darkHex": "#fab72a"
+      "light": "oklch(0.7998 0.1501 78.05)",
+      "dark": "oklch(0.8207 0.1504 79.92)",
+      "lightHex": "#f2b036",
+      "darkHex": "#f7b83d"
     },
     "warning-foreground": {
-      "light": "oklch(0.205 0 0)",
-      "dark": "oklch(0.205 0 0)",
-      "lightHex": "#171717",
-      "darkHex": "#171717"
+      "light": "oklch(0.1889 0.026 77.5)",
+      "dark": "oklch(0.1448 0 0)",
+      "lightHex": "#1a1206",
+      "darkHex": "#0a0a0a"
+    },
+    "warning-text": {
+      "light": "oklch(0.5202 0.1204 59.76)",
+      "dark": "oklch(0.8207 0.1504 79.92)",
+      "lightHex": "#9a5505",
+      "darkHex": "#f7b83d"
+    },
+    "warning-tint": {
+      "light": "oklch(0.9694 0.0296 85.56)",
+      "dark": "oklch(0.3206 0.0605 80.03)",
+      "lightHex": "#fef4df",
+      "darkHex": "#432f07"
     }
   }
 }

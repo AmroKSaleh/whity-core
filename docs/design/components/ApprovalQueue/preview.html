@@ -1,0 +1,14 @@
+<!-- @dsCard group="Agent UI" height=470 subtitle="One at a time, oldest first; try Approve and Undo" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>ApprovalQueue</title><style>#root{padding:16px 24px} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px 32px;align-items:start} .ar{font-family:var(--font-arabic)} </style></head>
+<body>
+<div id="root" class=""></div>
+<script>
+  var W = window.Whity, h = React.createElement; 
+  function cap(t) { return h('p', { className: 'cap' }, t); }
+  function col() { return h.apply(null, ['div', { style: { display: 'grid', gap: 12, alignContent: 'start' } }].concat([].slice.call(arguments))); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h(W.ApprovalQueue, { items: [{"agent": "Billing assistant", "onBehalfOf": "Rana", "title": "Send payment reminders to 12 customers", "summary": "These invoices are more than 14 days overdue. Each customer gets your standard reminder by email.", "changes": [{"label": "Example Café", "after": "INV-1029, INV-1036 · JOD 244.500"}, {"label": "Example Clinic", "after": "INV-1018 · JOD 185.000"}, {"label": "Example Hotel", "after": "INV-1012 · JOD 1,240.000"}, {"label": "and 9 more", "after": "JOD 3,190.500"}], "scope": ["invoice:read", "invoice:remind"], "undoWindow": "30 minutes"}, {"agent": "Front desk", "onBehalfOf": "Omar", "title": "Create a quote for Example Clinic", "changes": [{"label": "Items", "after": "3 catering trays, delivery"}, {"label": "Total", "after": "JOD 185.000"}], "scope": ["quote:create"], "undoWindow": "24 hours"}, {"agent": "Billing assistant", "onBehalfOf": "Rana", "title": "Void invoice INV-1031", "reversible": false, "changes": [{"label": "INV-1031", "before": "Issued · JOD 96", "after": "Void"}], "scope": ["invoice:void"]}] }));
+</script>
+</body>
+</html>

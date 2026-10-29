@@ -242,9 +242,14 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.45.0',
+            '1.46.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.45 ADDS MCP TOOL ANNOTATIONS: an authored tool descriptor may declare '
+            'SDK 1.46 PASSES AN McpToolContext TO AUTHORED MCP TOOLS: a handler is called as '
+            . 'fn(array $arguments, McpToolContext $context), and the context carries the tenant '
+            . 'the call is authorized in and the calling profile, so a multi-tenant tool can scope '
+            . 'its queries without reaching into the internal tenant state of core (#1419). Purely '
+            . 'additive: a one-parameter handler still works. '
+            . 'SDK 1.45 ADDS MCP TOOL ANNOTATIONS: an authored tool descriptor may declare '
             . '`annotations` (title, readOnlyHint, destructiveHint, idempotentHint, openWorldHint) '
             . 'and a route schema may declare `mcp_annotations` to override the hints the host '
             . 'derives from the HTTP method. Clients read them to run reads without asking and to '

@@ -1,0 +1,18 @@
+<!-- @dsCard group="Forms" height=290 subtitle="+962 by default, grouped as it is read" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Phone input</title><style>#root{padding:16px 24px} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px 32px;align-items:start} .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px;align-items:start} .ar{font-family:var(--font-arabic)} .panel{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-card);padding:16px}</style></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  function cap(t) { return h('p', { className: 'cap' }, t); }
+  function col() { return h.apply(null, ['div', { style: { display: 'grid', gap: 12, alignContent: 'start' } }].concat([].slice.call(arguments))); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'grid2' },
+    col(h(W.PhoneInput, { label: 'Mobile', defaultValue: '0791234567', helperText: 'For sign-in codes and WhatsApp receipts.' }),
+      h(W.PhoneInput, { label: 'Customer phone', defaultValue: '79123', defaultTouched: true })),
+    col(h('div', { dir: 'rtl', lang: 'ar', className: 'ar' }, h(W.PhoneInput, { lang: 'ar', label: 'رقم الهاتف', defaultValue: '٠٧٩٥٥٥١٢٣٤', helperText: 'تُقبل الأرقام العربية وتُحفظ بالأرقام الغربية.', labels: { country: 'رمز الدولة' } })),
+      h(W.PhoneInput, { label: 'Branch landline', defaultCountry: 'JO', defaultValue: '64612345', mobileOnly: true, defaultTouched: true }))));
+</script>
+</body>
+</html>

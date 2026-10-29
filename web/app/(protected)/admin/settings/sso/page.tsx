@@ -642,7 +642,7 @@ function ProviderFormCard({
   return (
     <Card className="border border-primary/30 bg-card shadow-sm" data-testid="sso-form">
       <CardHeader>
-        <CardTitle className="text-lg font-bold font-heading">
+        <CardTitle className="text-lg font-semibold font-heading">
           <h2>
             {editing
               ? t('settings.sso.form.editTitle', 'Edit {name}', { name: editing.display_name })

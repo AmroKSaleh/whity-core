@@ -1,6 +1,6 @@
 {
   "name": "@whity-org/api-client",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Typed client for the Whity API, generated from its OpenAPI spec.",
   "license": "MIT",
   "type": "module",

@@ -25,6 +25,9 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+  # GitHub's merge queue on develop runs the required checks on the queued
+  # merge commit (develop + the PRs ahead of it), so they must run here too.
+  merge_group:
   schedule:
     # Mondays 06:00 UTC — catch newly-disclosed advisories on unchanged code.
     - cron: '0 6 * * 1'

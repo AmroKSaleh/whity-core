@@ -1,0 +1,12 @@
+<!-- @dsCard group="Surfaces" height=312 -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Card</title></head>
+<body>
+<div id="root" class="wy-stack"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h(React.Fragment, null, h(W.Card, { title: 'Agent actions this week', description: 'Across all tenants', action: h(W.Badge, { variant: 'success' }, '98% approved') }, h('div', { className: 'wy-stat__num' }, '1,284')), h(W.Card, { title: 'Front Office', description: 'Leads, quotes and invoices in one flow.', interactive: true, onClick: function () {} })));
+</script>
+</body>
+</html>

@@ -125,6 +125,9 @@ task `142`) will warn on these at generation time.
 Plugin-contributed routes follow the same derivation via `PluginMcpInterface` (Phase C,
 task `138`). Plugin tool names are namespaced: `{plugin_namespace}.{operationId}`.
 
+> **Amended (WHIT-713):** tool names are one flat namespace, not prefixed. See
+> [Amendment 4](#amendment-4-2026-10-29-whit-713).
+
 ### 5. Per-call execution contract
 
 For every `tools/call` invocation:
@@ -185,6 +188,9 @@ mcp:rate:tenant:{tenant_id}:tool:{tool_name}  # per-tool budget (for expensive t
 Default limits (configurable via per-tenant settings in Phase E):
 - **60 calls/min** per tenant (global)
 - **10 calls/min** per tool per tenant
+
+> **Amended (WHIT-713):** the limits are 300/min per tenant and 60/min per principal, with no
+> per-tool counter. See [Amendment 4](#amendment-4-2026-10-29-whit-713).
 
 On limit: JSON-RPC error `-32000`, body `{ "data": { "retry_after": <seconds> } }`.
 The `Retry-After` HTTP header is also set on the enclosing HTTP response.
@@ -299,6 +305,29 @@ still never runs, and the call is still audited.
 An unknown tool stays -32601 at the top level, as the spec says. Under discovery mode,
 `call_tool` with an unknown name is a tool error that points at `search_tools`, because there the
 name is an argument the model chose.
+
+## Amendment 4 (2026-10-29, WHIT-713)
+
+Three corrections, raised by the first plugin to author MCP tools (#1419).
+
+**Authored tools are told their tenant.** A handler registered through
+`PluginMcpToolsInterface` is called as `fn(array $arguments, McpToolContext $context)` (SDK
+1.46). The context carries the tenant the call was authorized in, the one the tool's
+`requiredRole` / `requiredPermission` gate was checked against, and the calling profile. Before
+this an authored tool received only its arguments, so a multi-tenant plugin could scope its
+queries only by reading `TenantContext`, a core internal with no compatibility promise. A route
+handler has always had this through its request; the two paths now match.
+
+**§4: tool names are not namespaced.** There is one flat namespace. A derived tool is named by
+its route's `operationId` (or a name generated from the method and path), whichever plugin
+contributed it. An authored tool keeps the name it declares. On a collision the derived tool
+wins, and among authored tools the first registration wins; the duplicate is dropped with a
+logged warning. A plugin that wants its names to be unique should prefix them itself.
+
+**§7: the rate limits are per tenant and per principal.** `McpRateLimiter` keeps two fixed
+one-minute windows, `mcp:rate:tenant:{tenant_id}` (300 calls by default, `MCP_RATE_TENANT_LIMIT`)
+and `mcp:rate:principal:{profile_id}` (60, `MCP_RATE_PRINCIPAL_LIMIT`). There is no per-tool
+counter. The response on a limit is unchanged.
 
 ## Alternatives Considered
 

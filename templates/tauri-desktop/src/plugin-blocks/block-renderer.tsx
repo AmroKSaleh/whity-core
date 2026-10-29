@@ -67,7 +67,7 @@ import { usePermittedActions, type PermittedActionCheck } from "./use-permitted-
 
 type ButtonVariant = "primary" | "secondary" | "outline" | "ghost" | "destructive"
 
-function toButtonVariant(v?: ButtonVariant): "default" | "secondary" | "outline" | "ghost" | "destructive-solid" {
+function toButtonVariant(v?: ButtonVariant): "default" | "secondary" | "outline" | "ghost" | "destructive" {
   switch (v) {
     case "secondary":
       return "secondary"
@@ -76,7 +76,7 @@ function toButtonVariant(v?: ButtonVariant): "default" | "secondary" | "outline"
     case "ghost":
       return "ghost"
     case "destructive":
-      return "destructive-solid"
+      return "destructive"
     default:
       return "default"
   }

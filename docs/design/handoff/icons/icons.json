@@ -1,0 +1,585 @@
+{
+ "source": "Tabler Icons 3.50.0 (MIT), outline, 24 grid. Stroke 2 at 20\u201324px; stroke-width 2.25 on 16px icons (1.5px rendered, decision 5.2).",
+ "icons": [
+  {
+   "name": "dashboard",
+   "tabler": "layout-dashboard",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "tenant",
+   "tabler": "building",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "users",
+   "tabler": "users",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "user",
+   "tabler": "user",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "role",
+   "tabler": "shield-lock",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "permission",
+   "tabler": "key",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "delegation",
+   "tabler": "user-share",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "ai-principal",
+   "tabler": "robot-face",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "approval",
+   "tabler": "rubber-stamp",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "scope",
+   "tabler": "lock-access",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "document",
+   "tabler": "file-text",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "template",
+   "tabler": "template",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "routing",
+   "tabler": "route",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "inbox",
+   "tabler": "inbox",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "form",
+   "tabler": "forms",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "plugin",
+   "tabler": "puzzle",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "store",
+   "tabler": "building-store",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "tool",
+   "tabler": "tool",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "audit",
+   "tabler": "history",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "activity",
+   "tabler": "activity",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "notification",
+   "tabler": "bell",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "settings",
+   "tabler": "settings",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "branding",
+   "tabler": "palette",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "language",
+   "tabler": "language",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "billing",
+   "tabler": "credit-card",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "invoice",
+   "tabler": "file-invoice",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "receipt",
+   "tabler": "receipt",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "quote",
+   "tabler": "file-dollar",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "lead",
+   "tabler": "user-plus",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "customer",
+   "tabler": "address-book",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "money",
+   "tabler": "coin",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "chart",
+   "tabler": "chart-bar",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "search",
+   "tabler": "search",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "filter",
+   "tabler": "filter",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "plus",
+   "tabler": "plus",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "check",
+   "tabler": "check",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "close",
+   "tabler": "x",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "info",
+   "tabler": "info-circle",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "alert",
+   "tabler": "alert-triangle",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "success",
+   "tabler": "circle-check",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "error",
+   "tabler": "circle-x",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "view",
+   "tabler": "eye",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "hide",
+   "tabler": "eye-off",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "undo",
+   "tabler": "arrow-back-up",
+   "mirrorsInRtl": true
+  },
+  {
+   "name": "send",
+   "tabler": "send",
+   "mirrorsInRtl": true
+  },
+  {
+   "name": "edit",
+   "tabler": "pencil",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "delete",
+   "tabler": "trash",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "more",
+   "tabler": "dots",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "chevron-right",
+   "tabler": "chevron-right",
+   "mirrorsInRtl": true
+  },
+  {
+   "name": "chevron-left",
+   "tabler": "chevron-left",
+   "mirrorsInRtl": true
+  },
+  {
+   "name": "chevron-down",
+   "tabler": "chevron-down",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "arrow-right",
+   "tabler": "arrow-right",
+   "mirrorsInRtl": true
+  },
+  {
+   "name": "external",
+   "tabler": "external-link",
+   "mirrorsInRtl": true
+  },
+  {
+   "name": "download",
+   "tabler": "download",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "upload",
+   "tabler": "upload",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "calendar",
+   "tabler": "calendar",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "clock",
+   "tabler": "clock",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "lock",
+   "tabler": "lock",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "mail",
+   "tabler": "mail",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "phone",
+   "tabler": "phone",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "whatsapp",
+   "tabler": "brand-whatsapp",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "qr",
+   "tabler": "qrcode",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "print",
+   "tabler": "printer",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "logout",
+   "tabler": "logout",
+   "mirrorsInRtl": true
+  },
+  {
+   "name": "help",
+   "tabler": "help-circle",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "copy",
+   "tabler": "copy",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "link",
+   "tabler": "link",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "sync",
+   "tabler": "refresh",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "google",
+   "tabler": "brand-google",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "microsoft",
+   "tabler": "brand-windows",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "two-step",
+   "tabler": "shield-check",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "offline",
+   "tabler": "wifi-off",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "maintenance",
+   "tabler": "tools",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "mail-open",
+   "tabler": "mail-opened",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "unlock",
+   "tabler": "lock-open",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "world",
+   "tabler": "world",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "robot",
+   "tabler": "robot-face",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "chevron-up",
+   "tabler": "chevron-up",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "minus",
+   "tabler": "minus",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "sun",
+   "tabler": "sun",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "moon",
+   "tabler": "moon",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "desktop",
+   "tabler": "device-desktop",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "arrow-up",
+   "tabler": "arrow-up",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "arrow-down",
+   "tabler": "arrow-down",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "sort",
+   "tabler": "selector",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "zoom-in",
+   "tabler": "zoom-in",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "zoom-out",
+   "tabler": "zoom-out",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "menu",
+   "tabler": "menu-2",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "bold",
+   "tabler": "bold",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "italic",
+   "tabler": "italic",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "underline",
+   "tabler": "underline",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "strike",
+   "tabler": "strikethrough",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "list-bullet",
+   "tabler": "list",
+   "mirrorsInRtl": true
+  },
+  {
+   "name": "list-numbered",
+   "tabler": "list-numbers",
+   "mirrorsInRtl": true
+  },
+  {
+   "name": "list-todo",
+   "tabler": "list-check",
+   "mirrorsInRtl": true
+  },
+  {
+   "name": "blockquote",
+   "tabler": "blockquote",
+   "mirrorsInRtl": true
+  },
+  {
+   "name": "code",
+   "tabler": "code",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "table",
+   "tabler": "table",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "image",
+   "tabler": "photo",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "heading-1",
+   "tabler": "h-1",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "heading-2",
+   "tabler": "h-2",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "heading-3",
+   "tabler": "h-3",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "page-break",
+   "tabler": "page-break",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "columns",
+   "tabler": "columns-2",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "comment",
+   "tabler": "message-circle",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "comment-add",
+   "tabler": "message-plus",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "drag",
+   "tabler": "grip-vertical",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "redo",
+   "tabler": "arrow-forward-up",
+   "mirrorsInRtl": true
+  },
+  {
+   "name": "text",
+   "tabler": "letter-t",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "divider",
+   "tabler": "separator",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "field",
+   "tabler": "braces",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "highlight",
+   "tabler": "highlight",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "outline",
+   "tabler": "list-tree",
+   "mirrorsInRtl": true
+  },
+  {
+   "name": "suggest",
+   "tabler": "file-pencil",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "page",
+   "tabler": "file-text",
+   "mirrorsInRtl": false
+  },
+  {
+   "name": "continuous",
+   "tabler": "layout-rows",
+   "mirrorsInRtl": false
+  }
+ ]
+}

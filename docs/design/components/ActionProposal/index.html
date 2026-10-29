@@ -1,0 +1,16 @@
+<!-- @dsCard group="Agent UI" height=1200 subtitle="Waiting, approved, declined, expired, undone" -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../bundle.css"><script src="../../preview-runtime/react.production.min.js"></script><script src="../../preview-runtime/react-dom.production.min.js"></script><script src="../bundle.js"></script><script>(function(){var t=(location.hash.match(/theme=(dark|light)/)||[])[1]||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);})();</script><style>body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font-sans);width:960px;min-height:1200px}</style><meta charset="utf-8"><title>ActionProposal</title></head>
+<body>
+<div id="root" class="wy-stack"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  ReactDOM.createRoot(document.getElementById('root')).render(h(React.Fragment, null, h(W.ActionProposal, { agent: 'Billing assistant', onBehalfOf: 'Rana', undoWindow: '30 minutes', title: 'Send payment reminders to 12 customers', summary: 'These invoices are more than 14 days overdue. Each customer gets your standard reminder by email.', changes: [{ label: 'Invoices', after: '12 overdue · JOD 4,860' }, { label: 'Status', before: 'Overdue', after: 'Reminder sent' }], scope: ['invoice:read', 'invoice:remind'] }),
+    h(W.ActionProposal, { agent: 'Billing assistant', onBehalfOf: 'Rana', status: 'approved', decidedAt: '14:02', title: 'Mark invoice INV-1042 as paid', changes: [{ label: 'INV-1042', before: 'Unpaid', after: 'Paid · JOD 320' }], scope: ['invoice:update'], undoWindow: '30 minutes' }),
+    h(W.ActionProposal, { agent: 'Front desk', onBehalfOf: 'Omar', status: 'rejected', title: 'Create a quote for Example Hotel', changes: [{ label: 'Total', after: 'JOD 1,240.000' }], scope: ['quote:create'] }),
+    h(W.ActionProposal, { agent: 'HR assistant', onBehalfOf: 'Rana', status: 'expired', title: 'Approve 2 days of leave for Lina', changes: [{ label: 'Leave', after: '3–4 Nov 2026' }], scope: ['leave:approve'] }),
+    h(W.ActionProposal, { agent: 'Billing assistant', onBehalfOf: 'Rana', status: 'undone', undoneBy: 'Rana Haddad', title: 'Email the October statement to Example Clinic', changes: [{ label: 'To', after: 'clinic@example.jo' }], scope: ['statement:send'] })));
+</script>
+</body>
+</html>

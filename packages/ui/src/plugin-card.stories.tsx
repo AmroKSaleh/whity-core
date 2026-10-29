@@ -113,7 +113,7 @@ export const PluginStoreMarketplace: Story = {
   render: (args) => (
     <div className="space-y-4 max-w-4xl">
       <div className="space-y-1">
-        <h3 className="text-base font-bold text-foreground">Real-Store Plugin Marketplace</h3>
+        <h3 className="text-base font-semibold text-foreground">Real-Store Plugin Marketplace</h3>
         <p className="text-xs text-muted-foreground">
           Features store preview banners, neutral rating stars positioned above title, clean borderless icons, and interactive image gallery inside More Info &gt; Overview modal.
         </p>
@@ -156,7 +156,7 @@ export const InstalledPluginsAllStates: Story = {
     return (
       <div className="space-y-4 max-w-4xl">
         <div className="space-y-1">
-          <h3 className="text-base font-bold text-foreground">Installed Plugins Management</h3>
+          <h3 className="text-base font-semibold text-foreground">Installed Plugins Management</h3>
           <p className="text-xs text-muted-foreground">
             Demonstrates Active, Inactive, Disabled by System, and Update Available (Blue info theme) states with version rollback and details modal gallery.
           </p>

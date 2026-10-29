@@ -40,7 +40,7 @@ export const BrandingGuidePaletteGallery: Story = {
   render: () => (
     <div className="space-y-4 max-w-4xl">
       <div className="space-y-1">
-        <h2 className="text-xl font-bold text-foreground font-heading">Whity Brand System Color Palette</h2>
+        <h2 className="text-xl font-semibold text-foreground font-heading">Whity Brand System Color Palette</h2>
         <p className="text-xs text-muted-foreground">
           Ultra-minimal color cards with 10 even shade tokens (50 to 900, zero black/white), MAIN brand color token border highlights, neutral greys guide, and one-click copy hex functionality.
         </p>

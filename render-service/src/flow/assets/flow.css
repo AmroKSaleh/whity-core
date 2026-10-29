@@ -210,7 +210,7 @@ body {
 
 .flow-heading {
   margin: 0 0 2.5mm;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1.35;
   break-after: avoid;
 }
@@ -290,7 +290,7 @@ body {
 
 .flow-table th {
   background: var(--flow-tint);
-  font-weight: 700;
+  font-weight: 600;
 }
 
 /* ---- Figures ----------------------------------------------------------- */
@@ -363,7 +363,7 @@ body {
 }
 
 .flow-caption-label {
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .flow-caption-continued {
@@ -375,7 +375,7 @@ body {
 
 .flow-frontmatter-title {
   font-size: 16pt;
-  font-weight: 700;
+  font-weight: 600;
   margin: 0 0 6mm;
 }
 
@@ -424,7 +424,7 @@ body {
 }
 
 .flow-toc-level-1 {
-  font-weight: 700;
+  font-weight: 600;
   margin-top: 2.5mm;
 }
 
@@ -491,7 +491,7 @@ body {
 
 .flow-running-has-sub .flow-running-text {
   font-size: 11pt;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .flow-running-subtext {
@@ -517,7 +517,7 @@ body {
 
 .flow-running-badge-value {
   font-size: 15pt;
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1.1;
 }
 
@@ -549,7 +549,7 @@ body {
 
 .flow-panel-title {
   margin: 0 0 2mm;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .flow-facts {
@@ -585,7 +585,7 @@ body {
 
 .flow-fact-value {
   font-size: 11pt;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .flow-field-grid {
@@ -657,7 +657,7 @@ body {
   background: var(--flow-ink);
   color: #ffffff;
   font-size: 9pt;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .flow-question-number-none {
@@ -709,7 +709,7 @@ body {
   border: 0.35mm solid var(--flow-ink);
   border-radius: 50%;
   font-size: 8pt;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .flow-question-note {
@@ -756,4 +756,10 @@ body {
   content: "";
   flex: 1;
   border-top: 0.3mm solid var(--flow-line);
+}
+
+/* Bold is 600: no 700 anywhere (design system decision 3.6). */
+strong,
+b {
+  font-weight: 600;
 }

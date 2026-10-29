@@ -46,10 +46,15 @@ namespace Whity\Sdk;
  *   arguments. Validated by the host before the handler runs, with the same
  *   validator derived tools use, so a handler never sees arguments of the
  *   wrong shape.
- * - `handler` (callable, REQUIRED): `fn(array $arguments): mixed`. Return a
- *   value the host will encode as the tool result. THROWING IS SAFE — the host
- *   catches, logs, and answers the caller with an internal-error result rather
- *   than letting one plugin's tool break the dispatcher.
+ * - `handler` (callable, REQUIRED):
+ *   `fn(array $arguments, \Whity\Sdk\Mcp\McpToolContext $context): mixed`.
+ *   `$context` (SDK 1.46) carries the tenant the call is authorized in and the
+ *   calling profile; scope every query to `$context->tenantId`, the same way a
+ *   route handler scopes to its request's tenant. A one-parameter handler
+ *   written for an older SDK still works, since PHP ignores the extra argument.
+ *   Return a value the host will encode as the tool result. THROWING IS SAFE —
+ *   the host catches, logs, and answers the caller with an internal-error
+ *   result rather than letting one plugin's tool break the dispatcher.
  * - `requiredRole` (string, optional): only callers holding this role may see
  *   (`tools/list`) or invoke (`tools/call`) the tool.
  * - `requiredPermission` (string, optional): the same, checked against the

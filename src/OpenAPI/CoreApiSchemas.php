@@ -127,6 +127,7 @@ final class CoreApiSchemas
             self::subscriptionRoutes(),
             self::documentTemplateRoutes(),
             self::documentBlockRoutes(),
+            self::documentSourceRoutes(),
             self::documentRecordRoutes(),
             self::documentRoutingRoutes(),
             self::documentQrRoutes(),
@@ -5675,6 +5676,53 @@ final class CoreApiSchemas
                 'updated_at' => self::str(),
             ], ['id', 'tenant_id', 'name', 'data', 'scope', 'is_system', 'created_at', 'updated_at']),
             'DocumentBlockListResponse' => self::listEnvelope('DocumentBlock'),
+            // ── The block editor's documents (editor M2) ──────────────────────
+            // `blocks` is the WhityDocument contract's Block[], stored verbatim.
+            // List rows omit it; GET /{id} and saves return it.
+            'DocumentSource' => self::object([
+                'id' => self::int(),
+                'tenant_id' => self::int(),
+                'kind' => ['type' => 'string', 'enum' => ['template', 'letter', 'report', 'note', 'wiki', 'label']],
+                'title' => self::str(),
+                'lang' => ['type' => 'string', 'enum' => ['en', 'ar']],
+                'default_view' => ['type' => 'string', 'enum' => ['page', 'continuous']],
+                'full_width' => self::bool(),
+                'page' => ['type' => 'object', 'nullable' => true, 'additionalProperties' => true],
+                'record_type' => self::str(true),
+                'blocks' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true], 'description' => 'The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type'],
+                'draft_version' => self::int(),
+                'published_version' => self::int(true),
+                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
+                'required_permission' => self::str(true),
+                'created_by' => self::int(true),
+                'owner_ou_id' => self::int(true),
+                'updated_by' => self::int(true),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+            ], ['id', 'tenant_id', 'kind', 'title', 'lang', 'default_view', 'full_width', 'draft_version', 'scope', 'created_at', 'updated_at']),
+            'DocumentSourceListResponse' => self::listEnvelope('DocumentSource'),
+            'DocumentSourceResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentSource')),
+            'DocumentSourceCreateRequest' => self::object([
+                'kind' => ['type' => 'string', 'enum' => ['template', 'letter', 'report', 'note', 'wiki', 'label']] + ['description' => 'What the document is: a `template`, `letter`, `report`, `note`, `wiki` page or `label` sheet. Templates and printed kinds open in the page view, notes and wiki pages in the continuous view.'],
+                'title' => self::str() + ['description' => 'The title, at most 255 characters.'],
+                'lang' => ['type' => 'string', 'enum' => ['en', 'ar']] + ['description' => 'The language the document is written in: `en` or `ar`. Each block also follows the direction of its own text.'],
+                'default_view' => ['type' => 'string', 'enum' => ['page', 'continuous']] + ['description' => 'How the document opens: `page` (the A4 view of what prints) or `continuous`. Defaults by kind.'],
+                'full_width' => self::bool() + ['description' => 'For wiki pages with wide tables: use the full width instead of the 760px sheet.'],
+                'page' => ['type' => 'object', 'nullable' => true, 'additionalProperties' => true] + ['description' => 'Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`. Null for none.'],
+                'record_type' => self::str(true) + ['description' => 'For templates: the record type its merge fields come from, for example `invoice`.'],
+                'blocks' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true], 'description' => 'The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type'],
+                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']] + ['description' => 'Who can see the document: `personal` (only its creator, the default), `tenant`, `global` or `system`. Anything but personal needs documents:publish.'],
+                'required_permission' => self::str(true) + ['description' => 'Optionally, a permission a reader must also hold to see a shared document. Setting one needs documents:publish.'],
+                'owner_ou_id' => self::int(true) + ['description' => 'The organizational unit the document is filed under, which narrows who reaches it. Null files it tenant-wide.'],
+            ], ['kind']),
+            'DocumentSourceDraftRequest' => self::object([
+                'title' => self::str() + ['description' => 'The title, at most 255 characters.'],
+                'lang' => ['type' => 'string', 'enum' => ['en', 'ar']] + ['description' => 'The language the document is written in: `en` or `ar`. Each block also follows the direction of its own text.'],
+                'default_view' => ['type' => 'string', 'enum' => ['page', 'continuous']] + ['description' => 'How the document opens: `page` (the A4 view of what prints) or `continuous`. Defaults by kind.'],
+                'full_width' => self::bool() + ['description' => 'For wiki pages with wide tables: use the full width instead of the 760px sheet.'],
+                'page' => ['type' => 'object', 'nullable' => true, 'additionalProperties' => true] + ['description' => 'Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`. Null for none.'],
+                'blocks' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true], 'description' => 'The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type'],
+            ], []),
             'DocumentBlockResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentBlock')),
             // scope/required_permission/owner_ou_id are all optional; setting a
             // shared scope, a permission tag, or a placement requires
@@ -11233,6 +11281,74 @@ final class CoreApiSchemas
                     204 => ['description' => 'Block deleted'],
                     404 => self::errorResponse('Block not found or not visible to the caller'),
                     409 => self::errorResponse('Cannot delete a block that is still referenced by a template'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * The block editor's documents (editor M2) — templates, letters, reports,
+     * notes and wiki pages. Visibility is the designer's (DocumentAccessPolicy);
+     * saving the draft is optimistic (If-Match with the draft version, 409 when
+     * it is stale, 428 when it is missing).
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function documentSourceRoutes(): array
+    {
+        return [
+            self::permissionRoute('GET', '/api/document-sources', 'documents:read', [
+                'summary' => 'List the editor documents visible to the caller, without their blocks',
+                'tags' => ['documents'],
+                'parameters' => [
+                    self::queryParam('kind', 'string', 'Only documents of this kind: `template`, `letter`, `report`, `note`, `wiki` or `label`. Anything else is a 422.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The documents the caller may see (RBAC-filtered)', 'DocumentSourceListResponse'),
+                    422 => self::errorResponse('Unknown kind'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/document-sources', 'documents:write', [
+                'summary' => 'Create an editor document',
+                'tags' => ['documents'],
+                'request' => 'DocumentSourceCreateRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The created document; its ETag is the draft version', 'DocumentSourceResponse'),
+                    403 => self::errorResponse('Sharing a document requires documents:publish'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/document-sources/{id:\d+}', 'documents:read', [
+                'summary' => 'Get an editor document with its draft blocks; the ETag is the draft version',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The document', 'DocumentSourceResponse'),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PUT', '/api/document-sources/{id:\d+}/draft', 'documents:write', [
+                'summary' => 'Save the draft of an editor document',
+                'description' =>
+                    'Send If-Match with the draft version the edit was made against (the ETag of the last '
+                    . 'GET or save). When someone saved in between, the save is refused with 409 and the '
+                    . 'current version in details.draft_version, so newer work is never overwritten. Only '
+                    . 'the fields sent are changed.',
+                'tags' => ['documents'],
+                'request' => 'DocumentSourceDraftRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The saved document; its ETag is the new draft version', 'DocumentSourceResponse'),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                    409 => self::errorResponse('The document changed since this edit was made'),
+                    422 => self::errorResponse('Validation failed'),
+                    428 => self::errorResponse('If-Match with the draft version is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/document-sources/{id:\d+}', 'documents:write', [
+                'summary' => 'Delete an editor document',
+                'tags' => ['documents'],
+                'responses' => [
+                    204 => ['description' => 'Document deleted'],
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
                 ] + self::authErrors(),
             ]),
         ];

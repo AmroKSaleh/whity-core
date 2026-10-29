@@ -160,7 +160,8 @@ function TextBox({ style, children }: { style: TextStyle; children: React.ReactN
   const dir = style.direction ?? 'auto';
   const css: CSSProperties = {
     fontSize: `${style.fontSize}pt`,
-    fontWeight: style.fontWeight,
+    // 'bold' in the template model prints at 600: no 700 anywhere (decision 3.6).
+    fontWeight: style.fontWeight === 'bold' ? 600 : style.fontWeight,
     fontStyle: style.fontStyle,
     textAlign: style.align,
     color: style.color,
@@ -200,7 +201,7 @@ function RichText({ plain, runs }: { plain: string; runs?: TextRun[] }) {
         <span
           key={i}
           style={{
-            fontWeight: r.bold === undefined ? undefined : r.bold ? 'bold' : 'normal',
+            fontWeight: r.bold === undefined ? undefined : r.bold ? 600 : 'normal',
             fontStyle: r.italic === undefined ? undefined : r.italic ? 'italic' : 'normal',
           }}
         >

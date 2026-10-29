@@ -724,7 +724,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
             ) : (
               label && <span>{label}</span>
             )}
-            {required && <span className="text-destructive font-bold ms-0.5">*</span>}
+            {required && <span className="text-destructive font-semibold ms-0.5">*</span>}
             {tooltip && (
               <TooltipProvider>
                 <Tooltip>
