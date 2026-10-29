@@ -266,7 +266,7 @@ export function Sidebar() {
         className="mx-auto h-8 w-8 object-contain"
       />
     ) : (
-      <div className="text-center text-xl font-black">
+      <div className="text-center text-xl font-semibold">
         {branding.siteName.charAt(0).toUpperCase()}
       </div>
     )

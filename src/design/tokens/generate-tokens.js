@@ -449,7 +449,11 @@ function generateThemeInlineBlock(base) {
   lines.push('  --font-heading: var(--font-heading);');
   lines.push('  --font-arabic: var(--font-arabic);');
   lines.push('  --font-display: var(--font-display);');
-  for (const name of Object.keys(typo.fontSize)) lines.push(`  --text-${name}: var(--text-${name});`);
+  for (const [name, def] of Object.entries(typo.fontSize)) {
+    lines.push(`  --text-${name}: var(--text-${name});`);
+    // Without this, Tailwind's own default line height for each size applies (decision 3.6 sets them).
+    if (def.lineHeight !== undefined) lines.push(`  --text-${name}--line-height: ${def.lineHeight};`);
+  }
   for (const name of Object.keys(typo.fontWeight)) lines.push(`  --font-weight-${name}: var(--font-weight-${name});`);
   for (const name of Object.keys(typo.lineHeight)) lines.push(`  --leading-${name}: var(--leading-${name});`);
   for (const name of Object.keys(typo.letterSpacing)) lines.push(`  --tracking-${name}: var(--tracking-${name});`);
