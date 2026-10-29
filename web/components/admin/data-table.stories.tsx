@@ -1,8 +1,8 @@
 import type { ReactElement } from "react"
 import type { Meta, StoryObj } from "@storybook/nextjs-vite"
 import { IconDatabaseOff } from "@tabler/icons-react"
-import { Button } from "@amroksaleh/ui/button"
-import { Badge } from "@amroksaleh/ui/badge"
+import { Button } from "@whity-org/ui/button"
+import { Badge } from "@whity-org/ui/badge"
 
 import { DataTable, type Column, type DataTableProps } from "./data-table"
 

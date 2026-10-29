@@ -1,7 +1,7 @@
 import * as React from "react"
 
-import { Alert, AlertDescription, AlertTitle } from "@amroksaleh/ui/alert"
-import { Button } from "@amroksaleh/ui/button"
+import { Alert, AlertDescription, AlertTitle } from "@whity-org/ui/alert"
+import { Button } from "@whity-org/ui/button"
 
 /**
  * A render error boundary.

@@ -1,21 +1,21 @@
 'use client';
 
-import { useTranslation } from '@amroksaleh/features/i18n';
-import { Button } from '@amroksaleh/ui/button';
+import { useTranslation } from '@whity-org/features/i18n';
+import { Button } from '@whity-org/ui/button';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@amroksaleh/ui/select';
-import { ViewToggle } from '@amroksaleh/ui/view-toggle';
+} from '@whity-org/ui/select';
+import { ViewToggle } from '@whity-org/ui/view-toggle';
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from '@amroksaleh/ui/dropdown-menu';
+} from '@whity-org/ui/dropdown-menu';
 import {
   IconLayoutGrid,
   IconList,

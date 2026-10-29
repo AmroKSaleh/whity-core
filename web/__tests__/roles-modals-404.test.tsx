@@ -15,8 +15,8 @@
 import React from 'react';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { RolesScreen } from '@amroksaleh/features/roles';
-import type { Role, RolesAdapter, Transport } from '@amroksaleh/features/roles';
+import { RolesScreen } from '@whity-org/features/roles';
+import type { Role, RolesAdapter, Transport } from '@whity-org/features/roles';
 import { createRolesAdapter } from '@/lib/roles-adapter';
 
 const FRIENDLY_404 =

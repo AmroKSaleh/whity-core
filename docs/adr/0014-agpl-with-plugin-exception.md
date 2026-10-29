@@ -60,8 +60,8 @@ including proprietary and commercial ones. Modified versions of Whity Core
 itself remain fully AGPL, §13 network clause included.
 
 **3. The plugin boundary is MIT on both sides.** `whity/plugin-sdk` already
-was. The four published client packages — `@amroksaleh/ui`,
-`@amroksaleh/features`, `@amroksaleh/api-client`, `@amroksaleh/tokens` — were
+was. The four published client packages — `@whity-org/ui`,
+`@whity-org/features`, `@whity-org/api-client`, `@whity-org/tokens` — were
 published to GitHub Packages declaring **`UNLICENSED`**, which grants no rights
 to anybody. They are now MIT. This was not cosmetic: downstream consumers,
 including Elmak, had no legal basis to use them, and no plugin author could

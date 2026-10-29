@@ -1,6 +1,6 @@
 import * as React from "react"
 import { listen } from "@tauri-apps/api/event"
-import type { NavGroupConfig } from "@amroksaleh/features/nav"
+import type { NavGroupConfig } from "@whity-org/features/nav"
 
 import { fetchPluginFeatures } from "./plugin-blocks/fetch-features"
 import { resolveTablerIcon } from "./plugin-blocks/resolve-tabler-icon"

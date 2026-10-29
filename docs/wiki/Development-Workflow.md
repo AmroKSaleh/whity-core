@@ -78,7 +78,7 @@ has ten entries:
 
 ## The Tasker workflow
 
-[Tasker](https://github.com/AmroKSaleh) is the task manager that plans and tracks
+[Tasker](https://github.com/whity-org/tasker-whity) is the task manager that plans and tracks
 the project. Its structure:
 
 - **Project** → **sections** (our epics: FrankenPHP Runtime, Plugin Architecture,

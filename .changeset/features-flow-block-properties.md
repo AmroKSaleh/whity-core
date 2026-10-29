@@ -1,5 +1,5 @@
 ---
-"@amroksaleh/features": minor
+"@whity-org/features": minor
 ---
 
 `FlowEditor` can now set the four block properties the render service already

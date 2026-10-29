@@ -8,7 +8,7 @@ import {
   THEME_STORAGE_KEY,
   type ResolvedThemeMode,
   type ThemeModePreference,
-} from '@amroksaleh/ui/theme-mode';
+} from '@whity-org/ui/theme-mode';
 
 /**
  * App-wide color scheme (light / dark / system), mirroring the
@@ -27,7 +27,7 @@ import {
  * user-driven changes, they never own the very first paint.
  *
  * The storage key, preference type, and resolution rule are the shared
- * cross-client contract — see @amroksaleh/ui/theme-mode (and its module doc
+ * cross-client contract — see @whity-org/ui/theme-mode (and its module doc
  * comment) for the framework-agnostic half other clients replicate.
  */
 

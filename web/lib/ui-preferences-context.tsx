@@ -32,7 +32,7 @@
  */
 
 import { useEffect, useState, type ReactNode } from 'react';
-import { DateDisplayProvider } from '@amroksaleh/features/datetime';
+import { DateDisplayProvider } from '@whity-org/features/datetime';
 
 import { useAuth } from '@/lib/auth-context';
 import type { UiPreferences } from '@/lib/ui-preferences';

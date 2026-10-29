@@ -6,7 +6,7 @@ import type {
   Resolution,
   SyncController,
   SyncStatus,
-} from "@amroksaleh/features/sync"
+} from "@whity-org/features/sync"
 
 /**
  * The desktop implementation of the shared {@link SyncController} contract

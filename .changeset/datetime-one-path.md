@@ -1,17 +1,17 @@
 ---
-"@amroksaleh/features": minor
-"@amroksaleh/ui": minor
+"@whity-org/features": minor
+"@whity-org/ui": minor
 ---
 
-Add `@amroksaleh/features/datetime`: `DateDisplayProvider` and
+Add `@whity-org/features/datetime`: `DateDisplayProvider` and
 `useDateDisplay()`, the one path a date takes to a screen. The hook carries both
 things a call site should never have to remember — the reader's resolved
 language, and whether this tenant has asked for dates to be off the screen
 entirely (`ui.hide_dates`, #1068). It exposes `date`, `dateTime`, `age`,
 `relative` and `dateColumns`, all of which return nothing when dates are hidden.
 
-**Breaking (`@amroksaleh/features`).** `formatRecordDate` and
-`formatRecordDateTime` are no longer exported from `@amroksaleh/features/record`,
+**Breaking (`@whity-org/features`).** `formatRecordDate` and
+`formatRecordDateTime` are no longer exported from `@whity-org/features/record`,
 and the `./record/format` subpath is gone. They were one of six ways a date
 reached a screen, and a gated one of six is a setting that is 90% true. Use
 `useDateDisplay()` instead; it needs no locale argument, which is what eight of
@@ -23,7 +23,7 @@ offset, which `new Date()` reads in the *local* zone — and the formatters retu
 `null` rather than the raw wire string for a value they cannot parse, because
 `formatter(x) ?? x` prints the timestamp the formatter has just declined to.
 
-**Breaking (`@amroksaleh/ui`).** `PluginVersion.releasedAt` becomes
+**Breaking (`@whity-org/ui`).** `PluginVersion.releasedAt` becomes
 `releasedLabel`, and is optional. It was always display text in practice
 ("Current (Installed)", "2 weeks ago") printed verbatim, and a name that says
 "timestamp" over a field that is really a label is how an unformatted

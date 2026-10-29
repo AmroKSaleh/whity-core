@@ -5,14 +5,14 @@
  *
  * The SECOND record route in the web app, and the one that made the record-page
  * shell general: a shell extracted against a single screen is a shell shaped like
- * that screen, so `@amroksaleh/features/record` was pulled out of the roles
+ * that screen, so `@whity-org/features/record` was pulled out of the roles
  * prototype and immediately proven here.
  *
  * Thin, like every other page in this app: it owns only web's provider seams —
  * the dynamic segment, the cookie-authenticated `webUsersAdapter`, the capability
  * check, the composed translator, the toast notifier, and the router — and hands
  * them to the data-source-agnostic `UserRecordScreen`
- * (@amroksaleh/features/users). A desktop shell mounts the same component with
+ * (@whity-org/features/users). A desktop shell mounts the same component with
  * its own adapter and its own navigation.
  *
  * DEEP-LINKABILITY is the point of a record page, and it is a property of THIS
@@ -23,11 +23,11 @@
 
 import { useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { UserRecordScreen } from '@amroksaleh/features/users';
-import { RecordPageSkeleton } from '@amroksaleh/features/record';
+import { UserRecordScreen } from '@whity-org/features/users';
+import { RecordPageSkeleton } from '@whity-org/features/record';
 import { webUsersAdapter } from '@/lib/users-adapter';
 import { useCapabilities } from '@/hooks/useCapabilities';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 import { useToast } from '@/lib/toast-context';
 
 /**
@@ -57,7 +57,7 @@ export default function Page() {
   // back to `common` — restoring Arabic/RTL parity for the chrome instead of
   // shipping an English label onto an RTL admin page.
   //
-  // @i18n-dynamic-ignore: this composite forwards a runtime key to the admin/common domains; the literal keys are declared in the @i18n-keys blocks of the @amroksaleh/features/users component files that call t().
+  // @i18n-dynamic-ignore: this composite forwards a runtime key to the admin/common domains; the literal keys are declared in the @i18n-keys blocks of the @whity-org/features/users component files that call t().
   const tAdmin = useTranslation('admin');
   const tCommon = useTranslation('common');
   const t = useCallback(

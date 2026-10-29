@@ -1,14 +1,14 @@
 import * as React from "react"
 
-import { Alert, AlertDescription } from "@amroksaleh/ui/alert"
-import { RolesScreen, RoleRecordScreen } from "@amroksaleh/features/roles"
-import type { Role } from "@amroksaleh/features/roles"
+import { Alert, AlertDescription } from "@whity-org/ui/alert"
+import { RolesScreen, RoleRecordScreen } from "@whity-org/features/roles"
+import type { Role } from "@whity-org/features/roles"
 
 import { rolesAdapter } from "./roles-tauri-adapter"
 import { rolesT } from "./sync-i18n"
 
 /**
- * Desktop mount of the shared Roles admin (@amroksaleh/features/roles) — the
+ * Desktop mount of the shared Roles admin (@whity-org/features/roles) — the
  * same React that renders the Roles page on web, injected with the desktop
  * `rolesAdapter` (which talks to the enrolled remote instance over
  * `remote_request`) instead of web's cookie-authenticated adapter. That is the

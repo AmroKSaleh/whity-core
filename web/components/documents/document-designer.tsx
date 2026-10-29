@@ -1,7 +1,7 @@
 'use client';
 
 import { useToast } from '@/lib/toast-context';
-import { DocumentDesignerScreen } from '@amroksaleh/features/document-designer';
+import { DocumentDesignerScreen } from '@whity-org/features/document-designer';
 import { webDocumentsAdapter } from '@/lib/documents/storage';
 
 /**

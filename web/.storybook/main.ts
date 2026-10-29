@@ -26,7 +26,7 @@ const config: StorybookConfig = {
 
     viteConfig.resolve = viteConfig.resolve ?? {}
     // Match the app's `@/*` tsconfig path. A regex (not a bare "@" prefix) so it
-    // never swallows the `@amroksaleh/ui` / `@radix-ui/*` package imports.
+    // never swallows the `@whity-org/ui` / `@radix-ui/*` package imports.
     viteConfig.resolve.alias = [
       ...(Array.isArray(viteConfig.resolve.alias) ? viteConfig.resolve.alias : []),
       { find: /^@\/(.*)$/, replacement: path.resolve(dirname, "../$1") },

@@ -6,12 +6,12 @@ import { useToast } from '@/lib/toast-context';
 import { useAuth } from '@/lib/auth-context';
 import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Button } from '@amroksaleh/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@amroksaleh/ui/card';
+import { Button } from '@whity-org/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity-org/ui/card';
 import { Input } from '@/components/ui/input';
-import { Switch } from '@amroksaleh/ui/switch';
-import { Badge } from '@amroksaleh/ui/badge';
-import { AccessDenied } from '@amroksaleh/ui/access-denied';
+import { Switch } from '@whity-org/ui/switch';
+import { Badge } from '@whity-org/ui/badge';
+import { AccessDenied } from '@whity-org/ui/access-denied';
 import {
   IconAlertCircle,
   IconCircleCheck,
@@ -20,7 +20,7 @@ import {
   IconTrash,
   IconWorld,
 } from '@tabler/icons-react';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { useTranslation } from '@whity-org/features/i18n';
 import { SettingsTabs } from '../settings-tabs';
 
 const NATIVE_SELECT_CLASS =

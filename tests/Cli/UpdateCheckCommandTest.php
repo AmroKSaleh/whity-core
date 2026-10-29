@@ -60,7 +60,7 @@ final class UpdateCheckCommandTest extends TestCase
         $command = new UpdateCheckCommand(self::fetcher([
             'tag_name' => 'v99.0.0',
             'name' => 'v99.0.0',
-            'html_url' => 'https://github.com/AmroKSaleh/whity-core/releases/tag/v99.0.0',
+            'html_url' => 'https://github.com/whity-org/whity-core/releases/tag/v99.0.0',
             'published_at' => '2026-06-12T00:00:00Z',
         ]));
 
@@ -187,7 +187,7 @@ final class UpdateCheckCommandTest extends TestCase
 
         $this->assertSame(0, $exitCode, 'No published releases means nothing to update to — exit 0, not 2');
         $this->assertStringContainsString('no releases', strtolower($output));
-        $this->assertStringContainsString('AmroKSaleh/whity-core', $output, 'The repo coordinates are reported');
+        $this->assertStringContainsString('whity-org/whity-core', $output, 'The repo coordinates are reported');
     }
 
     public function testRepositoryOverrideViaEnvironmentIsUsedInTheRequest(): void
@@ -234,7 +234,7 @@ final class UpdateCheckCommandTest extends TestCase
         }
 
         $this->assertIsString($seenUrl);
-        $this->assertStringContainsString('repos/AmroKSaleh/whity-core/releases/latest', $seenUrl);
+        $this->assertStringContainsString('repos/whity-org/whity-core/releases/latest', $seenUrl);
         $this->assertStringNotContainsString('..', $seenUrl);
     }
 }

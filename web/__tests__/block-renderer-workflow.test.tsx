@@ -25,7 +25,7 @@ import { BlockRenderer } from '@/components/plugin/blocks/block-renderer';
 import type { Block } from '@/lib/plugin-features';
 import { apiClient } from '@/lib/api-client';
 import { ToastProvider } from '@/lib/toast-context';
-import { DateDisplayProvider } from '@amroksaleh/features/datetime';
+import { DateDisplayProvider } from '@whity-org/features/datetime';
 
 jest.mock('@/lib/api-client', () => ({ apiClient: jest.fn() }));
 const mockApiClient = apiClient as jest.MockedFunction<typeof apiClient>;

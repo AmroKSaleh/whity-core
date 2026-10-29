@@ -83,21 +83,21 @@ import type {
 import { OU_SCOPE_KINDS, isOuScopeValue } from '@/lib/plugin-features';
 import { buildFlowModel } from '@/components/plugin/blocks/flow-model';
 import { DocumentViewer } from '@/components/plugin/blocks/document-viewer';
-import { Chart } from '@amroksaleh/ui/chart';
+import { Chart } from '@whity-org/ui/chart';
 import { DataTable as SharedDataTable, type DataTableColumn } from '@/components/ui/data-table';
 import { Input } from '@/components/ui/input';
-import { BilingualInput } from '@amroksaleh/ui/bilingual-input';
-import { MathText } from '@amroksaleh/ui/math-text';
+import { BilingualInput } from '@whity-org/ui/bilingual-input';
+import { MathText } from '@whity-org/ui/math-text';
 import { renderMarkdown } from '@/lib/safe-markdown';
 import { Pagination } from '@/components/ui/pagination';
-import { Textarea } from '@amroksaleh/ui/textarea';
+import { Textarea } from '@whity-org/ui/textarea';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@amroksaleh/ui/select';
+} from '@whity-org/ui/select';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -108,21 +108,21 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from '@amroksaleh/ui/alert-dialog';
+} from '@whity-org/ui/alert-dialog';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from '@amroksaleh/ui/dialog';
+} from '@whity-org/ui/dialog';
 import {
   Sheet,
   SheetContent,
   SheetHeader,
   SheetTitle,
   SheetTrigger,
-} from '@amroksaleh/ui/sheet';
+} from '@whity-org/ui/sheet';
 import { PermissionButton } from '@/components/rbac/permission-button';
 import {
   FormProvider,
@@ -144,29 +144,29 @@ import {
   type PermittedActionCheck,
 } from '@/lib/use-permitted-actions';
 import { cn } from '@/lib/utils';
-import { Skeleton } from '@amroksaleh/ui/skeleton';
+import { Skeleton } from '@whity-org/ui/skeleton';
 import {
   Alert,
   AlertDescription,
   AlertTitle,
-} from '@amroksaleh/ui/alert';
-import { Badge } from '@amroksaleh/ui/badge';
-import { Button } from '@amroksaleh/ui/button';
+} from '@whity-org/ui/alert';
+import { Badge } from '@whity-org/ui/badge';
+import { Button } from '@whity-org/ui/button';
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from '@amroksaleh/ui/card';
+} from '@whity-org/ui/card';
 import {
   Tabs,
   TabsContent,
   TabsList,
   TabsTrigger,
-} from '@amroksaleh/ui/tabs';
-import { useTranslation } from '@amroksaleh/features/i18n';
-import { useDateDisplay } from '@amroksaleh/features/datetime';
+} from '@whity-org/ui/tabs';
+import { useTranslation } from '@whity-org/features/i18n';
+import { useDateDisplay } from '@whity-org/features/datetime';
 
 /**
  * WC-227: the web renderer for `screen: 'blocks'` plugin features.
@@ -1365,7 +1365,7 @@ function SelectorRenderer({ block }: { block: SelectorBlock }) {
 /**
  * InteractiveDataTable (WC-241) — renders the rows already fetched by
  * `DataTableRenderer` with sort/filter/pagination, now delegated to the
- * shared `@amroksaleh/ui` DataTable engine instead of a bespoke
+ * shared `@whity-org/ui` DataTable engine instead of a bespoke
  * implementation. All three still operate ENTIRELY on the in-memory `rows`
  * array: there is no second fetch, no route other than the block's original
  * (already ownership-verified) `source` is ever touched. Sortable/filterable

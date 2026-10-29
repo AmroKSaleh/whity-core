@@ -1,6 +1,6 @@
 /**
  * web/'s `UsersAdapter` implementation (#882) — wires the data-source-agnostic
- * `UserRecordScreen` (@amroksaleh/features/users) to the REST API via web's own
+ * `UserRecordScreen` (@whity-org/features/users) to the REST API via web's own
  * cookie-authenticated `apiClient` (silent token refresh on 401, like every
  * other authenticated fetch in this app).
  *
@@ -22,8 +22,8 @@ import type {
   UserRecord,
   UserUpdateInput,
   UsersAdapter,
-} from '@amroksaleh/features/users';
-import type { Transport } from '@amroksaleh/features/roles';
+} from '@whity-org/features/users';
+import type { Transport } from '@whity-org/features/roles';
 
 /** The backend's page-size ceiling. */
 const MAX_PER_PAGE = 100;

@@ -13,8 +13,8 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "paths": {
-      "@amroksaleh/ui": ["../ui/src/index.ts"],
-      "@amroksaleh/ui/*": ["../ui/src/*"]
+      "@whity-org/ui": ["../ui/src/index.ts"],
+      "@whity-org/ui/*": ["../ui/src/*"]
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],

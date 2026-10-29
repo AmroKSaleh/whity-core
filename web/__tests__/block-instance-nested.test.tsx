@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
-import { BlockInstanceContent } from '@amroksaleh/ui/documents/element-layer';
-import type { DocBlock } from '@amroksaleh/ui/documents/blocks';
+import { BlockInstanceContent } from '@whity-org/ui/documents/element-layer';
+import type { DocBlock } from '@whity-org/ui/documents/blocks';
 
 /**
  * Rendering a block that holds another block (#1186 slice 3).

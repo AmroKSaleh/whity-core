@@ -51,7 +51,7 @@ Frontend internationalization (i18n) support for Whity Core applications. Provid
 ### 1. Wrap Your App with LanguageProvider
 
 ```tsx
-import { LanguageProvider } from '@amroksaleh/features/i18n'
+import { LanguageProvider } from '@whity-org/features/i18n'
 
 export default function App() {
   return (
@@ -65,7 +65,7 @@ export default function App() {
 ### 2. Use `useTranslation` Hook to Translate Strings
 
 ```tsx
-import { useTranslation } from '@amroksaleh/features/i18n'
+import { useTranslation } from '@whity-org/features/i18n'
 
 export function MyComponent() {
   const t = useTranslation('common')
@@ -83,7 +83,7 @@ export function MyComponent() {
 ### 3. Use `useCurrentLanguage` Hook to Switch Languages
 
 ```tsx
-import { useCurrentLanguage } from '@amroksaleh/features/i18n'
+import { useCurrentLanguage } from '@whity-org/features/i18n'
 
 export function LanguageSwitcher() {
   const { currentLanguage, availableLanguages, setLanguage } = useCurrentLanguage()
@@ -103,7 +103,7 @@ export function LanguageSwitcher() {
 ### 4. (Optional) Use the Built-in Language Switcher Component
 
 ```tsx
-import { LanguageSwitcher } from '@amroksaleh/features/i18n'
+import { LanguageSwitcher } from '@whity-org/features/i18n'
 
 export function Header() {
   return (
@@ -424,7 +424,7 @@ import {
   setCachedTranslations,
   clearLanguageCache,
   clearAllTranslationCaches,
-} from '@amroksaleh/features/i18n'
+} from '@whity-org/features/i18n'
 
 // Clear cache before tests
 beforeEach(() => {

@@ -1,17 +1,17 @@
 import { useMemo, useState } from "react"
 import { IconLogout, IconMoon, IconSun, IconUserCog } from "@tabler/icons-react"
 
-import { Button } from "@amroksaleh/ui/button"
-import { PageHeader } from "@amroksaleh/ui/page-header"
-import { PageShell } from "@amroksaleh/ui/page-shell"
-import { resolveNavGroups } from "@amroksaleh/features/nav"
-import { DemoCatalogList, DemoCatalogDetail } from "@amroksaleh/features/demo-catalog"
+import { Button } from "@whity-org/ui/button"
+import { PageHeader } from "@whity-org/ui/page-header"
+import { PageShell } from "@whity-org/ui/page-shell"
+import { resolveNavGroups } from "@whity-org/features/nav"
+import { DemoCatalogList, DemoCatalogDetail } from "@whity-org/features/demo-catalog"
 import {
   ConflictResolver,
   UnsyncedBanner,
   useSyncStatus,
   type SyncStatus,
-} from "@amroksaleh/features/sync"
+} from "@whity-org/features/sync"
 
 import { navConfig } from "./nav-config"
 import { Sidebar } from "./sidebar"
@@ -198,7 +198,7 @@ function AuthenticatedApp() {
       </>
     )
   } else if (path === "/roles") {
-    // Server-owned admin surface rendered by the SHARED @amroksaleh/features/roles
+    // Server-owned admin surface rendered by the SHARED @whity-org/features/roles
     // page over the remote transport (Path B). RolesScreen renders its own
     // PageHeader, so no wrapping header here.
     body = <RolesPage />
@@ -222,7 +222,7 @@ function AuthenticatedApp() {
     body = (
       <PageHeader
         title="Home"
-        description="Whity Tauri desktop boilerplate — @amroksaleh/ui + @amroksaleh/features, a real SQLite-backed feature, offline-first sync, and a native-crate command example. Open a page from the sidebar."
+        description="Whity Tauri desktop boilerplate — @whity-org/ui + @whity-org/features, a real SQLite-backed feature, offline-first sync, and a native-crate command example. Open a page from the sidebar."
       />
     )
   }

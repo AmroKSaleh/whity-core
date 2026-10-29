@@ -1,14 +1,14 @@
-import type { DocBlock } from '@amroksaleh/ui/documents/blocks';
+import type { DocBlock } from '@whity-org/ui/documents/blocks';
 import { api } from '@/lib/api/client';
-import { toDocBlock } from '@amroksaleh/features/document-designer';
+import { toDocBlock } from '@whity-org/features/document-designer';
 
 /**
  * Web's HTTP half of reusable-block persistence.
  *
  * The pure model (row mapping, element-list validation, bounding-box
- * derivation) moved to `@amroksaleh/features/document-designer` alongside the
+ * derivation) moved to `@whity-org/features/document-designer` alongside the
  * designer itself; the block TYPE and the pure resolution helpers continue to
- * live in `@amroksaleh/ui/documents/blocks`. Both are re-exported here, so
+ * live in `@whity-org/ui/documents/blocks`. Both are re-exported here, so
  * every existing `@/lib/documents/blocks` import keeps working unchanged.
  *
  * These three stay on the typed OpenAPI client for the reasons given in
@@ -20,8 +20,8 @@ import { toDocBlock } from '@amroksaleh/features/document-designer';
  * `makeBlockFromElements` derives them when a block is first authored.
  */
 
-export type { BlockScope, DocBlock } from '@amroksaleh/ui/documents/blocks';
-export { BLOCK_SCOPES, blocksById, makeBlockFromElements, resolveInstance } from '@amroksaleh/ui/documents/blocks';
+export type { BlockScope, DocBlock } from '@whity-org/ui/documents/blocks';
+export { BLOCK_SCOPES, blocksById, makeBlockFromElements, resolveInstance } from '@whity-org/ui/documents/blocks';
 
 /** The blocks visible to the caller (server-side RBAC-filtered). Throws on a
  *  network/API failure; the caller catches and toasts. */

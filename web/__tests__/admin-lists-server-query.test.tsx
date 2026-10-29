@@ -30,7 +30,7 @@
 import React from 'react';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { DATA_TABLE_SEARCH_DEBOUNCE_MS } from '@amroksaleh/ui/data-table';
+import { DATA_TABLE_SEARCH_DEBOUNCE_MS } from '@whity-org/ui/data-table';
 
 const mockRouterPush = jest.fn();
 jest.mock('next/navigation', () => ({
@@ -89,8 +89,8 @@ jest.mock('@/app/(protected)/admin/users/invitations-panel', () => ({
 
 import UsersPage, { type User } from '@/app/(protected)/admin/users/page';
 import UserGroupsPage from '@/app/(protected)/admin/user-groups/page';
-import { RolesScreen } from '@amroksaleh/features/roles';
-import type { Role, RoleListQuery, RolesAdapter } from '@amroksaleh/features/roles';
+import { RolesScreen } from '@whity-org/features/roles';
+import type { Role, RoleListQuery, RolesAdapter } from '@whity-org/features/roles';
 
 function jsonResponse(body: unknown) {
   return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) });

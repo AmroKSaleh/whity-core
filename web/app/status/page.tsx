@@ -19,9 +19,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
-import { useDateDisplay } from '@amroksaleh/features/datetime';
-import type { DateDisplay } from '@amroksaleh/features/datetime';
+import { useTranslation, type TranslateFn } from '@whity-org/features/i18n';
+import { useDateDisplay } from '@whity-org/features/datetime';
+import type { DateDisplay } from '@whity-org/features/datetime';
 
 type ComponentStatus = 'operational' | 'degraded' | 'down' | 'unknown';
 

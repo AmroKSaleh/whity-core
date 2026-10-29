@@ -16,14 +16,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useCapabilities } from '@/hooks/useCapabilities';
 import { useToast } from '@/lib/toast-context';
-import { useTranslation, type TranslateFn } from '@amroksaleh/features/i18n';
-import { useDateDisplay } from '@amroksaleh/features/datetime';
-import type { DateDisplay } from '@amroksaleh/features/datetime';
-import { Button } from '@amroksaleh/ui/button';
-import { Badge } from '@amroksaleh/ui/badge';
-import { EmptyState } from '@amroksaleh/ui/empty-state';
-import { Skeleton } from '@amroksaleh/ui/skeleton';
-import { AccessDenied } from '@amroksaleh/ui/access-denied';
+import { useTranslation, type TranslateFn } from '@whity-org/features/i18n';
+import { useDateDisplay } from '@whity-org/features/datetime';
+import type { DateDisplay } from '@whity-org/features/datetime';
+import { Button } from '@whity-org/ui/button';
+import { Badge } from '@whity-org/ui/badge';
+import { EmptyState } from '@whity-org/ui/empty-state';
+import { Skeleton } from '@whity-org/ui/skeleton';
+import { AccessDenied } from '@whity-org/ui/access-denied';
 
 type ErrorStatus = 'unresolved' | 'resolved' | 'ignored';
 

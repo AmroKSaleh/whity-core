@@ -1,6 +1,6 @@
 ---
-"@amroksaleh/ui": minor
-"@amroksaleh/features": minor
+"@whity-org/ui": minor
+"@whity-org/features": minor
 ---
 
 Document mode's `table` block can be reshaped: `addTableRow`, `removeTableRow`,

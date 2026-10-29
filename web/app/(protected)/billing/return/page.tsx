@@ -6,10 +6,10 @@ import { Suspense } from 'react';
 import { useAuth } from '@/lib/auth-context';
 import { useFetch } from '@/hooks/useFetch';
 import { AdminHeader } from '@/components/admin/admin-header';
-import { Badge } from '@amroksaleh/ui/badge';
-import { Button } from '@amroksaleh/ui/button';
-import { useDateDisplay } from '@amroksaleh/features/datetime';
-import { useTranslation } from '@amroksaleh/features/i18n';
+import { Badge } from '@whity-org/ui/badge';
+import { Button } from '@whity-org/ui/button';
+import { useDateDisplay } from '@whity-org/features/datetime';
+import { useTranslation } from '@whity-org/features/i18n';
 
 /**
  * WHERE A PAYER LANDS COMING BACK FROM PAYING.
