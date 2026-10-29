@@ -38,7 +38,8 @@ const RAW_COLOUR = /\b(?:rgb|rgba|hsl|hsla)\(/;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
-    if (name === 'node_modules' || name === '.next' || name === 'dist' || name.startsWith('.')) continue;
+    // Build output is not product code: a local `build-storybook` leaves storybook-static/ behind.
+    if (name === 'node_modules' || name === '.next' || name === 'dist' || name === 'storybook-static' || name.startsWith('.')) continue;
     const p = path.join(dir, name);
     if (statSync(p).isDirectory()) walk(p, out);
     else if (/\.(tsx?|css|mjs|js)$/.test(name)) out.push(p);

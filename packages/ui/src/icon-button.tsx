@@ -19,6 +19,7 @@ function IconButton({
   size = "default",
   tooltip = true,
   shortcut,
+  pressed,
   className,
   ...props
 }: Omit<React.ComponentProps<"button">, "children"> & {
@@ -31,12 +32,16 @@ function IconButton({
   tooltip?: boolean | "bottom"
   /** A keyboard shortcut shown in the tooltip, e.g. "⌘B". */
   shortcut?: string
+  /** For toggle buttons: pressed is the tint (7.3) and reports `aria-pressed`. */
+  pressed?: boolean
 }) {
   const button = (
     <Button
       variant={variant}
       size={size === "sm" ? "icon-sm" : "icon"}
       aria-label={label}
+      active={pressed}
+      aria-pressed={pressed === undefined ? undefined : pressed}
       aria-keyshortcuts={shortcut ? toAriaShortcut(shortcut) : undefined}
       className={cn(!tooltip && className)}
       {...props}

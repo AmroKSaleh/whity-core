@@ -13,6 +13,7 @@
 @import "@whity-org/tokens/css";
 @import "@whity-org/tokens/base.css";
 @import "@whity-org/tokens/fonts.css";
+@import "./editor/editor.css";
 
 /* katex dark-mode overrides */
 .dark .katex { color: var(--foreground); }

@@ -16,7 +16,8 @@
     "./users": "./src/users/index.ts",
     "./sync": "./src/sync/index.ts",
     "./i18n": "./src/i18n/index.ts",
-    "./mcp": "./src/mcp/index.ts"
+    "./mcp": "./src/mcp/index.ts",
+    "./document-editor": "./src/document-editor/index.ts"
   },
   "files": [
     "src"
