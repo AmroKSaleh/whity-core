@@ -1093,6 +1093,18 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::DOCUMENTS_READ,
     ];
     $items[] = [
+        'id' => 'document-sources',
+        'label' => 'Notes and wiki',
+        'href' => '/admin/document-sources',
+        'icon' => 'notes',
+        'group' => 'documents',
+        'order' => 3,
+        // Editor M2: notes and wiki pages written in the block editor. Mirrors
+        // GET /api/document-sources (DocumentSourcesApiHandler), gated on
+        // documents:read; rows are filtered by DocumentAccessPolicy on top.
+        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::DOCUMENTS_READ,
+    ];
+    $items[] = [
         'id' => 'document-templates',
         'label' => 'Templates & Blocks',
         'href' => '/admin/document-templates',
@@ -2889,6 +2901,23 @@ $router->register('GET',    '/api/document-blocks/{id:\d+}', [$documentBlocksHan
 $router->register('GET',    '/api/document-blocks/{id:\d+}/usage', [$documentBlocksHandler, 'usage'], null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('PATCH',  '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'update'], null, null, CorePermissions::DOCUMENTS_WRITE);
 $router->register('DELETE', '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'delete'], null, null, CorePermissions::DOCUMENTS_WRITE);
+
+// 13a-septies-bis. The block editor's documents (editor M2): templates, letters,
+// reports, notes and wiki pages written in the new editor, their blocks stored
+// as the WhityDocument contract's JSON. Same visibility as the designer rows
+// above (DocumentAccessPolicy). Saving the draft is optimistic: PUT .../draft
+// needs If-Match with the version it edited, and a stale one gets 409.
+$documentSourcesHandler = new \Whity\Api\DocumentSourcesApiHandler(
+    new \Whity\Core\Document\DocumentSourceRepository($db->getPdo()),
+    $documentAccessPolicy,
+    $roleChecker,
+    $ouReachResolver
+);
+$router->register('GET',    '/api/document-sources',                [$documentSourcesHandler, 'list'],      null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('POST',   '/api/document-sources',                [$documentSourcesHandler, 'create'],    null, null, CorePermissions::DOCUMENTS_WRITE);
+$router->register('GET',    '/api/document-sources/{id:\d+}',       [$documentSourcesHandler, 'show'],      null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('PUT',    '/api/document-sources/{id:\d+}/draft', [$documentSourcesHandler, 'saveDraft'], null, null, CorePermissions::DOCUMENTS_WRITE);
+$router->register('DELETE', '/api/document-sources/{id:\d+}',       [$documentSourcesHandler, 'delete'],    null, null, CorePermissions::DOCUMENTS_WRITE);
 
 // 13a-nonies. Server-side document/label render (ADR 0012 / WC-docdesigner
 // Track 2): POST /api/document-templates/{id}/render calls out to the separate

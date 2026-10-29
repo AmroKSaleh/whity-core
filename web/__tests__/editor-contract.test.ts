@@ -3,6 +3,7 @@
  * WhityDocument contract without loss. Each case goes through a real
  * ProseMirror document (the editor's schema), not just the converters.
  */
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { Editor } from '@tiptap/core';
@@ -47,6 +48,7 @@ const EVERY_TEXT_BLOCK: Block[] = [
       { type: 'text', text: '14', marks: [{ type: 'insertion', suggestionId: 's1' }] },
       { type: 'text', text: '30', marks: [{ type: 'deletion', suggestionId: 's1' }] },
       { type: 'text', text: 'Rana', marks: [{ type: 'perDocument' }] },
+      { type: 'math', tex: 'a^2 + b^2' },
       { type: 'text', text: 'record', marks: [{ type: 'link', href: '/records/invoice/42', recordRef: { type: 'invoice', id: '42' } }] },
     ],
   },
@@ -135,5 +137,15 @@ describe('the contract in packages/ui is the design handoff, unchanged', () => {
     const root = path.resolve(__dirname, '..', '..');
     const read = (p: string) => readFileSync(path.join(root, p), 'utf8').replace(/\r\n/g, '\n');
     expect(read('packages/ui/src/editor/contract.ts')).toBe(read('docs/design/handoff/editor/whity-document.ts'));
+  });
+});
+
+describe('the editor strings reach the translation catalogue', () => {
+  it('packages/features/src/document-editor/editor-labels.ts matches labels.ts', () => {
+    const root = path.resolve(__dirname, '..', '..');
+    // Throws (and fails the test) when the generated file is stale.
+    expect(() =>
+      execFileSync(process.execPath, [path.join(root, 'scripts', 'generate-editor-labels.mjs'), '--check'], { cwd: root, stdio: 'pipe' })
+    ).not.toThrow();
   });
 });

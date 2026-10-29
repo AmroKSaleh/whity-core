@@ -173,6 +173,12 @@ final class TenantOwnedTables
         'document_templates' => '059_create_document_designer_tables.php',
         'document_blocks'    => '059_create_document_designer_tables.php',
 
+        // Editor M2 — written documents for the block editor (migration 160):
+        // templates, letters, reports, notes and wiki pages, the draft's blocks
+        // stored as the WhityDocument contract's JSON. Same visibility columns as
+        // document_templates, filtered by the same DocumentAccessPolicy.
+        'document_sources' => '160_create_document_sources.php',
+
         // #947 item 1 — issued documents and their stored render output
         // (migration 108). `documents` is the record; `document_artifacts` is
         // the append-only set of immutable rendered files, with the tenant

@@ -8,7 +8,7 @@ export const EDITOR_LABELS = {
   untitled: "Untitled",
   saved: "Saved {time}",
   saving: "Saving…",
-  offline: "Offline, changes kept on this device",
+  offline: "Offline. Changes save when you’re back online",
   saveFailed: "Not saved. Try again",
   modeEditing: "Editing",
   modeViewing: "Viewing",
