@@ -1341,6 +1341,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/document-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the editor documents visible to the caller, without their blocks */
+        get: operations["get_api_v1_document_sources"];
+        put?: never;
+        /** Create an editor document */
+        post: operations["post_api_v1_document_sources"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/document-sources/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get an editor document with its draft blocks; the ETag is the draft version */
+        get: operations["get_api_v1_document_sources_id"];
+        put?: never;
+        post?: never;
+        /** Delete an editor document */
+        delete: operations["delete_api_v1_document_sources_id"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/document-sources/{id}/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save the draft of an editor document
+         * @description Send If-Match with the draft version the edit was made against (the ETag of the last GET or save). When someone saved in between, the save is refused with 409 and the current version in details.draft_version, so newer work is never overwritten. Only the fields sent are changed.
+         */
+        put: operations["put_api_v1_document_sources_id_draft"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/document-templates": {
         parameters: {
             query?: never;
@@ -6034,6 +6090,106 @@ export interface components {
             /** @enum {string} */
             satisfied_by: "act" | "delivery";
             rejection_count: number;
+        };
+        DocumentSource: {
+            id: number;
+            tenant_id: number;
+            /** @enum {string} */
+            kind: "template" | "letter" | "report" | "note" | "wiki" | "label";
+            title: string;
+            /** @enum {string} */
+            lang: "en" | "ar";
+            /** @enum {string} */
+            default_view: "page" | "continuous";
+            full_width: boolean;
+            page?: {
+                [key: string]: unknown;
+            } | null;
+            record_type?: string | null;
+            /** @description The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type */
+            blocks?: {
+                [key: string]: unknown;
+            }[];
+            draft_version: number;
+            published_version?: number | null;
+            /** @enum {string} */
+            scope: "personal" | "tenant" | "global" | "system";
+            required_permission?: string | null;
+            created_by?: number | null;
+            owner_ou_id?: number | null;
+            updated_by?: number | null;
+            created_at: string;
+            updated_at: string;
+        };
+        DocumentSourceCreateRequest: {
+            /**
+             * @description What the document is: a `template`, `letter`, `report`, `note`, `wiki` page or `label` sheet. Templates and printed kinds open in the page view, notes and wiki pages in the continuous view.
+             * @enum {string}
+             */
+            kind: "template" | "letter" | "report" | "note" | "wiki" | "label";
+            /** @description The title, at most 255 characters. */
+            title?: string;
+            /**
+             * @description The language the document is written in: `en` or `ar`. Each block also follows the direction of its own text.
+             * @enum {string}
+             */
+            lang?: "en" | "ar";
+            /**
+             * @description How the document opens: `page` (the A4 view of what prints) or `continuous`. Defaults by kind.
+             * @enum {string}
+             */
+            default_view?: "page" | "continuous";
+            /** @description For wiki pages with wide tables: use the full width instead of the 760px sheet. */
+            full_width?: boolean;
+            /** @description Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`. Null for none. */
+            page?: {
+                [key: string]: unknown;
+            } | null;
+            /** @description For templates: the record type its merge fields come from, for example `invoice`. */
+            record_type?: string | null;
+            /** @description The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type */
+            blocks?: {
+                [key: string]: unknown;
+            }[];
+            /**
+             * @description Who can see the document: `personal` (only its creator, the default), `tenant`, `global` or `system`. Anything but personal needs documents:publish.
+             * @enum {string}
+             */
+            scope?: "personal" | "tenant" | "global" | "system";
+            /** @description Optionally, a permission a reader must also hold to see a shared document. Setting one needs documents:publish. */
+            required_permission?: string | null;
+            /** @description The organizational unit the document is filed under, which narrows who reaches it. Null files it tenant-wide. */
+            owner_ou_id?: number | null;
+        };
+        DocumentSourceDraftRequest: {
+            /** @description The title, at most 255 characters. */
+            title?: string;
+            /**
+             * @description The language the document is written in: `en` or `ar`. Each block also follows the direction of its own text.
+             * @enum {string}
+             */
+            lang?: "en" | "ar";
+            /**
+             * @description How the document opens: `page` (the A4 view of what prints) or `continuous`. Defaults by kind.
+             * @enum {string}
+             */
+            default_view?: "page" | "continuous";
+            /** @description For wiki pages with wide tables: use the full width instead of the 760px sheet. */
+            full_width?: boolean;
+            /** @description Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`. Null for none. */
+            page?: {
+                [key: string]: unknown;
+            } | null;
+            /** @description The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type */
+            blocks?: {
+                [key: string]: unknown;
+            }[];
+        };
+        DocumentSourceListResponse: {
+            data: components["schemas"]["DocumentSource"][];
+        };
+        DocumentSourceResponse: {
+            data: components["schemas"]["DocumentSource"];
         };
         DocumentStarResponse: {
             data: components["schemas"]["DocumentCollection"] | null;
@@ -16148,6 +16304,409 @@ export interface operations {
             };
             /** @description A rule kind nothing registered, a config the rule refused, an edge naming a position that is not on the canvas, an edge leaving a step that is not a decision, or more steps than documents.routing_max_steps allows */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_document_sources: {
+        parameters: {
+            query?: {
+                /** @description Only documents of this kind: `template`, `letter`, `report`, `note`, `wiki` or `label`. Anything else is a 422. */
+                kind?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The documents the caller may see (RBAC-filtered) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentSourceListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unknown kind */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_document_sources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentSourceCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description The created document; its ETag is the draft version */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentSourceResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Sharing a document requires documents:publish */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_document_sources_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The document */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentSourceResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Document not found or not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_document_sources_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Document deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Document not found or not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    put_api_v1_document_sources_id_draft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentSourceDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description The saved document; its ETag is the new draft version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentSourceResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Document not found or not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The document changed since this edit was made */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description If-Match with the draft version is required */
+            428: {
                 headers: {
                     [name: string]: unknown;
                 };

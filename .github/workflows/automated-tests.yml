@@ -28,6 +28,9 @@ on:
     branches:
       - main
       - develop
+  # GitHub's merge queue on develop runs the required checks on the queued
+  # merge commit (develop + the PRs ahead of it), so they must run here too.
+  merge_group:
 
 # A newer push to the same ref obsoletes the in-flight run; never let two full
 # suites race (this is what burned a duplicate ~13-min run when a fix commit
