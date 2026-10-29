@@ -245,6 +245,8 @@ function DocEditor({
       })
       const current = [...headings].reverse().find((h) => h.pos <= caret)
       if (current) current.current = true
+      // The document's title heads the outline, current until the caret passes the first heading.
+      headings.unshift({ level: 0, text: "", pos: -1, current: !current })
       return { words: countWords(e), headings }
     },
   })
@@ -345,7 +347,7 @@ function DocEditor({
         {outlineOpen && (
           <nav aria-label={labels.outline} className="sticky top-0 hidden content-start gap-0.5 self-start py-6 ps-4 pe-3 text-[0.8125rem] xl:grid">
             <div className="px-2 pb-1.5 text-xs font-medium text-muted-foreground">{labels.outline}</div>
-            {meta?.headings.length === 0 && <div className="px-2 text-xs text-muted-foreground">{labels.outlineEmpty}</div>}
+            {meta && meta.headings.length <= 1 && <div className="order-last px-2 text-xs text-muted-foreground">{labels.outlineEmpty}</div>}
             {meta?.headings.map((h) => (
               <a
                 key={h.pos}
@@ -353,16 +355,18 @@ function DocEditor({
                 aria-current={h.current ? "location" : undefined}
                 onClick={(e) => {
                   e.preventDefault()
-                  editor?.chain().focus().setTextSelection(h.pos + 1).scrollIntoView().run()
+                  if (h.pos < 0) editor?.chain().focus("start").scrollIntoView().run()
+                  else editor?.chain().focus().setTextSelection(h.pos + 1).scrollIntoView().run()
                 }}
                 className={cn(
                   "truncate rounded-[6px] border-s-2 border-transparent px-2 py-1 text-muted-foreground no-underline hover:bg-muted hover:text-foreground",
-                  h.level === 2 && "ps-5",
-                  h.level === 3 && "ps-8",
+                  h.level === 1 && "ps-5",
+                  h.level === 2 && "ps-8",
+                  h.level === 3 && "ps-11",
                   h.current && "rounded-s-none border-primary text-primary-tint-foreground"
                 )}
               >
-                {h.text || labels.untitled}
+                {(h.pos < 0 ? doc.title : h.text) || labels.untitled}
               </a>
             ))}
           </nav>
