@@ -1,0 +1,35 @@
+<!-- @dsCard group="Templates · Whity admin" height=882 width=1280 subtitle="White-label settings with a live preview" -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../bundle.css"><script src="../../preview-runtime/react.production.min.js"></script><script src="../../preview-runtime/react-dom.production.min.js"></script><script src="../bundle.js"></script><script>(function(){var t=(location.hash.match(/theme=(dark|light)/)||[])[1]||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);})();</script><style>body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font-sans);width:1280px;min-height:882px}</style><meta charset="utf-8"><title>Branding</title><style>html,body{height:100%} #root{min-height:100%} </style></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  function nav(active, counts) { counts = counts || {}; function it(icon, label) { return { icon: icon, label: label, active: label === active, count: counts[label] }; }
+    return [{ items: [it('dashboard', 'Dashboard'), it('inbox', 'Inbox'), it('approval', 'Approvals')] },
+      { label: 'People', items: [it('users', 'Users'), it('role', 'Roles'), it('delegation', 'Delegations')] },
+      { label: 'AI', items: [it('ai-principal', 'AI principals'), it('tool', 'MCP tools'), it('activity', 'Agent activity')] },
+      { label: 'Documents', items: [it('document', 'Library'), it('routing', 'Routing')] },
+      { label: 'Platform', items: [it('tenant', 'Tenants'), it('plugin', 'Plugins'), it('branding', 'Branding'), it('audit', 'Audit log')] }]; }
+  var topBar = h(React.Fragment, null, h(W.IconButton, { icon: 'notification', label: 'Notifications' }), h(W.IconButton, { icon: 'help', label: 'Help' }));
+  ReactDOM.createRoot(document.getElementById('root')).render((function () { function Page() { var st = React.useState('#b74c05'); var c = st[0];
+    var sw = ['#0961bb', '#b74c05', 'oklch(0.5 0.15 150)', 'oklch(0.55 0.18 30)', 'oklch(0.45 0.15 300)', 'oklch(0.8 0.16 85)'];
+    return h(W.AppShell, { tenant: 'Example Bakery', user: 'Rana Haddad', role: 'Owner', nav: nav('Branding'), topActions: topBar },
+      h(W.PageHeader, { breadcrumb: [{ label: 'Settings' }, { label: 'Branding' }], title: 'Branding', description: 'Your name, logo and colour, on every screen, email and document your team and customers see.', actions: h(W.Button, { icon: 'check' }, 'Save branding') }),
+      h('div', { className: 'wy-split' },
+        h(W.Card, { title: 'Your brand' }, h('div', { className: 'wy-grid' },
+          h(W.Input, { label: 'Product name', defaultValue: 'Example Office' }), h(W.Input, { label: 'Domain', defaultValue: 'office.example.jo', helperText: 'Point a CNAME record at your Whity host.' }),
+          h('div', { className: 'wy-field' }, h('span', { className: 'wy-field__label' }, 'Main colour'), h('div', { className: 'wy-row' }, sw.map(function (s) { return h('button', { key: s, type: 'button', className: 'wy-swatch', 'aria-label': s, 'aria-pressed': s === c, onClick: function () { st[1](s); }, style: { background: s, outline: s === c ? '2px solid var(--foreground)' : 'none', outlineOffset: 2, cursor: 'pointer' } }); })), h('span', { className: 'wy-field__help' }, 'The label on it is white or near-black, whichever reaches 4.5:1. The tint, the colour on dark and the plane are derived from it.')),
+          h(W.Switch, { label: 'Show “Built on Whity” in the footer', defaultChecked: true }))),
+        h('div', { className: 'wy-grid' }, h('span', { className: 'wy-section-title' }, 'Preview'),
+          h('div', { className: 'wy-preview-frame', style: W.tenantTheme(c, document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light') },
+            h('div', { style: { padding: 16, display: 'grid', gap: 12, background: 'var(--background)' } },
+              h('div', { className: 'wy-row', style: { fontWeight: 600, fontSize: 14 } }, h('span', { className: 'wy-shell__tenant-logo' }, 'E'), 'Example Office'),
+              h(W.Tabs, { items: [{ value: 'a', label: 'Quotes' }, { value: 'b', label: 'Invoices' }] }),
+              h('div', { className: 'wy-row' }, h(W.Button, { size: 'sm', icon: 'send' }, 'Send invoice'), h(W.Button, { size: 'sm', variant: 'link' }, 'View history')),
+              h(W.BuiltOnWhity, null))))));
+  } return h(Page); })());
+</script>
+</body>
+</html>

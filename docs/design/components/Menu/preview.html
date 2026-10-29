@@ -1,0 +1,20 @@
+<!-- @dsCard group="Surfaces" height=430 subtitle="Keyboard menu with shortcuts and a filter popover" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Menu and popover</title><style>#root{padding:16px 24px} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px 32px;align-items:start} .ar{font-family:var(--font-arabic)} </style></head>
+<body>
+<div id="root" class=""></div>
+<script>
+  var W = window.Whity, h = React.createElement; 
+  function cap(t) { return h('p', { className: 'cap' }, t); }
+  function col() { return h.apply(null, ['div', { style: { display: 'grid', gap: 12, alignContent: 'start' } }].concat([].slice.call(arguments))); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h('div', { className: 'wy-stage', style: { alignItems: 'flex-start', gap: 220, minHeight: 360 } },
+  h('div', null, cap('Menu'), h(W.Menu, { defaultOpen: true, align: 'start', label: 'Invoice actions', trigger: h(W.Button, { variant: 'outline', iconEnd: 'chevron-down' }, 'Actions'), items: [
+    { label: 'Edit', icon: 'edit', shortcut: 'E' }, { label: 'Duplicate', icon: 'copy' }, { label: 'Download PDF', icon: 'download', shortcut: '⌘D' }, { label: 'Send a reminder', icon: 'send', hint: 'Last sent 3 days ago' },
+    { divider: true }, { label: 'Void invoice', icon: 'delete', danger: true }, { label: 'Delete', icon: 'delete', disabled: true, hint: 'Issued invoices can’t be deleted' }] })),
+  h('div', null, cap('Popover'), h(W.Popover, { defaultOpen: true, align: 'start', title: 'Filter invoices', trigger: h(W.Button, { variant: 'outline', icon: 'filter' }, 'Filter') },
+    h(W.RadioGroup, { label: 'Payment', defaultValue: 'overdue', options: [{ value: 'all', label: 'All' }, { value: 'unpaid', label: 'Unpaid' }, { value: 'overdue', label: 'Overdue' }] }),
+    h(W.Checkbox, { label: 'Only invoices sent by agents', defaultChecked: true }), h('div', { className: 'wy-row', style: { justifyContent: 'flex-end' } }, h(W.Button, { variant: 'ghost', size: 'sm' }, 'Clear'), h(W.Button, { size: 'sm' }, 'Apply'))))));
+</script>
+</body>
+</html>

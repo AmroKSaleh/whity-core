@@ -153,7 +153,7 @@ function validateBase(base) {
   if (!typo || typeof typo !== 'object') {
     throw new TokenValidationError('base.json: missing "typography".');
   }
-  for (const k of ['sans', 'mono', 'heading']) {
+  for (const k of ['sans', 'mono', 'heading', 'arabic', 'display']) {
     if (typeof typo.fontFamily?.[k] !== 'string') {
       throw new TokenValidationError(`base.json: typography.fontFamily.${k} must be a string.`);
     }
@@ -176,9 +176,31 @@ function validateBase(base) {
       throw new TokenValidationError(`base.json: typography.${group} must be a non-empty object.`);
     }
   }
+  // Decision 3.6: no 700 in the product ("bold" is 600).
+  for (const [name, weight] of Object.entries(typo.fontWeight)) {
+    if (Number(weight) >= 700) {
+      throw new TokenValidationError(
+        `base.json: typography.fontWeight.${name} is ${weight}; weights of 700 and above are not allowed (decision 3.6).`
+      );
+    }
+  }
 
   if (!base.borderRadius || typeof base.borderRadius.base !== 'string') {
     throw new TokenValidationError('base.json: borderRadius.base must be a string (e.g. "0.625rem").');
+  }
+
+  // Shadows (the plane and the float shadow) differ per mode, so light/dark must match.
+  const shadow = base.shadow;
+  if (!shadow || typeof shadow.light !== 'object' || typeof shadow.dark !== 'object') {
+    throw new TokenValidationError('base.json: "shadow" must contain "light" and "dark" objects.');
+  }
+  if (Object.keys(shadow.light).sort().join(',') !== Object.keys(shadow.dark).sort().join(',')) {
+    throw new TokenValidationError('base.json: shadow light/dark parity mismatch.');
+  }
+  for (const group of ['plane', 'size', 'motion']) {
+    if (!base[group] || typeof base[group] !== 'object' || Object.keys(base[group]).length === 0) {
+      throw new TokenValidationError(`base.json: "${group}" must be a non-empty object.`);
+    }
   }
 
   return base;
@@ -279,6 +301,10 @@ function generateTokensJson(base) {
     },
     spacing: base.spacing,
     borderRadius: base.borderRadius,
+    shadow: { light: base.shadow.light, dark: base.shadow.dark },
+    plane: base.plane,
+    size: base.size,
+    motion: base.motion,
   };
   return JSON.stringify(output, null, 2) + '\n';
 }
@@ -341,6 +367,8 @@ function generateDart(base) {
   lines.push(`  static const String fontSans = '${typo.fontFamilyDart.sans}';`);
   lines.push(`  static const String fontMono = '${typo.fontFamilyDart.mono}';`);
   lines.push(`  static const String fontHeading = '${typo.fontFamilyDart.heading}';`);
+  lines.push(`  static const String fontArabic = '${typo.fontFamilyDart.arabic}';`);
+  lines.push(`  static const String fontDisplay = '${typo.fontFamilyDart.display}';`);
   lines.push('');
 
   // Font sizes (logical pixels)
@@ -419,7 +447,13 @@ function generateThemeInlineBlock(base) {
   lines.push('  --font-sans: var(--font-sans);');
   lines.push('  --font-mono: var(--font-mono);');
   lines.push('  --font-heading: var(--font-heading);');
-  for (const name of Object.keys(typo.fontSize)) lines.push(`  --text-${name}: var(--text-${name});`);
+  lines.push('  --font-arabic: var(--font-arabic);');
+  lines.push('  --font-display: var(--font-display);');
+  for (const [name, def] of Object.entries(typo.fontSize)) {
+    lines.push(`  --text-${name}: var(--text-${name});`);
+    // Without this, Tailwind's own default line height for each size applies (decision 3.6 sets them).
+    if (def.lineHeight !== undefined) lines.push(`  --text-${name}--line-height: ${def.lineHeight};`);
+  }
   for (const name of Object.keys(typo.fontWeight)) lines.push(`  --font-weight-${name}: var(--font-weight-${name});`);
   for (const name of Object.keys(typo.lineHeight)) lines.push(`  --leading-${name}: var(--leading-${name});`);
   for (const name of Object.keys(typo.letterSpacing)) lines.push(`  --tracking-${name}: var(--tracking-${name});`);
@@ -427,16 +461,57 @@ function generateThemeInlineBlock(base) {
   for (const key of Object.keys(base.colors.light)) {
     lines.push(`  --color-${key}: var(--${key});`);
   }
-  lines.push('  --radius-sm: calc(var(--radius) * 0.6);');
-  lines.push('  --radius-md: calc(var(--radius) * 0.8);');
-  lines.push('  --radius-lg: var(--radius);');
-  lines.push('  --radius-xl: calc(var(--radius) * 1.4);');
-  lines.push('  --radius-2xl: calc(var(--radius) * 1.8);');
-  lines.push('  --radius-3xl: calc(var(--radius) * 2.2);');
-  lines.push('  --radius-4xl: calc(var(--radius) * 2.6);');
+  // Radii are literal (decision 4.2: ¼ of the control height, cards 12, dialogs
+  // 16), not ratios of --radius, so a tenant changing --radius can't bend them.
+  for (const [name, value] of Object.entries(base.borderRadius)) {
+    if (name === 'base') continue;
+    lines.push(`  --radius-${name}: ${value};`);
+  }
+  // The plane (decision 4.3) and the float shadow (4.4).
+  lines.push('  --shadow-plane: var(--plane-rest);');
+  lines.push('  --shadow-plane-hover: var(--plane-hover);');
+  lines.push('  --shadow-plane-primary: var(--plane-primary-rest);');
+  lines.push('  --shadow-plane-primary-hover: var(--plane-primary-hover);');
+  lines.push('  --shadow-float: var(--shadow-float);');
+  lines.push(`  --ease-out-whity: ${base.motion['ease-out']};`);
   lines.push('}');
+  lines.push('');
+  // The main button lifts 1px up-right while its plane grows from 3 to 5px (4.3).
+  lines.push(
+    `@utility plane-lift { transition: box-shadow ${base.motion['dur-fast']} ${base.motion['ease-out']}, ` +
+      `translate ${base.motion['dur-fast']} ${base.motion['ease-out']}; &:hover { translate: 1px -1px; } }`
+  );
+  lines.push(
+    '@utility bg-blueprint-grid { background-color: var(--blueprint); background-image: ' +
+      'linear-gradient(var(--blueprint-line) 1px, transparent 1px), linear-gradient(90deg, var(--blueprint-line) 1px, transparent 1px), ' +
+      'linear-gradient(var(--blueprint-line-strong) 1px, transparent 1px), linear-gradient(90deg, var(--blueprint-line-strong) 1px, transparent 1px); ' +
+      'background-size: 16px 16px, 16px 16px, 80px 80px, 80px 80px; }'
+  );
   return lines.join('\n');
 }
+
+/**
+ * The non-colour custom properties shared by both CSS outputs: the radius
+ * root, the plane lengths, sizes and motion (mode-independent), plus the
+ * shadows, which differ per mode.
+ */
+function pushScalarProperties(lines, base) {
+  lines.push(`  --radius: ${base.borderRadius.base};`);
+  for (const [name, value] of Object.entries(base.plane)) lines.push(`  --${name}: ${value};`);
+  for (const [name, value] of Object.entries(base.size)) lines.push(`  --${name}: ${value};`);
+  for (const [name, value] of Object.entries(base.motion)) lines.push(`  --${name}: ${value};`);
+}
+
+function pushShadowProperties(lines, base, mode) {
+  for (const [name, value] of Object.entries(base.shadow[mode])) lines.push(`  --${name}: ${value};`);
+}
+
+// Decision 5.3: reduced motion shows the end state only.
+const REDUCED_MOTION_CSS = [
+  '@media (prefers-reduced-motion: reduce) {',
+  '  :root { --dur-fast: 0ms; --dur-base: 0ms; --dur-slow: 0ms; }',
+  '}',
+].join('\n');
 
 /**
  * Standalone Tailwind v4 theme CSS for `@whity-org/tokens` — the whole file
@@ -467,10 +542,13 @@ function generateTokensPackageCss(base) {
   lines.push(`  --font-sans: ${typo.fontFamily.sans};`);
   lines.push(`  --font-mono: ${typo.fontFamily.mono};`);
   lines.push(`  --font-heading: ${typo.fontFamily.heading};`);
+  lines.push(`  --font-arabic: ${typo.fontFamily.arabic};`);
+  lines.push(`  --font-display: ${typo.fontFamily.display};`);
   for (const [key, value] of Object.entries(base.colors.light)) {
     lines.push(`  --${key}: ${value};`);
   }
-  lines.push(`  --radius: ${base.borderRadius.base};`);
+  pushShadowProperties(lines, base, 'light');
+  pushScalarProperties(lines, base);
   for (const [name, def] of Object.entries(typo.fontSize)) {
     lines.push(`  --text-${name}: ${def.rem};`);
   }
@@ -489,26 +567,32 @@ function generateTokensPackageCss(base) {
   for (const [key, value] of Object.entries(base.colors.dark)) {
     lines.push(`  --${key}: ${value};`);
   }
+  pushShadowProperties(lines, base, 'dark');
   lines.push('}');
+  lines.push('');
+  lines.push(REDUCED_MOTION_CSS);
   lines.push('');
   return lines.join('\n');
 }
 
 /**
- * Self-hosted @font-face declarations for the three type families base.json
- * ships (Noto Sans, Noto Sans Arabic, Geist Mono) at weights 400/500/600/700
- * — matches typography.fontWeight.{normal,medium,semibold,bold}. Binaries
- * live alongside this file in packages/tokens/fonts/ (sourced from
- * @fontsource/noto-sans, @fontsource/noto-sans-arabic and geist — see that
- * directory's LICENSE-*.txt files, all OFL). Woff2-only: every browser Whity
- * supports handles it, and it's the smallest transfer.
+ * Self-hosted @font-face declarations for the four type families of design
+ * system 2.2, at only the weights it declares (decision 3.6, stage 9): Noto
+ * Sans and Noto Sans Arabic 400/500/600, Geist Mono 400/500, Readex Pro 600
+ * (Latin, and its Arabic design for Arabic document titles, E.35). No 700.
+ * Binaries live in packages/tokens/fonts/ (the brand kit's web subsets, see
+ * that directory's LICENSE-*.txt files, all OFL). Woff2-only: every browser
+ * Whity supports handles it, and it's the smallest transfer.
  */
+const READEX_ARABIC_RANGE =
+  'U+0600-06FF,U+0750-077F,U+0870-088E,U+0890-0891,U+0897-08E1,U+08E3-08FF,U+200C-200E,U+2010-2011,U+204F,U+2E41,U+FB50-FDFF,U+FE70-FE74,U+FE76-FEFC';
 const FONT_FACES = [
-  { family: 'Noto Sans', fileStem: 'noto-sans-latin', unicodeRange: undefined },
-  { family: 'Noto Sans Arabic', fileStem: 'noto-sans-arabic', unicodeRange: undefined },
-  { family: 'Geist Mono', fileStem: 'geist-mono', unicodeRange: undefined },
+  { family: 'Noto Sans', fileStem: 'noto-sans-latin', weights: [400, 500, 600] },
+  { family: 'Noto Sans Arabic', fileStem: 'noto-sans-arabic', weights: [400, 500, 600] },
+  { family: 'Geist Mono', fileStem: 'geist-mono', weights: [400, 500] },
+  { family: 'Readex Pro', fileStem: 'readex-pro-latin', weights: [600] },
+  { family: 'Readex Pro', fileStem: 'readex-pro-arabic', weights: [600], unicodeRange: READEX_ARABIC_RANGE },
 ];
-const FONT_WEIGHTS = [400, 500, 600, 700];
 
 function generateFontsCss() {
   const lines = [];
@@ -517,20 +601,21 @@ function generateFontsCss() {
   lines.push(' * Do not edit manually - run: npm run tokens:generate');
   lines.push(' *');
   lines.push(' * Binaries live in ../fonts (relative to this file once published —');
-  lines.push(' * see package.json "files"). Noto Sans + Noto Sans Arabic + Geist Mono,');
-  lines.push(' * OFL-licensed (packages/tokens/fonts/LICENSE-*.txt). Import this once,');
-  lines.push(' * anywhere before first paint; `--font-sans` / `--font-mono` in');
-  lines.push(' * theme.css already reference these family names.');
+  lines.push(' * see package.json "files"). Noto Sans, Noto Sans Arabic, Geist Mono and');
+  lines.push(' * Readex Pro, OFL-licensed (packages/tokens/fonts/LICENSE-*.txt). Import');
+  lines.push(' * this once, anywhere before first paint; `--font-sans`, `--font-mono` and');
+  lines.push(' * `--font-display` in theme.css already reference these family names.');
   lines.push(' */');
   lines.push('');
-  for (const { family, fileStem } of FONT_FACES) {
-    for (const weight of FONT_WEIGHTS) {
+  for (const { family, fileStem, weights, unicodeRange } of FONT_FACES) {
+    for (const weight of weights) {
       lines.push('@font-face {');
       lines.push(`  font-family: '${family}';`);
       lines.push(`  font-style: normal;`);
       lines.push(`  font-weight: ${weight};`);
       lines.push(`  font-display: swap;`);
       lines.push(`  src: url('../fonts/${fileStem}-${weight}.woff2') format('woff2');`);
+      if (unicodeRange) lines.push(`  unicode-range: ${unicodeRange};`);
       lines.push('}');
       lines.push('');
     }
@@ -564,6 +649,16 @@ function generateBaseCss() {
   lines.push('  }');
   lines.push('  body {');
   lines.push('    @apply bg-background text-foreground;');
+  lines.push('    /* Decision 3.5a/3.6: 14px text at line height 1.5 (Arabic 1.7) is the product default. */');
+  lines.push('    font-size: var(--text-sm);');
+  lines.push('    line-height: var(--leading-normal);');
+  lines.push('  }');
+  lines.push('  :lang(ar) {');
+  lines.push('    line-height: 1.7;');
+  lines.push('  }');
+  lines.push('  /* Preflight makes these `bolder` (700); bold is 600 (decision 3.6). */');
+  lines.push('  b, strong {');
+  lines.push('    font-weight: var(--font-weight-semibold);');
   lines.push('  }');
   lines.push('  button:not(:disabled), [role="button"]:not(:disabled) {');
   lines.push('    cursor: pointer;');
@@ -586,11 +681,16 @@ function generateCssRegion(base) {
   const lines = [];
   lines.push(CSS_BEGIN);
 
+  // Font families are composed from next/font variables in globals.css's own
+  // html rule (see web/app/layout.tsx), so this region doesn't set them.
+  lines.push(generateThemeInlineBlock(base));
+  lines.push('');
   lines.push(':root {');
   for (const [key, value] of Object.entries(base.colors.light)) {
     lines.push(`  --${key}: ${value};`);
   }
-  lines.push(`  --radius: ${base.borderRadius.base};`);
+  pushShadowProperties(lines, base, 'light');
+  pushScalarProperties(lines, base);
   // Typography custom properties (shared across modes).
   for (const [name, def] of Object.entries(typo.fontSize)) {
     lines.push(`  --text-${name}: ${def.rem};`);
@@ -611,7 +711,10 @@ function generateCssRegion(base) {
   for (const [key, value] of Object.entries(base.colors.dark)) {
     lines.push(`  --${key}: ${value};`);
   }
+  pushShadowProperties(lines, base, 'dark');
   lines.push('}');
+  lines.push('');
+  lines.push(REDUCED_MOTION_CSS);
 
   lines.push(CSS_END);
   return lines.join('\n');

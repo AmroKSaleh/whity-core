@@ -1,0 +1,24 @@
+<!-- @dsCard group="Templates · Agent approvals" height=820 width=1280 subtitle="Arabic interface; the Whity name stays in Latin letters" -->
+<!doctype html>
+<html dir="rtl" lang="ar">
+<head><meta charset="utf-8"><title>Approvals Arabic</title><style>html,body{height:100%} #root{min-height:100%} body{font-family:var(--font-arabic)} .wy-shell__brand{direction:ltr}</style></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  function nav(active, counts) { counts = counts || {}; function it(icon, label) { return { icon: icon, label: label, active: label === active, count: counts[label] }; }
+    return [{ items: [it('dashboard', 'Dashboard'), it('inbox', 'Inbox'), it('approval', 'Approvals')] },
+      { label: 'People', items: [it('users', 'Users'), it('role', 'Roles'), it('delegation', 'Delegations')] },
+      { label: 'AI', items: [it('ai-principal', 'AI principals'), it('tool', 'MCP tools'), it('activity', 'Agent activity')] },
+      { label: 'Documents', items: [it('document', 'Library'), it('routing', 'Routing')] },
+      { label: 'Platform', items: [it('tenant', 'Tenants'), it('plugin', 'Plugins'), it('branding', 'Branding'), it('audit', 'Audit log')] }]; }
+  var topBar = h(React.Fragment, null, h(W.IconButton, { icon: 'notification', label: 'Notifications' }), h(W.IconButton, { icon: 'help', label: 'Help' }));
+  ReactDOM.createRoot(document.getElementById('root')).render(h(W.AppShell, { dir: 'rtl', searchLabel: 'بحث', tenant: 'مخبز المثال', user: 'رنا حداد', role: 'المالكة', topActions: topBar,
+    nav: [{ items: [{ icon: 'dashboard', label: 'اللوحة' }, { icon: 'inbox', label: 'الوارد', count: 2 }, { icon: 'approval', label: 'الموافقات', count: 3, active: true }] }, { label: 'الذكاء الاصطناعي', items: [{ icon: 'ai-principal', label: 'الوكلاء' }, { icon: 'activity', label: 'سجل الوكلاء' }] }] },
+    h(W.PageHeader, { title: 'الموافقات', description: 'يستأذن الوكلاء هنا قبل أي إجراء ضبطته على «اسأل أولًا».' }),
+    h('div', { className: 'wy-queue__pos', style: { maxWidth: 560 } }, h('span', null, '1 من 3 بانتظار القرار')),
+    h(W.ActionProposal, { dir: 'rtl', agent: 'مساعد الفوترة', onBehalfOf: 'رنا', title: 'إرسال تذكير بالدفع إلى 12 عميلًا', changes: [{ label: 'الفواتير', after: '12 متأخرة · JOD 4,860' }, { label: 'الحالة', before: 'متأخرة', after: 'أُرسل التذكير' }], scope: ['invoice:remind'],
+      labels: { waiting: 'بانتظار موافقتك', approve: 'موافقة', reject: 'رفض', edit: 'تعديل', reversible: 'يمكن التراجع عنه', scope: 'يستخدم', forLabel: 'نيابةً عن', before: 'الآن', after: 'بعد' } })));
+</script>
+</body>
+</html>

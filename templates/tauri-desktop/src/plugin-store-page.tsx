@@ -206,8 +206,8 @@ function PluginCard({ entry, installedVersion }: { entry: CatalogEntry; installe
         <CardTitle className="flex items-center justify-between gap-2 text-sm">
           {entry.name}
           {!isInstalled && <Badge variant="secondary">Available</Badge>}
-          {isInstalled && !updateAvailable && <Badge variant="success-solid">Installed</Badge>}
-          {updateAvailable && <Badge variant="warning-solid">Update available</Badge>}
+          {isInstalled && !updateAvailable && <Badge variant="success">Installed</Badge>}
+          {updateAvailable && <Badge variant="warning">Update available</Badge>}
         </CardTitle>
         <CardDescription>
           Latest v{entry.latestVersion}

@@ -96,11 +96,11 @@ export function Sidebar({ groups, siteName, subtitle, footer }: SidebarProps) {
           <div className="flex-1">
             {!isCollapsed ? (
               <>
-                <h1 className="text-2xl font-bold">{siteName}</h1>
+                <h1 className="text-2xl font-semibold">{siteName}</h1>
                 <p className="text-sm text-muted-foreground mt-1">{subtitle}</p>
               </>
             ) : (
-              <div className="text-xl font-bold text-center font-black">{siteName.charAt(0).toUpperCase()}</div>
+              <div className="text-xl font-semibold text-center font-black">{siteName.charAt(0).toUpperCase()}</div>
             )}
           </div>
 

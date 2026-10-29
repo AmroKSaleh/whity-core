@@ -294,7 +294,7 @@ export default function DocumentTemplatesPage() {
   const permissionCell = useCallback(
     (row: TemplateRow | BlockRow) =>
       row.required_permission ? (
-        <Badge variant="purple">{row.required_permission}</Badge>
+        <Badge variant="secondary">{row.required_permission}</Badge>
       ) : (
         <span className="text-muted-foreground">
           {t('documentTemplates.table.noPermission', 'None')}

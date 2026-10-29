@@ -1,0 +1,25 @@
+<!-- @dsCard group="Templates · Agent approvals" height=882 width=1280 subtitle="Scope, credential and rules for one AI principal" -->
+<!doctype html>
+<html>
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../bundle.css"><script src="../../preview-runtime/react.production.min.js"></script><script src="../../preview-runtime/react-dom.production.min.js"></script><script src="../bundle.js"></script><script>(function(){var t=(location.hash.match(/theme=(dark|light)/)||[])[1]||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);})();</script><style>body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font-sans);width:1280px;min-height:882px}</style><meta charset="utf-8"><title>AI principal</title><style>html,body{height:100%} #root{min-height:100%} </style></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement;
+  function nav(active, counts) { counts = counts || {}; function it(icon, label) { return { icon: icon, label: label, active: label === active, count: counts[label] }; }
+    return [{ items: [it('dashboard', 'Dashboard'), it('inbox', 'Inbox'), it('approval', 'Approvals')] },
+      { label: 'People', items: [it('users', 'Users'), it('role', 'Roles'), it('delegation', 'Delegations')] },
+      { label: 'AI', items: [it('ai-principal', 'AI principals'), it('tool', 'MCP tools'), it('activity', 'Agent activity')] },
+      { label: 'Documents', items: [it('document', 'Library'), it('routing', 'Routing')] },
+      { label: 'Platform', items: [it('tenant', 'Tenants'), it('plugin', 'Plugins'), it('branding', 'Branding'), it('audit', 'Audit log')] }]; }
+  var topBar = h(React.Fragment, null, h(W.IconButton, { icon: 'notification', label: 'Notifications' }), h(W.IconButton, { icon: 'help', label: 'Help' }));
+  ReactDOM.createRoot(document.getElementById('root')).render(h(W.AppShell, { tenant: 'Example Bakery', user: 'Rana Haddad', role: 'Owner', nav: nav('AI principals', { Approvals: 3 }), topActions: topBar },
+    h(W.PageHeader, { breadcrumb: [{ label: 'AI principals' }, { label: 'Billing assistant' }], title: 'Billing assistant', description: 'An AI client connected through MCP. It acts for Rana Haddad and never with more than her permissions.', actions: h(React.Fragment, null, h(W.Button, { variant: 'outline', icon: 'sync' }, 'Rotate credential'), h(W.Button, { variant: 'destructive' }, 'Revoke')) }),
+    h('div', { className: 'wy-split' },
+      h(W.ScopeGrant, { agent: 'Billing assistant', onBehalfOf: 'Rana', grants: [{ key: 'invoice', label: 'Invoices', actions: [{ key: 'read', label: 'See invoices', mode: 'allow' }, { key: 'remind', label: 'Send reminders', mode: 'ask' }, { key: 'update', label: 'Mark as paid', mode: 'ask' }, { key: 'void', label: 'Void an invoice', mode: 'off' }] }, { key: 'customer', label: 'Customers', actions: [{ key: 'read', label: 'See customers', mode: 'allow' }, { key: 'update', label: 'Edit contact details', mode: 'off' }] }] }),
+      h('div', { className: 'wy-grid' },
+        h(W.Card, { title: 'Credential' }, h('dl', { style: { margin: 0, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 12px' } }, h('dt', { className: 'wy-caption' }, 'Issued'), h('dd', { style: { margin: 0 } }, '12 Oct 2026 by Rana Haddad'), h('dt', { className: 'wy-caption' }, 'Last used'), h('dd', { style: { margin: 0 } }, 'Today, 14:02'), h('dt', { className: 'wy-caption' }, 'Key'), h('dd', { style: { margin: 0 }, className: 'wy-mono' }, 'wmcp_••••••7f3a'))),
+        h(W.Alert, { variant: 'info', title: 'Asks before it changes anything' }, 'Every write is set to Ask first or Off. Reads are allowed.')))));
+</script>
+</body>
+</html>

@@ -187,7 +187,7 @@ export default function InboxPage() {
                   waiting.
                 */}
                 {meta !== null && meta.decision && meta.open && (
-                  <Badge variant="warning-solid" data-slot="inbox-decision">
+                  <Badge variant="warning" data-slot="inbox-decision">
                     {t('inbox.decision.badge', 'Decision')}
                   </Badge>
                 )}
@@ -221,7 +221,7 @@ export default function InboxPage() {
             meta !== null && !meta.open
               ? 'secondary'
               : meta !== null && meta.decision
-                ? 'warning-solid'
+                ? 'warning'
                 : 'warning';
           return <Badge variant={variant}>{row.status}</Badge>;
         },

@@ -259,7 +259,7 @@ const Slider = React.forwardRef<
           <div className="flex items-center justify-between gap-2 text-xs font-semibold text-foreground">
             <div className="flex items-center gap-1">
               {label && <span>{label}</span>}
-              {required && <span className="text-destructive font-bold ms-0.5">*</span>}
+              {required && <span className="text-destructive font-semibold ms-0.5">*</span>}
               {tooltip && (
                 <TooltipProvider>
                   <Tooltip>

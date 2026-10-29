@@ -44,7 +44,7 @@ function LockedScreen({
       >
         {icon ?? <IconLock />}
       </div>
-      <h2 data-slot="locked-screen-title" className="mb-2 text-xl font-bold text-foreground">
+      <h2 data-slot="locked-screen-title" className="mb-2 text-xl font-semibold text-foreground">
         {title}
       </h2>
       <div

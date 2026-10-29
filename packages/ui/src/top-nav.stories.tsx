@@ -35,7 +35,7 @@ export const Default: Story = {
 
 export const SimpleWithTitle: Story = {
   args: {
-    leftContent: <h2 className="text-sm font-bold tracking-tight text-foreground">Analytics Overview</h2>,
+    leftContent: <h2 className="text-sm font-semibold tracking-tight text-foreground">Analytics Overview</h2>,
     user: {
       name: "Jane Doe",
       email: "jane@example.com",

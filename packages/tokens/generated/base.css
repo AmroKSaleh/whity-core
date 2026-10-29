@@ -12,6 +12,16 @@
   }
   body {
     @apply bg-background text-foreground;
+    /* Decision 3.5a/3.6: 14px text at line height 1.5 (Arabic 1.7) is the product default. */
+    font-size: var(--text-sm);
+    line-height: var(--leading-normal);
+  }
+  :lang(ar) {
+    line-height: 1.7;
+  }
+  /* Preflight makes these `bolder` (700); bold is 600 (decision 3.6). */
+  b, strong {
+    font-weight: var(--font-weight-semibold);
   }
   button:not(:disabled), [role="button"]:not(:disabled) {
     cursor: pointer;

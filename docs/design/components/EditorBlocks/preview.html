@@ -1,0 +1,85 @@
+<!-- @dsCard group="Document editor" height=1330 width=1280 subtitle="The block catalogue on the continuous sheet" -->
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Blocks</title><style>html,body{height:100%} #root{height:100%} .cap{font-size:.75rem;color:var(--muted-foreground);margin:0 0 6px} #root{padding:24px;box-sizing:border-box;height:auto}</style></head>
+<body>
+<div id="root"></div>
+<script>
+  var W = window.Whity, h = React.createElement, F = React.Fragment;
+  function I(n, s) { return h(W.Icon, { name: n, size: s || 16 }); }
+  function tb(icon, label, on, sc) { return h(W.IconButton, { icon: icon, label: label, size: 'sm', shortcut: sc, className: on ? 'is-on' : undefined, tooltip: 'bottom' }); }
+  function sep() { return h('span', { className: 'wy-edx__sep', 'aria-hidden': 'true' }); }
+  function mf(label, sample, preview) { return h('span', { className: 'wy-mf' + (preview ? ' is-preview' : ''), contentEditable: false, 'data-field': label }, preview ? sample : label); }
+  function blk(type, kids, extra) { extra = extra || {}; return h('div', { className: 'wy-blk wy-blk--' + type + (extra.cls ? ' ' + extra.cls : ''), 'data-type': type }, extra.gutter ? h('div', { className: 'wy-blk__gutter' }, h('button', { className: 'wy-blk__g', 'aria-label': 'Add a block below' }, I('plus')), h('button', { className: 'wy-blk__g wy-blk__g--drag', 'aria-label': 'Drag to move, click for options' }, I('drag'))) : null, extra.toolbar || null, kids); }
+  function head(o) { o = o || {};
+    return h('div', { className: 'wy-edx__head' },
+      h(W.IconButton, { icon: 'chevron-left', label: o.back || 'Back to templates', tooltip: 'bottom' }),
+      h('span', { className: 'wy-edx__doc', 'aria-hidden': 'true' }, I(o.icon || 'template')),
+      h('div', { className: 'wy-edx__titles' }, h('input', { className: 'wy-edx__title', defaultValue: o.title || 'Payment reminder', 'aria-label': 'Document title', size: 22 }),
+        h('div', { className: 'wy-edx__meta' }, o.where || 'Templates · Letters', h('span', null, '·'), I('check', 12), o.saved || 'Saved 14:02')),
+      h('div', { className: 'wy-edx__acts' },
+        h('button', { className: 'wy-edx__mode' + (o.mode === 'suggest' ? ' is-suggest' : ''), 'aria-haspopup': 'menu' }, I(o.mode === 'suggest' ? 'suggest' : o.mode === 'view' ? 'view' : 'edit', 14), o.mode === 'suggest' ? 'Suggesting' : o.mode === 'view' ? 'Viewing' : 'Editing', I('chevron-down', 14)),
+        h('span', { className: 'wy-edx__count' }, h(W.IconButton, { icon: 'comment', label: 'Comments and suggestions', tooltip: 'bottom' }), h('b', null, o.count || '3')),
+        h(W.Button, { variant: 'outline', size: 'sm', icon: 'download' }, 'PDF'),
+        o.main === false ? null : h(W.Button, { size: 'sm', icon: 'check' }, o.mainLabel || 'Publish')));
+  }
+  function bar(o) { o = o || {};
+    return h('div', { className: 'wy-edx__bar' + (o.readonly ? ' is-readonly' : ''), role: 'toolbar', 'aria-label': 'Formatting' },
+      tb('undo', 'Undo', false, '⌘Z'), tb('redo', 'Redo', false, '⇧⌘Z'), sep(),
+      h('button', { className: 'wy-edx__drop wy-edx__style', 'aria-haspopup': 'menu' }, o.style || 'Normal text', I('chevron-down', 14)), sep(),
+      tb('bold', 'Bold', o.bold, '⌘B'), tb('italic', 'Italic', false, '⌘I'), tb('underline', 'Underline', false, '⌘U'), tb('strike', 'Strikethrough', false, '⇧⌘X'), sep(),
+      tb('link', 'Link', false, '⌘K'), tb('highlight', 'Highlight'), sep(),
+      tb('list-bullet', 'Bulleted list', false, '⇧⌘8'), tb('list-numbered', 'Numbered list', false, '⇧⌘7'), tb('list-todo', 'Checklist', false, '⇧⌘9'), sep(),
+      h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu' }, I('plus', 14), 'Insert', I('chevron-down', 14)),
+      h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu' }, I('field', 14), 'Field', I('chevron-down', 14)),
+      tb('comment-add', 'Comment', false, '⌥⌘M'), sep(),
+      h('button', { className: 'wy-edx__ask' }, I('robot', 14), 'Ask an agent'),
+      h('span', { className: 'wy-edx__grow' }),
+      o.page ? h('button', { className: 'wy-edx__drop', 'aria-haspopup': 'menu', 'aria-label': 'Zoom' }, o.zoom || '75%', I('chevron-down', 14)) : null,
+      h(W.ToggleGroup, { size: 'sm', label: 'View', required: true, defaultValue: o.page ? 'page' : 'continuous', options: [{ value: 'continuous', label: 'Continuous', icon: 'continuous', iconOnly: true }, { value: 'page', label: 'Page view', icon: 'page', iconOnly: true }] }),
+      tb('outline', 'Outline', o.outline !== false));
+  }
+  function outline(items) { return h('nav', { className: 'wy-edx__outline', 'aria-label': 'Outline' }, h('div', { className: 'wy-edx__outline-h' }, 'Outline'), items.map(function (it, i) { return h('a', { key: i, href: '#', className: 'l' + it[0] + (it[2] ? ' is-on' : '') }, it[1]); })); }
+  function status(t) { return h('div', { className: 'wy-edx__status' }, t.map(function (x, i) { return x === '|' ? h('span', { key: i, className: 'wy-edx__grow' }) : h('span', { key: i }, x); })); }
+  function rcard(top, o) {
+    return h('div', { className: 'wy-rc' + (o.agent ? ' is-agent' : '') + (o.active ? ' is-active' : ''), style: { top: top } },
+      h('div', { className: 'wy-rc__who' }, o.agent ? h(W.ActorChip, { kind: 'agent', name: o.agent, onBehalfOf: o.for }) : h(F, null, h(W.Avatar, { name: o.name, size: 24 }), h('span', { className: 'wy-rc__name' }, o.name)),
+        o.agent ? null : h('span', { className: 'wy-rc__time' }, o.time),
+        h('span', { className: 'wy-rc__acts' }, o.sug ? h(F, null, h(W.IconButton, { icon: 'check', label: 'Accept', size: 'sm' }), h(W.IconButton, { icon: 'close', label: 'Reject', size: 'sm' })) : h(W.IconButton, { icon: 'check', label: 'Resolve', size: 'sm' }))),
+      o.what ? h('div', { className: 'wy-rc__what' }, o.what) : null,
+      o.text ? h('div', null, o.text) : null,
+      o.reply ? h('div', { className: 'wy-rc__reply' }, 'Reply or add others with @') : null);
+  }
+  var IMG = "data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 640 260'%3E%3Cdefs%3E%3Cpattern id='g' width='16' height='16' patternUnits='userSpaceOnUse'%3E%3Cpath d='M16 0H0V16' fill='none' stroke='%23ffffff' stroke-opacity='.12'/%3E%3C/pattern%3E%3C/defs%3E%3Crect width='640' height='260' fill='%230961bb'/%3E%3Crect width='640' height='260' fill='url(%23g)'/%3E%3Cg fill='none' stroke='%23fff' stroke-width='2' stroke-opacity='.85'%3E%3Crect x='80' y='48' width='480' height='164'/%3E%3Cpath d='M80 132H300V212M300 132V48M420 48V212M420 150H560'/%3E%3Crect x='112' y='72' width='150' height='34'/%3E%3Ccircle cx='360' cy='180' r='14'/%3E%3C/g%3E%3Cg fill='%23fff' fill-opacity='.85' font-family='monospace' font-size='12'%3E%3Ctext x='112' y='160'%3EOVENS%3C/text%3E%3Ctext x='320' y='80'%3ESHOP FLOOR%3C/text%3E%3Ctext x='440' y='80'%3ECOUNTER%3C/text%3E%3Ctext x='440' y='186'%3ESTORE%3C/text%3E%3C/g%3E%3C/svg%3E";
+  function tag(t) { return h('span', { className: 'wy-catalog__tag' }, t); }
+  ReactDOM.createRoot(document.getElementById('root')).render(h('article', { className: 'wy-edx__sheet', style: { maxWidth: 1180, padding: '40px 56px 48px' } }, h('div', { className: 'wy-catalog' },
+    h('div', null,
+      tag('Text'), blk('p', h('p', null, 'Body text, 16px on screen and 9.5pt on paper. ', h('b', null, 'Bold'), ', ', h('i', null, 'italic'), ', ', h('u', null, 'underline'), ', ', h('s', null, 'strike'), ', ', h('code', null, 'code'), ', a ', h('a', { className: 'wy-lnk', href: '#' }, 'link'), ' and a ', h('mark', { className: 'wy-hl' }, 'highlight'), '.')),
+      tag('Headings 1 · 2 · 3'), blk('h1', h('h2', null, 'Payment terms')), blk('h2', h('h3', null, 'How to pay')), blk('h3', h('h4', null, 'Bank transfer')),
+      tag('Bulleted · numbered · checklist'),
+      blk('li', [h('span', { key: 1, className: 'wy-blk__mk' }, '•'), h('div', { key: 2 }, 'Bank transfer to Example Bank')]),
+      blk('li', [h('span', { key: 1, className: 'wy-blk__mk' }, '◦'), h('div', { key: 2 }, 'Reference: the invoice number')], { cls: 'l1' }),
+      blk('li', [h('span', { key: 1, className: 'wy-blk__mk' }, '1.'), h('div', { key: 2 }, 'Open the invoice from the email')]),
+      blk('li', [h('span', { key: 1, className: 'wy-blk__mk' }, '2.'), h('div', { key: 2 }, 'Choose Pay online')]),
+      blk('todo', [h('span', { key: 1, className: 'wy-blk__check' }, I('check', 12)), h('div', { key: 2, className: 'wy-blk__text' }, 'Confirm the IBAN with the bank')], { cls: 'is-done' }),
+      blk('todo', [h('span', { key: 1, className: 'wy-blk__check' }), h('div', { key: 2, className: 'wy-blk__text' }, 'Send the October statement')]),
+      tag('Quote'), blk('quote', h('div', null, 'Every invoice paid on time keeps the ovens running.')),
+      tag('Callout: note · important'),
+      blk('callout', h('div', null, I('info'), h('p', null, 'A note: background for the reader.')), { cls: 'is-note' }),
+      blk('callout', h('div', null, I('alert'), h('p', null, 'Important: something the reader must not miss.')), { cls: 'is-warning' }),
+      tag('Toggle'), h('div', { className: 'wy-blk wy-blk--toggle is-open' }, h('div', { className: 'wy-blk__sum' }, I('chevron-right'), h('div', null, 'What if I already paid?')), h('div', { className: 'wy-blk__kids' }, blk('p', h('p', null, 'Ignore this letter; payments take two working days to reach us.')))),
+      tag('Code'), blk('code', h('pre', null, 'POST /api/invoices/INV-1042/remind\n{ "channel": "email" }')),
+      tag('Divider · page break'), blk('divider', h('hr')), blk('pagebreak', h('div', null, 'Page break'))),
+    h('div', null,
+      tag('Table'), blk('table', h('table', null, h('thead', null, h('tr', null, h('th', null, 'Invoice'), h('th', null, 'Due'), h('th', { className: 'is-num' }, 'Amount'))), h('tbody', null, h('tr', null, h('td', null, 'INV-1042'), h('td', null, '14 Oct 2026'), h('td', { className: 'is-num' }, 'JOD 301.600')), h('tr', null, h('td', null, 'INV-1051'), h('td', null, '21 Oct 2026'), h('td', { className: 'is-num' }, 'JOD 96.000'))))),
+      tag('Image: half · wide · full, with a caption'), blk('image', h('figure', null, h('img', { src: IMG, alt: 'Shop layout drawn as a blueprint' }), h('figcaption', null, 'The new shop layout, from October'))),
+      tag('Columns'), blk('columns', h('div', { className: 'wy-blk__cols' }, h('div', null, h('p', { style: { margin: 0 } }, h('b', null, 'Abdoun'), h('br'), 'Opens 7:00, closes 22:00')), h('div', null, h('p', { style: { margin: 0 } }, h('b', null, 'Sweifieh'), h('br'), 'Opens 6:30, closes 23:00')))),
+      tag('Record (live)'), blk('embed', h('div', { className: 'wy-embed' }, h('div', { className: 'wy-embed__head' }, I('invoice', 14), 'Invoice', h('span', { className: 'wy-edx__grow' }), I('sync', 12), 'Live · updated 14:02'),
+        h('div', { className: 'wy-embed__row' }, h('span', { className: 'wy-embed__tile' }, I('invoice')), h('div', { className: 'wy-embed__main' }, h('b', null, 'INV-1042 · Example Clinic'), h('span', null, 'Due 14 Oct 2026')), h('span', { className: 'wy-embed__amt' }, 'JOD 301.600'), h(W.Badge, { variant: 'destructive' }, 'Overdue')))),
+      tag('Chart'), blk('embed', h('div', { className: 'wy-embed' }, h(W.BarChart, { title: 'Revenue', subtitle: 'Last 6 months · live', height: 170, data: [{ label: 'May', value: 3120 }, { label: 'Jun', value: 3480 }, { label: 'Jul', value: 2950 }, { label: 'Aug', value: 4010 }, { label: 'Sep', value: 4380 }, { label: 'Oct', value: 4860 }] }))),
+      tag('File'), blk('file', h('div', { className: 'wy-file' }, h('span', { className: 'wy-file__ic' }, I('document')), h('div', { className: 'wy-file__meta' }, h('b', { style: { fontWeight: 500 } }, 'Bank letter.pdf'), h('span', null, '482 KB · PDF')), h(W.IconButton, { icon: 'download', label: 'Download', size: 'sm' }))),
+      tag('Signature and stamp'), blk('sign', h('div', { className: 'wy-sign' }, h('div', { className: 'wy-sign__line' }, h('b', null, 'Rana Haddad'), 'Owner, Example Bakery'), h('div', { className: 'wy-sign__line' }, h('b', null, 'Date'), '29 October 2026'), h('div', { className: 'wy-sign__stamp' }, 'Company', h('br'), 'stamp'))))
+  )));
+</script>
+</body>
+</html>

@@ -1,0 +1,50 @@
+<!-- @dsCard height=288 -->
+<!doctype html>
+<html lang="en">
+<head><link rel="stylesheet" href="../../tokens.css"><link rel="stylesheet" href="../bundle.css"><script src="../../preview-runtime/react.production.min.js"></script><script src="../../preview-runtime/react-dom.production.min.js"></script><script src="../bundle.js"></script><script>(function(){var t=(location.hash.match(/theme=(dark|light)/)||[])[1]||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);})();</script><style>body{margin:0;background:var(--background);color:var(--foreground);font-family:var(--font-sans);width:960px;min-height:288px}</style>
+<meta charset="utf-8">
+<title>Whity</title>
+<style>
+  html, body { margin:0; height:100%; }
+  body { background:var(--background); color:var(--foreground); font-family:var(--font-sans); overflow:hidden; }
+  .cover { position:relative; height:288px; overflow:hidden; }
+  .art { position:absolute; top:0; left:480px; width:480px; height:288px; overflow:hidden; }
+  .art svg { display:block; width:480px; height:288px; }
+  .brand { fill:var(--brand); }
+  .sheet { fill:var(--mark-sheet); }
+  .deep { fill:var(--plane-deep); }
+  .ink { fill:var(--foreground); }
+  .grid { stroke:var(--brand-foreground); stroke-width:1.5; stroke-linecap:round; opacity:.5; }
+  .words { position:absolute; left:var(--space-8); bottom:var(--space-6); max-width:440px; }
+  .name { margin:0; font-family:var(--font-display); font-size:120px; line-height:.92; font-weight:600; letter-spacing:-0.02em; color:var(--foreground); }
+  .tag { margin:var(--space-6) 0 0 4px; font-size:14px; line-height:20px; color:var(--muted-foreground); }
+</style>
+</head>
+<body>
+<div class="cover">
+<div class="art" aria-hidden="true">
+<svg viewBox="0 0 480 288" width="480" height="288">
+<!--
+  blocks      brand: the mark's two planes at m = 24 (side 192 = 8 m, offset 72 = 3 m, radius 48 = 2 m, edge 24 = 1 m) with the white mark-sheet window; a plane-deep satellite 120×96; a foreground slab 152×88 bleeding off the right and bottom: three colours (brand, plane-deep, ink), about 40% of 960×288
+  arrangement the mark itself at cover scale, platform low-left bleeding off the bottom, sheet lifted 3 m up-right; the satellite and slab step right and down on the 24 grid, as the plane steps out from under the main button
+  pattern     blueprint plus-grid on the platform's exposed area, from the README's "Open at the core: show how the platform works, in the blueprint style"; the sheet stays blank because the surface belongs to whoever builds on it
+  scales      pitch space-6 (24); gaps space-4 and space-6; satellite corners radius-card (12); plane corners radius 2 m = 48, window 1 m = 24 (the ¼ rule)
+-->
+<rect class="ink" x="352" y="224" width="152" height="88" rx="12"/>
+<rect class="deep" x="336" y="96" width="120" height="96" rx="12"/>
+<rect class="brand" x="24" y="96" width="192" height="192" rx="48"/>
+<g class="grid">
+  <path d="M48 116v8M44 120h8 M72 116v8M68 120h8 M48 140v8M44 144h8 M72 140v8M68 144h8 M48 164v8M44 168h8 M72 164v8M68 168h8 M48 188v8M44 192h8 M72 188v8M68 192h8"/>
+  <path d="M48 212v8M44 216h8 M72 212v8M68 216h8 M48 236v8M44 240h8 M72 236v8M68 240h8 M96 236v8M92 240h8 M120 236v8M116 240h8 M144 236v8M140 240h8 M168 236v8M164 240h8 M48 260v8M44 264h8 M72 260v8M68 264h8 M96 260v8M92 264h8 M120 260v8M116 264h8 M144 260v8M140 264h8 M168 260v8M164 264h8"/>
+</g>
+<rect class="brand" x="96" y="24" width="192" height="192" rx="48"/>
+<rect class="sheet" x="120" y="48" width="144" height="144" rx="24"/>
+</svg>
+</div>
+<div class="words">
+  <h1 class="name">Whity</h1>
+  <p class="tag">A blank sheet, on the platform beneath it.</p>
+</div>
+</div>
+</body>
+</html>
