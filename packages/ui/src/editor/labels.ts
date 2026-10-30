@@ -225,6 +225,20 @@ export const EDITOR_LABELS = {
   blockerNoPrintHint: "It can’t be printed. Remove it, or keep it for notes.",
   blockerField: "{field} isn’t a field of this record type",
   blockerFieldHint: "Remove it, or pick a field the record has.",
+  labelGrid: "{columns} × {rows} labels",
+  labelStock: "Label stock",
+  labelCertificate: "Certificate",
+  labelSheet: "Sheet",
+  labelColumns: "Columns",
+  labelRows: "Rows",
+  labelWidth: "Label width (mm)",
+  labelHeight: "Label height (mm)",
+  labelGapX: "Gap between columns (mm)",
+  labelGapY: "Gap between rows (mm)",
+  labelTooBig: "The labels don’t fit on the sheet.",
+  labelOverflow: "Doesn’t fit the label",
+  labelsPerSheet: "{n} labels a sheet",
+  printLabels: "Print labels",
 }
 
 export type EditorLabels = typeof EDITOR_LABELS

@@ -376,6 +376,36 @@
 .wy-pv .wy-doc .wy-pagebreak { visibility: hidden; height: 0; margin: 0; }
 .wy-pv__gap { pointer-events: none; }
 
+/* Label sheets (E.43): one sheet of identical labels. The first is the one
+   you edit; the others repeat it. A label's outline is dashed, as on the
+   stock's backing sheet; content past it is cut off on paper. */
+.wy-ls__label {
+  position: absolute;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: 4px;
+  outline: 1px dashed color-mix(in oklab, var(--border) 100%, var(--foreground) 15%);
+  outline-offset: -1px;
+}
+.wy-ls__label.is-first { outline: 1px solid var(--ring); overflow: visible; }
+.wy-ls__label.is-first .ProseMirror { min-height: 100%; }
+.wy-ls__label.is-over { outline-color: var(--error); }
+.wy-ls__label:not(.is-first) { color: var(--muted-foreground); }
+.wy-ls__label .wy-doc > * { margin-block: 0 2px; }
+.wy-ls__over {
+  position: absolute;
+  inset-inline-end: 4px;
+  inset-block-end: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--error-tint);
+  color: var(--error-text);
+  font-size: 11px;
+}
+
 /* Preview with a record (E.12): the bar above the pages. */
 .wy-previewbar {
   display: flex;

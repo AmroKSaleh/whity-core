@@ -32,6 +32,7 @@ import { BlockToolbar } from "./block-toolbar"
 import { EditorServicesProvider, type EditorServices, type FieldPreview } from "./services"
 import { FieldTrigger, filterFields, type FieldDef, type FieldGroup, type FieldTriggerState } from "./fields"
 import { FieldPicker, flatFields } from "./field-picker"
+import { DEFAULT_LABEL_GRID, LabelSetup, LabelSheetView, labelCells, type SheetSize } from "./label-sheet"
 import { PagePagination, PageView, fitZoom, type Letterhead } from "./page-view"
 import { PublishCheck } from "./publish-check"
 
@@ -107,6 +108,8 @@ export interface DocEditorProps {
   }
   /** Downloads the PDF through Whity Render. */
   onExportPdf?: () => Promise<void> | void
+  /** Label sheets: Print fills one label per record or CSV row (E.43); the screen asks which. */
+  onPrintLabels?: () => void
   className?: string
 }
 
@@ -153,6 +156,7 @@ function DocEditor({
   onClosePreview,
   publish,
   onExportPdf,
+  onPrintLabels,
   className,
 }: DocEditorProps) {
   const labels = React.useMemo(() => ({ ...EDITOR_LABELS, ...labelProp }), [labelProp])
@@ -166,6 +170,11 @@ function DocEditor({
     onViewChange?.(v)
   }
   const [zoom, setZoom] = React.useState<PageZoom>("fit")
+  // E.43: a label sheet is one sheet of identical labels, page view only.
+  const isLabel = doc.kind === "label"
+  const labelGrid = doc.labels ?? DEFAULT_LABEL_GRID
+  const sheetSize: SheetSize = doc.page?.size === "Letter" ? "Letter" : "A4"
+  const [labelOverflow, setLabelOverflow] = React.useState(false)
   const [canvasWidth, setCanvasWidth] = React.useState(1000)
   const [pages, setPages] = React.useState(1)
   const [fieldQuery, setFieldQuery] = React.useState<FieldTriggerState>({ open: false, query: "", range: null, rect: null })
@@ -489,6 +498,11 @@ function DocEditor({
               {labels.preview}
             </Button>
           )}
+          {isLabel && onPrintLabels && (
+            <Button variant="outline" size="sm" icon="print" onClick={onPrintLabels}>
+              {labels.printLabels}
+            </Button>
+          )}
           {onExportPdf && (
             <Button variant="outline" size="sm" icon="download" onClick={() => void onExportPdf()}>
               {labels.pdf}
@@ -516,6 +530,19 @@ function DocEditor({
           onView={doc.kind === "label" ? undefined : setView}
           zoom={zoom}
           onZoom={setZoom}
+          sheet={
+            isLabel ? (
+              <LabelSetup
+                grid={labelGrid}
+                sheet={sheetSize}
+                disabled={!editable}
+                labels={labels}
+                onChange={(grid, sheet) =>
+                  onChange({ ...latest.current, labels: grid, page: { size: sheet, marginMm: 16, letterhead: false } })
+                }
+              />
+            ) : undefined
+          }
         />
       ) : (
         <div className="h-11 border-b border-border bg-card" />
@@ -633,6 +660,13 @@ function DocEditor({
               </div>
             </EditorServicesProvider>
             )
+            if (isLabel) {
+              return (
+                <LabelSheetView editor={editor} grid={labelGrid} sheet={sheetSize} zoom={zoomFactor} accent={accent} labels={labels} onOverflow={setLabelOverflow}>
+                  {content}
+                </LabelSheetView>
+              )
+            }
             return view === "page" ? (
               <PageView
                 editor={editor}
@@ -670,7 +704,15 @@ function DocEditor({
       {/* Status bar (28px) */}
       <footer className="flex h-7 items-center gap-4 overflow-hidden border-t border-border bg-card px-4 text-xs whitespace-nowrap text-muted-foreground">
         <span>{meta?.words === 1 ? labels.word : fill(labels.words, { n: meta?.words ?? 0 })}</span>
-        {view === "page" ? (
+        {isLabel ? (
+          <>
+            <span>{fill(labels.labelsPerSheet, { n: labelCells(labelGrid, sheetSize).length })}</span>
+            <span dir="ltr">
+              {sheetSize} · {labelGrid.size.widthMm} × {labelGrid.size.heightMm} mm
+            </span>
+            {labelOverflow && <span className="text-error-text">{labels.labelOverflow}</span>}
+          </>
+        ) : view === "page" ? (
           <>
             <span>{fill(labels.pageOf, { page: 1, pages })}</span>
             <span>{labels.pageSetup}</span>

@@ -146,6 +146,7 @@ function EditorToolbar({
   onView,
   zoom,
   onZoom,
+  sheet,
 }: {
   editor: Editor
   labels: EditorLabels
@@ -160,6 +161,8 @@ function EditorToolbar({
   onView?: (view: EditorView) => void
   zoom?: PageZoom
   onZoom?: (zoom: PageZoom) => void
+  /** Label sheets: the sheet setup, beside the zoom (E.43). */
+  sheet?: React.ReactNode
 }) {
   const s = useEditorState({
     editor,
@@ -255,6 +258,7 @@ function EditorToolbar({
       </DropdownMenu>
       {fields && fields.length > 0 && <FieldMenu editor={editor} groups={fields} labels={labels} disabled={!editable} />}
       <span className="min-w-2 flex-1" />
+      {sheet}
       {view === "page" && onZoom && (
         <DropdownMenu modal={false}>
           <DropdownMenuTrigger asChild>
