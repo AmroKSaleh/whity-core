@@ -143,7 +143,7 @@ export function PrintLabelsDialog({
           : { kind: 'csv', file: file!, columns: mapped };
       setDone(await onPrint(source));
     } catch (e) {
-      setError(e instanceof Error && e.message ? e.message : t('blockEditor.printLabels.failed', 'The labels didn’t print. Try again.'));
+      setError(e instanceof Error && e.message ? e.message : t('blockEditor.labelPrint.failed', 'The labels didn’t print. Try again.'));
     } finally {
       setBusy(false);
     }
@@ -159,22 +159,22 @@ export function PrintLabelsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[520px]" closeLabel={t('blockEditor.printLabels.close', 'Close')}>
+      <DialogContent className="max-w-[520px]" closeLabel={t('blockEditor.labelPrint.close', 'Close')}>
         <DialogHeader>
-          <DialogTitle>{t('blockEditor.printLabels.title', 'Print labels')}</DialogTitle>
-          <DialogDescription>{t('blockEditor.printLabels.description', 'One label for each record or each row of a CSV file.')}</DialogDescription>
+          <DialogTitle>{t('blockEditor.labelPrint.title', 'Print labels')}</DialogTitle>
+          <DialogDescription>{t('blockEditor.labelPrint.description', 'One label for each record or each row of a CSV file.')}</DialogDescription>
         </DialogHeader>
 
         {canUseRecords && (
           <ToggleGroup
             size="sm"
-            label={t('blockEditor.printLabels.from', 'Print from')}
+            label={t('blockEditor.labelPrint.from', 'Print from')}
             required
             value={from}
             onChange={(v) => v && setFrom(v as 'records' | 'csv')}
             options={[
-              { value: 'records', label: t('blockEditor.printLabels.records', 'Records') },
-              { value: 'csv', label: t('blockEditor.printLabels.csv', 'CSV file') },
+              { value: 'records', label: t('blockEditor.labelPrint.records', 'Records') },
+              { value: 'csv', label: t('blockEditor.labelPrint.csv', 'CSV file') },
             ]}
           />
         )}
@@ -191,7 +191,7 @@ export function PrintLabelsDialog({
                 className="h-9 min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
               />
             </label>
-            <div className="grid max-h-[260px] gap-0.5 overflow-y-auto" role="group" aria-label={t('blockEditor.printLabels.records', 'Records')}>
+            <div className="grid max-h-[260px] gap-0.5 overflow-y-auto" role="group" aria-label={t('blockEditor.labelPrint.records', 'Records')}>
               {choices?.length === 0 && (
                 <p className="m-0 px-2 py-3 text-sm text-muted-foreground">{t('blockEditor.recordPicker.none', 'No records match')}</p>
               )}
@@ -204,8 +204,8 @@ export function PrintLabelsDialog({
             </div>
             <span className="text-xs text-muted-foreground">
               {picked.size === 1
-                ? t('blockEditor.printLabels.oneRecord', '1 record selected')
-                : t('blockEditor.printLabels.nRecords', '{n} records selected').replace('{n}', String(picked.size))}
+                ? t('blockEditor.labelPrint.oneRecord', '1 record selected')
+                : t('blockEditor.labelPrint.nRecords', '{n} records selected').replace('{n}', String(picked.size))}
             </span>
           </div>
         ) : (
@@ -219,7 +219,7 @@ export function PrintLabelsDialog({
                 onChange={(e) => void chooseFile(e.target.files?.[0] ?? null)}
               />
               <Button variant="outline" size="sm" icon="upload" onClick={() => input.current?.click()}>
-                {file ? t('blockEditor.printLabels.changeFile', 'Choose another file') : t('blockEditor.printLabels.chooseFile', 'Choose a CSV file')}
+                {file ? t('blockEditor.labelPrint.changeFile', 'Choose another file') : t('blockEditor.labelPrint.chooseFile', 'Choose a CSV file')}
               </Button>
               {file && (
                 <span className="min-w-0 truncate text-sm" dir="auto">
@@ -229,12 +229,12 @@ export function PrintLabelsDialog({
             </div>
             {file && columns.length === 0 && (
               <p role="alert" className="m-0 text-sm text-error-text">
-                {t('blockEditor.printLabels.noHeader', 'The first row of the file should name its columns.')}
+                {t('blockEditor.labelPrint.noHeader', 'The first row of the file should name its columns.')}
               </p>
             )}
             {columns.length > 0 && (
               <div className="grid gap-1.5">
-                <span className="text-xs font-semibold text-foreground">{t('blockEditor.printLabels.match', 'Match each column to a field')}</span>
+                <span className="text-xs font-semibold text-foreground">{t('blockEditor.labelPrint.match', 'Match each column to a field')}</span>
                 <div className="grid max-h-[240px] gap-1.5 overflow-y-auto">
                   {columns.map((column) => (
                     <div key={column} className="grid grid-cols-2 items-center gap-2">
@@ -246,7 +246,7 @@ export function PrintLabelsDialog({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value={NOT_PRINTED}>{t('blockEditor.printLabels.notPrinted', 'Not printed')}</SelectItem>
+                          <SelectItem value={NOT_PRINTED}>{t('blockEditor.labelPrint.notPrinted', 'Not printed')}</SelectItem>
                           {allFields.map((field) => (
                             <SelectItem key={field.path} value={field.path}>
                               {field.label}
@@ -258,7 +258,7 @@ export function PrintLabelsDialog({
                   ))}
                 </div>
                 <span className="text-xs text-muted-foreground">
-                  {t('blockEditor.printLabels.notStored', 'The file is used for this print only and isn’t kept.')}
+                  {t('blockEditor.labelPrint.notStored', 'The file is used for this print only and isn’t kept.')}
                 </span>
               </div>
             )}
@@ -274,20 +274,20 @@ export function PrintLabelsDialog({
         {done && (
           <p role="status" className="m-0 text-sm text-muted-foreground">
             {(done.count === 1
-              ? t('blockEditor.printLabels.printedOne', '1 label printed.')
-              : t('blockEditor.printLabels.printed', '{n} labels printed.').replace('{n}', String(done.count))) +
+              ? t('blockEditor.labelPrint.printedOne', '1 label printed.')
+              : t('blockEditor.labelPrint.printed', '{n} labels printed.').replace('{n}', String(done.count))) +
               (done.clipped > 0
-                ? ' ' + t('blockEditor.printLabels.clipped', '{n} didn’t fit their label and were cut off.').replace('{n}', String(done.clipped))
+                ? ' ' + t('blockEditor.labelPrint.clipped', '{n} didn’t fit their label and were cut off.').replace('{n}', String(done.clipped))
                 : '')}
           </p>
         )}
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            {t('blockEditor.printLabels.cancel', 'Cancel')}
+            {t('blockEditor.labelPrint.cancel', 'Cancel')}
           </Button>
           <Button icon="print" disabled={!ready || busy} onClick={() => void print()}>
-            {busy ? t('blockEditor.printLabels.printing', 'Printing…') : t('blockEditor.printLabels.print', 'Print')}
+            {busy ? t('blockEditor.labelPrint.printing', 'Printing…') : t('blockEditor.labelPrint.print', 'Print')}
           </Button>
         </DialogFooter>
       </DialogContent>

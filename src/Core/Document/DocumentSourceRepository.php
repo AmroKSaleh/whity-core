@@ -79,7 +79,7 @@ final class DocumentSourceRepository
     /**
      * @param array{kind: string, title: string, lang: string, default_view: string, full_width?: bool,
      *              page?: ?array<string, mixed>, record_type?: ?string, blocks: list<array<string, mixed>>,
-     *              scope?: string, required_permission?: ?string, created_by: int, owner_ou_id?: ?int,
+     *              scope?: string, required_permission?: ?string, created_by: ?int, owner_ou_id?: ?int,
      *              own_fields?: ?list<array<string, string>>, starter_key?: ?string, legacy_template_id?: ?int} $rec
      * @return int The new row id.
      */

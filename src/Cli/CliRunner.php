@@ -35,6 +35,8 @@ class CliRunner
         // (#1063). Run it alongside `queue:work`.
         'events:relay' => 'Whity\Cli\Commands\EventRelayCommand',
         'permissions:unheld' => 'Whity\Cli\Commands\PermissionsCommand',
+        // Editor M4b: the editor's starters and the old designer's templates, for existing tenants.
+        'documents:convert-legacy' => 'Whity\Cli\Commands\DocumentsCommand',
     ];
 
     /**

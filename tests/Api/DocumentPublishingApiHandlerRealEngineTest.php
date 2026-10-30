@@ -381,7 +381,9 @@ final class DocumentPublishingApiHandlerRealEngineTest extends TestCase
         self::assertCount(2, $labels);
         self::assertSame('Example Clinic; East · Example Bakery', $labels[0][0]['text'], 'the shared fields fill every label');
         self::assertSame('Example School · Example Bakery', $labels[1][0]['text']);
-        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM document_source_files')->fetchColumn(), 'the CSV is not stored');
+        $files = $this->pdo->prepare('SELECT COUNT(*) FROM document_source_files');
+        $files->execute();
+        self::assertSame(0, (int) $files->fetchColumn(), 'the CSV is not stored');
 
         self::assertSame(422, $this->printLabels(self::OWNER, $id, ['csv' => $csv, 'columns' => ['Phone' => 'document.title']])->getStatusCode(), 'no such column');
         self::assertSame(422, $this->printLabels(self::OWNER, $id, ['csv' => $csv, 'columns' => ['Name' => 'invoice.total']])->getStatusCode(), 'not a field');

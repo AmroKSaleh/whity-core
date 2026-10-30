@@ -8,6 +8,8 @@ use PDO;
 use Psr\Log\LoggerInterface;
 use RuntimeException;
 use Whity\Core\Document\DocumentBlockRepository;
+use Whity\Core\Document\DocumentSourceRepository;
+use Whity\Core\Document\DocumentSourceStarterSeeder;
 use Whity\Core\Document\DocumentStarterSeeder;
 use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Hooks\HookManager;
@@ -115,6 +117,9 @@ final class TenantProvisioner
                 new DocumentBlockRepository($db),
                 $logger,
             ),
+            // The document editor's own starters (editor M4b), which replace the
+            // ones above when the old designer goes (M4c).
+            new DocumentSourceStarterSeeder(new DocumentSourceRepository($db), $logger),
         ];
     }
 
