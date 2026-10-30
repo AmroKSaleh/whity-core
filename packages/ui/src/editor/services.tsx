@@ -55,15 +55,27 @@ export interface EditorServices {
   recordTypes?: { key: string; label: string }[]
 }
 
+/**
+ * Preview with a record (E.12): each field's value for that record, by path.
+ * `null` is a missing value, flagged on the error tint (E.27).
+ */
+export interface FieldPreview {
+  /** "INV-1042 · Example Clinic" */
+  label: string
+  values: Record<string, string | null>
+}
+
 interface ServicesValue {
   services: EditorServices
   labels: EditorLabels
+  /** Set while previewing with a record; fields then show values, not chips. */
+  preview?: FieldPreview | null
 }
 
 const ServicesContext = React.createContext<ServicesValue>({ services: {}, labels: EDITOR_LABELS })
 
-export function EditorServicesProvider({ services, labels, children }: ServicesValue & { children: React.ReactNode }) {
-  const value = React.useMemo(() => ({ services, labels }), [services, labels])
+export function EditorServicesProvider({ services, labels, preview = null, children }: ServicesValue & { children: React.ReactNode }) {
+  const value = React.useMemo(() => ({ services, labels, preview }), [services, labels, preview])
   return <ServicesContext.Provider value={value}>{children}</ServicesContext.Provider>
 }
 

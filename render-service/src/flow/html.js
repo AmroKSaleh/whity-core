@@ -51,13 +51,14 @@ const DEFAULT_FONT_STACK =
   "'Noto Naskh Arabic', 'Noto Sans Arabic', 'DejaVu Sans', 'Liberation Sans', Arial, sans-serif";
 
 const { escapeHtml, isolateForeignRuns } = require('./bidi');
-const { QR_SIZE_MM, MAX_FIELD_BOXES, MAX_ANSWER_LINES } = require('./document');
+const { QR_SIZE_MM, MAX_FIELD_BOXES, MAX_ANSWER_LINES, BARCODE_SYMBOLOGIES } = require('./document');
 
 /* Already a dependency of this service for the fixed-canvas mode's barcode
  * element; the flowing mode draws its verification code with the same encoder
  * so two modes of one product cannot print two different barcodes for one
  * token. */
 const bwipjs = require('bwip-js');
+const katex = require('katex');
 
 /**
  * Escape a JSON string for embedding inside a <script> block. `</` is the
@@ -276,6 +277,36 @@ function renderQr(block, direction) {
   );
 }
 
+/** E.40: a barcode, ink only, with its value under it when asked. */
+function renderBarcode(block, direction) {
+  let svg = '';
+  try {
+    svg = bwipjs.toSVG({ bcid: BARCODE_SYMBOLOGIES[block.symbology], text: block.value, scale: 2, height: 12, includetext: false });
+  } catch (err) {
+    // A value the symbology can't encode (an EAN-13 with letters) prints as
+    // its text, which still reads, rather than failing the whole document.
+    // eslint-disable-next-line no-console
+    console.error('[whity_render] barcode could not be encoded:', err && err.message ? err.message : err);
+  }
+  const text = block.showText !== false || !svg ? `<div class="flow-barcode-text">${isolateForeignRuns(block.value, direction)}</div>` : '';
+  return `${unitOpen(block, 'barcode')}${svg ? `<div class="flow-barcode-code">${svg}</div>` : ''}${text}</div>`;
+}
+
+/**
+ * E.42: a formula. KaTeX writes MathML, which Chromium lays out itself, so
+ * the PDF needs no KaTeX fonts or stylesheet. A formula that doesn't parse
+ * prints as its source.
+ */
+function renderMath(block) {
+  let math = '';
+  try {
+    math = katex.renderToString(block.tex, { output: 'mathml', displayMode: true, throwOnError: true, trust: false });
+  } catch {
+    math = `<code>${escapeHtml(block.tex)}</code>`;
+  }
+  return `${unitOpen(block, 'math')}${math}</div>`;
+}
+
 /* ---------------------------------------------------------------- forms
  *
  * The blocks a printed form needs. Each is one paginator unit (its
@@ -395,6 +426,22 @@ function renderDivider(block, direction) {
   return `${unitOpen(block, 'divider')}${text}</div>`;
 }
 
+/** The first page's letterhead: start side, then end side (logical, so it mirrors in Arabic). */
+function renderLetterhead(block, direction) {
+  const side = (part, cls) => {
+    if (!part) return `<div class="${cls}"></div>`;
+    const image = part.image
+      ? `<img class="flow-letterhead-logo" src="${escapeHtml(part.image.src)}" alt="${escapeHtml(part.image.alt || '')}"` +
+        `${part.image.heightMm ? ` style="height:${Number(part.image.heightMm)}mm"` : ''}>`
+      : '';
+    const name = part.name ? `<div class="flow-letterhead-name">${isolateForeignRuns(part.name, direction)}</div>` : '';
+    const title = part.title ? `<div class="flow-letterhead-title">${isolateForeignRuns(part.title, direction)}</div>` : '';
+    const lines = (part.lines || []).map((l) => `<div class="flow-letterhead-line">${isolateForeignRuns(l, direction)}</div>`).join('');
+    return `<div class="${cls}">${image}${name}${title}${lines}</div>`;
+  };
+  return `${unitOpen(block, 'letterhead')}${side(block.start, 'flow-letterhead-start')}${side(block.end, 'flow-letterhead-end')}</div>`;
+}
+
 function renderBlock(block, direction) {
   switch (block.type) {
     case 'heading': {
@@ -432,6 +479,12 @@ function renderBlock(block, direction) {
       return renderQuestion(block, direction);
     case 'divider':
       return renderDivider(block, direction);
+    case 'letterhead':
+      return renderLetterhead(block, direction);
+    case 'barcode':
+      return renderBarcode(block, direction);
+    case 'math':
+      return renderMath(block);
     case 'pageBreak':
       return '<div class="flow-page-break" data-flow-unit="pageBreak"></div>';
     case 'spacer':

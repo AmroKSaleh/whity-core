@@ -1,6 +1,7 @@
-import type { Block, DocumentKind, WhityDocument } from '@whity-org/ui/editor/contract';
-import type { EditorServices, RecordView, UploadedFile } from '@whity-org/ui/editor/services';
-import type { DocumentEditorAdapter, LoadedDocument, SaveResult } from '@whity-org/features/document-editor';
+import type { Block, DocumentKind, PublishBlocker, WhityDocument } from '@whity-org/ui/editor/contract';
+import type { FieldGroup } from '@whity-org/ui/editor/fields';
+import type { EditorServices, FieldPreview, RecordView, UploadedFile } from '@whity-org/ui/editor/services';
+import type { DocumentEditorAdapter, LoadedDocument, SaveResult, TemplateSetup } from '@whity-org/features/document-editor';
 import { api } from '@/lib/api/client';
 import type { components } from '@/lib/api/schema';
 
@@ -27,6 +28,7 @@ export function toDocument(row: Row): WhityDocument {
     lang: row.lang === 'ar' ? 'ar' : 'en',
     defaultView: row.default_view === 'page' ? 'page' : 'continuous',
     fullWidth: row.full_width,
+    page: (row.page ?? undefined) as WhityDocument['page'],
     recordType: row.record_type ?? undefined,
     blocks: (row.blocks ?? []) as unknown as Block[],
     // Comments and suggestions have their own endpoints from M5.
@@ -122,8 +124,72 @@ async function loadServices(id: string): Promise<EditorServices> {
   };
 }
 
+/** Saves the PDF the server returns under the template's name. */
+function download(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${filename || 'document'}.pdf`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export const documentSourcesAdapter: DocumentEditorAdapter = {
   loadServices,
+
+  async loadTemplate(recordType): Promise<TemplateSetup> {
+    const { data, response } = await api.GET('/api/v1/document-fields', {
+      params: { query: recordType ? { recordType } : {} },
+    });
+    if (data === undefined) throw new Error(`Failed to load the fields (${response.status})`);
+    return {
+      fields: data.data.groups as FieldGroup[],
+      letterhead: data.data.letterhead,
+      accent: data.data.accent ?? null,
+    };
+  },
+
+  async findRecords(recordType, query) {
+    const { data, response } = await api.GET('/api/v1/document-fields/records', {
+      params: { query: { recordType, ...(query ? { q: query } : {}) } },
+    });
+    if (data === undefined) throw new Error(`Failed to find records (${response.status})`);
+    return data.data.map((r) => ({ ref: `${recordType}:${r.id}`, label: r.label }));
+  },
+
+  async preview(id, record): Promise<FieldPreview | null> {
+    const { data, response } = await api.GET('/api/v1/document-sources/{id}/preview', {
+      params: { path: { id: Number(id) }, query: record ? { record } : {} },
+    });
+    if (response.status === 404) return null;
+    if (data === undefined) throw new Error(`Failed to preview (${response.status})`);
+    return { label: data.data.label, values: data.data.values };
+  },
+
+  async publishCheck(id): Promise<PublishBlocker[]> {
+    const { data, response } = await api.GET('/api/v1/document-sources/{id}/publish-check', { params: { path: { id: Number(id) } } });
+    if (data === undefined) throw new Error(`Failed to check the template (${response.status})`);
+    return data.data as PublishBlocker[];
+  },
+
+  async publish(id, version): Promise<number> {
+    const { data, response } = await api.POST('/api/v1/document-sources/{id}/publish', {
+      params: { path: { id: Number(id) } },
+      headers: { 'If-Match': `"${version}"` },
+    });
+    if (data === undefined) throw new Error(`Failed to publish (${response.status})`);
+    return data.data.published_version;
+  },
+
+  async exportPdf(id, record, filename) {
+    const { data, response } = await api.POST('/api/v1/document-sources/{id}/render', {
+      params: { path: { id: Number(id) } },
+      body: record ? { record } : {},
+      parseAs: 'blob',
+    });
+    if (data === undefined) throw new Error(`Failed to print (${response.status})`);
+    download(data as Blob, filename);
+  },
 
   async load(id: string): Promise<LoadedDocument> {
     const { data, response } = await api.GET('/api/v1/document-sources/{id}', { params: { path: { id: Number(id) } } });

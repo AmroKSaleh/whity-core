@@ -742,6 +742,80 @@ body {
   font-size: 9pt;
 }
 
+.flow-barcode {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1mm;
+  margin: 2mm 0 3mm;
+}
+
+.flow-barcode-code svg {
+  display: block;
+  height: 14mm;
+  width: auto;
+}
+
+.flow-barcode-text {
+  font-family: var(--flow-mono, monospace);
+  font-size: 8.5pt;
+  direction: ltr;
+}
+
+.flow-math {
+  margin: 2mm 0 3mm;
+  text-align: center;
+  direction: ltr;
+}
+
+.flow-letterhead {
+  display: flex;
+  justify-content: space-between;
+  gap: 6mm;
+  padding-bottom: 3.7mm;
+  margin-bottom: 4.8mm;
+  border-bottom: 0.26mm solid var(--flow-line);
+  font-size: 8.5pt;
+  color: var(--flow-muted);
+}
+
+.flow-letterhead-start,
+.flow-letterhead-end {
+  display: flex;
+  flex-direction: column;
+  gap: 1mm;
+}
+
+.flow-letterhead-end {
+  align-items: flex-end;
+  text-align: end;
+}
+
+.flow-letterhead-logo {
+  height: 8.5mm;
+  width: auto;
+  align-self: flex-start;
+}
+
+.flow-letterhead-name {
+  font-size: 10pt;
+  font-weight: 600;
+  color: var(--flow-ink);
+}
+
+/* The document's title, in the tenant's print colour (stage 6). */
+.flow-letterhead-title {
+  font-size: 22pt;
+  font-weight: 600;
+  line-height: 1.15;
+  color: var(--flow-accent);
+}
+
+.flow-letterhead-end .flow-letterhead-line:first-of-type {
+  color: var(--flow-ink);
+  font-weight: 600;
+}
+
 .flow-divider {
   display: flex;
   align-items: center;

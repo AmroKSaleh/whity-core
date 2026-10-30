@@ -1,0 +1,473 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Whity\Api;
+
+use Whity\Auth\RoleChecker;
+use Whity\Core\Document\DocumentIssuer;
+use Whity\Core\Document\DocumentPresenter;
+use Whity\Core\Document\DocumentSourceFileStore;
+use Whity\Core\Document\DocumentSourceVersionRepository;
+use Whity\Core\Document\Embed\DocumentEmbedRegistry;
+use Whity\Core\Document\Fields\DocumentFieldRegistry;
+use Whity\Core\Document\Print\DocumentPublishCheck;
+use Whity\Core\Document\Print\PrintLabels;
+use Whity\Core\Document\Print\WhityDocumentPrinter;
+use Whity\Core\Document\Render\DocumentRenderRejectedException;
+use Whity\Core\Document\Render\FlowDocumentRenderer;
+use Whity\Core\Document\Render\RenderServiceUnavailableException;
+use Whity\Core\Entitlement\EntitlementRegistry;
+use Whity\Core\Entitlement\MeterService;
+use Whity\Core\RBAC\ScopedPermissionSet;
+use Whity\Core\Request;
+use Whity\Core\Response;
+use Whity\Core\Settings\SettingsRegistry;
+use Whity\Core\Settings\SettingsService;
+use Whity\Core\Tenant\TenantContext;
+use Whity\Http\JsonBody;
+use Whity\Storage\StorageException;
+
+/**
+ * Templates from the document editor, from draft to paper (editor M4;
+ * IMPLEMENTATION-NOTES 3.2 and 3.7):
+ *
+ *   GET  /api/document-fields?recordType=            the field picker's groups,
+ *                                                    the letterhead and print colour
+ *   GET  /api/document-fields/records?recordType=&q= records to preview with
+ *   GET  /api/document-sources/{id}/publish-check    what blocks publishing (E.37)
+ *   POST /api/document-sources/{id}/publish          the draft becomes a version (E.9)
+ *   GET  /api/document-sources/{id}/versions         the history
+ *   GET  /api/document-sources/{id}/preview?record=  field values for one record (E.12)
+ *   POST /api/document-sources/{id}/render           the PDF through Whity Render (E.16)
+ *
+ * Every route first finds the document the way the editor's own routes do
+ * (DocumentSourcesApiHandler::visibleRow), so a hidden document answers 404
+ * here too, and every value is read for the person asking.
+ */
+final class DocumentPublishingApiHandler
+{
+    /** The limits one rendered document spends, as for the designer's renders. */
+    private const RENDER_METERS = [
+        EntitlementRegistry::DOCUMENTS_RENDER_PER_DAY,
+        EntitlementRegistry::DOCUMENTS_RENDER_PER_MONTH,
+    ];
+
+    private const MAX_RECORDS = 25;
+
+    private PrintLabels $printLabels;
+
+    public function __construct(
+        private readonly DocumentSourcesApiHandler $sources,
+        private readonly DocumentSourceVersionRepository $versions,
+        private readonly DocumentFieldRegistry $fields,
+        private readonly DocumentEmbedRegistry $embeds,
+        private readonly RoleChecker $roleChecker,
+        private readonly SettingsService $settings,
+        private readonly ?FlowDocumentRenderer $renderer = null,
+        private readonly ?DocumentIssuer $issuer = null,
+        private readonly ?DocumentSourceFileStore $files = null,
+        ?PrintLabels $printLabels = null,
+        private readonly ?MeterService $meters = null,
+    ) {
+        $this->printLabels = $printLabels ?? new PrintLabels();
+    }
+
+    public function fields(Request $request): Response
+    {
+        $ctx = $this->context($request);
+        if ($ctx instanceof Response) {
+            return $ctx;
+        }
+        [$tenantId] = $ctx;
+        $type = self::query($request)['recordType'] ?? null;
+        $type = is_string($type) && $type !== '' ? $type : null;
+
+        return Response::json(['data' => [
+            'record_types' => $this->fields->recordTypes(),
+            'groups' => $this->fields->groups($tenantId, $type),
+            'letterhead' => $this->letterhead($tenantId),
+            'accent' => $this->accent($tenantId),
+        ]]);
+    }
+
+    public function records(Request $request): Response
+    {
+        $ctx = $this->context($request);
+        if ($ctx instanceof Response) {
+            return $ctx;
+        }
+        [$tenantId, $callerId] = $ctx;
+        $q = self::query($request);
+        $type = (string) ($q['recordType'] ?? '');
+        if (!$this->fields->has($type)) {
+            return Response::error('Unknown record type', 404);
+        }
+
+        return Response::json(['data' => $this->fields->records(
+            $tenantId,
+            $callerId,
+            $this->permissions($callerId, $tenantId),
+            $type,
+            mb_substr((string) ($q['q'] ?? ''), 0, 100),
+            self::MAX_RECORDS,
+        )]);
+    }
+
+    /** @param array<string, string> $params */
+    public function publishCheck(Request $request, array $params): Response
+    {
+        $found = $this->template($request, $params);
+        if ($found instanceof Response) {
+            return $found;
+        }
+        [$tenantId, , $row] = $found;
+
+        return Response::json(['data' => $this->blockers($tenantId, $row)])
+            ->withHeaders(['ETag' => '"' . (int) $row['draft_version'] . '"']);
+    }
+
+    /**
+     * Runs the check again and publishes exactly the draft version it checked
+     * (If-Match), so a save landing in between can't be published unchecked.
+     *
+     * @param array<string, string> $params
+     */
+    public function publish(Request $request, array $params): Response
+    {
+        $found = $this->template($request, $params);
+        if ($found instanceof Response) {
+            return $found;
+        }
+        [$tenantId, $callerId, $row] = $found;
+
+        $base = DocumentSourcesApiHandler::parseIfMatch($request->getHeader('If-Match'));
+        if ($base === null) {
+            return Response::error('If-Match with the draft version is required', 428);
+        }
+        if ($base !== (int) $row['draft_version']) {
+            return Response::error('The document changed since it was checked', 409, ['draft_version' => (int) $row['draft_version']]);
+        }
+        $blockers = $this->blockers($tenantId, $row);
+        if ($blockers !== []) {
+            return Response::error('The template has something that blocks publishing', 409, ['blockers' => $blockers]);
+        }
+
+        $version = $this->versions->publish((int) $row['id'], $tenantId, $base, $callerId);
+        if ($version === null) {
+            return Response::error('The document changed since it was checked', 409);
+        }
+
+        return Response::json(['data' => ['published_version' => $version]], 201);
+    }
+
+    /** @param array<string, string> $params */
+    public function history(Request $request, array $params): Response
+    {
+        $found = $this->template($request, $params, false);
+        if ($found instanceof Response) {
+            return $found;
+        }
+        [$tenantId, , $row] = $found;
+
+        return Response::json(['data' => $this->versions->listForSource((int) $row['id'], $tenantId)]);
+    }
+
+    /**
+     * E.12: each field's value for one record as the caller may see it. A
+     * record the caller can't see answers the same 404 as one that doesn't exist.
+     *
+     * @param array<string, string> $params
+     */
+    public function preview(Request $request, array $params): Response
+    {
+        $found = $this->template($request, $params, false);
+        if ($found instanceof Response) {
+            return $found;
+        }
+        [$tenantId, $callerId, $row] = $found;
+
+        $record = self::parseRecord(self::query($request)['record'] ?? null);
+        $type = $row['record_type'] !== null ? (string) $row['record_type'] : null;
+        if ($type !== null && ($record === null || $record[0] !== $type)) {
+            return Response::error('record must be "' . $type . ':<id>"', 422);
+        }
+        $resolved = $this->fields->resolve($tenantId, $callerId, $this->permissions($callerId, $tenantId), $type, $record[1] ?? null);
+        if ($resolved === null) {
+            return Response::error('Record not found', 404);
+        }
+
+        return Response::json(['data' => $resolved]);
+    }
+
+    /**
+     * The PDF of the published version (or the draft, for a preview) filled
+     * for one record. Field values, records and charts are read now, for the
+     * caller, and frozen into the PDF (E.16). With `persist`, the PDF is issued
+     * as a document whose variable_data keeps the values it printed.
+     *
+     * @param array<string, string> $params
+     */
+    public function render(Request $request, array $params): Response
+    {
+        $found = $this->template($request, $params, false);
+        if ($found instanceof Response) {
+            return $found;
+        }
+        [$tenantId, $callerId, $row] = $found;
+        if ($this->renderer === null || !$this->renderer->isEnabled($tenantId)) {
+            return Response::error('Document rendering is not enabled on this instance', 503);
+        }
+
+        $body = JsonBody::parsed($request);
+        $draft = ($body['draft'] ?? false) === true;
+        $persist = ($body['persist'] ?? false) === true;
+        if ($draft && $persist) {
+            return Response::error('A draft can be previewed as a PDF but not issued', 422);
+        }
+        if ($persist && $this->issuer === null) {
+            return Response::error('Issuing documents is not available on this instance', 503);
+        }
+
+        if ($draft) {
+            $doc = ['title' => (string) $row['title'], 'page' => $row['page'], 'blocks' => $row['blocks'], 'version' => null];
+        } else {
+            $published = $row['published_version'] !== null
+                ? $this->versions->find((int) $row['id'], $tenantId, (int) $row['published_version'])
+                : null;
+            if ($published === null) {
+                return Response::error('This template has no published version yet', 409);
+            }
+            $doc = ['title' => $published['title'], 'page' => $published['page'], 'blocks' => $published['blocks'], 'version' => $published['version']];
+        }
+
+        $hasPermission = $this->permissions($callerId, $tenantId);
+        $type = $row['record_type'] !== null ? (string) $row['record_type'] : null;
+        $record = self::parseRecord($body['record'] ?? null);
+        if ($type !== null && ($record === null || $record[0] !== $type)) {
+            return Response::error('record must be "' . $type . ':<id>"', 422);
+        }
+        $resolved = $this->fields->resolve($tenantId, $callerId, $hasPermission, $type, $record[1] ?? null);
+        if ($resolved === null) {
+            return Response::error('Record not found', 404);
+        }
+        $values = $resolved['values'];
+
+        $sourceId = (int) $row['id'];
+        $printer = new WhityDocumentPrinter(
+            $values,
+            $this->fields->requiredPaths($tenantId, $type),
+            function (array $ref) use ($tenantId, $callerId, $hasPermission): ?array {
+                return $this->embeds->recordProvider($ref['type'])?->resolve($tenantId, $callerId, $hasPermission, $ref['id']);
+            },
+            function (string $key) use ($tenantId, $callerId, $hasPermission): ?array {
+                return $this->embeds->chartSource($key)?->load($tenantId, $callerId, $hasPermission, []);
+            },
+            fn (string $fileId): ?string => $this->imageData($tenantId, $sourceId, $fileId),
+            $this->printLabels,
+        );
+
+        // E.27: refuse rather than issue a document with a required field missing.
+        $missing = $printer->missingRequired($doc['blocks']);
+        if ($missing !== []) {
+            return Response::error('Required fields have no value for this record', 422, ['missing' => $missing]);
+        }
+
+        $payload = $printer->payload(
+            ['title' => $doc['title'], 'lang' => (string) $row['lang'], 'page' => $doc['page'], 'blocks' => $doc['blocks']],
+            ($doc['page']['letterhead'] ?? true) === false ? null : $this->letterhead($tenantId),
+            $resolved['label'] !== '' ? $resolved['label'] : null,
+            $values['today'] ?? null,
+            $this->accent($tenantId),
+        );
+
+        $metered = false;
+        if ($this->meters !== null) {
+            $decision = $this->meters->consume($tenantId, self::RENDER_METERS);
+            if (!$decision->allowed) {
+                return Response::error('The document render limit has been reached', 429);
+            }
+            $metered = true;
+        }
+        try {
+            $pdf = $this->renderer->render($tenantId, $payload)->bytes;
+        } catch (DocumentRenderRejectedException $e) {
+            $this->refund($tenantId, $metered);
+
+            return Response::error($e->clientMessage, 422);
+        } catch (RenderServiceUnavailableException $e) {
+            $this->refund($tenantId, $metered);
+            error_log('[DocumentPublishingApiHandler] render failed: ' . $e->getMessage());
+
+            return Response::error('Document rendering is temporarily unavailable', 503);
+        }
+
+        $title = $resolved['label'] !== '' ? $doc['title'] . ' · ' . $resolved['label'] : $doc['title'];
+        if ($persist && $this->issuer !== null) {
+            try {
+                $issued = $this->issuer->issue(
+                    $tenantId,
+                    $callerId,
+                    ['name' => (string) $doc['title']],
+                    mb_substr($title, 0, 255),
+                    $pdf,
+                    'application/pdf',
+                    'pdf',
+                    // What printed, as the one data row it was raised with, so a
+                    // re-render can show it (3.7 step 5). A missing optional value printed blank.
+                    [array_map(static fn (?string $v): string => $v ?? '', $values)],
+                );
+            } catch (StorageException $e) {
+                error_log('[DocumentPublishingApiHandler] issuing failed: ' . $e->getMessage());
+
+                return Response::error('Storing the rendered document is temporarily unavailable', 503);
+            }
+
+            return Response::json(['data' => DocumentPresenter::document($issued['document'], [$issued['artifact']])], 201);
+        }
+
+        return new Response(200, $pdf, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="' . DocumentPresenter::slugify($title) . '.pdf"',
+        ]);
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return list<array<string, mixed>>
+     */
+    private function blockers(int $tenantId, array $row): array
+    {
+        $type = $row['record_type'] !== null ? (string) $row['record_type'] : null;
+
+        return DocumentPublishCheck::blockers(
+            is_array($row['blocks'] ?? null) ? $row['blocks'] : [],
+            $this->fields->paths($tenantId, $type),
+        );
+    }
+
+    /**
+     * The tenant's letterhead as it invoices: its name, address and tax number
+     * (stage 6). The logo is the editor's to show; Whity Render prints the name.
+     *
+     * @return array{name: string, lines: list<string>}
+     */
+    private function letterhead(int $tenantId): array
+    {
+        $effective = $this->settings->effective($tenantId);
+        $name = trim((string) ($effective[SettingsRegistry::BILLING_SELLER_NAME] ?? ''));
+        if ($name === '') {
+            $name = trim((string) ($effective[SettingsRegistry::SITE_NAME] ?? ''));
+        }
+        $lines = [];
+        $address = trim((string) ($effective[SettingsRegistry::BILLING_SELLER_ADDRESS] ?? ''));
+        if ($address !== '') {
+            $lines[] = preg_replace('/\s*\R\s*/', ', ', $address) ?? $address;
+        }
+        $tax = trim((string) ($effective[SettingsRegistry::BILLING_SELLER_TAX_ID] ?? ''));
+        if ($tax !== '') {
+            $lines[] = $tax;
+        }
+
+        return ['name' => $name, 'lines' => $lines];
+    }
+
+    private function accent(int $tenantId): ?string
+    {
+        $value = trim((string) ($this->settings->effective($tenantId)[SettingsRegistry::DOCUMENTS_PRINT_COLOR] ?? ''));
+
+        return preg_match('/^#[0-9A-Fa-f]{6}$/', $value) === 1 ? $value : null;
+    }
+
+    private function imageData(int $tenantId, int $sourceId, string $fileId): ?string
+    {
+        if ($this->files === null || !ctype_digit($fileId)) {
+            return null;
+        }
+        $file = $this->files->find((int) $fileId, $sourceId, $tenantId);
+        if ($file === null || !in_array($file['content_type'], ['image/png', 'image/jpeg'], true)) {
+            return null;
+        }
+        try {
+            return 'data:' . $file['content_type'] . ';base64,' . base64_encode($this->files->bytes((string) $file['storage_key']));
+        } catch (StorageException) {
+            return null;
+        }
+    }
+
+    /**
+     * The visible template, or an early error.
+     *
+     * @param array<string, string> $params
+     * @return array{0: int, 1: int, 2: array<string, mixed>}|Response
+     */
+    private function template(Request $request, array $params, bool $templatesOnly = true): array|Response
+    {
+        $ctx = $this->context($request);
+        if ($ctx instanceof Response) {
+            return $ctx;
+        }
+        [$tenantId, $callerId] = $ctx;
+        $row = $this->sources->visibleRow((int) ($params['id'] ?? 0), $tenantId, $callerId);
+        if ($row === null) {
+            return Response::error('Document not found', 404);
+        }
+        // E.9: only templates have a published version; notes and wiki pages save live.
+        if ($templatesOnly && !in_array($row['kind'], ['template', 'letter', 'report', 'label'], true)) {
+            return Response::error('Only documents that print are published', 409);
+        }
+
+        return [$tenantId, $callerId, $row];
+    }
+
+    /** @return array{0: string, 1: string}|null */
+    private static function parseRecord(mixed $value): ?array
+    {
+        if (!is_string($value) || preg_match('/^([a-z0-9._-]{1,64}):([A-Za-z0-9._-]{1,64})$/', $value, $m) !== 1) {
+            return null;
+        }
+
+        return [$m[1], $m[2]];
+    }
+
+    /** @return array<int|string, mixed> */
+    private static function query(Request $request): array
+    {
+        $query = parse_url($request->getPath(), PHP_URL_QUERY);
+        $params = [];
+        if (is_string($query) && $query !== '') {
+            parse_str($query, $params);
+        }
+
+        return $params;
+    }
+
+    private function refund(int $tenantId, bool $metered): void
+    {
+        if ($metered && $this->meters !== null) {
+            $this->meters->refund($tenantId, self::RENDER_METERS);
+        }
+    }
+
+    /** @return array{0: int, 1: int}|Response */
+    private function context(Request $request): array|Response
+    {
+        $tenantId = TenantContext::getTenantId();
+        if ($tenantId === null) {
+            return Response::error('Tenant context is required', 400);
+        }
+        $actor = $request->user;
+        $callerId = is_object($actor) && isset($actor->profile_id) && is_int($actor->profile_id) ? $actor->profile_id : null;
+        if ($callerId === null) {
+            return Response::error('Authentication required', 401);
+        }
+
+        return [$tenantId, $callerId];
+    }
+
+    /** @return callable(string, int|null=): bool */
+    private function permissions(int $callerId, int $tenantId): callable
+    {
+        return ScopedPermissionSet::forProfile($this->roleChecker, $callerId, $tenantId);
+    }
+}

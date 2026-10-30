@@ -5,6 +5,7 @@ import type { Editor } from "@tiptap/core"
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react"
 
 import { Badge } from "../badge"
+import { Button } from "../button"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,7 +18,7 @@ import { cn } from "../utils"
 import { BlockList } from "./block-list"
 import { SelectionBubble } from "./bubble"
 import { applyItem, filterCatalogue } from "./catalogue"
-import type { Actor, DocumentKind, EditorMode, WhityDocument } from "./contract"
+import type { Actor, DocumentKind, EditorMode, PublishBlocker, WhityDocument } from "./contract"
 import { fromEditorContent, toEditorContent } from "./convert"
 import { DocumentBehaviour } from "./behaviour"
 import { documentExtensions } from "./extensions"
@@ -25,10 +26,14 @@ import { BlockGutter } from "./gutter"
 import { EDITOR_LABELS, fill, type EditorLabels } from "./labels"
 import { LinkCard, LinkPopover } from "./link-tools"
 import { SlashCommand, type SlashState } from "./slash"
-import { EditorToolbar } from "./toolbar"
+import { EditorToolbar, insertField, type EditorView, type PageZoom } from "./toolbar"
 import { UnknownBlock } from "./schema"
 import { BlockToolbar } from "./block-toolbar"
-import { EditorServicesProvider, type EditorServices } from "./services"
+import { EditorServicesProvider, type EditorServices, type FieldPreview } from "./services"
+import { FieldTrigger, filterFields, type FieldDef, type FieldGroup, type FieldTriggerState } from "./fields"
+import { FieldPicker, flatFields } from "./field-picker"
+import { PagePagination, PageView, fitZoom, type Letterhead } from "./page-view"
+import { PublishCheck } from "./publish-check"
 
 export type SaveState =
   | { state: "saved"; at: string }
@@ -72,6 +77,36 @@ export interface DocEditorProps {
   labels?: Partial<EditorLabels>
   /** Live data for rich blocks: records, charts, uploads (M3). Each checks the reader's permissions. */
   services?: EditorServices
+  /** The fields the template's record type offers (E.26); Field ▾ and {{ show them. */
+  fields?: FieldGroup[]
+  /** Continuous or page view; starts at the document's default (E.7). */
+  view?: EditorView
+  onViewChange?: (view: EditorView) => void
+  /** The tenant's letterhead on page 1; `null` for none. */
+  letterhead?: Letterhead | null
+  /** The tenant's print colour (`--doc-accent`) for the title and fields. */
+  accent?: string | null
+  /** The letterhead's end side: the reference ("Ref INV-1042") and the date, as fields. */
+  pageFields?: { reference?: FieldDef; date?: FieldDef }
+  /** E.12: preview with a record. Read-only while set. */
+  preview?: FieldPreview | null
+  /** Starts a preview (the screen asks which record) or changes the record. */
+  onPreview?: () => void
+  /** Show fields: leaves the preview. */
+  onClosePreview?: () => void
+  /** E.9: templates only. The header says what's in use; Publish opens the check. */
+  publish?: {
+    publishedVersion: number | null
+    /** The server's check (E.37); the editor adds the fields it can see aren't offered. */
+    check: () => Promise<PublishBlocker[]>
+    publish: () => Promise<void>
+    /** What the template prints, plural, for the check's sentence. */
+    recordLabel?: string
+    /** Fix actions: Review opens the rail (M5); Show selects the block. */
+    onFix?: (blocker: PublishBlocker) => void
+  }
+  /** Downloads the PDF through Whity Render. */
+  onExportPdf?: () => Promise<void> | void
   className?: string
 }
 
@@ -90,8 +125,9 @@ function countWords(editor: Editor): number {
  * The document editor (section 18, EditorShell): header, the fixed toolbar,
  * the outline, the continuous sheet and the status bar. Blocks, the / menu,
  * the + inserter, Markdown shortcuts, the selection bubble, links and the
- * block gutter are this milestone's (M2); comments and suggestions, fields,
- * the page view, agents and plugin blocks join in M3–M7.
+ * block gutter came in M2, rich blocks in M3; fields, the page view, preview
+ * with a record and Publish are M4's; comments and suggestions, agents and
+ * plugin blocks join in M5–M7.
  */
 function DocEditor({
   document: doc,
@@ -106,11 +142,39 @@ function DocEditor({
   blockUrl = (id) => `${typeof window === "undefined" ? "" : window.location.href.split("#")[0]}#block-${id}`,
   labels: labelProp,
   services = NO_SERVICES,
+  fields,
+  view: viewProp,
+  onViewChange,
+  letterhead,
+  accent,
+  pageFields,
+  preview = null,
+  onPreview,
+  onClosePreview,
+  publish,
+  onExportPdf,
   className,
 }: DocEditorProps) {
   const labels = React.useMemo(() => ({ ...EDITOR_LABELS, ...labelProp }), [labelProp])
   const mode: EditorMode = canEdit ? (modeProp === "viewing" ? "viewing" : "editing") : "viewing"
-  const editable = mode === "editing"
+  // E.12: the pages are read-only while previewing with a record.
+  const editable = mode === "editing" && !preview
+  const [viewState, setViewState] = React.useState<EditorView>(doc.defaultView === "page" || doc.kind === "label" ? "page" : "continuous")
+  const view: EditorView = doc.kind === "label" ? "page" : (viewProp ?? viewState)
+  const setView = (v: EditorView) => {
+    setViewState(v)
+    onViewChange?.(v)
+  }
+  const [zoom, setZoom] = React.useState<PageZoom>("fit")
+  const [canvasWidth, setCanvasWidth] = React.useState(1000)
+  const [pages, setPages] = React.useState(1)
+  const [fieldQuery, setFieldQuery] = React.useState<FieldTriggerState>({ open: false, query: "", range: null, rect: null })
+  const [fieldActive, setFieldActive] = React.useState(0)
+  const fieldKeys = React.useRef<(e: KeyboardEvent) => boolean>(() => false)
+  const [checkOpen, setCheckOpen] = React.useState(false)
+  const [blockers, setBlockers] = React.useState<PublishBlocker[]>([])
+  const [checking, setChecking] = React.useState(false)
+  const canvasRef = React.useRef<HTMLDivElement>(null)
   const [outlineOpen, setOutlineOpen] = React.useState(true)
   const [slash, setSlash] = React.useState<SlashState>({ open: false, query: "", range: null, rect: null })
   const [slashActive, setSlashActive] = React.useState(0)
@@ -128,6 +192,8 @@ function DocEditor({
     editable,
     extensions: [
       SlashCommand.configure({ onState: setSlash, onKeyDown: (e) => slashKeys.current(e) }),
+      FieldTrigger.configure({ onState: setFieldQuery, onKeyDown: (e) => fieldKeys.current(e) }),
+      PagePagination,
       ...documentExtensions({ placeholder: labels.placeholder }).map((ext) =>
         ext.name === "documentBehaviour"
           ? DocumentBehaviour.configure({ onBlockMenu: setMenuAt })
@@ -241,6 +307,79 @@ function DocEditor({
     return false
   }
 
+  const fieldGroups = React.useMemo(() => filterFields(fields ?? [], fieldQuery.query), [fields, fieldQuery.query])
+  const fieldList = flatFields(fieldGroups)
+  const fieldOpen = fieldQuery.open && !!fields?.length
+  React.useEffect(() => setFieldActive(0), [fieldQuery.query, fieldQuery.open])
+  const pickField = React.useCallback(
+    (index: number) => {
+      const field = fieldList[index]
+      if (!editor || !field || !fieldQuery.range) return
+      editor.chain().focus().deleteRange(fieldQuery.range).run()
+      setFieldQuery({ open: false, query: "", range: null, rect: null })
+      insertField(editor, field)
+    },
+    [editor, fieldList, fieldQuery.range]
+  )
+  fieldKeys.current = (e) => {
+    if (!fieldOpen) return false
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      const n = fieldList.length || 1
+      setFieldActive((i) => (i + (e.key === "ArrowDown" ? 1 : n - 1)) % n)
+      return true
+    }
+    if (e.key === "Enter") {
+      if (!fieldList.length) return false
+      pickField(fieldActive)
+      return true
+    }
+    return false
+  }
+
+  // Fit width follows the canvas.
+  React.useEffect(() => {
+    const el = canvasRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setCanvasWidth(el.clientWidth))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [view])
+  const zoomFactor = zoom === "fit" ? fitZoom(canvasWidth) : zoom / 100
+
+  const openPublish = React.useCallback(async () => {
+    if (!publish || !editor) return
+    setCheckOpen(true)
+    setChecking(true)
+    try {
+      setBlockers(await publish.check())
+    } catch {
+      setBlockers([])
+    } finally {
+      setChecking(false)
+    }
+  }, [publish, editor])
+
+  const fieldLabel = React.useCallback(
+    (path: string) => fields?.flatMap((g) => g.items).find((f) => f.path === path)?.label ?? path,
+    [fields]
+  )
+  const fixBlocker = React.useCallback(
+    (b: PublishBlocker) => {
+      if (publish?.onFix) return publish.onFix(b)
+      if (!editor) return
+      // Show: select the first place the blocker is in the document.
+      let at = -1
+      editor.state.doc.descendants((node, pos) => {
+        if (at >= 0) return false
+        if (b.kind === "unknown-field" && node.type.name === "field" && node.attrs.path === b.path) at = pos
+        if (b.kind === "block-without-print-view" && node.attrs.id === b.blockId) at = pos
+        return true
+      })
+      if (at >= 0) editor.chain().focus().setNodeSelection(at).scrollIntoView().run()
+    },
+    [publish, editor]
+  )
+
   const meta = useEditorState({
     editor,
     selector: ({ editor: e }) => {
@@ -304,7 +443,13 @@ function DocEditor({
               <span role="status" className="inline-flex items-center gap-1">
                 {save?.state === "saved" && <Icon name="check" size={12} />}
                 {save?.state === "error" && <Icon name="alert" size={12} className="text-error-text" />}
-                {saveText}
+                {publish && save?.state === "saved" ? fill(labels.draftSaved, { time: save.at }) : saveText}
+                {publish && (
+                  <span>
+                    {" · "}
+                    {publish.publishedVersion ? fill(labels.publishedInUse, { n: publish.publishedVersion }) : labels.notPublished}
+                  </span>
+                )}
               </span>
             )}
           </div>
@@ -339,12 +484,39 @@ function DocEditor({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          {onPreview && !preview && (
+            <Button variant="outline" size="sm" icon="view" onClick={onPreview}>
+              {labels.preview}
+            </Button>
+          )}
+          {onExportPdf && (
+            <Button variant="outline" size="sm" icon="download" onClick={() => void onExportPdf()}>
+              {labels.pdf}
+            </Button>
+          )}
+          {publish && (
+            <Button size="sm" icon="check" disabled={!canEdit} onClick={() => void openPublish()}>
+              {labels.publish}
+            </Button>
+          )}
         </div>
       </header>
 
       {/* Toolbar (44px) */}
       {editor ? (
-        <EditorToolbar editor={editor} labels={labels} editable={editable} outline={outlineOpen} onOutline={() => setOutlineOpen((o) => !o)} onLink={() => openLink()} />
+        <EditorToolbar
+          editor={editor}
+          labels={labels}
+          editable={editable}
+          outline={outlineOpen}
+          onOutline={() => setOutlineOpen((o) => !o)}
+          onLink={() => openLink()}
+          fields={fields}
+          view={view}
+          onView={doc.kind === "label" ? undefined : setView}
+          zoom={zoom}
+          onZoom={setZoom}
+        />
       ) : (
         <div className="h-11 border-b border-border bg-card" />
       )}
@@ -378,18 +550,27 @@ function DocEditor({
             ))}
           </nav>
         )}
-        <div className="min-w-0 px-6 pt-8 pb-16">
-          <article className="relative mx-auto box-border max-w-[760px] rounded-card border border-border bg-card px-[72px] pt-14 pb-[72px] max-md:px-6">
-            <h1
-              className="m-0 mb-1.5 font-display text-[1.9375rem] leading-[1.15] font-semibold tracking-[-0.01em] text-foreground"
-              dir="auto"
-            >
-              {doc.title || <span className="text-muted-foreground">{labels.untitled}</span>}
-            </h1>
-            <div className="mb-7 flex items-center gap-2 text-[0.8125rem] text-muted-foreground">
-              <Badge variant="secondary">{labels[KIND_LABEL[doc.kind]]}</Badge>
+        <div ref={canvasRef} className={cn("min-w-0 pb-16", view === "page" ? "overflow-x-auto px-6 pt-5" : "px-6 pt-8")}>
+          {preview && (
+            <div className="wy-previewbar" role="status">
+              <Icon name="view" size={14} />
+              <span>{labels.previewingWith}</span>
+              <b>{preview.label}</b>
+              {onPreview && (
+                <Button variant="ghost" size="sm" onClick={onPreview}>
+                  {labels.changeRecord}
+                </Button>
+              )}
+              {onClosePreview && (
+                <Button variant="ghost" size="sm" onClick={onClosePreview}>
+                  {labels.showFields}
+                </Button>
+              )}
             </div>
-            <EditorServicesProvider services={services} labels={labels}>
+          )}
+          {(() => {
+            const content = (
+            <EditorServicesProvider services={services} labels={labels} preview={preview}>
               <div ref={contentRef} className="relative">
                 <EditorContent editor={editor} />
                 {editor && (
@@ -422,6 +603,19 @@ function DocEditor({
                     />
                   </div>
                 )}
+                {editor && fieldOpen && fieldQuery.rect && (
+                  <div className="absolute z-30" style={relative(fieldQuery.rect)}>
+                    <FieldPicker
+                      id="wy-fieldpick"
+                      groups={fieldGroups}
+                      query={fieldQuery.query}
+                      active={Math.min(fieldActive, Math.max(0, fieldList.length - 1))}
+                      onActive={setFieldActive}
+                      onPick={(field) => pickField(fieldList.indexOf(field))}
+                      labels={labels}
+                    />
+                  </div>
+                )}
                 {editor && linkAt && <LinkPopover editor={editor} labels={labels} position={linkAt} onClose={() => setLinkAt(null)} />}
                 {editor && linkCard && !linkAt && (
                   <LinkCard
@@ -438,20 +632,90 @@ function DocEditor({
                 )}
               </div>
             </EditorServicesProvider>
-          </article>
+            )
+            return view === "page" ? (
+              <PageView
+                editor={editor}
+                title={doc.title}
+                letterhead={letterhead}
+                accent={accent}
+                reference={pageFields?.reference && <>{labels.reference} <LetterheadField field={pageFields.reference} preview={preview} labels={labels} /></>}
+                // @date-display-ignore: a merge field (its chip, or the record's value the server already formatted as text), not a record timestamp.
+                date={pageFields?.date && <LetterheadField field={pageFields.date} preview={preview} labels={labels} />}
+                footerRef={pageFields?.reference && preview ? (preview.values[pageFields.reference.path] ?? undefined) : undefined}
+                zoom={zoomFactor}
+                labels={labels}
+                onPages={setPages}
+              >
+                {content}
+              </PageView>
+            ) : (
+              <article className="relative mx-auto box-border max-w-[760px] rounded-card border border-border bg-card px-[72px] pt-14 pb-[72px] max-md:px-6">
+                <h1
+                  className="m-0 mb-1.5 font-display text-[1.9375rem] leading-[1.15] font-semibold tracking-[-0.01em] text-foreground"
+                  dir="auto"
+                >
+                  {doc.title || <span className="text-muted-foreground">{labels.untitled}</span>}
+                </h1>
+                <div className="mb-7 flex items-center gap-2 text-[0.8125rem] text-muted-foreground">
+                  <Badge variant="secondary">{labels[KIND_LABEL[doc.kind]]}</Badge>
+                </div>
+                {content}
+              </article>
+            )
+          })()}
         </div>
       </div>
 
       {/* Status bar (28px) */}
       <footer className="flex h-7 items-center gap-4 overflow-hidden border-t border-border bg-card px-4 text-xs whitespace-nowrap text-muted-foreground">
         <span>{meta?.words === 1 ? labels.word : fill(labels.words, { n: meta?.words ?? 0 })}</span>
-        <span>{doc.lang === "ar" ? labels.arabic : labels.english}</span>
+        {view === "page" ? (
+          <>
+            <span>{fill(labels.pageOf, { page: 1, pages })}</span>
+            <span>{labels.pageSetup}</span>
+          </>
+        ) : (
+          <span>{doc.lang === "ar" ? labels.arabic : labels.english}</span>
+        )}
         <span>{labels[KIND_LABEL[doc.kind]]}</span>
         <span className="flex-1" />
-        <span>{fill(labels.lastEdited, { name: actorName(doc.updatedBy), time: formatTime(doc.updatedAt) })}</span>
+        <span>
+          {preview
+            ? fill(labels.previewStatus, { record: preview.label })
+            : fill(labels.lastEdited, { name: actorName(doc.updatedBy), time: formatTime(doc.updatedAt) })}
+        </span>
       </footer>
+      {publish && (
+        <PublishCheck
+          open={checkOpen}
+          onOpenChange={setCheckOpen}
+          blockers={blockers}
+          checking={checking}
+          nextVersion={(publish.publishedVersion ?? 0) + 1}
+          recordLabel={publish.recordLabel}
+          onPublish={publish.publish}
+          onFix={fixBlocker}
+          labels={labels}
+          fieldLabel={fieldLabel}
+        />
+      )}
     </div>
   )
+}
+
+/** A field in the letterhead: its chip while editing, the record's value in preview. */
+function LetterheadField({ field, preview, labels }: { field: FieldDef; preview: FieldPreview | null; labels: EditorLabels }) {
+  if (!preview) return <span className="wy-mf" title={field.path}>{field.label}</span>
+  const value = preview.values[field.path]
+  if (value === null || value === undefined || value === "")
+    return (
+      <span className="wy-mf is-missing" title={labels.fieldMissing}>
+        <Icon name="alert" size={12} />
+        {field.label}
+      </span>
+    )
+  return <span className="wy-mf is-preview">{value}</span>
 }
 
 /** 24-hour times in Western digits (stage 5). */

@@ -66,7 +66,7 @@ final class SettingsRegistryTest extends TestCase
              'affiliate.clawback_on_refund', 'affiliate.withholding_bp',
              'dunning.retry_schedule_days', 'dunning.lock_after_days',
              'plugins.store_allowed_hosts', 'plugins.store_enabled',
-             'documents.render_enabled', 'documents.render_max_rows',
+             'documents.render_enabled', 'documents.print_color', 'documents.render_max_rows',
              'documents.render_max_pages', 'documents.render_max_template_bytes',
              'documents.flow_max_blocks', 'documents.flow_max_table_rows',
              'documents.flow_max_bytes',
@@ -262,7 +262,9 @@ final class SettingsRegistryTest extends TestCase
         // per tenant in a white-label deployment. The three numbering keys are
         // not, for the reason given beside their constants.
         // 33 since #billing: the two dunning keys are tenant-overridable.
-        self::assertCount(33, SettingsRegistry::tenantTextKeys());
+        // 34 since editor M4: documents.print_color, because each tenant
+        // prints in its own colour.
+        self::assertCount(34, SettingsRegistry::tenantTextKeys());
 
         // The desktop-login TTL is per-tenant overridable (NOT global-only) and a
         // plain numeric string key.
@@ -410,7 +412,8 @@ final class SettingsRegistryTest extends TestCase
         // 86 since auth.sso_self_provision_workspace, which lets a first
         // sign-in through the operator's identity provider create its own
         // workspace instead of bouncing with no_membership.
-        self::assertCount(86, $describe);
+        // 87 since editor M4's documents.print_color (stage 6, --doc-accent).
+        self::assertCount(87, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

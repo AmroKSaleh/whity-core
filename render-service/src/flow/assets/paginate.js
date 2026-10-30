@@ -731,10 +731,11 @@
       };
       var header = runningBand(doc.header, 'flow-running-header', values);
       var footer = runningBand(doc.footer, 'flow-running-footer', values);
-      if (header.any) {
+      // A band with fromPage starts there (a letter's header begins on page 2).
+      if (header.any && pageNumber >= ((doc.header && doc.header.fromPage) || 1)) {
         pages[i].el.appendChild(header.el);
       }
-      if (footer.any) {
+      if (footer.any && pageNumber >= ((doc.footer && doc.footer.fromPage) || 1)) {
         pages[i].el.appendChild(footer.el);
       }
     }

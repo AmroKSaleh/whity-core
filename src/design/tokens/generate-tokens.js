@@ -570,6 +570,8 @@ function generateTokensPackageCss(base) {
   pushShadowProperties(lines, base, 'dark');
   lines.push('}');
   lines.push('');
+  pushLightScope(lines, base);
+  lines.push('');
   lines.push(REDUCED_MOTION_CSS);
   lines.push('');
   return lines.join('\n');
@@ -676,6 +678,19 @@ function generateBaseCss() {
  * @theme inline declarations. The static (hand-authored) parts of
  * globals.css live outside the sentinel markers.
  */
+/**
+ * `.light` puts the light colours back on one element inside a dark page, for
+ * what stays light like paper: the editor's A4 page view (decision E.11).
+ */
+function pushLightScope(lines, base) {
+  lines.push('.light {');
+  for (const [key, value] of Object.entries(base.colors.light)) {
+    lines.push(`  --${key}: ${value};`);
+  }
+  pushShadowProperties(lines, base, 'light');
+  lines.push('}');
+}
+
 function generateCssRegion(base) {
   const typo = base.typography;
   const lines = [];
@@ -713,6 +728,8 @@ function generateCssRegion(base) {
   }
   pushShadowProperties(lines, base, 'dark');
   lines.push('}');
+  lines.push('');
+  pushLightScope(lines, base);
   lines.push('');
   lines.push(REDUCED_MOTION_CSS);
 

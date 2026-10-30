@@ -11,12 +11,14 @@ import type { WhityDocument } from '@whity-org/ui/editor/contract';
 
 let lastOnChange: ((doc: WhityDocument) => void) | null = null;
 let lastServices: unknown = 'not rendered';
+let lastProps: Record<string, unknown> = {};
 
 // The editor itself is covered by editor-*.test.ts; here only its onChange matters.
 jest.mock('@whity-org/ui/editor/doc-editor', () => ({
   DocEditor: (props: { document: WhityDocument; onChange: (d: WhityDocument) => void; save?: { state: string }; services?: unknown }) => {
     lastOnChange = props.onChange;
     lastServices = props.services;
+    lastProps = props as unknown as Record<string, unknown>;
     return <div data-testid="editor" data-save={props.save?.state ?? ''}>{props.document.title}</div>;
   },
 }));
@@ -130,4 +132,61 @@ it('still opens the document when its services fail to load', async () => {
 
   expect(lastServices).toEqual({});
   expect(screen.getByTestId('editor').textContent).toBe(SAMPLE_DOCUMENT.title);
+});
+
+describe('templates (M4, the Document designer)', () => {
+  const TEMPLATE: WhityDocument = { ...SAMPLE_DOCUMENT, kind: 'template', recordType: 'document', defaultView: 'page', publishedVersion: 2 };
+  const SETUP = {
+    fields: [
+      { group: 'Document', items: [{ path: 'document.title', label: 'Document title' }, { path: 'document.number', label: 'Document number', required: true }] },
+      { group: 'Today', items: [{ path: 'today', label: 'Today' }] },
+    ],
+    letterhead: { name: 'Example Bakery', lines: [] },
+    accent: null,
+  };
+
+  function templateAdapter() {
+    const { a, calls } = adapter([]);
+    a.load = jest.fn(async () => ({ document: TEMPLATE, version: 4 }));
+    a.loadTemplate = jest.fn(async () => SETUP);
+    a.publishCheck = jest.fn(async () => []);
+    a.publish = jest.fn(async () => 3);
+    a.preview = jest.fn(async () => ({ label: '#3 · Receipt', values: { 'document.title': 'Receipt' } }));
+    return { a, calls };
+  }
+
+  it('hands the editor the fields, letterhead and the reference and date fields', async () => {
+    const { a } = templateAdapter();
+    await mount(a);
+
+    expect(a.loadTemplate).toHaveBeenCalledWith('document');
+    expect(lastProps.fields).toBe(SETUP.fields);
+    expect(lastProps.letterhead).toBe(SETUP.letterhead);
+    expect(lastProps.pageFields).toEqual({ reference: SETUP.fields[0].items[1], date: SETUP.fields[1].items[0] });
+    expect((lastProps.publish as { publishedVersion: number }).publishedVersion).toBe(2);
+  });
+
+  it('saves what is waiting before publishing, then publishes that version', async () => {
+    const { a, calls } = templateAdapter();
+    await mount(a);
+
+    act(() => lastOnChange?.({ ...TEMPLATE, title: 'Payment reminder' }));
+    const publish = lastProps.publish as { publish: () => Promise<void> };
+    await act(async () => {
+      await publish.publish();
+    });
+    expect(calls).toEqual([{ title: 'Payment reminder', version: 4 }]);
+    expect(a.publish).toHaveBeenCalledWith('7', 5);
+    expect((lastProps.publish as { publishedVersion: number }).publishedVersion).toBe(3);
+  });
+
+  it('a note has no fields or Publish', async () => {
+    const { a } = templateAdapter();
+    a.load = jest.fn(async () => ({ document: SAMPLE_DOCUMENT, version: 4 }));
+    await mount(a);
+
+    expect(a.loadTemplate).not.toHaveBeenCalled();
+    expect(lastProps.publish).toBeUndefined();
+    expect(lastProps.fields).toBeUndefined();
+  });
 });

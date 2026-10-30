@@ -83,7 +83,20 @@ const BLOCK_TYPES = new Set([
   'list',
   'question',
   'divider',
+  // A printed letter's first page (the document editor's page view, E.7): the
+  // tenant's logo, name and address at the start side, the title, reference
+  // and date at the end side. One unit, so it is never split across pages.
+  'letterhead',
+  // The document editor's Barcode and Maths blocks (E.40, E.42). The editor's
+  // QR code block (E.41) prints as `qr` with its caption as the reference.
+  'barcode',
+  'math',
 ]);
+
+/** E.40: the symbologies the editor offers, as bwip-js names them. */
+const BARCODE_SYMBOLOGIES = { code128: 'code128', ean13: 'ean13', code39: 'code39' };
+const MAX_BARCODE_VALUE_LENGTH = 80;
+const MAX_MATH_LENGTH = 2000;
 
 /** The colours a caller may theme, each a CSS custom property `--flow-<key>`. */
 const THEME_KEYS = ['ink', 'muted', 'accent', 'line', 'tint'];
@@ -118,6 +131,7 @@ const MAX_FIELDS = 24;
 const MAX_FIELD_BOXES = 40;
 const MAX_LIST_ITEMS = 30;
 const MAX_CHOICES = 12;
+const MAX_LETTERHEAD_LINES = 6;
 const MAX_ANSWER_LINES = 25;
 const LIST_TONES = new Set(['plain', 'outline', 'tint']);
 const FIELD_KINDS = new Set(['line', 'boxes']);
@@ -388,6 +402,14 @@ function validateRunning(spec, name) {
   // number this mode ignores. Those are still ignored (unknown names) or
   // printed as text (numbers) - only the new OBJECT form is checked strictly.
   if (!isPlainObject(spec)) return null;
+  // The page the band starts on: a letter's running header begins on page 2,
+  // under page 1's letterhead.
+  if (spec.fromPage !== undefined) {
+    const from = asFiniteNumber(spec.fromPage);
+    if (from === null || !Number.isInteger(from) || from < 1) {
+      return `"${name}.fromPage" must be a whole number from 1`;
+    }
+  }
   for (const key of RUNNING_SLOTS) {
     const slot = spec[key];
     const at = `${name}.${key}`;
@@ -530,6 +552,25 @@ function validateFormBlock(block, i) {
   if (block.type === 'divider' && !optionalString(block.text)) {
     return `"${at}.text" must be a string`;
   }
+  if (block.type === 'letterhead') {
+    for (const side of ['start', 'end']) {
+      const part = block[side];
+      if (part === undefined) continue;
+      if (!isPlainObject(part)) return `"${at}.${side}" must be an object`;
+      if (!optionalString(part.name) || !optionalString(part.title)) {
+        return `"${at}.${side}.name" and "${at}.${side}.title" must be strings`;
+      }
+      if (part.lines !== undefined) {
+        if (!Array.isArray(part.lines) || part.lines.length > MAX_LETTERHEAD_LINES || !part.lines.every(isString)) {
+          return `"${at}.${side}.lines" must list up to ${MAX_LETTERHEAD_LINES} strings`;
+        }
+      }
+      if (part.image !== undefined) {
+        const err = validateImage(part.image, `${at}.${side}.image`);
+        if (err) return err;
+      }
+    }
+  }
   return null;
 }
 
@@ -658,6 +699,22 @@ function validateFlowPayload(payload) {
       }
       if (block.reference !== undefined && typeof block.reference !== 'string') {
         return `"content[${i}].reference" must be a string`;
+      }
+    }
+    if (block.type === 'barcode') {
+      if (!Object.prototype.hasOwnProperty.call(BARCODE_SYMBOLOGIES, block.symbology)) {
+        return `"content[${i}].symbology" must be one of: ${Object.keys(BARCODE_SYMBOLOGIES).join(', ')}`;
+      }
+      if (typeof block.value !== 'string' || block.value === '' || block.value.length > MAX_BARCODE_VALUE_LENGTH) {
+        return `"content[${i}].value" must be 1-${MAX_BARCODE_VALUE_LENGTH} characters`;
+      }
+      if (block.showText !== undefined && typeof block.showText !== 'boolean') {
+        return `"content[${i}].showText" must be true or false`;
+      }
+    }
+    if (block.type === 'math') {
+      if (typeof block.tex !== 'string' || block.tex === '' || block.tex.length > MAX_MATH_LENGTH) {
+        return `"content[${i}].tex" must be 1-${MAX_MATH_LENGTH} characters of TeX`;
       }
     }
     if (block.type === 'figure') {
@@ -885,10 +942,13 @@ function normaliseRunning(spec) {
       out[key] = clean;
     }
   }
+  const from = asFiniteNumber(spec.fromPage);
+  if (from !== null && Number.isInteger(from) && from > 1) out.fromPage = from;
   return out;
 }
 
 module.exports = {
+  BARCODE_SYMBOLOGIES,
   validateFlowPayload,
   normaliseFlowDocument,
   resolvePage,

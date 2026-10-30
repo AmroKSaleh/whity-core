@@ -1,5 +1,7 @@
-import type { WhityDocument } from '@whity-org/ui/editor/contract';
-import type { EditorServices } from '@whity-org/ui/editor/services';
+import type { PublishBlocker, WhityDocument } from '@whity-org/ui/editor/contract';
+import type { FieldGroup } from '@whity-org/ui/editor/fields';
+import type { Letterhead } from '@whity-org/ui/editor/page-view';
+import type { EditorServices, FieldPreview } from '@whity-org/ui/editor/services';
 
 /** A document as the server keeps it: the contract's document plus its draft version. */
 export interface LoadedDocument {
@@ -29,4 +31,32 @@ export interface DocumentEditorAdapter {
    * Without it, those blocks say what is missing instead of loading.
    */
   loadServices?(id: string): Promise<EditorServices>;
+  /**
+   * Templates (M4): the fields the record type offers, the tenant's
+   * letterhead and print colour. Without it, a template edits like any
+   * document, without fields, preview or Publish.
+   */
+  loadTemplate?(recordType: string | null): Promise<TemplateSetup>;
+  /** Records of a type the reader may preview with, newest first. */
+  findRecords?(recordType: string, query: string): Promise<RecordChoice[]>;
+  /** E.12: each field's value for one record (`type:id`), or null when hidden or missing. */
+  preview?(id: string, record: string | null): Promise<FieldPreview | null>;
+  /** E.37: what blocks publishing the draft at `version`. */
+  publishCheck?(id: string): Promise<PublishBlocker[]>;
+  /** E.9: publishes the draft at `version`; resolves to the new published version. Throws when refused. */
+  publish?(id: string, version: number): Promise<number>;
+  /** The PDF through Whity Render: the published version filled for one record. */
+  exportPdf?(id: string, record: string | null, filename: string): Promise<void>;
+}
+
+export interface TemplateSetup {
+  fields: FieldGroup[];
+  letterhead: Letterhead;
+  accent: string | null;
+}
+
+export interface RecordChoice {
+  /** `type:id`, as preview and render take it. */
+  ref: string;
+  label: string;
 }
