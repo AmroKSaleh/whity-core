@@ -152,7 +152,8 @@
   background: color-mix(in oklab, var(--chart-3) 40%, transparent);
   border-radius: 2px;
 }
-.wy-doc .wy-field {
+/* E.26: a merge field, a chip with braces on the tint (EditorInline). */
+.wy-mf {
   display: inline-block;
   padding: 0 5px;
   margin: 0 1px;
@@ -164,6 +165,19 @@
   line-height: 1.45;
   white-space: nowrap;
 }
+.wy-mf::before { content: "{"; opacity: 0.55; margin-inline-end: 2px; }
+.wy-mf::after { content: "}"; opacity: 0.55; margin-inline-start: 2px; }
+.wy-mf:hover { outline: 1px solid var(--primary); }
+.wy-mf.is-selected, .wy-doc .ProseMirror-selectednode.wy-mf { background: var(--primary); color: var(--primary-foreground); }
+/* E.12: in preview, the record's value with a dotted underline. */
+.wy-mf.is-preview { background: none; color: inherit; font-size: inherit; font-weight: inherit; padding: 0; margin: 0; border-bottom: 1px dotted var(--primary); border-radius: 0; }
+.wy-mf.is-preview:hover { outline: 0; }
+/* E.27: no value for this record. */
+.wy-mf.is-missing { display: inline-flex; align-items: center; gap: 3px; background: var(--error-tint); color: var(--error-text); }
+.wy-mf.is-preview::before, .wy-mf.is-preview::after, .wy-mf.is-missing::before, .wy-mf.is-missing::after { content: none; }
+
+/* The field picker ({{ or Field ▾). */
+.wy-fpick__it .wy-mf { pointer-events: none; }
 
 /* The focused empty line says what it takes (EditorInsert). */
 .wy-doc p.is-empty::before {
@@ -296,3 +310,84 @@
   .wy-doc .wy-skeleton { animation: wy-pulse 1.2s ease-in-out infinite; }
 }
 @keyframes wy-pulse { 50% { opacity: 0.55; } }
+
+/* ------------------------------------------------------------------
+ * The page view (E.7, EditorPageView): A4 at 96 dpi, 16mm margins. The
+ * stack carries `.light`, so the pages stay white like paper in dark mode
+ * (E.11) while the ground around them follows the theme.
+ * ------------------------------------------------------------------ */
+.wy-pv { width: 794px; margin-inline: auto; }
+.wy-pv__stack { position: relative; width: 794px; color: var(--foreground); --primary: var(--doc-accent, var(--brand)); }
+.wy-pv__page {
+  position: absolute;
+  inset-inline: 0;
+  height: 1123px;
+  background: var(--card);
+  box-shadow: 0 0 0 1px var(--border), 0 1px 3px color-mix(in oklab, var(--foreground) 6%, transparent);
+}
+.wy-pv__margin { position: absolute; inset: 60px; border: 1px dashed transparent; pointer-events: none; }
+.wy-pv__page.show-margins .wy-pv__margin { border-color: color-mix(in oklab, var(--ring) 35%, transparent); }
+.wy-pv__run {
+  position: absolute;
+  top: 60px;
+  inset-inline: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.wy-pv__foot {
+  position: absolute;
+  inset-inline: 60px;
+  bottom: 28px;
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted-foreground);
+}
+.wy-pv__column { position: relative; padding: 60px; min-height: 1123px; box-sizing: border-box; }
+.wy-pv__lh {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 14px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11.33px;
+  color: var(--muted-foreground);
+}
+.wy-pv__lh b { color: var(--foreground); font-weight: 600; }
+.wy-pv__lhend { text-align: end; display: grid; gap: 2px; align-content: start; }
+/* The document title: Readex Pro 600 in the tenant's print colour. */
+.wy-pv__title { margin: 0 0 4px; font-family: var(--font-display); font-weight: 600; font-size: 29.33px; line-height: 1.15; color: var(--doc-accent, var(--brand)); }
+.wy-pv .wy-doc { font-size: 12.67px; }
+.wy-pv .wy-doc h2 { font-size: 18.67px; padding-top: 14px; }
+.wy-pv .wy-doc h3 { font-size: 16px; padding-top: 10px; }
+.wy-pv .wy-doc h4 { font-size: 14px; padding-top: 8px; }
+.wy-pv .wy-doc table[data-type="table"] { font-size: 11.33px; }
+.wy-pv .wy-doc table[data-type="table"] td { border: 0; border-bottom: 1px solid var(--border); }
+/* On paper the header row is a rule under muted labels, not a filled row. */
+.wy-pv .wy-doc table[data-type="table"][data-header-row="true"] tr:first-child td { background: none; border-bottom: 1.5px solid var(--foreground); color: var(--muted-foreground); }
+/* A page break's own line is hidden: the next page shows where it falls. */
+.wy-pv .wy-doc .wy-pagebreak { visibility: hidden; height: 0; margin: 0; }
+.wy-pv__gap { pointer-events: none; }
+
+/* Preview with a record (E.12): the bar above the pages. */
+.wy-previewbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  margin: 0 auto 16px;
+  padding: 4px 4px 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  font-size: 0.8125rem;
+  color: var(--muted-foreground);
+}
+.wy-previewbar b { color: var(--foreground); font-weight: 500; }

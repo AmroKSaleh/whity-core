@@ -25,7 +25,7 @@ import {
   Table,
   Toggle,
 } from "./schema-rich"
-import { MathInline } from "./schema"
+import { Field, MathInline } from "./schema"
 import { formatSize, inlineText, useEditorServices, type ChartData, type RecordView } from "./services"
 
 /**
@@ -360,6 +360,38 @@ function MathInlineView(props: ReactNodeViewProps) {
   )
 }
 
+/**
+ * E.26: a merge field is a chip with its plain name, its path on hover. While
+ * previewing with a record it shows the value with a dotted underline, or the
+ * name on the error tint when the record has none (E.27).
+ */
+function FieldView(props: ReactNodeViewProps) {
+  const { labels, preview } = useEditorServices()
+  const path = String(props.node.attrs.path ?? "")
+  const label = String(props.node.attrs.label || path)
+  if (preview) {
+    const value = preview.values[path]
+    if (value === null || value === undefined || value === "") {
+      return (
+        <NodeViewWrapper as="span" data-field={path} title={labels.fieldMissing} className="wy-mf is-missing">
+          <Icon name="alert" size={12} />
+          {label}
+        </NodeViewWrapper>
+      )
+    }
+    return (
+      <NodeViewWrapper as="span" data-field={path} title={label} className="wy-mf is-preview">
+        {value}
+      </NodeViewWrapper>
+    )
+  }
+  return (
+    <NodeViewWrapper as="span" data-field={path} title={path} className={cn("wy-mf", props.selected && "is-selected")}>
+      {label}
+    </NodeViewWrapper>
+  )
+}
+
 /** Table cells take their column's alignment (E.15: end-aligned numbers). */
 const TableWithAlign = Table.extend({
   addNodeView() {
@@ -414,4 +446,5 @@ export const richNodeViews = [
   QrBlock.extend({ addNodeView: react((p) => <CodeView {...p} qr />) }),
   MathBlock.extend({ addNodeView: react(MathView) }),
   MathInline.extend({ addNodeView: react(MathInlineView) }),
+  Field.extend({ addNodeView: react(FieldView) }),
 ]
