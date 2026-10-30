@@ -133,17 +133,29 @@ final class WhityDocumentPrinter
                 continue;
             }
             $type = (string) ($block['type'] ?? '');
-            if (in_array($type, ['bullet', 'number', 'checklist'], true)) {
+            if ($type === 'checklist') {
+                // Its box is its marker: a line of its own, never a bullet beside a box.
+                $text = $this->text($block['content'] ?? []);
+                if ($text !== '') {
+                    if ($ordered !== null) {
+                        self::list($items, $ordered, $out);
+                        $items = [];
+                        $ordered = null;
+                    }
+                    $out[] = ['type' => 'paragraph', 'text' => ((($block['checked'] ?? false) === true) ? '☑ ' : '☐ ') . $text];
+                }
+                continue;
+            }
+            if (in_array($type, ['bullet', 'number'], true)) {
                 if ($ordered !== null && $ordered !== ($type === 'number')) {
                     self::list($items, $ordered, $out);
                     $items = [];
                 }
                 $ordered = $type === 'number';
                 $indent = str_repeat('  ', max(0, min(2, (int) ($block['level'] ?? 0))));
-                $mark = $type === 'checklist' ? ((($block['checked'] ?? false) === true) ? '☑ ' : '☐ ') : '';
                 $text = $this->text($block['content'] ?? []);
                 if ($text !== '') {
-                    $items[] = $indent . $mark . $text;
+                    $items[] = $indent . $text;
                 }
                 continue;
             }
