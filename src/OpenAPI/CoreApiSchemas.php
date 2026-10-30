@@ -5742,6 +5742,61 @@ final class CoreApiSchemas
                     'subtitle' => self::str() + ['description' => 'What the series covers, for example Last 6 months, in the caller language'],
                 ], ['points']),
             ], ['data']),
+            'DocumentFieldItem' => self::object([
+                'path' => self::str() + ['description' => 'Where the value comes from, for example `customer.name`'],
+                'label' => self::str() + ['description' => 'The field plain name in the caller language'],
+                'sample' => self::str() + ['description' => 'An example value the picker shows beside it'],
+                'required' => self::bool() + ['description' => 'A document is not issued while this field has no value (E.27)'],
+            ], ['path', 'label']),
+            'DocumentFieldsResponse' => self::object([
+                'data' => self::object([
+                    'record_types' => ['type' => 'array', 'items' => self::object(['key' => self::str(), 'label' => self::str()], ['key', 'label'])],
+                    'groups' => ['type' => 'array', 'items' => self::object([
+                        'group' => self::str(),
+                        'items' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentFieldItem')],
+                    ], ['group', 'items'])],
+                    'letterhead' => self::object([
+                        'name' => self::str(),
+                        'lines' => ['type' => 'array', 'items' => self::str()],
+                    ], ['name', 'lines']),
+                    'accent' => self::str(true) + ['description' => 'The tenant print colour as #RRGGBB, or null for the brand colour'],
+                ], ['record_types', 'groups', 'letterhead']),
+            ], ['data']),
+            'DocumentFieldRecordsResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => self::object(['id' => self::str(), 'label' => self::str()], ['id', 'label'])],
+            ], ['data']),
+            'DocumentPublishBlocker' => self::object([
+                'kind' => ['type' => 'string', 'enum' => ['open-suggestions', 'missing-plugin', 'block-without-print-view', 'unknown-field']],
+                'count' => self::int(),
+                'plugin' => self::str(),
+                'blockId' => self::str(),
+                'path' => self::str(),
+            ], ['kind']),
+            'DocumentPublishCheckResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentPublishBlocker')],
+            ], ['data']),
+            'DocumentPublishResponse' => self::object([
+                'data' => self::object(['published_version' => self::int()], ['published_version']),
+            ], ['data']),
+            'DocumentSourceVersionListResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => self::object([
+                    'version' => self::int(),
+                    'title' => self::str(),
+                    'published_by' => self::int(true),
+                    'published_at' => self::str(),
+                ], ['version', 'title', 'published_at'])],
+            ], ['data']),
+            'DocumentPreviewResponse' => self::object([
+                'data' => self::object([
+                    'label' => self::str() + ['description' => 'The record as it is named, for example `INV-1042 · Example Clinic`'],
+                    'values' => ['type' => 'object', 'additionalProperties' => ['type' => 'string', 'nullable' => true], 'description' => 'Each field value by path; null is a missing value'],
+                ], ['label', 'values']),
+            ], ['data']),
+            'DocumentSourceRenderRequest' => self::object([
+                'record' => self::str() + ['description' => 'The record to fill the fields from, as `type:id`. Required when the template has a record type.'],
+                'draft' => self::bool() + ['description' => 'Render the draft instead of the published version, as a preview. A draft is never issued.'],
+                'persist' => self::bool() + ['description' => 'Issue the PDF as a document; its values are kept with it.'],
+            ], []),
             'DocumentSourceResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentSource')),
             'DocumentSourceCreateRequest' => self::object([
                 'kind' => ['type' => 'string', 'enum' => ['template', 'letter', 'report', 'note', 'wiki', 'label']] + ['description' => 'What the document is: a `template`, `letter`, `report`, `note`, `wiki` page or `label` sheet. Templates and printed kinds open in the page view, notes and wiki pages in the continuous view.'],
@@ -11459,6 +11514,105 @@ final class CoreApiSchemas
                 'responses' => [
                     200 => self::jsonResponse('One series of labelled values', 'DocumentEmbedChartResponse'),
                     404 => self::errorResponse('Unknown chart source, or one the caller may not use'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/document-fields', 'documents:read', [
+                'summary' => 'List the merge fields a template can use',
+                'description' =>
+                    'The record types templates can be written for, and the field picker groups for one '
+                    . '(editor M4, E.26): the record type own fields first, then Company and Today, which every '
+                    . 'template has. Also the tenant letterhead and print colour for the page view.',
+                'tags' => ['documents'],
+                'parameters' => [
+                    self::queryParam('recordType', 'string', 'The template record type, for example `document`. Without it, only the shared groups.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('Record types, field groups, letterhead and print colour', 'DocumentFieldsResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/document-fields/records', 'documents:read', [
+                'summary' => 'Find records to preview a template with',
+                'description' => 'Records of one type the caller may see, newest first, at most 25.',
+                'tags' => ['documents'],
+                'parameters' => [
+                    self::queryParam('recordType', 'string', 'The record type', true),
+                    self::queryParam('q', 'string', 'Text the record name contains'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('Matching records', 'DocumentFieldRecordsResponse'),
+                    404 => self::errorResponse('Unknown record type'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/document-sources/{id:\d+}/publish-check', 'documents:publish', [
+                'summary' => 'List what blocks publishing a template',
+                'description' =>
+                    'E.37: a field the record type does not have, and a block without a print view. An empty '
+                    . 'list means the template can be published. The ETag is the draft version checked; send '
+                    . 'it as If-Match to publish exactly that version.',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The blockers, empty when clear', 'DocumentPublishCheckResponse'),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                    409 => self::errorResponse('Only documents that print are published'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/document-sources/{id:\d+}/publish', 'documents:publish', [
+                'summary' => 'Publish a template',
+                'description' =>
+                    'E.9: the draft at the If-Match version becomes the next published version, the one Whity '
+                    . 'Render and agents use. The check runs again first; with blockers the answer is 409 with '
+                    . 'them in details.blockers. Versions are kept; none is ever changed.',
+                'tags' => ['documents'],
+                'responses' => [
+                    201 => self::jsonResponse('The new published version number', 'DocumentPublishResponse'),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                    409 => self::errorResponse('Something blocks publishing, or the draft changed since it was checked'),
+                    428 => self::errorResponse('If-Match with the draft version is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/document-sources/{id:\d+}/versions', 'documents:read', [
+                'summary' => 'List a template published versions',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('Published versions, newest first', 'DocumentSourceVersionListResponse'),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/document-sources/{id:\d+}/preview', 'documents:read', [
+                'summary' => 'Fill a template fields from one record, for Preview with a record',
+                'description' =>
+                    'E.12: each field value for the record as the caller may see it; a missing value is null '
+                    . '(E.27). A record that does not exist and one the caller may not see are the same 404.',
+                'tags' => ['documents'],
+                'parameters' => [
+                    self::queryParam('record', 'string', 'The record as `type:id`. Required when the template has a record type.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The record name and each field value', 'DocumentPreviewResponse'),
+                    404 => self::errorResponse('Document or record not found, or not visible to the caller'),
+                    422 => self::errorResponse('record is missing or of another type'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/document-sources/{id:\d+}/render', 'documents:render', [
+                'summary' => 'Print a template through Whity Render',
+                'description' =>
+                    'The published version (or the draft, as a preview) filled for one record. Field values, '
+                    . 'Record and Chart blocks are read now, for the caller, and frozen into the PDF (E.16). A '
+                    . 'required field with no value refuses the render with 422 and the paths in '
+                    . 'details.missing (E.27). With persist, the PDF is issued as a document.',
+                'tags' => ['documents'],
+                'request' => 'DocumentSourceRenderRequest',
+                'responses' => [
+                    200 => [
+                        'description' => 'The PDF',
+                        'content' => ['application/pdf' => ['schema' => ['type' => 'string', 'format' => 'binary']]],
+                    ],
+                    201 => self::jsonResponse('The issued document', 'DocumentResponse'),
+                    404 => self::errorResponse('Document or record not found, or not visible to the caller'),
+                    409 => self::errorResponse('The template has no published version yet'),
+                    422 => self::errorResponse('A required field has no value, the record is missing, or the render was refused'),
+                    429 => self::errorResponse('The document render limit has been reached'),
+                    503 => self::errorResponse('Rendering is not enabled or temporarily unavailable'),
                 ] + self::authErrors(),
             ]),
         ];

@@ -640,6 +640,7 @@ function DocEditor({
                 letterhead={letterhead}
                 accent={accent}
                 reference={pageFields?.reference && <>{labels.reference} <LetterheadField field={pageFields.reference} preview={preview} labels={labels} /></>}
+                // @date-display-ignore: a merge field (its chip, or the record's value the server already formatted as text), not a record timestamp.
                 date={pageFields?.date && <LetterheadField field={pageFields.date} preview={preview} labels={labels} />}
                 footerRef={pageFields?.reference && preview ? (preview.values[pageFields.reference.path] ?? undefined) : undefined}
                 zoom={zoomFactor}

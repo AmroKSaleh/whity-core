@@ -348,14 +348,20 @@ abstract class BaseCommand implements CliCommand, CommandHelp
         $settingsCatalog = new \Whity\Core\Settings\SettingsCatalog($pluginSettingsRegistry);
         \Whity\register_service(\Whity\Core\Settings\SettingsCatalog::class, $settingsCatalog);
 
-        \Whity\register_service(
-            \Whity\Core\Settings\SettingsService::class,
-            new \Whity\Core\Settings\SettingsService(
-                new \Whity\Core\Settings\GlobalSettingsRepository($db->getPdo()),
-                new \Whity\Core\Settings\TenantSettingsRepository($db->getPdo()),
-                $settingsCatalog
-            )
+        $settingsService = new \Whity\Core\Settings\SettingsService(
+            new \Whity\Core\Settings\GlobalSettingsRepository($db->getPdo()),
+            new \Whity\Core\Settings\TenantSettingsRepository($db->getPdo()),
+            $settingsCatalog
         );
+        \Whity\register_service(\Whity\Core\Settings\SettingsService::class, $settingsService);
+
+        // Templates' merge fields (editor M4), mirroring public/index.php, so a
+        // plugin registering its record type at boot finds the same registry.
+        $documentFieldRegistry = new \Whity\Core\Document\Fields\DocumentFieldRegistry();
+        $documentFieldRegistry->add(new \Whity\Core\Document\Fields\IssuedDocumentFieldProvider($embedDocuments, $embedVisibility));
+        $documentFieldRegistry->add(new \Whity\Core\Document\Fields\CompanyFieldProvider($settingsService));
+        $documentFieldRegistry->add(new \Whity\Core\Document\Fields\TodayFieldProvider());
+        \Whity\register_service(\Whity\Core\Document\Fields\DocumentFieldRegistry::class, $documentFieldRegistry);
 
         $dataTypeLifecycle = new \Whity\Core\DataType\DataTypeLifecycleService(
             $db->getPdo(),

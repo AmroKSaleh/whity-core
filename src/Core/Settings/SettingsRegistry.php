@@ -343,6 +343,12 @@ final class SettingsRegistry
     // never attempts the internal HTTP call) when off.
     public const DOCUMENTS_RENDER_ENABLED = 'documents.render_enabled';
 
+    // The tenant's print colour (stage 6, `--doc-accent`): a printed document's
+    // title and its field underlines in the editor's page view. A #RRGGBB hex,
+    // or empty for the brand colour. Tenant-overridable: each tenant prints as
+    // itself.
+    public const DOCUMENTS_PRINT_COLOR = 'documents.print_color';
+
     // Render batch limits (ADR 0012): per-tenant-overridable ceilings so an
     // operator can tune them without a code deploy, "no hardcoded values" per
     // convention. Resolution is tenant override -> global default -> this
@@ -981,6 +987,7 @@ final class SettingsRegistry
         // container) — opt-in, not opt-out. A sovereign deploy that never runs
         // the `render` compose profile stays disabled here regardless.
         self::DOCUMENTS_RENDER_ENABLED => 'false',
+        self::DOCUMENTS_PRINT_COLOR => '',
         self::DOCUMENTS_RENDER_MAX_ROWS => '500',
         self::DOCUMENTS_RENDER_MAX_PAGES => '2000',
         // 2 MiB.
@@ -1360,6 +1367,7 @@ final class SettingsRegistry
             self::LICENSING_BILLING_BASIS => self::validateEnum($key, $value),
             self::SEATS_COUNT_INVITED => self::validateBoolean($value, self::SEATS_COUNT_INVITED),
             self::MAIL_BRAND_COLOR => self::validateHexColor($value),
+            self::DOCUMENTS_PRINT_COLOR => $value === '' ? null : self::validateHexColor($value, self::DOCUMENTS_PRINT_COLOR),
             self::MAIL_SMTP_HOST,
             self::MAIL_SMTP_USERNAME,
             self::MAIL_FROM_NAME,
@@ -1426,10 +1434,10 @@ final class SettingsRegistry
     /**
      * Validate a #RRGGBB hex colour.
      */
-    private static function validateHexColor(string $value): ?string
+    private static function validateHexColor(string $value, string $key = self::MAIL_BRAND_COLOR): ?string
     {
         if (preg_match('/^#[0-9A-Fa-f]{6}$/', $value) !== 1) {
-            return 'mail.brand_color must be a #RRGGBB hex colour (e.g. #2B6CD2).';
+            return "{$key} must be a #RRGGBB hex colour (e.g. #2B6CD2).";
         }
 
         return null;

@@ -3096,6 +3096,39 @@ $router->register('GET', '/api/document-embeds',                                
 $router->register('GET', '/api/document-embeds/records/{type:[a-z0-9._-]+}/{id:[A-Za-z0-9._-]+}', [$documentEmbedsHandler, 'record'], null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET', '/api/document-embeds/charts/{key:[a-z0-9._-]+}',               [$documentEmbedsHandler, 'chart'],     null, null, CorePermissions::DOCUMENTS_READ);
 
+// Templates from the editor, from draft to paper (editor M4, E.9 to E.37).
+// Merge fields come from one provider per record type: core's Company and
+// Today for every template and issued documents as a record type; plugins
+// register theirs on $documentFieldRegistry. Publishing copies the draft into
+// document_source_versions; rendering fills the published version for one
+// record, for the person asking, and prints it through Whity Render.
+$documentFieldRegistry = new \Whity\Core\Document\Fields\DocumentFieldRegistry();
+$documentFieldLabels = new \Whity\Core\Document\Fields\FieldLabels($serverLabels);
+$documentFieldRegistry->add(new \Whity\Core\Document\Fields\IssuedDocumentFieldProvider($documentRepository, $documentVisibilityPolicy, $documentFieldLabels));
+$documentFieldRegistry->add(new \Whity\Core\Document\Fields\CompanyFieldProvider($settingsService, $documentFieldLabels));
+$documentFieldRegistry->add(new \Whity\Core\Document\Fields\TodayFieldProvider($documentFieldLabels));
+\Whity\register_service(\Whity\Core\Document\Fields\DocumentFieldRegistry::class, $documentFieldRegistry);
+$documentPublishingHandler = new \Whity\Api\DocumentPublishingApiHandler(
+    $documentSourcesHandler,
+    new \Whity\Core\Document\DocumentSourceVersionRepository($db->getPdo()),
+    $documentFieldRegistry,
+    $documentEmbedRegistry,
+    $roleChecker,
+    $settingsService,
+    $flowDocumentRenderer,
+    $documentIssuer,
+    new \Whity\Core\Document\DocumentSourceFileStore($storageDriver, $db->getPdo()),
+    new \Whity\Core\Document\Print\PrintLabels($serverLabels),
+    $documentRenderMeters,
+);
+$router->register('GET',  '/api/document-fields',                         [$documentPublishingHandler, 'fields'],       null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('GET',  '/api/document-fields/records',                 [$documentPublishingHandler, 'records'],      null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('GET',  '/api/document-sources/{id:\d+}/publish-check', [$documentPublishingHandler, 'publishCheck'], null, null, CorePermissions::DOCUMENTS_PUBLISH);
+$router->register('POST', '/api/document-sources/{id:\d+}/publish',       [$documentPublishingHandler, 'publish'],      null, null, CorePermissions::DOCUMENTS_PUBLISH);
+$router->register('GET',  '/api/document-sources/{id:\d+}/versions',      [$documentPublishingHandler, 'history'],      null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('GET',  '/api/document-sources/{id:\d+}/preview',       [$documentPublishingHandler, 'preview'],      null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('POST', '/api/document-sources/{id:\d+}/render',        [$documentPublishingHandler, 'render'],       null, null, CorePermissions::DOCUMENTS_RENDER);
+
 // Still 13a-nonies-bis: THE DOCUMENT ORGANIZER's registries (#978, implementing
 // #947 item 5). They are built here rather than at a step of their own because
 // the documents handler below reads them and PHP does not hoist.

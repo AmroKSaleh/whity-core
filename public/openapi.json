@@ -8760,6 +8760,191 @@
                 ]
             }
         },
+        "/api/v1/document-fields": {
+            "get": {
+                "operationId": "get_api_v1_document_fields",
+                "summary": "List the merge fields a template can use",
+                "tags": [
+                    "documents"
+                ],
+                "description": "The record types templates can be written for, and the field picker groups for one (editor M4, E.26): the record type own fields first, then Company and Today, which every template has. Also the tenant letterhead and print colour for the page view.",
+                "parameters": [
+                    {
+                        "name": "recordType",
+                        "in": "query",
+                        "required": false,
+                        "description": "The template record type, for example `document`. Without it, only the shared groups.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Record types, field groups, letterhead and print colour",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentFieldsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/document-fields/records": {
+            "get": {
+                "operationId": "get_api_v1_document_fields_records",
+                "summary": "Find records to preview a template with",
+                "tags": [
+                    "documents"
+                ],
+                "description": "Records of one type the caller may see, newest first, at most 25.",
+                "parameters": [
+                    {
+                        "name": "recordType",
+                        "in": "query",
+                        "required": true,
+                        "description": "The record type",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "required": false,
+                        "description": "Text the record name contains",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Matching records",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentFieldRecordsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Unknown record type",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/document-route-templates": {
             "get": {
                 "operationId": "get_api_v1_document_route_templates",
@@ -10120,6 +10305,560 @@
                     },
                     "503": {
                         "description": "The stored file could not be read from storage",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/document-sources/{id}/preview": {
+            "get": {
+                "operationId": "get_api_v1_document_sources_id_preview",
+                "summary": "Fill a template fields from one record, for Preview with a record",
+                "tags": [
+                    "documents"
+                ],
+                "description": "E.12: each field value for the record as the caller may see it; a missing value is null (E.27). A record that does not exist and one the caller may not see are the same 404.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "record",
+                        "in": "query",
+                        "required": false,
+                        "description": "The record as `type:id`. Required when the template has a record type.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The record name and each field value",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentPreviewResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document or record not found, or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "record is missing or of another type",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/document-sources/{id}/publish": {
+            "post": {
+                "operationId": "post_api_v1_document_sources_id_publish",
+                "summary": "Publish a template",
+                "tags": [
+                    "documents"
+                ],
+                "description": "E.9: the draft at the If-Match version becomes the next published version, the one Whity Render and agents use. The check runs again first; with blockers the answer is 409 with them in details.blockers. Versions are kept; none is ever changed.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "The new published version number",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentPublishResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Something blocks publishing, or the draft changed since it was checked",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "428": {
+                        "description": "If-Match with the draft version is required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/document-sources/{id}/publish-check": {
+            "get": {
+                "operationId": "get_api_v1_document_sources_id_publish_check",
+                "summary": "List what blocks publishing a template",
+                "tags": [
+                    "documents"
+                ],
+                "description": "E.37: a field the record type does not have, and a block without a print view. An empty list means the template can be published. The ETag is the draft version checked; send it as If-Match to publish exactly that version.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The blockers, empty when clear",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentPublishCheckResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Only documents that print are published",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/document-sources/{id}/render": {
+            "post": {
+                "operationId": "post_api_v1_document_sources_id_render",
+                "summary": "Print a template through Whity Render",
+                "tags": [
+                    "documents"
+                ],
+                "description": "The published version (or the draft, as a preview) filled for one record. Field values, Record and Chart blocks are read now, for the caller, and frozen into the PDF (E.16). A required field with no value refuses the render with 422 and the paths in details.missing (E.27). With persist, the PDF is issued as a document.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DocumentSourceRenderRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The PDF",
+                        "content": {
+                            "application/pdf": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
+                                }
+                            }
+                        }
+                    },
+                    "201": {
+                        "description": "The issued document",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document or record not found, or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The template has no published version yet",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "A required field has no value, the record is missing, or the render was refused",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "The document render limit has been reached",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Rendering is not enabled or temporarily unavailable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/document-sources/{id}/versions": {
+            "get": {
+                "operationId": "get_api_v1_document_sources_id_versions",
+                "summary": "List a template published versions",
+                "tags": [
+                    "documents"
+                ],
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Published versions, newest first",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentSourceVersionListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -41211,6 +41950,137 @@
                     "data"
                 ]
             },
+            "DocumentFieldItem": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Where the value comes from, for example `customer.name`"
+                    },
+                    "label": {
+                        "type": "string",
+                        "description": "The field plain name in the caller language"
+                    },
+                    "sample": {
+                        "type": "string",
+                        "description": "An example value the picker shows beside it"
+                    },
+                    "required": {
+                        "type": "boolean",
+                        "description": "A document is not issued while this field has no value (E.27)"
+                    }
+                },
+                "required": [
+                    "path",
+                    "label"
+                ]
+            },
+            "DocumentFieldRecordsResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string"
+                                },
+                                "label": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "id",
+                                "label"
+                            ]
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "DocumentFieldsResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "record_types": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "key": {
+                                            "type": "string"
+                                        },
+                                        "label": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "key",
+                                        "label"
+                                    ]
+                                }
+                            },
+                            "groups": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "group": {
+                                            "type": "string"
+                                        },
+                                        "items": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/components/schemas/DocumentFieldItem"
+                                            }
+                                        }
+                                    },
+                                    "required": [
+                                        "group",
+                                        "items"
+                                    ]
+                                }
+                            },
+                            "letterhead": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "lines": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        }
+                                    }
+                                },
+                                "required": [
+                                    "name",
+                                    "lines"
+                                ]
+                            },
+                            "accent": {
+                                "type": "string",
+                                "nullable": true,
+                                "description": "The tenant print colour as #RRGGBB, or null for the brand colour"
+                            }
+                        },
+                        "required": [
+                            "record_types",
+                            "groups",
+                            "letterhead"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
             "DocumentListResponse": {
                 "type": "object",
                 "properties": {
@@ -41274,6 +42144,97 @@
                     "pagination",
                     "view",
                     "sort"
+                ]
+            },
+            "DocumentPreviewResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "label": {
+                                "type": "string",
+                                "description": "The record as it is named, for example `INV-1042 \u00b7 Example Clinic`"
+                            },
+                            "values": {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "type": "string",
+                                    "nullable": true
+                                },
+                                "description": "Each field value by path; null is a missing value"
+                            }
+                        },
+                        "required": [
+                            "label",
+                            "values"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "DocumentPublishBlocker": {
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": [
+                            "open-suggestions",
+                            "missing-plugin",
+                            "block-without-print-view",
+                            "unknown-field"
+                        ]
+                    },
+                    "count": {
+                        "type": "integer"
+                    },
+                    "plugin": {
+                        "type": "string"
+                    },
+                    "blockId": {
+                        "type": "string"
+                    },
+                    "path": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "kind"
+                ]
+            },
+            "DocumentPublishCheckResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DocumentPublishBlocker"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "DocumentPublishResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "published_version": {
+                                "type": "integer"
+                            }
+                        },
+                        "required": [
+                            "published_version"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "DocumentRenderRequest": {
@@ -42013,11 +42974,62 @@
                     "data"
                 ]
             },
+            "DocumentSourceRenderRequest": {
+                "type": "object",
+                "properties": {
+                    "record": {
+                        "type": "string",
+                        "description": "The record to fill the fields from, as `type:id`. Required when the template has a record type."
+                    },
+                    "draft": {
+                        "type": "boolean",
+                        "description": "Render the draft instead of the published version, as a preview. A draft is never issued."
+                    },
+                    "persist": {
+                        "type": "boolean",
+                        "description": "Issue the PDF as a document; its values are kept with it."
+                    }
+                }
+            },
             "DocumentSourceResponse": {
                 "type": "object",
                 "properties": {
                     "data": {
                         "$ref": "#/components/schemas/DocumentSource"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "DocumentSourceVersionListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "version": {
+                                    "type": "integer"
+                                },
+                                "title": {
+                                    "type": "string"
+                                },
+                                "published_by": {
+                                    "type": "integer",
+                                    "nullable": true
+                                },
+                                "published_at": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "version",
+                                "title",
+                                "published_at"
+                            ]
+                        }
                     }
                 },
                 "required": [

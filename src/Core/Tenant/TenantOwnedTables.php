@@ -181,6 +181,7 @@ final class TenantOwnedTables
         // Editor M3: images and files placed in those documents (migration
         // 161). Bound to their document; read only through it.
         'document_source_files' => '161_create_document_source_files.php',
+        'document_source_versions' => '162_create_document_source_versions.php',
 
         // #947 item 1 — issued documents and their stored render output
         // (migration 108). `documents` is the record; `document_artifacts` is

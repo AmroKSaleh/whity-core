@@ -458,7 +458,7 @@ final class DocumentSourcesApiHandler
     }
 
     /** `"7"` or `W/"7"` → 7; anything else → null. */
-    private static function parseIfMatch(?string $header): ?int
+    public static function parseIfMatch(?string $header): ?int
     {
         if ($header === null || preg_match('/^\s*(?:W\/)?"(\d{1,9})"\s*$/', $header, $m) !== 1) {
             return null;
@@ -468,9 +468,12 @@ final class DocumentSourcesApiHandler
     }
 
     /**
+     * The row when this caller may see it, else null (not found and hidden
+     * answer the same). Public so the publishing routes check exactly this.
+     *
      * @return array<string, mixed>|null
      */
-    private function visibleRow(int $id, int $tenantId, int $callerId): ?array
+    public function visibleRow(int $id, int $tenantId, int $callerId): ?array
     {
         $row = $this->repo->findById($id, $tenantId);
         if ($row === null || !$this->policy->canView(

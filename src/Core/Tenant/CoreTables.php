@@ -83,6 +83,7 @@ final class CoreTables
         'document_route_templates' => '120_create_document_route_templates.php',
         'document_routes' => '112_create_document_routing.php',
         'document_source_files' => '161_create_document_source_files.php',
+        'document_source_versions' => '162_create_document_source_versions.php',
         'document_sources' => '160_create_document_sources.php',
         'document_templates' => '059_create_document_designer_tables.php',
         'documents' => '108_create_documents.php',
