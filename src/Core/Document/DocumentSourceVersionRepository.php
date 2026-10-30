@@ -32,7 +32,7 @@ final class DocumentSourceVersionRepository
         }
         try {
             $stmt = $this->db->prepare(
-                'SELECT title, page, blocks FROM document_sources
+                'SELECT title, page, blocks, own_fields FROM document_sources
                  WHERE id = :id AND tenant_id = :tenant_id AND draft_version = :draft_version'
             );
             $stmt->execute([':id' => $sourceId, ':tenant_id' => $tenantId, ':draft_version' => $draftVersion]);
@@ -53,8 +53,8 @@ final class DocumentSourceVersionRepository
             $version = (int) $max->fetchColumn() + 1;
 
             $this->db->prepare(
-                'INSERT INTO document_source_versions (tenant_id, source_id, version, title, page, blocks, published_by_profile_id)
-                 VALUES (:tenant_id, :source_id, :version, :title, :page, :blocks, :published_by)'
+                'INSERT INTO document_source_versions (tenant_id, source_id, version, title, page, blocks, own_fields, published_by_profile_id)
+                 VALUES (:tenant_id, :source_id, :version, :title, :page, :blocks, :own_fields, :published_by)'
             )->execute([
                 ':tenant_id'    => $tenantId,
                 ':source_id'    => $sourceId,
@@ -62,6 +62,7 @@ final class DocumentSourceVersionRepository
                 ':title'        => (string) $draft['title'],
                 ':page'         => $draft['page'],
                 ':blocks'       => (string) $draft['blocks'],
+                ':own_fields'   => $draft['own_fields'],
                 ':published_by' => $publishedBy,
             ]);
 
@@ -119,12 +120,12 @@ final class DocumentSourceVersionRepository
     /**
      * One published version with its blocks, or null.
      *
-     * @return array{version: int, title: string, page: array<string, mixed>|null, blocks: list<mixed>, published_by: int|null, published_at: string}|null
+     * @return array{version: int, title: string, page: array<string, mixed>|null, blocks: list<mixed>, own_fields: list<mixed>, published_by: int|null, published_at: string}|null
      */
     public function find(int $sourceId, int $tenantId, int $version): ?array
     {
         $stmt = $this->db->prepare(
-            'SELECT version, title, page, blocks, published_by_profile_id, published_at FROM document_source_versions
+            'SELECT version, title, page, blocks, own_fields, published_by_profile_id, published_at FROM document_source_versions
              WHERE source_id = :source_id AND tenant_id = :tenant_id AND version = :version'
         );
         $stmt->execute([':source_id' => $sourceId, ':tenant_id' => $tenantId, ':version' => $version]);
@@ -135,12 +136,14 @@ final class DocumentSourceVersionRepository
         }
         $page = $row['page'] !== null ? json_decode((string) $row['page'], true) : null;
         $blocks = json_decode((string) $row['blocks'], true);
+        $ownFields = $row['own_fields'] !== null ? json_decode((string) $row['own_fields'], true) : null;
 
         return [
             'version'      => (int) $row['version'],
             'title'        => (string) $row['title'],
             'page'         => is_array($page) ? $page : null,
             'blocks'       => is_array($blocks) ? array_values($blocks) : [],
+            'own_fields'   => is_array($ownFields) ? array_values($ownFields) : [],
             'published_by' => $row['published_by_profile_id'] !== null ? (int) $row['published_by_profile_id'] : null,
             'published_at' => (string) $row['published_at'],
         ];

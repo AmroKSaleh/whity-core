@@ -42294,6 +42294,27 @@
                     "sort"
                 ]
             },
+            "DocumentOwnField": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "Lowercase letters, digits and underscores, at most 40; the field is `template.<key>`."
+                    },
+                    "label": {
+                        "type": "string",
+                        "description": "The name shown on the chip and in Field menus, at most 80 characters."
+                    },
+                    "sample": {
+                        "type": "string",
+                        "description": "An example value, at most 200 characters."
+                    }
+                },
+                "required": [
+                    "key",
+                    "label"
+                ]
+            },
             "DocumentPreviewResponse": {
                 "type": "object",
                 "properties": {
@@ -42889,6 +42910,13 @@
                         },
                         "description": "The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type"
                     },
+                    "own_fields": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DocumentOwnField"
+                        },
+                        "description": "A template's own fields, for values no record type provides (a CSV column on a label sheet): a list of {key, label, sample?}, at most 50. The editor inserts each as the field `template.<key>`."
+                    },
                     "draft_version": {
                         "type": "integer"
                     },
@@ -43065,6 +43093,14 @@
                             "additionalProperties": true
                         },
                         "description": "The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type"
+                    },
+                    "own_fields": {
+                        "type": "array",
+                        "nullable": true,
+                        "items": {
+                            "$ref": "#/components/schemas/DocumentOwnField"
+                        },
+                        "description": "A template's own fields, for values no record type provides (a CSV column on a label sheet): a list of {key, label, sample?}, at most 50. The editor inserts each as the field `template.<key>`."
                     }
                 }
             },

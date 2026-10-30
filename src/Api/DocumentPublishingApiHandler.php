@@ -369,7 +369,7 @@ final class DocumentPublishingApiHandler
 
         $body = JsonBody::parsed($request);
         if (($body['draft'] ?? false) === true) {
-            $doc = ['page' => $row['page'], 'blocks' => $row['blocks']];
+            $doc = ['page' => $row['page'], 'blocks' => $row['blocks'], 'own_fields' => $row['own_fields'] ?? []];
         } else {
             $published = $row['published_version'] !== null
                 ? $this->versions->find((int) $row['id'], $tenantId, (int) $row['published_version'])
@@ -377,7 +377,7 @@ final class DocumentPublishingApiHandler
             if ($published === null) {
                 return Response::error('This label sheet has no published version yet', 409);
             }
-            $doc = ['page' => $published['page'], 'blocks' => $published['blocks']];
+            $doc = ['page' => $published['page'], 'blocks' => $published['blocks'], 'own_fields' => $published['own_fields']];
         }
         $page = is_array($doc['page']) ? $doc['page'] : [];
         $grid = is_array($page['labels'] ?? null) ? $page['labels'] : null;
@@ -411,7 +411,8 @@ final class DocumentPublishingApiHandler
             }
         } elseif (isset($body['csv'])) {
             $shared = $this->fields->resolve($tenantId, $callerId, $hasPermission, null, null);
-            $parsed = LabelCsv::rows($body['csv'], $body['columns'] ?? null, $this->fields->paths($tenantId, $type), self::MAX_LABEL_ROWS);
+            $paths = $this->fields->paths($tenantId, $type) + self::ownPaths($doc['own_fields']);
+            $parsed = LabelCsv::rows($body['csv'], $body['columns'] ?? null, $paths, self::MAX_LABEL_ROWS);
             if (is_string($parsed)) {
                 return Response::error($parsed, 422);
             }
@@ -508,8 +509,26 @@ final class DocumentPublishingApiHandler
 
         return DocumentPublishCheck::blockers(
             is_array($row['blocks'] ?? null) ? $row['blocks'] : [],
-            $this->fields->paths($tenantId, $type),
+            $this->fields->paths($tenantId, $type) + self::ownPaths($row['own_fields'] ?? []),
         );
+    }
+
+    /**
+     * A template's own fields as paths (`template.<key>`). They have no value
+     * unless a print fills them (a CSV column); with a record they print blank.
+     *
+     * @return array<string, true>
+     */
+    private static function ownPaths(mixed $ownFields): array
+    {
+        $paths = [];
+        foreach (is_array($ownFields) ? $ownFields : [] as $field) {
+            if (is_array($field) && is_string($field['key'] ?? null)) {
+                $paths['template.' . $field['key']] = true;
+            }
+        }
+
+        return $paths;
     }
 
     /**

@@ -37,6 +37,7 @@ export function toDocument(row: Row): WhityDocument {
     fullWidth: row.full_width,
     ...pageOf(row.page),
     recordType: row.record_type ?? undefined,
+    ownFields: row.own_fields?.length ? row.own_fields : undefined,
     blocks: (row.blocks ?? []) as unknown as Block[],
     // Comments and suggestions have their own endpoints from M5.
     comments: [],
@@ -234,6 +235,7 @@ export const documentSourcesAdapter: DocumentEditorAdapter = {
         title: patch.title,
         blocks: patch.blocks as unknown as Row['blocks'],
         ...(patch.page || patch.labels ? { page: { ...patch.page, ...(patch.labels ? { labels: patch.labels } : {}) } as Row['page'] } : {}),
+        ...(patch.ownFields ? { own_fields: patch.ownFields } : {}),
       },
     });
     if (response.status === 409) {

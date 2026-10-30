@@ -132,6 +132,20 @@ function countWords(editor: Editor): number {
  * with a record and Publish are M4's; comments and suggestions, agents and
  * plugin blocks join in M5–M7.
  */
+/** A key for a new own field from its name: lowercase letters, digits and _, unique. */
+export function ownFieldKey(label: string, taken: string[]): string {
+  const base =
+    label
+      .normalize("NFKD")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 32) || "field"
+  let key = base
+  for (let n = 2; taken.includes(key); n++) key = `${base}_${n}`
+  return key
+}
+
 function DocEditor({
   document: doc,
   onChange,
@@ -316,9 +330,26 @@ function DocEditor({
     return false
   }
 
-  const fieldGroups = React.useMemo(() => filterFields(fields ?? [], fieldQuery.query), [fields, fieldQuery.query])
+  // A template's own fields (`template.<key>`) join the record type's, as their own group.
+  const ownFields = doc.ownFields
+  const allFields = React.useMemo<FieldGroup[] | undefined>(() => {
+    if (!fields) return undefined
+    if (!ownFields?.length) return fields
+    const items = ownFields.map((f) => ({ path: `template.${f.key}`, label: f.label, sample: f.sample }))
+    return [...fields, { group: labels.fieldsThisTemplate, items }]
+  }, [fields, ownFields, labels.fieldsThisTemplate])
+  const createField = React.useCallback(
+    (label: string): FieldDef => {
+      const current = latest.current.ownFields ?? []
+      const key = ownFieldKey(label, current.map((f) => f.key))
+      onChange({ ...latest.current, ownFields: [...current, { key, label }] })
+      return { path: `template.${key}`, label }
+    },
+    [onChange]
+  )
+  const fieldGroups = React.useMemo(() => filterFields(allFields ?? [], fieldQuery.query), [allFields, fieldQuery.query])
   const fieldList = flatFields(fieldGroups)
-  const fieldOpen = fieldQuery.open && !!fields?.length
+  const fieldOpen = fieldQuery.open && !!allFields?.length
   React.useEffect(() => setFieldActive(0), [fieldQuery.query, fieldQuery.open])
   const pickField = React.useCallback(
     (index: number) => {
@@ -369,8 +400,8 @@ function DocEditor({
   }, [publish, editor])
 
   const fieldLabel = React.useCallback(
-    (path: string) => fields?.flatMap((g) => g.items).find((f) => f.path === path)?.label ?? path,
-    [fields]
+    (path: string) => allFields?.flatMap((g) => g.items).find((f) => f.path === path)?.label ?? path,
+    [allFields]
   )
   const fixBlocker = React.useCallback(
     (b: PublishBlocker) => {
@@ -525,7 +556,8 @@ function DocEditor({
           outline={outlineOpen}
           onOutline={() => setOutlineOpen((o) => !o)}
           onLink={() => openLink()}
-          fields={fields}
+          fields={allFields}
+          onCreateField={fields && editable ? createField : undefined}
           view={view}
           onView={doc.kind === "label" ? undefined : setView}
           zoom={zoom}

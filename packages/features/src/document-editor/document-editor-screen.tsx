@@ -134,9 +134,10 @@ export function DocumentEditorScreen({
     saving.current = true;
     setSave({ state: 'saving' });
     try {
-      // A label sheet's grid and sheet size are saved with it (E.43).
+      // A label sheet's grid and sheet size are saved with it (E.43), and a template's own fields.
       const sheet = next.kind === 'label' ? { page: next.page, labels: next.labels } : {};
-      const result = await adapter.save(id, { title: next.title, blocks: next.blocks, ...sheet }, version.current);
+      const own = next.ownFields ? { ownFields: next.ownFields } : {};
+      const result = await adapter.save(id, { title: next.title, blocks: next.blocks, ...sheet, ...own }, version.current);
       retryDelay.current = RETRY_FIRST_MS;
       if (result.ok) {
         version.current = result.version;
@@ -321,7 +322,17 @@ export function DocumentEditorScreen({
         <PrintLabelsDialog
           open={printingLabels}
           onOpenChange={setPrintingLabels}
-          fields={template.fields}
+          fields={
+            doc.ownFields?.length
+              ? [
+                  ...template.fields,
+                  {
+                    group: labels.fieldsThisTemplate,
+                    items: doc.ownFields.map((f) => ({ path: `template.${f.key}`, label: f.label, sample: f.sample })),
+                  },
+                ]
+              : template.fields
+          }
           findRecords={findRecords}
           canUseRecords={!!recordType && !!adapter.findRecords}
           onPrint={(source) => adapter.printLabels!(id, source, doc.title)}

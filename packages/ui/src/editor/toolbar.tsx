@@ -68,7 +68,20 @@ const BarDrop = React.forwardRef<HTMLButtonElement, React.ComponentProps<"button
 })
 
 /** Field ▾ (EditorInline): the field picker with its own search box. */
-function FieldMenu({ editor, groups, labels, disabled }: { editor: Editor; groups: FieldGroup[]; labels: EditorLabels; disabled: boolean }) {
+function FieldMenu({
+  editor,
+  groups,
+  labels,
+  disabled,
+  onCreate,
+}: {
+  editor: Editor
+  groups: FieldGroup[]
+  labels: EditorLabels
+  disabled: boolean
+  /** A template's own field named `label`, added to the document (editor M4b). */
+  onCreate?: (label: string) => FieldDef
+}) {
   const [open, setOpen] = React.useState(false)
   const [query, setQuery] = React.useState("")
   const [active, setActive] = React.useState(0)
@@ -80,6 +93,9 @@ function FieldMenu({ editor, groups, labels, disabled }: { editor: Editor; group
     setQuery("")
     insertField(editor, field)
   }
+  const name = query.trim()
+  const exists = flatFields(groups).some((f) => f.label.toLowerCase() === name.toLowerCase())
+  const create = onCreate && name && !exists ? () => pick(onCreate(name)) : undefined
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -111,6 +127,9 @@ function FieldMenu({ editor, groups, labels, disabled }: { editor: Editor; group
                   } else if (e.key === "Enter" && flat[active]) {
                     e.preventDefault()
                     pick(flat[active])
+                  } else if (e.key === "Enter" && create) {
+                    e.preventDefault()
+                    create()
                   }
                 }}
                 placeholder={labels.fieldSearch}
@@ -120,6 +139,26 @@ function FieldMenu({ editor, groups, labels, disabled }: { editor: Editor; group
                 className="h-7 min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
               />
             </label>
+          }
+          footer={
+            onCreate && (
+              <div className="border-t border-border pt-1">
+                {create ? (
+                  <button
+                    type="button"
+                    onClick={create}
+                    className="flex w-full items-center gap-1.5 rounded-control px-2 py-1.5 text-start text-sm hover:bg-accent"
+                  >
+                    <Icon name="plus" size={14} />
+                    <span className="min-w-0 truncate" dir="auto">
+                      {fill(labels.fieldNew, { name })}
+                    </span>
+                  </button>
+                ) : (
+                  <p className="m-0 px-2 py-1.5 text-xs text-muted-foreground">{labels.fieldNewHint}</p>
+                )}
+              </div>
+            )
           }
         />
       </PopoverContent>
@@ -147,6 +186,7 @@ function EditorToolbar({
   zoom,
   onZoom,
   sheet,
+  onCreateField,
 }: {
   editor: Editor
   labels: EditorLabels
@@ -163,6 +203,8 @@ function EditorToolbar({
   onZoom?: (zoom: PageZoom) => void
   /** Label sheets: the sheet setup, beside the zoom (E.43). */
   sheet?: React.ReactNode
+  /** A template's own field, made from Field ▾. */
+  onCreateField?: (label: string) => FieldDef
 }) {
   const s = useEditorState({
     editor,
@@ -256,7 +298,9 @@ function EditorToolbar({
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
-      {fields && fields.length > 0 && <FieldMenu editor={editor} groups={fields} labels={labels} disabled={!editable} />}
+      {fields && (fields.length > 0 || onCreateField) && (
+        <FieldMenu editor={editor} groups={fields} labels={labels} disabled={!editable} onCreate={onCreateField} />
+      )}
       <span className="min-w-2 flex-1" />
       {sheet}
       {view === "page" && onZoom && (

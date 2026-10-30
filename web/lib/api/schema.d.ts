@@ -6282,6 +6282,14 @@ export interface components {
                 direction: "asc" | "desc";
             };
         };
+        DocumentOwnField: {
+            /** @description Lowercase letters, digits and underscores, at most 40; the field is `template.<key>`. */
+            key: string;
+            /** @description The name shown on the chip and in Field menus, at most 80 characters. */
+            label: string;
+            /** @description An example value, at most 200 characters. */
+            sample?: string;
+        };
         DocumentPreviewResponse: {
             data: {
                 /** @description The record as it is named, for example `INV-1042 · Example Clinic` */
@@ -6464,6 +6472,8 @@ export interface components {
             blocks?: {
                 [key: string]: unknown;
             }[];
+            /** @description A template's own fields, for values no record type provides (a CSV column on a label sheet): a list of {key, label, sample?}, at most 50. The editor inserts each as the field `template.<key>`. */
+            own_fields?: components["schemas"]["DocumentOwnField"][];
             draft_version: number;
             published_version?: number | null;
             /** @enum {string} */
@@ -6538,6 +6548,8 @@ export interface components {
             blocks?: {
                 [key: string]: unknown;
             }[];
+            /** @description A template's own fields, for values no record type provides (a CSV column on a label sheet): a list of {key, label, sample?}, at most 50. The editor inserts each as the field `template.<key>`. */
+            own_fields?: components["schemas"]["DocumentOwnField"][] | null;
         };
         DocumentSourceFileResponse: {
             data: {

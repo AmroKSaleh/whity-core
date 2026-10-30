@@ -415,6 +415,46 @@ final class DocumentPublishingApiHandlerRealEngineTest extends TestCase
         self::assertSame(422, $res->getStatusCode(), 'no grid yet');
     }
 
+    public function testATemplatesOwnFieldsPublishAndPrintFromACsv(): void
+    {
+        $blocks = [$this->para($this->field('template.ship_to'))];
+        $id = $this->labelSheet($blocks);
+        self::assertSame(
+            ['template.ship_to'],
+            array_column(json_decode($this->check(self::OWNER, $id)->getBody(), true)['data'], 'path'),
+            'not declared yet, so not a field',
+        );
+
+        $this->save(self::OWNER, $id, '"1"', ['own_fields' => [['key' => 'ship_to', 'label' => 'Ship to', 'sample' => 'Example Clinic']]]);
+        self::assertSame([], json_decode($this->check(self::OWNER, $id)->getBody(), true)['data']);
+        self::assertSame(201, $this->publish(self::OWNER, $id, '"2"')->getStatusCode());
+
+        $res = $this->printLabels(self::OWNER, $id, ['csv' => "Address\nMecca Street 112\n", 'columns' => ['Address' => 'template.ship_to']]);
+        self::assertSame(200, $res->getStatusCode(), $res->getBody());
+        self::assertSame('Mecca Street 112', $this->render->labelCalls[0]['labels'][0][0]['text']);
+
+        // With a record, a template's own field prints blank.
+        $doc = $this->issue(self::OWNER, 'Example Clinic');
+        self::assertSame(200, $this->printLabels(self::OWNER, $id, ['records' => ['document:' . $doc]])->getStatusCode());
+    }
+
+    public function testOwnFieldsAreValidated(): void
+    {
+        $id = $this->labelSheet([$this->para('Hi')]);
+        foreach ([
+            [['key' => 'Ship To', 'label' => 'Ship to']],
+            [['key' => 'a', 'label' => 'A'], ['key' => 'a', 'label' => 'Again']],
+            [['key' => 'a', 'label' => '']],
+            'ship_to',
+        ] as $bad) {
+            $res = $this->sources->saveDraft(
+                $this->request('PUT', "/api/document-sources/{$id}/draft", self::OWNER, (string) json_encode(['own_fields' => $bad]), self::TENANT, ['If-Match' => '"1"']),
+                ['id' => (string) $id],
+            );
+            self::assertSame(422, $res->getStatusCode(), (string) json_encode($bad));
+        }
+    }
+
     public function testASavedGridIsValidated(): void
     {
         $id = $this->labelSheet([$this->para('Hi')]);

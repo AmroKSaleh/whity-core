@@ -12,7 +12,7 @@ export interface LoadedDocument {
 
 /** What a save sends: the fields of the document the editor changes. */
 export type DraftPatch = Pick<WhityDocument, 'title' | 'blocks'> &
-  Partial<Pick<WhityDocument, 'lang' | 'defaultView' | 'fullWidth' | 'page' | 'labels'>>;
+  Partial<Pick<WhityDocument, 'lang' | 'defaultView' | 'fullWidth' | 'page' | 'labels' | 'ownFields'>>;
 
 export type SaveResult =
   | { ok: true; version: number; updatedAt: string }

@@ -239,6 +239,9 @@ export const EDITOR_LABELS = {
   labelOverflow: "Doesn’t fit the label",
   labelsPerSheet: "{n} labels a sheet",
   printLabels: "Print labels",
+  fieldsThisTemplate: "This template",
+  fieldNew: "New field “{name}”",
+  fieldNewHint: "Type a name to add a field of this template.",
 }
 
 export type EditorLabels = typeof EDITOR_LABELS

@@ -5690,6 +5690,7 @@ final class CoreApiSchemas
                 'page' => ['type' => 'object', 'nullable' => true, 'additionalProperties' => true],
                 'record_type' => self::str(true),
                 'blocks' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true], 'description' => 'The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type'],
+                'own_fields' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentOwnField'), 'description' => 'A template\'s own fields, for values no record type provides (a CSV column on a label sheet): a list of {key, label, sample?}, at most 50. The editor inserts each as the field `template.<key>`.'],
                 'draft_version' => self::int(),
                 'published_version' => self::int(true),
                 'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
@@ -5797,6 +5798,11 @@ final class CoreApiSchemas
                 'draft' => self::bool() + ['description' => 'Render the draft instead of the published version, as a preview. A draft is never issued.'],
                 'persist' => self::bool() + ['description' => 'Issue the PDF as a document; its values are kept with it.'],
             ], []),
+            'DocumentOwnField' => self::object([
+                'key' => self::str() + ['description' => 'Lowercase letters, digits and underscores, at most 40; the field is `template.<key>`.'],
+                'label' => self::str() + ['description' => 'The name shown on the chip and in Field menus, at most 80 characters.'],
+                'sample' => self::str() + ['description' => 'An example value, at most 200 characters.'],
+            ], ['key', 'label']),
             'DocumentSourcePrintLabelsRequest' => self::object([
                 'records' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'One label per record, each as `type:id` (at most 500). Send this or csv.'],
                 'csv' => self::str() + ['description' => 'One label per row of this CSV text (UTF-8, a header row, at most 2 MB and 5000 rows). Read for this print and never stored.'],
@@ -5824,6 +5830,7 @@ final class CoreApiSchemas
                 'full_width' => self::bool() + ['description' => 'For wiki pages with wide tables: use the full width instead of the 760px sheet.'],
                 'page' => ['type' => 'object', 'nullable' => true, 'additionalProperties' => true] + ['description' => 'Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`; for a label sheet, `labels` is its grid (columns, rows, size {widthMm, heightMm}, gapMm, gapYMm). Null for none.'],
                 'blocks' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true], 'description' => 'The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type'],
+                'own_fields' => ['type' => 'array', 'nullable' => true, 'items' => SchemaBuilder::ref('DocumentOwnField'), 'description' => 'A template\'s own fields, for values no record type provides (a CSV column on a label sheet): a list of {key, label, sample?}, at most 50. The editor inserts each as the field `template.<key>`.'],
             ], []),
             'DocumentBlockResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentBlock')),
             // scope/required_permission/owner_ou_id are all optional; setting a

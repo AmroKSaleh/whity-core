@@ -245,5 +245,8 @@ export function useEditorLabels(): EditorLabels {
     labelOverflow: t('blockEditor.labelOverflow', 'Doesn’t fit the label'),
     labelsPerSheet: t('blockEditor.labelsPerSheet', '{n} labels a sheet'),
     printLabels: t('blockEditor.printLabels', 'Print labels'),
+    fieldsThisTemplate: t('blockEditor.fieldsThisTemplate', 'This template'),
+    fieldNew: t('blockEditor.fieldNew', 'New field “{name}”'),
+    fieldNewHint: t('blockEditor.fieldNewHint', 'Type a name to add a field of this template.'),
   };
 }
