@@ -103,6 +103,10 @@ function inlineContent(block, direction) {
 
   let out = '';
   for (const run of runs) {
+    if (run.break === true) {
+      out += '<br>';
+      continue;
+    }
     let piece = isolateForeignRuns(run.text, direction);
     if (run.italic) piece = `<em>${piece}</em>`;
     if (run.bold) piece = `<strong>${piece}</strong>`;

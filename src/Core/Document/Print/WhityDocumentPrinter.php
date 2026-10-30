@@ -423,12 +423,18 @@ final class WhityDocumentPrinter
             if (!is_array($run)) {
                 continue;
             }
+            // A hard break is a line break on paper too: an address, a recipient's lines.
+            if (($run['type'] ?? '') === 'break') {
+                $runs[] = ['text' => "\n", 'break' => true];
+                continue;
+            }
             $text = $this->runText($run);
             if ($text === '') {
                 continue;
             }
             $r = ['text' => $text];
-            $marks = ($run['type'] ?? '') === 'text' && is_array($run['marks'] ?? null) ? $run['marks'] : [];
+            // A field can be bold or italic like the text around it.
+            $marks = in_array($run['type'] ?? '', ['text', 'field'], true) && is_array($run['marks'] ?? null) ? $run['marks'] : [];
             $types = array_map(static fn ($m) => is_array($m) ? ($m['type'] ?? '') : '', $marks);
             if ($bold || in_array('bold', $types, true)) {
                 $r['bold'] = true;

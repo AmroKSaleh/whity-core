@@ -290,10 +290,15 @@ function validateRuns(block, at) {
     if (typeof run.text !== 'string') {
       return `"${at}.runs[${r}].text" must be a string`;
     }
-    for (const mark of ['bold', 'italic']) {
+    for (const mark of ['bold', 'italic', 'break']) {
       if (run[mark] !== undefined && typeof run[mark] !== 'boolean') {
         return `"${at}.runs[${r}].${mark}" must be true or false`;
       }
+    }
+    // A line break inside a paragraph (an address): its text is the newline
+    // the plain text carries, so runs and text still spell the same thing.
+    if (run.break === true && run.text !== '\n') {
+      return `"${at}.runs[${r}].text" must be "\\n" for a break`;
     }
     if (run.href !== undefined) {
       // Normalise, check the normalised value, then KEEP it. Checking a

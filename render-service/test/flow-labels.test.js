@@ -77,6 +77,19 @@ describe('buildLabelsHtml', () => {
     expect(html).not.toContain('<b>مخبز</b>');
   });
 
+  test('a break run is a line break, and must carry the newline its text spells', () => {
+    const address = {
+      type: 'paragraph',
+      text: 'Example Clinic\nRainbow Street 21',
+      runs: [{ text: 'Example Clinic', bold: true }, { text: '\n', break: true }, { text: 'Rainbow Street 21' }],
+    };
+    expect(validateLabelsPayload(payload([[address]]))).toBeNull();
+    expect(buildLabelsHtml(payload([[address]]))).toMatch(/Example Clinic.*<\/strong><br>.*Rainbow Street 21/);
+
+    const wrong = { ...address, text: 'Example Clinic Rainbow Street 21', runs: [address.runs[0], { text: ' ', break: true }, address.runs[2]] };
+    expect(validateLabelsPayload(payload([[wrong]]))).toMatch(/must be "\\n" for a break/);
+  });
+
   test('places labels with logical properties, so an Arabic sheet starts at the right', () => {
     const html = buildLabelsHtml(payload([label('a')]));
     expect(html).toMatch(/inset-inline-start:7\.25mm;top:15\.15mm/);
