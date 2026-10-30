@@ -387,9 +387,11 @@
   outline: 1px dashed color-mix(in oklab, var(--border) 100%, var(--foreground) 15%);
   outline-offset: -1px;
 }
-.wy-ls__label.is-first { outline: 1px solid var(--ring); overflow: visible; }
+.wy-ls__label.is-first { outline: 1px solid var(--ring); overflow: visible; z-index: 1; }
 .wy-ls__label.is-first .ProseMirror { min-height: 100%; }
+/* What runs past the label stays readable above its neighbours while it's edited. */
 .wy-ls__label.is-over { outline-color: var(--error); }
+.wy-ls__label.is-over .ProseMirror { background: var(--card); box-shadow: 0 0 0 1px var(--error); border-radius: 4px; }
 .wy-ls__label:not(.is-first) { color: var(--muted-foreground); }
 .wy-ls__label .wy-doc > * { margin-block: 0 2px; }
 .wy-ls__over {

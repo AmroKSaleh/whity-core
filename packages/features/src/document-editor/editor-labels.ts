@@ -70,6 +70,7 @@ export function useEditorLabels(): EditorLabels {
     kindReport: t('blockEditor.kindReport', 'Report'),
     kindNote: t('blockEditor.kindNote', 'Note'),
     kindWiki: t('blockEditor.kindWiki', 'Wiki page'),
+    kindLabel: t('blockEditor.kindLabel', 'Label sheet'),
     groupBasic: t('blockEditor.groupBasic', 'Basic'),
     groupLists: t('blockEditor.groupLists', 'Lists'),
     groupStructure: t('blockEditor.groupStructure', 'Structure'),

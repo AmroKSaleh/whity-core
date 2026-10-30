@@ -5,9 +5,23 @@
  */
 const GET = jest.fn();
 const POST = jest.fn();
-jest.mock('@/lib/api/client', () => ({ api: { GET: (...a: unknown[]) => GET(...a), POST: (...a: unknown[]) => POST(...a) } }));
+const PUT = jest.fn();
+jest.mock('@/lib/api/client', () => ({
+  api: { GET: (...a: unknown[]) => GET(...a), POST: (...a: unknown[]) => POST(...a), PUT: (...a: unknown[]) => PUT(...a) },
+}));
 
-import { documentSourcesAdapter } from '@/lib/documents/sources';
+import { documentSourcesAdapter, toDocument } from '@/lib/documents/sources';
+
+// jsdom has no Blob#text(); browsers do.
+if (!Blob.prototype.text) {
+  Blob.prototype.text = function text(this: Blob) {
+    return new Promise<string>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.readAsText(this);
+    });
+  };
+}
 
 const ok = (data: unknown) => ({ data: { data }, response: new Response(null, { status: 200 }) });
 const notFound = () => ({ data: undefined, response: new Response(null, { status: 404 }) });
@@ -112,5 +126,79 @@ describe('templates (M4)', () => {
 
     POST.mockResolvedValueOnce({ data: undefined, response: new Response(null, { status: 409 }) });
     await expect(documentSourcesAdapter.publish!('7', 11)).rejects.toThrow('409');
+  });
+});
+
+describe('label sheets and own fields (M4b)', () => {
+  const row = {
+    id: 9,
+    tenant_id: 1,
+    kind: 'label',
+    title: 'Shipping labels',
+    lang: 'en',
+    default_view: 'page',
+    full_width: false,
+    page: { size: 'A4', marginMm: 16, letterhead: false, labels: { columns: 2, rows: 4, size: { widthMm: 99.1, heightMm: 67.7 }, gapMm: 2.5 } },
+    record_type: null,
+    own_fields: [{ key: 'ship_to', label: 'Ship to' }],
+    blocks: [],
+    draft_version: 3,
+    published_version: null,
+    scope: 'personal',
+    required_permission: null,
+    created_by: 1,
+    owner_ou_id: null,
+    updated_by: 1,
+    created_at: '2026-10-30 09:00:00',
+    updated_at: '2026-10-30 09:00:00',
+  };
+
+  it('keeps the label grid beside the page setup, and the own fields', () => {
+    const doc = toDocument(row as never);
+    expect(doc.page).toEqual({ size: 'A4', marginMm: 16, letterhead: false });
+    expect(doc.labels).toEqual(row.page.labels);
+    expect(doc.ownFields).toEqual([{ key: 'ship_to', label: 'Ship to' }]);
+  });
+
+  it('saves the grid inside page, and the own fields', async () => {
+    PUT.mockResolvedValueOnce({ data: { data: { draft_version: 4, updated_at: 'now' } }, response: new Response(null, { status: 200, headers: { ETag: '"4"' } }) });
+    const doc = toDocument(row as never);
+    await documentSourcesAdapter.save('9', { title: doc.title, blocks: [], page: doc.page, labels: doc.labels, ownFields: doc.ownFields }, 3);
+    expect(PUT.mock.calls[0][1].body).toEqual({
+      title: 'Shipping labels',
+      blocks: [],
+      page: { ...row.page },
+      own_fields: [{ key: 'ship_to', label: 'Ship to' }],
+    });
+  });
+
+  describe('printLabels', () => {
+    beforeAll(() => {
+      Object.assign(URL, { createObjectURL: jest.fn(() => 'blob:x'), revokeObjectURL: jest.fn() });
+    });
+
+    it('prints records as type:id and reports the counts', async () => {
+      POST.mockResolvedValueOnce({
+        data: new Blob(['%PDF']),
+        response: new Response(null, { status: 200, headers: { 'X-Labels-Count': '2', 'X-Labels-Clipped': '1' } }),
+      });
+      const result = await documentSourcesAdapter.printLabels!('9', { kind: 'records', records: [{ type: 'document', id: '3' }, { type: 'document', id: '4' }] }, 'Labels');
+      expect(result).toEqual({ count: 2, clipped: 1 });
+      expect(POST).toHaveBeenLastCalledWith('/api/v1/document-sources/{id}/print-labels', {
+        params: { path: { id: 9 } },
+        body: { records: ['document:3', 'document:4'] },
+        parseAs: 'blob',
+      });
+    });
+
+    it("sends the CSV as text with its columns, and throws the server's sentence", async () => {
+      POST.mockResolvedValueOnce({ data: undefined, error: { error: 'The CSV has no column "Phone"' }, response: new Response(null, { status: 422 }) });
+      const csv = 'Name\nExample Clinic\n';
+      const file = new File([csv], 'list.csv', { type: 'text/csv' });
+      await expect(
+        documentSourcesAdapter.printLabels!('9', { kind: 'csv', file, columns: { Name: 'template.ship_to' } }, 'Labels')
+      ).rejects.toThrow('The CSV has no column "Phone"');
+      expect(POST.mock.calls.at(-1)[1].body).toEqual({ csv, columns: { Name: 'template.ship_to' } });
+    });
   });
 });

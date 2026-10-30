@@ -29,6 +29,7 @@ export type SheetSize = keyof typeof SHEETS
 export const LABEL_PRESETS: { id: string; name: string; sheet: SheetSize; grid: LabelGrid }[] = [
   { id: "avery-l7160", name: "Avery L7160", sheet: "A4", grid: { columns: 3, rows: 7, size: { widthMm: 63.5, heightMm: 38.1 }, gapMm: 2.5, gapYMm: 0 } },
   { id: "avery-l7159", name: "Avery L7159", sheet: "A4", grid: { columns: 3, rows: 8, size: { widthMm: 63.5, heightMm: 33.9 }, gapMm: 2.5, gapYMm: 0 } },
+  { id: "avery-l7165", name: "Avery L7165", sheet: "A4", grid: { columns: 2, rows: 4, size: { widthMm: 99.1, heightMm: 67.7 }, gapMm: 2.5, gapYMm: 0 } },
   { id: "avery-l7651", name: "Avery L7651", sheet: "A4", grid: { columns: 5, rows: 13, size: { widthMm: 38.1, heightMm: 21.2 }, gapMm: 2.5, gapYMm: 0 } },
   { id: "letter-2x5", name: "Letter 2 × 5", sheet: "Letter", grid: { columns: 2, rows: 5, size: { widthMm: 101.6, heightMm: 50.8 }, gapMm: 4.8, gapYMm: 0 } },
   { id: "certificate", name: "Certificate", sheet: "A4", grid: { columns: 1, rows: 1, size: { widthMm: 190, heightMm: 277 }, gapMm: 0 } },

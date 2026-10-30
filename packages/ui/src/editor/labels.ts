@@ -64,6 +64,7 @@ export const EDITOR_LABELS = {
   kindReport: "Report",
   kindNote: "Note",
   kindWiki: "Wiki page",
+  kindLabel: "Label sheet",
   groupBasic: "Basic",
   groupLists: "Lists",
   groupStructure: "Structure",

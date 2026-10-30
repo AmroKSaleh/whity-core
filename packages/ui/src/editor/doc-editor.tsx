@@ -56,7 +56,7 @@ const KIND_LABEL: Record<DocumentKind, keyof EditorLabels> = {
   report: "kindReport",
   note: "kindNote",
   wiki: "kindWiki",
-  label: "kindTemplate",
+  label: "kindLabel",
 }
 
 export interface DocEditorProps {
