@@ -126,6 +126,7 @@
         "blockEditor.insert": "Insert",
         "blockEditor.italic": "Italic",
         "blockEditor.keepEditing": "Keep editing",
+        "blockEditor.kindLabel": "Label sheet",
         "blockEditor.kindLetter": "Letter",
         "blockEditor.kindNote": "Note",
         "blockEditor.kindReport": "Report",

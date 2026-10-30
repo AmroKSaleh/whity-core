@@ -159,7 +159,9 @@ final class LegacyConversionRealEngineTest extends TestCase
         (new DocumentStarterSeeder($this->templates, new DocumentBlockRepository($this->pdo)))->seedForTenant(self::TENANT, 'Example Bakery');
         $starters = $this->templates->listForTenant(self::TENANT);
         $edited = $starters[0];
-        $this->pdo->prepare("UPDATE document_templates SET updated_at = datetime(created_at, '+1 day') WHERE id = ?")->execute([$edited['id']]);
+        // Someone edited this starter a day after it was seeded.
+        $this->pdo->prepare('UPDATE document_templates SET updated_at = ? WHERE id = ?')
+            ->execute([date('Y-m-d H:i:s', (int) strtotime((string) $edited['created_at']) + 86400), $edited['id']]);
         $mine = $this->templates->create(self::TENANT, [
             'name' => 'Our letter',
             'data' => ['version' => 2, 'name' => 'Our letter', 'placeholders' => [], 'page' => ['widthMm' => 210, 'heightMm' => 297, 'marginMm' => 10, 'background' => '#fff'],

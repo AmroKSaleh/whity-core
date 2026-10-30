@@ -25,6 +25,9 @@ final class DocumentsCommand implements CommandHelp, CliCommand
     private const TENANT_FLAG = '--tenant';
     private const DRY_RUN_FLAG = '--dry-run';
 
+    /** The platform's own tenant, which has no documents of its own. */
+    private const SYSTEM_TENANT_ID = 0;
+
     public function printHelp(string $commandName): bool
     {
         echo "Bring existing tenants onto the document editor.\n\n";
@@ -34,7 +37,7 @@ final class DocumentsCommand implements CommandHelp, CliCommand
         echo "designer template into an editor document once, as a draft. Starters Whity seeded\n";
         echo "and nobody edited are not copied. The old templates are not changed.\n\n";
         echo "Options:\n";
-        echo "  " . self::TENANT_FLAG . "=ID   Only this tenant (default: every tenant).\n";
+        echo "  " . self::TENANT_FLAG . "=ID   Only this tenant (default: every tenant but the system tenant).\n";
         echo "  " . self::DRY_RUN_FLAG . "     Report what would be converted; write nothing.\n";
 
         return true;
@@ -69,8 +72,8 @@ final class DocumentsCommand implements CommandHelp, CliCommand
 
         $stmt = $only !== null
             ? $pdo->prepare('SELECT id, name FROM tenants WHERE id = :id')
-            : $pdo->prepare('SELECT id, name FROM tenants ORDER BY id');
-        $stmt->execute($only !== null ? [':id' => $only] : []);
+            : $pdo->prepare('SELECT id, name FROM tenants WHERE id <> :system ORDER BY id');
+        $stmt->execute($only !== null ? [':id' => $only] : [':system' => self::SYSTEM_TENANT_ID]);
         $tenants = $stmt->fetchAll(\PDO::FETCH_ASSOC);
         if ($tenants === []) {
             fwrite(STDERR, "No tenant found\n");
@@ -88,8 +91,8 @@ final class DocumentsCommand implements CommandHelp, CliCommand
                 ? ''
                 : ' (left out: ' . implode(', ', array_map(static fn (string $k, int $n): string => "{$k} {$n}", array_keys($summary['dropped']), $summary['dropped'])) . ')';
             printf(
-                "%s tenant %d %s: %d starters, %d templates converted%s, %d skipped, %d failed\n",
-                $dryRun ? '[dry run]' : '',
+                "%stenant %d %s: %d starters, %d templates converted%s, %d skipped, %d failed\n",
+                $dryRun ? '[dry run] ' : '',
                 $id,
                 (string) $tenant['name'],
                 $added,
