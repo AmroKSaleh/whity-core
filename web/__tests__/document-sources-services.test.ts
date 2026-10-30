@@ -77,3 +77,40 @@ it('uploads a file as multipart and returns it for the block', async () => {
   expect(path).toBe('/api/v1/document-sources/7/files');
   expect((body as FormData).get('file')).toBeInstanceOf(File);
 });
+
+describe('templates (M4)', () => {
+  it('loads the field groups, letterhead and print colour for a record type', async () => {
+    GET.mockResolvedValueOnce(
+      ok({
+        record_types: [{ key: 'document', label: 'Document' }],
+        groups: [{ group: 'Document', items: [{ path: 'document.title', label: 'Document title' }] }],
+        letterhead: { name: 'Example Bakery', lines: ['Mecca Street 112, Amman'] },
+        accent: '#B74C05',
+      })
+    );
+    await expect(documentSourcesAdapter.loadTemplate!('document')).resolves.toEqual({
+      fields: [{ group: 'Document', items: [{ path: 'document.title', label: 'Document title' }] }],
+      letterhead: { name: 'Example Bakery', lines: ['Mecca Street 112, Amman'] },
+      accent: '#B74C05',
+    });
+    expect(GET).toHaveBeenLastCalledWith('/api/v1/document-fields', { params: { query: { recordType: 'document' } } });
+  });
+
+  it('names records as type:id, and a hidden preview record is null', async () => {
+    GET.mockResolvedValueOnce(ok([{ id: '3', label: '#3 · Receipt' }]));
+    await expect(documentSourcesAdapter.findRecords!('document', 'rec')).resolves.toEqual([{ ref: 'document:3', label: '#3 · Receipt' }]);
+    expect(GET).toHaveBeenLastCalledWith('/api/v1/document-fields/records', { params: { query: { recordType: 'document', q: 'rec' } } });
+
+    GET.mockResolvedValueOnce(notFound());
+    await expect(documentSourcesAdapter.preview!('7', 'document:4')).resolves.toBeNull();
+  });
+
+  it('publishes the version it saved, as If-Match', async () => {
+    POST.mockResolvedValueOnce({ data: { data: { published_version: 4 } }, response: new Response(null, { status: 201 }) });
+    await expect(documentSourcesAdapter.publish!('7', 12)).resolves.toBe(4);
+    expect(POST).toHaveBeenLastCalledWith('/api/v1/document-sources/{id}/publish', { params: { path: { id: 7 } }, headers: { 'If-Match': '"12"' } });
+
+    POST.mockResolvedValueOnce({ data: undefined, response: new Response(null, { status: 409 }) });
+    await expect(documentSourcesAdapter.publish!('7', 11)).rejects.toThrow('409');
+  });
+});

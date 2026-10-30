@@ -4,11 +4,16 @@ import * as React from 'react';
 
 import { Button } from '@whity-org/ui/button';
 import { DocEditor, type SaveState } from '@whity-org/ui/editor/doc-editor';
-import type { EditorMode, WhityDocument } from '@whity-org/ui/editor/contract';
-import type { EditorServices } from '@whity-org/ui/editor/services';
+import type { DocumentKind, EditorMode, WhityDocument } from '@whity-org/ui/editor/contract';
+import type { FieldDef } from '@whity-org/ui/editor/fields';
+import type { EditorServices, FieldPreview } from '@whity-org/ui/editor/services';
 import { useTranslation } from '../i18n';
 import { useEditorLabels } from './editor-labels';
-import type { DocumentEditorAdapter } from './types';
+import { RecordPicker } from './record-picker';
+import type { DocumentEditorAdapter, RecordChoice, TemplateSetup } from './types';
+
+/** The kinds Whity Render prints, which have fields, a published version and a PDF (E.7, E.9). */
+const PRINTED: DocumentKind[] = ['template', 'letter', 'report', 'label'];
 
 /** How long typing has to pause before the draft saves. */
 const SAVE_DELAY_MS = 800;
@@ -29,6 +34,10 @@ function time(d: Date): string {
  * overwritten: saving stops, the person's edits stay on screen, and a bar says
  * what happened with one way forward (load the newer version). Live merging of
  * concurrent edits comes with collaboration (E.3).
+ *
+ * A printed kind (a template, letter, report or label sheet) is the Document
+ * designer (A33, editor M4): it opens in the page view with the letterhead and
+ * merge fields, previews with a record, and is published through the check.
  */
 export function DocumentEditorScreen({
   id,
@@ -54,6 +63,11 @@ export function DocumentEditorScreen({
   const [mode, setMode] = React.useState<EditorMode>('editing');
   const [loadCount, setLoadCount] = React.useState(0);
   const [services, setServices] = React.useState<EditorServices | undefined>(undefined);
+  const [template, setTemplate] = React.useState<TemplateSetup | null>(null);
+  const [preview, setPreview] = React.useState<FieldPreview | null>(null);
+  const [previewRecord, setPreviewRecord] = React.useState<string | null>(null);
+  const [pickerFor, setPickerFor] = React.useState<'preview' | 'pdf' | null>(null);
+  const [publishedVersion, setPublishedVersion] = React.useState<number | null>(null);
 
   const version = React.useRef(0);
   const pending = React.useRef<WhityDocument | null>(null);
@@ -74,6 +88,7 @@ export function DocumentEditorScreen({
         conflictRef.current = false;
         setConflict(false);
         setDoc(loaded.document);
+        setPublishedVersion(loaded.document.publishedVersion ?? null);
         setSave(undefined);
       })
       .catch(() => live && setLoadError(true));
@@ -94,6 +109,21 @@ export function DocumentEditorScreen({
       live = false;
     };
   }, [adapter, id]);
+
+  // Templates: the record type's fields, the letterhead and print colour.
+  const printed = doc ? PRINTED.includes(doc.kind) && !!adapter.loadTemplate : false;
+  const recordType = doc?.recordType ?? null;
+  React.useEffect(() => {
+    if (!printed || !adapter.loadTemplate) return;
+    let live = true;
+    adapter.loadTemplate(recordType).then(
+      (next) => live && setTemplate(next),
+      () => live && setTemplate(null)
+    );
+    return () => {
+      live = false;
+    };
+  }, [adapter, printed, recordType]);
 
   const flush = React.useCallback(async () => {
     const next = pending.current;
@@ -155,6 +185,44 @@ export function DocumentEditorScreen({
     [canEdit, flush]
   );
 
+  /** Save what's waiting now; publishing and printing need the draft on the server. */
+  const flushNow = React.useCallback(async () => {
+    clearTimeout(timer.current);
+    await flush();
+    if (pending.current || conflictRef.current) throw new Error('The draft is not saved');
+  }, [flush]);
+
+  const showPreview = React.useCallback(
+    async (record: string | null) => {
+      if (!adapter.preview) return;
+      const next = await adapter.preview(id, record);
+      setPreview(next);
+      setPreviewRecord(record);
+    },
+    [adapter, id]
+  );
+
+  const exportPdf = React.useCallback(
+    (record: string | null) => {
+      if (!adapter.exportPdf || !doc) return;
+      void adapter.exportPdf(id, record, doc.title);
+    },
+    [adapter, id, doc]
+  );
+
+  const findRecords = React.useCallback(
+    (query: string): Promise<RecordChoice[]> => (recordType && adapter.findRecords ? adapter.findRecords(recordType, query) : Promise.resolve([])),
+    [adapter, recordType]
+  );
+
+  // The letterhead's end side: the record's own required field (its number) and today.
+  const pageFields = React.useMemo(() => {
+    if (!template) return undefined;
+    const all: FieldDef[] = template.fields.flatMap((g) => g.items);
+    const reference = recordType ? template.fields[0]?.items.find((f) => f.required) : undefined;
+    return { reference, date: all.find((f) => f.path === 'today') };
+  }, [template, recordType]);
+
   if (loadError) {
     return (
       <div role="alert" className="grid h-full place-items-center p-6 text-center">
@@ -210,7 +278,47 @@ export function DocumentEditorScreen({
         onCommandPalette={onCommandPalette}
         labels={labels}
         services={services}
+        {...(printed && template
+          ? {
+              fields: template.fields,
+              letterhead: template.letterhead,
+              accent: template.accent,
+              pageFields,
+              preview,
+              onPreview: adapter.preview ? () => (recordType ? setPickerFor('preview') : void showPreview(null)) : undefined,
+              onClosePreview: () => {
+                setPreview(null);
+                setPreviewRecord(null);
+              },
+              onExportPdf: adapter.exportPdf
+                ? () => (recordType && !previewRecord ? setPickerFor('pdf') : exportPdf(previewRecord))
+                : undefined,
+              publish:
+                adapter.publishCheck && adapter.publish
+                  ? {
+                      publishedVersion,
+                      check: async () => {
+                        await flushNow();
+                        return adapter.publishCheck!(id);
+                      },
+                      publish: async () => {
+                        await flushNow();
+                        setPublishedVersion(await adapter.publish!(id, version.current));
+                      },
+                    }
+                  : undefined,
+            }
+          : {})}
       />
+      {recordType && (
+        <RecordPicker
+          open={pickerFor !== null}
+          onOpenChange={(open) => !open && setPickerFor(null)}
+          title={pickerFor === 'pdf' ? t('blockEditor.recordPicker.pdfTitle', 'Print with a record') : t('blockEditor.recordPicker.title', 'Preview with a record')}
+          find={findRecords}
+          onPick={(choice) => (pickerFor === 'pdf' ? exportPdf(choice.ref) : void showPreview(choice.ref))}
+        />
+      )}
     </div>
   );
 }
