@@ -3128,6 +3128,7 @@ $router->register('POST', '/api/document-sources/{id:\d+}/publish',       [$docu
 $router->register('GET',  '/api/document-sources/{id:\d+}/versions',      [$documentPublishingHandler, 'history'],      null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/document-sources/{id:\d+}/preview',       [$documentPublishingHandler, 'preview'],      null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('POST', '/api/document-sources/{id:\d+}/render',        [$documentPublishingHandler, 'render'],       null, null, CorePermissions::DOCUMENTS_RENDER);
+$router->register('POST', '/api/document-sources/{id:\d+}/print-labels',  [$documentPublishingHandler, 'printLabels'],  null, null, CorePermissions::DOCUMENTS_RENDER);
 
 // Still 13a-nonies-bis: THE DOCUMENT ORGANIZER's registries (#978, implementing
 // #947 item 5). They are built here rather than at a step of their own because

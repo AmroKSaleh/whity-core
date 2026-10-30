@@ -342,7 +342,117 @@ final class DocumentPublishingApiHandlerRealEngineTest extends TestCase
         self::assertSame(422, $this->renderPdf(self::OWNER, $id, [])->getStatusCode(), 'a template with a record type needs a record');
     }
 
+    // ── label sheets (E.43) ─────────────────────────────────────────────────
+
+    public function testALabelSheetPrintsOneLabelPerRecordOnItsGrid(): void
+    {
+        $id = $this->labelSheet([$this->para('For ', $this->field('document.title'))]);
+        $this->publish(self::OWNER, $id, '"1"');
+        $a = $this->issue(self::OWNER, 'Example Bakery');
+        $b = $this->issue(self::OWNER, 'Example Clinic');
+
+        $res = $this->printLabels(self::OWNER, $id, ['records' => ['document:' . $a, 'document:' . $b]]);
+        self::assertSame(200, $res->getStatusCode(), $res->getBody());
+        self::assertSame('application/pdf', self::header($res, 'Content-Type'));
+        self::assertSame('2', self::header($res, 'X-Labels-Count'));
+
+        $payload = $this->render->labelCalls[0];
+        self::assertSame(['preset' => 'a4'], $payload['sheet']);
+        self::assertSame(['columns' => 3, 'rows' => 7, 'widthMm' => 63.5, 'heightMm' => 38.1, 'gapXMm' => 2.5, 'gapYMm' => 0.0], $payload['grid']);
+        self::assertSame('For Example Bakery', $payload['labels'][0][0]['text']);
+        self::assertSame('For Example Clinic', $payload['labels'][1][0]['text']);
+        self::assertSame([], $this->render->flowCalls, 'a label sheet is not a flowing document');
+
+        self::assertSame(404, $this->printLabels(self::OWNER, $id, ['records' => ['document:99999']])->getStatusCode());
+        self::assertSame(422, $this->printLabels(self::OWNER, $id, ['records' => ['invoice:1']])->getStatusCode(), 'records of another type');
+    }
+
+    public function testALabelSheetPrintsFromACsvItNeverStores(): void
+    {
+        $this->settings->setTenant(self::TENANT, SettingsRegistry::BILLING_SELLER_NAME, 'Example Bakery');
+        $id = $this->labelSheet([$this->para($this->field('document.title'), ' · ', $this->field('company.name'))]);
+        $this->publish(self::OWNER, $id, '"1"');
+
+        // A spreadsheet's export: a byte order mark, semicolons, a quoted cell and a blank row.
+        $csv = "\u{FEFF}Name;City\r\n\"Example Clinic; East\";Amman\r\n\r\nExample School;Irbid\r\n";
+        $res = $this->printLabels(self::OWNER, $id, ['csv' => $csv, 'columns' => ['Name' => 'document.title']]);
+        self::assertSame(200, $res->getStatusCode(), $res->getBody());
+        $labels = $this->render->labelCalls[0]['labels'];
+        self::assertCount(2, $labels);
+        self::assertSame('Example Clinic; East · Example Bakery', $labels[0][0]['text'], 'the shared fields fill every label');
+        self::assertSame('Example School · Example Bakery', $labels[1][0]['text']);
+        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM document_source_files')->fetchColumn(), 'the CSV is not stored');
+
+        self::assertSame(422, $this->printLabels(self::OWNER, $id, ['csv' => $csv, 'columns' => ['Phone' => 'document.title']])->getStatusCode(), 'no such column');
+        self::assertSame(422, $this->printLabels(self::OWNER, $id, ['csv' => $csv, 'columns' => ['Name' => 'invoice.total']])->getStatusCode(), 'not a field');
+        self::assertSame(422, $this->printLabels(self::OWNER, $id, ['csv' => "Name\n", 'columns' => ['Name' => 'document.title']])->getStatusCode(), 'no rows');
+        self::assertSame(422, $this->printLabels(self::OWNER, $id, ['csv' => "Name\n\xff\n", 'columns' => ['Name' => 'document.title']])->getStatusCode(), 'not UTF-8');
+        self::assertSame(422, $this->printLabels(self::OWNER, $id, [])->getStatusCode(), 'records or a csv');
+    }
+
+    public function testALabelWithARequiredFieldMissingRefusesThePrintAndNamesIt(): void
+    {
+        $id = $this->labelSheet([$this->para($this->field('document.title'), ' ', $this->field('company.tax_number'))]);
+        $this->publish(self::OWNER, $id, '"1"');
+
+        $res = $this->printLabels(self::OWNER, $id, ['csv' => "Name\nA\nB\n", 'columns' => ['Name' => 'document.title']]);
+        self::assertSame(422, $res->getStatusCode());
+        self::assertSame(
+            [['label' => 1, 'fields' => ['company.tax_number']], ['label' => 2, 'fields' => ['company.tax_number']]],
+            json_decode($res->getBody(), true)['details']['missing'],
+        );
+        self::assertSame([], $this->render->labelCalls, 'nothing was sent to Whity Render');
+    }
+
+    public function testOnlyALabelSheetWithAGridPrintsLabels(): void
+    {
+        $template = $this->template(self::OWNER, [$this->para('Hi')]);
+        self::assertSame(409, $this->printLabels(self::OWNER, $template, ['records' => []])->getStatusCode());
+
+        $id = $this->labelSheet([$this->para('Hi')], null);
+        self::assertSame(409, $this->printLabels(self::OWNER, $id, ['csv' => "a\nb\n", 'columns' => ['a' => 'document.title']])->getStatusCode(), 'nothing published');
+        $res = $this->printLabels(self::OWNER, $id, ['csv' => "a\nb\n", 'columns' => ['a' => 'document.title'], 'draft' => true]);
+        self::assertSame(422, $res->getStatusCode(), 'no grid yet');
+    }
+
+    public function testASavedGridIsValidated(): void
+    {
+        $id = $this->labelSheet([$this->para('Hi')]);
+        $bad = ['columns' => 0, 'rows' => 7, 'size' => ['widthMm' => 63.5, 'heightMm' => 38.1], 'gapMm' => 2.5];
+        $res = $this->sources->saveDraft(
+            $this->request('PUT', "/api/document-sources/{$id}/draft", self::OWNER, (string) json_encode(['page' => ['size' => 'A4', 'labels' => $bad]]), self::TENANT, ['If-Match' => '"1"']),
+            ['id' => (string) $id],
+        );
+        self::assertSame(422, $res->getStatusCode());
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────────
+
+    /**
+     * A label sheet of Avery L7160 labels for issued documents.
+     *
+     * @param list<array<string, mixed>> $blocks
+     * @param array<string, mixed>|null $grid
+     */
+    private function labelSheet(array $blocks, ?array $grid = ['columns' => 3, 'rows' => 7, 'size' => ['widthMm' => 63.5, 'heightMm' => 38.1], 'gapMm' => 2.5, 'gapYMm' => 0]): int
+    {
+        $res = $this->sources->create($this->request('POST', '/api/document-sources', self::OWNER, (string) json_encode([
+            'kind' => 'label',
+            'title' => 'Parcel labels',
+            'record_type' => 'document',
+            'page' => $grid !== null ? ['size' => 'A4', 'marginMm' => 16, 'letterhead' => false, 'labels' => $grid] : null,
+            'blocks' => $blocks,
+        ])));
+        self::assertSame(201, $res->getStatusCode(), $res->getBody());
+
+        return (int) $this->data($res)['id'];
+    }
+
+    /** @param array<string, mixed> $body */
+    private function printLabels(int $userId, int $id, array $body): Response
+    {
+        return $this->handler->printLabels($this->request('POST', "/api/document-sources/{$id}/print-labels", $userId, (string) json_encode((object) $body)), ['id' => (string) $id]);
+    }
 
     /** @return array<string, mixed> */
     private function field(string $path): array

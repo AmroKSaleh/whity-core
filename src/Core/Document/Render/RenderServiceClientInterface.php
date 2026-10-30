@@ -58,4 +58,16 @@ interface RenderServiceClientInterface
      *         other non-200 response, or a 200 body that is not a PDF.
      */
     public function renderFlow(array $payload): RenderedDocument;
+
+    /**
+     * Label sheets (E.43): `POST /render/labels`, one label per entry of
+     * `labels` on a fixed grid, as many sheets as it takes. The service owns
+     * the shape (sheet, grid, each label's blocks) and names what it refuses.
+     *
+     * @param array<string, mixed> $payload {sheet, grid, labels, direction, ...}
+     * @throws DocumentRenderRejectedException   The service answered 422.
+     * @throws RenderServiceUnavailableException On any transport failure, any
+     *         other non-200 response, or a 200 body that is not a PDF.
+     */
+    public function renderLabels(array $payload): RenderedDocument;
 }

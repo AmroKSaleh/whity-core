@@ -12,6 +12,7 @@ use Whity\Core\Document\DocumentSourceVersionRepository;
 use Whity\Core\Document\Embed\DocumentEmbedRegistry;
 use Whity\Core\Document\Fields\DocumentFieldRegistry;
 use Whity\Core\Document\Print\DocumentPublishCheck;
+use Whity\Core\Document\Print\LabelCsv;
 use Whity\Core\Document\Print\PrintLabels;
 use Whity\Core\Document\Print\WhityDocumentPrinter;
 use Whity\Core\Document\Render\DocumentRenderRejectedException;
@@ -40,6 +41,7 @@ use Whity\Storage\StorageException;
  *   GET  /api/document-sources/{id}/versions         the history
  *   GET  /api/document-sources/{id}/preview?record=  field values for one record (E.12)
  *   POST /api/document-sources/{id}/render           the PDF through Whity Render (E.16)
+ *   POST /api/document-sources/{id}/print-labels     a label sheet, one label per record or CSV row (E.43)
  *
  * Every route first finds the document the way the editor's own routes do
  * (DocumentSourcesApiHandler::visibleRow), so a hidden document answers 404
@@ -54,6 +56,10 @@ final class DocumentPublishingApiHandler
     ];
 
     private const MAX_RECORDS = 25;
+
+    /** Label sheets (E.43): records read for one print, and CSV rows. */
+    private const MAX_LABEL_RECORDS = 500;
+    private const MAX_LABEL_ROWS = 5000;
 
     private PrintLabels $printLabels;
 
@@ -329,6 +335,166 @@ final class DocumentPublishingApiHandler
         return new Response(200, $pdf, [
             'Content-Type' => 'application/pdf',
             'Content-Disposition' => 'attachment; filename="' . DocumentPresenter::slugify($title) . '.pdf"',
+        ]);
+    }
+
+    /**
+     * POST /api/document-sources/{id}/print-labels: a label sheet's PDF, one
+     * label per record or per CSV row (E.43). The body is either
+     * `{records: ["type:id", …]}` or `{csv: "<text>", columns: {"CSV column": "field.path"}}`,
+     * with `draft: true` to print the draft instead of the published version.
+     *
+     * The CSV is read here and never stored: a mailing list is personal data,
+     * and documents' file store holds only PDFs and images. The shared fields
+     * (Company, Today) fill every label; a row's mapped columns fill the rest.
+     * A required field with no value on any label refuses the print, naming
+     * the labels (E.27). Labels aren't issued as documents; one print is one
+     * render against the tenant's limits.
+     *
+     * @param array<string, string> $params
+     */
+    public function printLabels(Request $request, array $params): Response
+    {
+        $found = $this->template($request, $params, false);
+        if ($found instanceof Response) {
+            return $found;
+        }
+        [$tenantId, $callerId, $row] = $found;
+        if ($row['kind'] !== 'label') {
+            return Response::error('Only label sheets print labels', 409);
+        }
+        if ($this->renderer === null || !$this->renderer->isEnabled($tenantId)) {
+            return Response::error('Document rendering is not enabled on this instance', 503);
+        }
+
+        $body = JsonBody::parsed($request);
+        if (($body['draft'] ?? false) === true) {
+            $doc = ['page' => $row['page'], 'blocks' => $row['blocks']];
+        } else {
+            $published = $row['published_version'] !== null
+                ? $this->versions->find((int) $row['id'], $tenantId, (int) $row['published_version'])
+                : null;
+            if ($published === null) {
+                return Response::error('This label sheet has no published version yet', 409);
+            }
+            $doc = ['page' => $published['page'], 'blocks' => $published['blocks']];
+        }
+        $page = is_array($doc['page']) ? $doc['page'] : [];
+        $grid = is_array($page['labels'] ?? null) ? $page['labels'] : null;
+        if ($grid === null) {
+            return Response::error('This label sheet has no label grid; choose the label stock first', 422);
+        }
+
+        $hasPermission = $this->permissions($callerId, $tenantId);
+        $type = $row['record_type'] !== null ? (string) $row['record_type'] : null;
+
+        // Each label's field values: from its record, or from its CSV row over the shared fields.
+        $rows = [];
+        if (isset($body['records'])) {
+            $refs = $body['records'];
+            if (!is_array($refs) || $refs === [] || !array_is_list($refs)) {
+                return Response::error('records must be a non-empty list of "type:id"', 422);
+            }
+            if (count($refs) > self::MAX_LABEL_RECORDS) {
+                return Response::error('At most ' . self::MAX_LABEL_RECORDS . ' records can be printed at once', 422);
+            }
+            foreach ($refs as $i => $ref) {
+                $record = self::parseRecord($ref);
+                if ($record === null || ($type !== null && $record[0] !== $type)) {
+                    return Response::error('records[' . $i . '] must be "' . ($type ?? '<type>') . ':<id>"', 422);
+                }
+                $resolved = $this->fields->resolve($tenantId, $callerId, $hasPermission, $record[0], $record[1]);
+                if ($resolved === null) {
+                    return Response::error('Record not found: ' . $ref, 404);
+                }
+                $rows[] = $resolved['values'];
+            }
+        } elseif (isset($body['csv'])) {
+            $shared = $this->fields->resolve($tenantId, $callerId, $hasPermission, null, null);
+            $parsed = LabelCsv::rows($body['csv'], $body['columns'] ?? null, $this->fields->paths($tenantId, $type), self::MAX_LABEL_ROWS);
+            if (is_string($parsed)) {
+                return Response::error($parsed, 422);
+            }
+            foreach ($parsed as $values) {
+                $rows[] = $values + ($shared['values'] ?? []);
+            }
+        } else {
+            return Response::error('Send records or a csv with its columns', 422);
+        }
+
+        $sourceId = (int) $row['id'];
+        $required = $this->fields->requiredPaths($tenantId, $type);
+        $labels = [];
+        $missing = [];
+        foreach ($rows as $n => $values) {
+            $printer = new WhityDocumentPrinter(
+                $values,
+                $required,
+                function (array $ref) use ($tenantId, $callerId, $hasPermission): ?array {
+                    return $this->embeds->recordProvider($ref['type'])?->resolve($tenantId, $callerId, $hasPermission, $ref['id']);
+                },
+                function (string $key) use ($tenantId, $callerId, $hasPermission): ?array {
+                    return $this->embeds->chartSource($key)?->load($tenantId, $callerId, $hasPermission, []);
+                },
+                fn (string $fileId): ?string => $this->imageData($tenantId, $sourceId, $fileId),
+                $this->printLabels,
+            );
+            $gaps = $printer->missingRequired($doc['blocks']);
+            if ($gaps !== []) {
+                $missing[] = ['label' => $n + 1, 'fields' => $gaps];
+                continue;
+            }
+            $labels[] = $printer->labelContent($doc['blocks']);
+        }
+        if ($missing !== []) {
+            return Response::error('Required fields have no value on some labels', 422, ['missing' => array_slice($missing, 0, 50)]);
+        }
+
+        $payload = [
+            'sheet' => ['preset' => ($page['size'] ?? 'A4') === 'Letter' ? 'letter' : 'a4'],
+            'grid' => [
+                'columns' => (int) $grid['columns'],
+                'rows' => (int) $grid['rows'],
+                'widthMm' => (float) $grid['size']['widthMm'],
+                'heightMm' => (float) $grid['size']['heightMm'],
+                'gapXMm' => (float) $grid['gapMm'],
+                'gapYMm' => (float) ($grid['gapYMm'] ?? $grid['gapMm']),
+            ],
+            'labels' => $labels,
+            'direction' => $row['lang'] === 'ar' ? 'rtl' : 'ltr',
+            'title' => (string) $row['title'],
+        ];
+        $accent = $this->accent($tenantId);
+        if ($accent !== null) {
+            $payload['theme'] = ['accent' => $accent];
+        }
+
+        $metered = false;
+        if ($this->meters !== null) {
+            $decision = $this->meters->consume($tenantId, self::RENDER_METERS);
+            if (!$decision->allowed) {
+                return Response::error('The document render limit has been reached', 429);
+            }
+            $metered = true;
+        }
+        try {
+            $rendered = $this->renderer->renderLabels($tenantId, $payload);
+        } catch (DocumentRenderRejectedException $e) {
+            $this->refund($tenantId, $metered);
+
+            return Response::error($e->clientMessage, 422);
+        } catch (RenderServiceUnavailableException $e) {
+            $this->refund($tenantId, $metered);
+            error_log('[DocumentPublishingApiHandler] label render failed: ' . $e->getMessage());
+
+            return Response::error('Document rendering is temporarily unavailable', 503);
+        }
+
+        return new Response(200, $rendered->bytes, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="' . DocumentPresenter::slugify((string) $row['title']) . '.pdf"',
+            'X-Labels-Count' => (string) count($labels),
+            'X-Labels-Clipped' => (string) $rendered->labelsClipped,
         ]);
     }
 

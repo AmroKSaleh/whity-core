@@ -292,6 +292,12 @@ final class DocumentSourcesApiHandler
             }
             /** @var array<string, mixed>|null $page */
             $page = $body['page'];
+            if (is_array($page) && array_key_exists('labels', $page) && !self::validLabelGrid($page['labels'])) {
+                return Response::error(
+                    'page.labels must be {columns 1-10, rows 1-30, size {widthMm, heightMm 10-500}, gapMm 0-50, gapYMm? 0-50}',
+                    422,
+                );
+            }
             $fields['page'] = $page;
         }
         if (array_key_exists('blocks', $body)) {
@@ -406,6 +412,23 @@ final class DocumentSourcesApiHandler
             'Cache-Control' => 'private, max-age=31536000, immutable',
             'X-Content-Type-Options' => 'nosniff',
         ]);
+    }
+
+    /** E.43: a label sheet's grid, as the editor's LabelGrid. Whity Render checks it fits the sheet. */
+    private static function validLabelGrid(mixed $grid): bool
+    {
+        if (!is_array($grid) || !is_array($grid['size'] ?? null)) {
+            return false;
+        }
+        $whole = static fn (mixed $v, int $min, int $max): bool => is_int($v) && $v >= $min && $v <= $max;
+        $mm = static fn (mixed $v, float $min, float $max): bool => (is_int($v) || is_float($v)) && $v >= $min && $v <= $max;
+
+        return $whole($grid['columns'] ?? null, 1, 10)
+            && $whole($grid['rows'] ?? null, 1, 30)
+            && $mm($grid['size']['widthMm'] ?? null, 10, 500)
+            && $mm($grid['size']['heightMm'] ?? null, 10, 500)
+            && $mm($grid['gapMm'] ?? null, 0, 50)
+            && (!array_key_exists('gapYMm', $grid) || $mm($grid['gapYMm'], 0, 50));
     }
 
     /**

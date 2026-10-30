@@ -69,6 +69,12 @@ final class FakeRenderServiceClient implements RenderServiceClientInterface
      */
     public int $flowFrontMatterPages = 0;
 
+    /** @var list<array<string, mixed>> The label-sheet payloads, in order. */
+    public array $labelCalls = [];
+
+    /** What the label mode reports as cut at their edge. */
+    public int $labelsClipped = 0;
+
     public function __construct(string $pdfBytes = "%PDF-1.4\nfake\n%%EOF")
     {
         $this->pdfBytes = $pdfBytes;
@@ -108,6 +114,16 @@ final class FakeRenderServiceClient implements RenderServiceClientInterface
         $this->failIfConfigured();
 
         return new RenderedDocument($this->pdfBytes, $this->flowPageCount, $this->flowFrontMatterPages);
+    }
+
+    /** Label sheets: recorded on `calls` too, and on their own list. */
+    public function renderLabels(array $payload): RenderedDocument
+    {
+        $this->calls[] = $payload;
+        $this->labelCalls[] = $payload;
+        $this->failIfConfigured();
+
+        return new RenderedDocument($this->pdfBytes, 1, 0, $this->labelsClipped);
     }
 
     /**

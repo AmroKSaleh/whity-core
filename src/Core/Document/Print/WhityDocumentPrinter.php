@@ -120,6 +120,22 @@ final class WhityDocumentPrinter
     }
 
     /**
+     * One label of a label sheet (E.43): the document's blocks filled with this
+     * printer's values, without what a label can't hold (page breaks). The
+     * sheet itself, the grid and the other labels are the caller's.
+     *
+     * @param list<mixed> $blocks
+     * @return list<array<string, mixed>>
+     */
+    public function labelContent(array $blocks): array
+    {
+        $content = [];
+        $this->blocks($blocks, $content);
+
+        return array_values(array_filter($content, static fn (array $b): bool => !in_array($b['type'] ?? '', ['pageBreak', 'letterhead', 'question'], true)));
+    }
+
+    /**
      * @param list<mixed> $blocks
      * @param list<array<string, mixed>> $out
      */
