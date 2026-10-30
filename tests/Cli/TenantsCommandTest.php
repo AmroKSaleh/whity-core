@@ -14,14 +14,43 @@ class TenantsCommandTest extends TestCase
 {
     private CliRunner $runner;
 
+    /**
+     * The environment entries setUp() replaced, put back by tearDown().
+     *
+     * @var array<string, mixed>
+     */
+    private array $savedEnv = [];
+
     protected function setUp(): void
     {
         $this->runner = new CliRunner();
 
-        // Set up environment variables for testing
-        $_ENV['JWT_SECRET'] = 'test_secret-padded-for-hs256-min-32-byte-key';
-        $_ENV['DB_USER'] = 'test';
-        $_ENV['DB_PASSWORD'] = 'test';
+        // Set up environment variables for testing. They are put back in
+        // tearDown(): left behind, DB_USER/DB_PASSWORD tell every later test in
+        // the process that a database is configured, and MigrationsCommandTest
+        // (RequiresConfiguredDatabase) then FAILS on the missing server instead
+        // of skipping. Serial runs only escaped it because this file happened
+        // to sort after that one (WHIT-715).
+        foreach ([
+            'JWT_SECRET' => 'test_secret-padded-for-hs256-min-32-byte-key',
+            'DB_USER' => 'test',
+            'DB_PASSWORD' => 'test',
+        ] as $name => $value) {
+            $this->savedEnv[$name] = $_ENV[$name] ?? null;
+            $_ENV[$name] = $value;
+        }
+    }
+
+    protected function tearDown(): void
+    {
+        foreach ($this->savedEnv as $name => $value) {
+            if ($value === null) {
+                unset($_ENV[$name]);
+            } else {
+                $_ENV[$name] = $value;
+            }
+        }
+        $this->savedEnv = [];
     }
 
     /**

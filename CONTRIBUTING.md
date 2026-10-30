@@ -343,6 +343,11 @@ do not merge `main` into the branch repeatedly to avoid resolving conflicts.
 Never force-push to `main`; force-push your own feature branch only after a
 rebase (`git push --force-with-lease`).
 
+PRs into `develop` merge through GitHub's merge queue, so a PR does not have to be
+up to date with `develop` to merge: once it is green, `gh pr merge <n> --merge`
+queues it, and the queue tests it against `develop` and the PRs ahead of it before
+merging. Rebase only to resolve conflicts.
+
 ## Code Standards
 
 ### PHP (backend)
