@@ -1,4 +1,4 @@
-import type { PublishBlocker, WhityDocument } from '@whity-org/ui/editor/contract';
+import type { LabelPrintSource, PublishBlocker, WhityDocument } from '@whity-org/ui/editor/contract';
 import type { FieldGroup } from '@whity-org/ui/editor/fields';
 import type { Letterhead } from '@whity-org/ui/editor/page-view';
 import type { EditorServices, FieldPreview } from '@whity-org/ui/editor/services';
@@ -11,7 +11,8 @@ export interface LoadedDocument {
 }
 
 /** What a save sends: the fields of the document the editor changes. */
-export type DraftPatch = Pick<WhityDocument, 'title' | 'blocks'> & Partial<Pick<WhityDocument, 'lang' | 'defaultView' | 'fullWidth'>>;
+export type DraftPatch = Pick<WhityDocument, 'title' | 'blocks'> &
+  Partial<Pick<WhityDocument, 'lang' | 'defaultView' | 'fullWidth' | 'page' | 'labels'>>;
 
 export type SaveResult =
   | { ok: true; version: number; updatedAt: string }
@@ -47,6 +48,17 @@ export interface DocumentEditorAdapter {
   publish?(id: string, version: number): Promise<number>;
   /** The PDF through Whity Render: the published version filled for one record. */
   exportPdf?(id: string, record: string | null, filename: string): Promise<void>;
+  /**
+   * E.43: a label sheet's PDF, one label per record or CSV row, downloaded as
+   * `filename`. Throws with the server's sentence when refused.
+   */
+  printLabels?(id: string, source: LabelPrintSource, filename: string): Promise<LabelPrintResult>;
+}
+
+/** What a label print did: how many labels, and how many were cut at their edge. */
+export interface LabelPrintResult {
+  count: number;
+  clipped: number;
 }
 
 export interface TemplateSetup {

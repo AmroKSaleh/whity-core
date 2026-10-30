@@ -20,6 +20,13 @@ function versionFrom(response: Response, fallback: number): number {
   return m ? Number(m[1]) : fallback;
 }
 
+/** The server keeps a label sheet's grid inside `page` (E.43); the editor has it beside. */
+function pageOf(page: Row['page']): Pick<WhityDocument, 'page' | 'labels'> {
+  if (!page) return { page: undefined, labels: undefined };
+  const { labels, ...rest } = page as Record<string, unknown>;
+  return { page: rest as WhityDocument['page'], labels: (labels ?? undefined) as WhityDocument['labels'] };
+}
+
 export function toDocument(row: Row): WhityDocument {
   return {
     id: String(row.id),
@@ -28,7 +35,7 @@ export function toDocument(row: Row): WhityDocument {
     lang: row.lang === 'ar' ? 'ar' : 'en',
     defaultView: row.default_view === 'page' ? 'page' : 'continuous',
     fullWidth: row.full_width,
-    page: (row.page ?? undefined) as WhityDocument['page'],
+    ...pageOf(row.page),
     recordType: row.record_type ?? undefined,
     blocks: (row.blocks ?? []) as unknown as Block[],
     // Comments and suggestions have their own endpoints from M5.
@@ -191,6 +198,28 @@ export const documentSourcesAdapter: DocumentEditorAdapter = {
     download(data as Blob, filename);
   },
 
+  async printLabels(id, source, filename) {
+    // The CSV goes as text with this print and is never stored (E.43).
+    const body =
+      source.kind === 'records'
+        ? { records: source.records.map((r) => `${r.type}:${r.id}`) }
+        : { csv: await source.file.text(), columns: source.columns };
+    const { data, error, response } = await api.POST('/api/v1/document-sources/{id}/print-labels', {
+      params: { path: { id: Number(id) } },
+      body,
+      parseAs: 'blob',
+    });
+    if (data === undefined) {
+      const message = (error as { error?: unknown } | undefined)?.error;
+      throw new Error(typeof message === 'string' ? message : `Failed to print the labels (${response.status})`);
+    }
+    download(data as Blob, filename);
+    return {
+      count: Number(response.headers.get('X-Labels-Count') ?? 0),
+      clipped: Number(response.headers.get('X-Labels-Clipped') ?? 0),
+    };
+  },
+
   async load(id: string): Promise<LoadedDocument> {
     const { data, response } = await api.GET('/api/v1/document-sources/{id}', { params: { path: { id: Number(id) } } });
     if (data === undefined) throw new Error(`Failed to load the document (${response.status})`);
@@ -201,7 +230,11 @@ export const documentSourcesAdapter: DocumentEditorAdapter = {
     const { data, response } = await api.PUT('/api/v1/document-sources/{id}/draft', {
       params: { path: { id: Number(id) } },
       headers: { 'If-Match': `"${version}"` },
-      body: { title: patch.title, blocks: patch.blocks as unknown as Row['blocks'] },
+      body: {
+        title: patch.title,
+        blocks: patch.blocks as unknown as Row['blocks'],
+        ...(patch.page || patch.labels ? { page: { ...patch.page, ...(patch.labels ? { labels: patch.labels } : {}) } as Row['page'] } : {}),
+      },
     });
     if (response.status === 409) {
       return { ok: false, conflict: true, currentVersion: versionFrom(response, version) };
