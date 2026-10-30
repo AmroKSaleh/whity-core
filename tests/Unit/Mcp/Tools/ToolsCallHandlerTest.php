@@ -385,6 +385,51 @@ final class ToolsCallHandlerTest extends TestCase
         self::assertFalse($ran);
     }
 
+    public function testInvoke_authoredToolIsToldItsTenantAndCaller(): void
+    {
+        // #1419: without this a plugin's tool could only scope its queries by
+        // reaching into TenantContext, a core internal.
+        $seen = null;
+        $registry = new \Whity\Mcp\Tools\AuthoredToolRegistry();
+        self::assertNull($registry->register([
+            'name'        => 'list_periods',
+            'description' => 'List periods.',
+            'inputSchema' => ['type' => 'object'],
+            'handler'     => static function (array $arguments, \Whity\Sdk\Mcp\McpToolContext $context) use (&$seen): array {
+                $seen = $context;
+                return ['tenant' => $context->tenantId];
+            },
+            'open'        => true,
+        ], 'Periods'));
+        $handler = new ToolsCallHandler($this->toolDeriver, $this->router, $this->roleChecker, $this->tokenValidator, authoredTools: $registry);
+
+        $result = ($handler)(['name' => 'list_periods', 'arguments' => []], self::BEARER);
+
+        self::assertArrayNotHasKey('isError', $result);
+        self::assertInstanceOf(\Whity\Sdk\Mcp\McpToolContext::class, $seen);
+        self::assertSame(self::TENANT_ID, $seen->tenantId);
+        self::assertSame(self::USER_ID, $seen->profileId);
+    }
+
+    public function testInvoke_authoredHandlerWrittenForAnOlderSdkStillRuns(): void
+    {
+        // Handlers written for SDK 1.43-1.45 take only the arguments.
+        $registry = new \Whity\Mcp\Tools\AuthoredToolRegistry();
+        self::assertNull($registry->register([
+            'name'        => 'close_period',
+            'description' => 'Close a period.',
+            'inputSchema' => ['type' => 'object'],
+            'handler'     => static fn (array $arguments): array => ['closed' => true],
+            'open'        => true,
+        ], 'Periods'));
+        $handler = new ToolsCallHandler($this->toolDeriver, $this->router, $this->roleChecker, $this->tokenValidator, authoredTools: $registry);
+
+        $result = ($handler)(['name' => 'close_period', 'arguments' => []], self::BEARER);
+
+        self::assertArrayNotHasKey('isError', $result);
+        self::assertSame(['closed' => true], json_decode($result['content'][0]['text'], true));
+    }
+
     public function testInvoke_unknownToolStaysAProtocolError(): void
     {
         // The spec keeps an unknown tool a protocol error at the top level.

@@ -48,10 +48,11 @@ const base = `http://127.0.0.1:${server.address().port}`;
 
 const index = JSON.parse(fs.readFileSync(path.join(sbDir, 'index.json'), 'utf8'));
 const stories = Object.values(index.entries).filter((e) => e.type === 'story' && e.title === 'Design cards');
-const cardHeight = (name) => {
-  const head = fs.readFileSync(path.join(root, 'docs/design/components', name, 'index.html'), 'utf8').split('\n')[0];
-  return Number(/height=(\d+)/.exec(head)?.[1] ?? 400);
-};
+/** The card's size from the first line of its page, `<!-- @dsCard … height=820 width=1280 -->`. */
+const cardHead = (name) =>
+  fs.readFileSync(path.join(root, 'docs/design/components', name, 'index.html'), 'utf8').split('\n')[0];
+const cardHeight = (name) => Number(/height=(\d+)/.exec(cardHead(name))?.[1] ?? 400);
+const cardWidth = (name) => Number(/width=(\d+)/.exec(cardHead(name))?.[1] ?? 960);
 
 // --channel chrome uses the installed Google Chrome when Playwright's own browser isn't downloaded.
 const channel = arg('--channel');
@@ -63,13 +64,14 @@ for (const story of stories) {
   const name = story.name;
   if (only && !only.includes(name)) continue;
   const height = cardHeight(name);
+  const width = cardWidth(name);
   for (const theme of ['light', 'dark']) {
-    await page.setViewportSize({ width: 960, height });
+    await page.setViewportSize({ width, height });
     await page.goto(`${base}/iframe.html?id=${story.id}&viewMode=story&globals=theme:${theme}`, { waitUntil: 'networkidle' });
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(400); // let open menus, tooltips and popovers settle
     const actual = path.join(outDir, `${name}-${theme}.png`);
-    await page.screenshot({ path: actual, clip: { x: 0, y: 0, width: 960, height } });
+    await page.screenshot({ path: actual, clip: { x: 0, y: 0, width, height } });
     const ref = path.join(shots, `${name}-${theme}.png`);
     let ratio = null;
     if (fs.existsSync(ref)) {

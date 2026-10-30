@@ -82,6 +82,7 @@ final class CoreTables
         'document_route_template_steps' => '120_create_document_route_templates.php',
         'document_route_templates' => '120_create_document_route_templates.php',
         'document_routes' => '112_create_document_routing.php',
+        'document_sources' => '160_create_document_sources.php',
         'document_templates' => '059_create_document_designer_tables.php',
         'documents' => '108_create_documents.php',
         'domain_events' => '066_create_domain_events.php',

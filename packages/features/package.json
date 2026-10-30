@@ -16,7 +16,8 @@
     "./users": "./src/users/index.ts",
     "./sync": "./src/sync/index.ts",
     "./i18n": "./src/i18n/index.ts",
-    "./mcp": "./src/mcp/index.ts"
+    "./mcp": "./src/mcp/index.ts",
+    "./document-editor": "./src/document-editor/index.ts"
   },
   "files": [
     "src"
@@ -35,15 +36,15 @@
     "@tabler/icons-react": "^3.49.0"
   },
   "devDependencies": {
-    "@hookform/resolvers": "^5.9.1",
+    "@hookform/resolvers": "^6.0.0",
     "@types/katex": "^0.16.8",
-    "katex": "^0.19.0",
+    "katex": "^0.19.1",
     "radix-ui": "^1.8.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "react-hook-form": "^7.90.0",
+    "react-hook-form": "^7.91.0",
     "typescript": "^5",
     "zod": "^4.6.7"
   },

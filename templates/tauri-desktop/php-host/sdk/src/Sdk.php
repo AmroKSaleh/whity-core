@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.45).
+ * SDK identity (v1.46).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -771,13 +771,24 @@ namespace Whity\Sdk;
  * confirm before destructive calls. They are hints only: nothing about
  * enforcement changes. Malformed entries are dropped, never passed on.
  *
- * Purely additive. On an older host both keys are ignored.)
+ * Purely additive. On an older host both keys are ignored.) ->
+ * 1.46 (MCP TOOL CONTEXT: an authored tool's handler is called as
+ * `fn(array $arguments, Mcp\McpToolContext $context)`. The context carries
+ * the tenant the call is authorized in and the calling profile, so a tool can
+ * scope its queries the way a route handler does with its request. Before it
+ * a tool had no supported way to learn its tenant, and the only route was core's
+ * internal tenant state (#1419).
+ *
+ * Purely additive. A one-parameter handler keeps working, since PHP ignores
+ * the extra argument; on an older host a two-parameter handler is called with
+ * one argument and fails, so a tool that needs the context should declare
+ * `^1.46`.)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.45.0';
+    public const VERSION = '1.46.0';
 
     /**
      * Static identity only — never instantiated.

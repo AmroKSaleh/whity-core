@@ -43,6 +43,7 @@
         "sidebar.item.delegations": "Delegations",
         "sidebar.item.documentDesigner": "Document Designer",
         "sidebar.item.documentLibrary": "Documents",
+        "sidebar.item.documentSources": "Notes and wiki",
         "sidebar.item.documentTemplates": "Templates & Blocks",
         "sidebar.item.errors": "Errors",
         "sidebar.item.inbox": "Inbox",

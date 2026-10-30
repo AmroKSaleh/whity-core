@@ -29,6 +29,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "./popover"
 import { RadioGroup, RadioGroupItem } from "./radio-group"
 import { ToggleGroup } from "./toggle-group"
 import { Tooltip, TooltipContent, TooltipTrigger } from "./tooltip"
+import { DocEditor } from "./editor/doc-editor"
+import { SAMPLE_DOCUMENT } from "./editor/sample"
 
 /**
  * One story per design card (docs/design/components/<Name>), with the card's
@@ -429,4 +431,28 @@ export const IconCard: Story = {
       ))}
     </div>
   ),
+}
+
+/* ------------------------------------------------- Document editor (M2) */
+
+function EditorCard() {
+  const [doc, setDoc] = React.useState(SAMPLE_DOCUMENT)
+  return (
+    <div style={{ height: 820 }}>
+      <DocEditor
+        document={doc}
+        onChange={setDoc}
+        canEdit
+        back={{ label: "Back to notes", onClick: () => {} }}
+        path="Notes · Billing"
+        save={{ state: "saved", at: "14:02" }}
+      />
+    </div>
+  )
+}
+
+export const EditorShellCard: Story = {
+  name: "EditorShell",
+  parameters: { designCard: { name: "EditorShell", width: 1280, height: 820 } },
+  render: () => <EditorCard />,
 }

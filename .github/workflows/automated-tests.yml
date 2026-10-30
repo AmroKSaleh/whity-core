@@ -28,6 +28,9 @@ on:
     branches:
       - main
       - develop
+  # GitHub's merge queue on develop runs the required checks on the queued
+  # merge commit (develop + the PRs ahead of it), so they must run here too.
+  merge_group:
 
 # A newer push to the same ref obsoletes the in-flight run; never let two full
 # suites race (this is what burned a duplicate ~13-min run when a fix commit
@@ -42,7 +45,7 @@ concurrency:
 # ---------------------------------------------------------------------------
 # Job graph (WC-ci-wallclock)
 #
-#   changes ──┬─ test (SQLite shard 1..4, coverage) ─── coverage (merge + floor)
+#   changes ──┬─ test (SQLite shard 1..3, coverage) ─── coverage (merge + floor)
 #             ├─ static-analysis
 #             ├─ postgres-migrations
 #             ├─ postgres-integration (shard 1..5)
@@ -228,25 +231,42 @@ jobs:
   # a single coverage-instrumented pass measured 16m46s and pinned half the
   # workflow.
   #
-  # Sharding is by FILE, round-robin over the same deterministic sorted listing
-  # in every shard, so the union of the shards is exactly the file set PHPUnit's
-  # own `<directory>tests</directory>` iterator would walk — a newly added test
-  # file lands in exactly one shard automatically and can never fall through the
-  # gaps (which a hand-maintained per-shard directory list would allow).
+  # Sharding is by FILE, over the same deterministic sorted listing in every
+  # shard, so the union of the shards is exactly the file set PHPUnit's own
+  # `<directory>tests</directory>` iterator would walk — a newly added test file
+  # lands in exactly one shard automatically and can never fall through the gaps
+  # (which a hand-maintained per-shard directory list would allow).
+  #
+  # WHIT-715. Files used to be dealt round-robin (`i % shards`), which balances
+  # file COUNT: run 40881065695 took 9, 16, 13 and 13 min per shard, and the
+  # 16-min one held up everything downstream. They are now dealt by recorded
+  # seconds (scripts/ci-test-timings.json, longest first onto the lightest
+  # shard — see scripts/ci-test-shard.php), and each shard runs its files under
+  # ParaTest with one worker per core instead of one serial PHPUnit process that
+  # left three of the runner's four vCPUs idle. Every worker gets its own temp
+  # directory (tests/bootstrap.php, keyed by TEST_TOKEN); the SQLite databases
+  # are in-memory and per-test already.
   test:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
-    # Keep the `/4` here in step with the matrix below; the shard arithmetic
+    # Keep the `/3` here in step with the matrix below; the shard arithmetic
     # itself reads `strategy.job-total`, so only this label is manual.
-    name: Tests shard ${{ matrix.shard }}/4 (SQLite, coverage)
+    name: Tests shard ${{ matrix.shard }}/3 (SQLite, coverage)
     runs-on: ubuntu-latest
 
     strategy:
       # One shard's failure must not cancel the others: a red run should report
       # every failing test, not just the first shard to trip.
       fail-fast: false
+      # Three, measured (WHIT-715). Under ParaTest the suite is about 60
+      # worker-minutes, i.e. ~15 minutes of 4-vCPU runner time, so the shard
+      # count barely changes the runner-minutes taken from the shared
+      # concurrency pool (each shard adds ~1 min of setup); what it changes is
+      # wall time. Two shards
+      # took ~9 min each and put this matrix back on the critical path; three
+      # take ~5-6 min and finish inside the PostgreSQL dialect shards.
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3]
 
     steps:
       - name: Checkout code
@@ -278,40 +298,38 @@ jobs:
       # the exact union of executed lines, not an approximation reconstructed
       # from per-shard Clover XML. Measured ~0.6 M (line, test) pairs across the
       # whole suite, so a shard's .cov is tens of MB: cheap to hand between jobs.
-      - name: Run PHPUnit with coverage (shard ${{ matrix.shard }})
+      # Writes phpunit.shard.xml: phpunit.xml with this shard's files as its only
+      # suite. It also fails the job when there are no test files, when the
+      # shards do not cover every file exactly once, or when this shard is empty.
+      - name: Plan shard ${{ matrix.shard }}
+        run: php scripts/ci-test-shard.php plan ${{ matrix.shard }} ${{ strategy.job-total }} phpunit.shard.xml
+
+      - name: Run ParaTest with coverage (shard ${{ matrix.shard }})
         run: |
-          mapfile -t all < <(find tests -type f -name '*Test.php' | LC_ALL=C sort)
-          total=${#all[@]}
-          if [ "$total" -eq 0 ]; then
-            echo "::error::no test files matched tests/**/*Test.php — refusing to run an empty shard"
-            exit 1
-          fi
-
-          shards=${{ strategy.job-total }}
-          index=$(( ${{ matrix.shard }} - 1 ))
-          files=()
-          for i in "${!all[@]}"; do
-            if [ $(( i % shards )) -eq "$index" ]; then
-              files+=("${all[$i]}")
-            fi
-          done
-
-          if [ "${#files[@]}" -eq 0 ]; then
-            echo "::error::shard ${{ matrix.shard }}/${shards} selected 0 of ${total} test files"
-            exit 1
-          fi
-
-          echo "Shard ${{ matrix.shard }}/${shards}: ${#files[@]} of ${total} test files"
-
-          # NO `-d memory_limit=` HERE, and that is not an oversight. PHPUnit
-          # applies phpunit.xml's <ini name="memory_limit"> with ini_set() during
-          # bootstrap, so a command-line -d is silently LOWERED back to whatever
-          # the config says — a flag that looks like it is doing something and
-          # is not. The ceiling for this job lives in phpunit.xml; see the
-          # comment there for why it is a number and not -1.
-          vendor/bin/phpunit \
+          mkdir -p coverage-shards junit
+          # NO `-d memory_limit=` for the workers, and that is not an oversight.
+          # PHPUnit applies phpunit.xml's <ini name="memory_limit"> with
+          # ini_set() during bootstrap, so a command-line -d is silently LOWERED
+          # back to whatever the config says. The ceiling for each worker lives
+          # in phpunit.xml; see the comment there for why it is a number and not
+          # -1. Each worker now holds a quarter of the shard's coverage, so it
+          # sits further below that ceiling than the old serial run did.
+          vendor/bin/paratest \
+            --processes "$(nproc)" \
+            --configuration phpunit.shard.xml \
             --coverage-php "coverage-shards/shard-${{ matrix.shard }}.cov" \
-            "${files[@]}"
+            --log-junit "junit/shard-${{ matrix.shard }}.xml"
+
+      # Per-file seconds for the next timings refresh (the `coverage` job turns
+      # them into the `test-timings` artifact).
+      - name: Upload shard JUnit report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-shard-${{ matrix.shard }}
+          path: junit/shard-${{ matrix.shard }}.xml
+          retention-days: 7
+          if-no-files-found: ignore
 
       # `always()`: PHPUnit writes the coverage report even when tests fail, and
       # a partial report is still useful when diagnosing a red run.
@@ -386,6 +404,26 @@ jobs:
         with:
           name: coverage-report
           path: coverage.xml
+          retention-days: 30
+
+      # The shard plan is only as balanced as scripts/ci-test-timings.json is
+      # current. This publishes a fresh one from this run's JUnit reports; when
+      # the shard durations drift apart, commit it over the tracked file.
+      - name: Download shard JUnit reports
+        uses: actions/download-artifact@v8
+        with:
+          pattern: junit-shard-*
+          merge-multiple: true
+          path: junit
+
+      - name: Rebuild per-file test timings
+        run: php scripts/ci-test-shard.php timings ci-test-timings.json junit
+
+      - name: Upload test timings
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-timings
+          path: ci-test-timings.json
           retention-days: 30
 
   # Static analysis and the codebase-scanning guards need the source tree, not a
@@ -1028,7 +1066,7 @@ jobs:
   # on the runner.
   # ---------------------------------------------------------------------------
   postgres-dialect:
-    # Keep the `/2` here in step with the matrix below; the shard arithmetic
+    # Keep the `/3` here in step with the matrix below; the shard arithmetic
     # itself reads `strategy.job-total`, so only this label is manual.
     name: Dialect shard ${{ matrix.shard }}/2 (real-engine suites on PostgreSQL)
     needs: changes

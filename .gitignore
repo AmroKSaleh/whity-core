@@ -54,6 +54,13 @@ phpunit_full.log
 # mid-run would otherwise commit 37k lines of it).
 /coverage.xml
 
+# CI shard config and reports written by scripts/ci-test-shard.php and ParaTest
+# (WHIT-715); the tracked timings live in scripts/ci-test-timings.json.
+/phpunit.shard.xml
+/junit/
+/coverage-shards/
+/ci-test-timings.json
+
 # Bytecode from the python CI helpers (scripts/ci-mutation-gate.py). Running one
 # locally leaves it behind, and a `git add -A` would otherwise commit it.
 __pycache__/
