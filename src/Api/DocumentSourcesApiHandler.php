@@ -6,7 +6,10 @@ namespace Whity\Api;
 
 use Whity\Auth\RoleChecker;
 use Whity\Core\Document\DocumentAccessPolicy;
+use Whity\Core\Document\DocumentSourceFileStore;
 use Whity\Core\Document\DocumentSourceRepository;
+use Whity\Core\Form\FormRejectedException;
+use Whity\Core\Form\FormUploadPolicy;
 use Whity\Core\Ou\OuReachResolver;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\ScopedPermissionSet;
@@ -14,6 +17,9 @@ use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Http\JsonBody;
+use Whity\Http\UploadedFilePart;
+use Whity\Http\UploadedFilePartException;
+use Whity\Storage\StorageException;
 
 /**
  * The block editor's documents (editor M2; docs/design/IMPLEMENTATION-NOTES.md
@@ -24,6 +30,8 @@ use Whity\Http\JsonBody;
  *   GET    /api/document-sources/{id}        → show()      (documents:read)
  *   PUT    /api/document-sources/{id}/draft  → saveDraft() (documents:write)
  *   DELETE /api/document-sources/{id}        → delete()    (documents:write)
+ *   POST   /api/document-sources/{id}/files → uploadFile() (documents:write)
+ *   GET    /api/document-sources/{id}/files/{fileId}/content → fileContent() (documents:read)
  *
  * Visibility is the designer's: rows are filtered by {@see DocumentAccessPolicy}
  * (scope, required_permission, creator, OU reach), a hidden row 404s, and
@@ -61,6 +69,7 @@ final class DocumentSourcesApiHandler
         DocumentAccessPolicy $policy,
         RoleChecker $roleChecker,
         OuReachResolver $ouReach,
+        private readonly ?DocumentSourceFileStore $files = null,
     ) {
         $this->repo = $repo;
         $this->policy = $policy;
@@ -297,6 +306,106 @@ final class DocumentSourcesApiHandler
         }
 
         return $fields;
+    }
+
+    /**
+     * POST /api/document-sources/{id}/files: an image or file for an Image or
+     * File block (E.13), multipart with one `file` part.
+     *
+     * The caller must be able to see the document and hold documents:write
+     * (the route gate), the same as saving its draft. The type is sniffed from
+     * the bytes and checked against what the browser declared
+     * ({@see FormUploadPolicy}); the response carries the file id and the
+     * address the editor shows it from, never the storage key.
+     *
+     * @param array<string, string> $params
+     */
+    public function uploadFile(Request $request, array $params): Response
+    {
+        $ctx = $this->context($request);
+        if ($ctx instanceof Response) {
+            return $ctx;
+        }
+        [$tenantId, $callerId] = $ctx;
+        if ($this->files === null) {
+            return Response::error('File storage is not configured', 503);
+        }
+
+        $id = (int) ($params['id'] ?? 0);
+        if ($this->visibleRow($id, $tenantId, $callerId) === null) {
+            return Response::error('Document not found', 404);
+        }
+
+        try {
+            $part = UploadedFilePart::read($request, 'file');
+            $contentType = FormUploadPolicy::assertAcceptable($part['bytes'], $part['media_type'], FormUploadPolicy::MAX_BYTES);
+            $stored = $this->files->put($tenantId, $id, $part['bytes'], $contentType, $part['filename'], $callerId);
+        } catch (UploadedFilePartException $e) {
+            return Response::error($e->clientMessage, $e->status);
+        } catch (FormRejectedException $e) {
+            return Response::error($e->clientMessage, 422);
+        } catch (StorageException $e) {
+            error_log('[DocumentSourcesApiHandler] storage write failed: ' . $e->getMessage());
+
+            return Response::error('The file could not be stored. Please try again.', 503);
+        }
+
+        return Response::json(['data' => [
+            'id' => $stored['id'],
+            'url' => '/api/v1/document-sources/' . $id . '/files/' . $stored['id'] . '/content',
+            'filename' => $stored['filename'],
+            'content_type' => $stored['content_type'],
+            'byte_size' => $stored['byte_size'],
+            'checksum_sha256' => $stored['checksum_sha256'],
+        ]], 201);
+    }
+
+    /**
+     * GET /api/document-sources/{id}/files/{fileId}/content: the bytes of a
+     * file, readable exactly when its document is. The file id is bound to the
+     * document and the tenant, so a guessed id cannot be walked across others.
+     *
+     * @param array<string, string> $params
+     */
+    public function fileContent(Request $request, array $params): Response
+    {
+        $ctx = $this->context($request);
+        if ($ctx instanceof Response) {
+            return $ctx;
+        }
+        [$tenantId, $callerId] = $ctx;
+        if ($this->files === null) {
+            return Response::error('File storage is not configured', 503);
+        }
+
+        $id = (int) ($params['id'] ?? 0);
+        $file = $this->visibleRow($id, $tenantId, $callerId) === null
+            ? null
+            : $this->files->find((int) ($params['fileId'] ?? 0), $id, $tenantId);
+        if ($file === null) {
+            return Response::error('File not found', 404);
+        }
+
+        try {
+            $bytes = $this->files->bytes((string) $file['storage_key']);
+        } catch (StorageException $e) {
+            error_log('[DocumentSourcesApiHandler] reading a stored file failed: ' . $e->getMessage());
+
+            return Response::error('The file is temporarily unavailable', 503);
+        }
+
+        $type = (string) $file['content_type'];
+        $name = preg_replace('/[^A-Za-z0-9._-]/', '_', (string) ($file['filename'] ?? 'file')) ?: 'file';
+
+        return new Response(200, $bytes, [
+            'Content-Type' => $type,
+            // Images show in the page; anything else downloads.
+            'Content-Disposition' => (str_starts_with($type, 'image/') ? 'inline' : 'attachment') . '; filename="' . $name . '"',
+            // A stored file never changes, so it caches hard, but privately: the bytes are permission-gated.
+            'ETag' => '"' . $file['checksum_sha256'] . '"',
+            'Cache-Control' => 'private, max-age=31536000, immutable',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
     }
 
     /**

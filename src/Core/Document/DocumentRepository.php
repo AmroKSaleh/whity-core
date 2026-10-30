@@ -245,6 +245,46 @@ final class DocumentRepository
     }
 
     /**
+     * How many documents the criteria match per calendar month, from `$since`
+     * on: `['2026-09' => 12, ...]`, months with none left out. For the editor's
+     * chart blocks (M3), which count with the SAME visibility predicate as the
+     * list, so a chart never shows more than the reader's own document list.
+     *
+     * The month is the first seven characters of the timestamp as text, which
+     * is `YYYY-MM` on both PostgreSQL and SQLite.
+     *
+     * @return array<string, int>
+     */
+    public function countByMonthForCriteria(int $tenantId, DocumentCriteria $criteria, string $since): array
+    {
+        if ($criteria->matchesNothing) {
+            return [];
+        }
+
+        $sql = 'SELECT SUBSTR(CAST(created_at AS TEXT), 1, 7) AS month, COUNT(*) AS n
+                  FROM documents
+                 WHERE tenant_id = :tenant_id AND created_at >= :since';
+        $bindings = [];
+        $sql .= $this->criteriaSql($criteria, $bindings);
+        $sql .= ' GROUP BY SUBSTR(CAST(created_at AS TEXT), 1, 7)';
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+        $stmt->bindValue(':since', $since, PDO::PARAM_STR);
+        foreach ($bindings as $name => $value) {
+            $stmt->bindValue($name, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
+        $stmt->execute();
+
+        $counts = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $counts[(string) $row['month']] = (int) $row['n'];
+        }
+
+        return $counts;
+    }
+
+    /**
      * How many documents the same criteria as {@see listForCriteria()} match, so
      * the pagination envelope reports a total the caller can actually reach.
      */

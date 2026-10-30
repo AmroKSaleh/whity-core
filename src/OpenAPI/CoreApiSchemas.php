@@ -5701,6 +5701,47 @@ final class CoreApiSchemas
                 'updated_at' => self::str(),
             ], ['id', 'tenant_id', 'kind', 'title', 'lang', 'default_view', 'full_width', 'draft_version', 'scope', 'created_at', 'updated_at']),
             'DocumentSourceListResponse' => self::listEnvelope('DocumentSource'),
+            'DocumentSourceFileResponse' => self::object([
+                'data' => self::object([
+                    'id' => self::int(),
+                    'url' => self::str() + ['description' => 'Where the file is served, relative to the API origin'],
+                    'filename' => self::str(true),
+                    'content_type' => self::str(),
+                    'byte_size' => self::int(),
+                    'checksum_sha256' => self::str(),
+                ], ['id', 'url', 'content_type', 'byte_size', 'checksum_sha256']),
+            ], ['data']),
+            'DocumentEmbedCatalogueResponse' => self::object([
+                'data' => self::object([
+                    'record_types' => ['type' => 'array', 'items' => self::object(['key' => self::str(), 'label' => self::str()], ['key', 'label'])],
+                    'chart_sources' => ['type' => 'array', 'items' => self::object(['key' => self::str(), 'label' => self::str()], ['key', 'label'])],
+                ], ['record_types', 'chart_sources']),
+            ], ['data']),
+            'DocumentEmbedRecordResponse' => self::object([
+                'data' => self::object([
+                    'type_label' => self::str(),
+                    'title' => self::str(),
+                    'subtitle' => self::str(true),
+                    'amount' => self::str(true),
+                    'status' => [
+                        'type' => 'object',
+                        'nullable' => true,
+                        'properties' => [
+                            'label' => self::str(),
+                            'tone' => ['type' => 'string', 'enum' => ['success', 'warning', 'destructive', 'info', 'secondary']],
+                        ],
+                        'required' => ['label', 'tone'],
+                    ],
+                    'href' => self::str(true),
+                ], ['type_label', 'title']),
+            ], ['data']),
+            'DocumentEmbedChartResponse' => self::object([
+                'data' => self::object([
+                    'points' => ['type' => 'array', 'items' => self::object(['label' => self::str(), 'value' => ['type' => 'number']], ['label', 'value'])],
+                    'value_label' => self::str(),
+                    'subtitle' => self::str() + ['description' => 'What the series covers, for example Last 6 months, in the caller language'],
+                ], ['points']),
+            ], ['data']),
             'DocumentSourceResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentSource')),
             'DocumentSourceCreateRequest' => self::object([
                 'kind' => ['type' => 'string', 'enum' => ['template', 'letter', 'report', 'note', 'wiki', 'label']] + ['description' => 'What the document is: a `template`, `letter`, `report`, `note`, `wiki` page or `label` sheet. Templates and printed kinds open in the page view, notes and wiki pages in the continuous view.'],
@@ -11349,6 +11390,75 @@ final class CoreApiSchemas
                 'responses' => [
                     204 => ['description' => 'Document deleted'],
                     404 => self::errorResponse('Document not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/document-sources/{id:\d+}/files', 'documents:write', array_merge([
+                'summary' => 'Upload an image or file into an editor document',
+                'description' =>
+                    'MULTIPART, one part named `file`, for an Image or File block (editor M3). The caller must '
+                    . 'be able to see the document. ACCEPTS application/pdf, image/png and image/jpeg ONLY, '
+                    . 'decided by the LEADING BYTES (a declared type that contradicts them is a 422); SVG is '
+                    . 'refused because an SVG served from this origin is a script. MAXIMUM 10 MiB. Returns the '
+                    . 'file id and the address it is served from, never the storage key.',
+                'tags' => ['documents'],
+                'responses' => [
+                    201 => self::jsonResponse('The stored file and where it is served from', 'DocumentSourceFileResponse'),
+                    400 => self::errorResponse('No file part, or the multipart body could not be read'),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                    422 => self::errorResponse('Too large, empty, or not an accepted kind'),
+                    503 => self::errorResponse('The file could not be stored'),
+                ] + self::authErrors(),
+            ], self::formUploadMultipartBody(
+                'The image or file. PDF, PNG or JPEG, decided by MAGIC BYTES rather than by '
+                . 'filename or Content-Type. Maximum 10 MiB.'
+            ))),
+            self::permissionRoute('GET', '/api/document-sources/{id:\d+}/files/{fileId:\d+}/content', 'documents:read', [
+                'summary' => 'Download a file placed in an editor document',
+                'description' =>
+                    'Readable exactly when the document is. The file id is bound to the document and the '
+                    . 'tenant. Images are served inline, anything else as an attachment, with nosniff and a '
+                    . 'private immutable cache.',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => [
+                        'description' => 'The stored bytes, with the content type they were stored under',
+                        'content' => [
+                            'image/png' => ['schema' => ['type' => 'string', 'format' => 'binary']],
+                            'image/jpeg' => ['schema' => ['type' => 'string', 'format' => 'binary']],
+                            'application/pdf' => ['schema' => ['type' => 'string', 'format' => 'binary']],
+                        ],
+                    ],
+                    404 => self::errorResponse('Document or file not found, or not visible to the caller'),
+                    503 => self::errorResponse('The stored file could not be read from storage'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/document-embeds', 'documents:read', [
+                'summary' => 'List what Record and Chart blocks can show',
+                'description' => 'The record types and chart sources registered by core and enabled plugins (editor M3, E.16).',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The record types and chart sources', 'DocumentEmbedCatalogueResponse'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/document-embeds/records/{type:[a-z0-9._-]+}/{id:[A-Za-z0-9._-]+}', 'documents:read', [
+                'summary' => 'Show one record in a Record block, as the caller may see it',
+                'description' =>
+                    'Answered for the CALLER, not for the document: a Record block in a shared document shows '
+                    . 'each reader only what that reader may see. A record that does not exist and one the '
+                    . 'caller may not see are the same 404.',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The record', 'DocumentEmbedRecordResponse'),
+                    404 => self::errorResponse('Record not found, not visible to the caller, or an unknown type'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/document-embeds/charts/{key:[a-z0-9._-]+}', 'documents:read', [
+                'summary' => 'Load the series a Chart block draws, counted within the caller permissions',
+                'description' => 'Query-string values are passed to the source as the block `source.params`.',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('One series of labelled values', 'DocumentEmbedChartResponse'),
+                    404 => self::errorResponse('Unknown chart source, or one the caller may not use'),
                 ] + self::authErrors(),
             ]),
         ];

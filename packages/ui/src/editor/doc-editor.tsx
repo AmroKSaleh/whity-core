@@ -27,6 +27,8 @@ import { LinkCard, LinkPopover } from "./link-tools"
 import { SlashCommand, type SlashState } from "./slash"
 import { EditorToolbar } from "./toolbar"
 import { UnknownBlock } from "./schema"
+import { BlockToolbar } from "./block-toolbar"
+import { EditorServicesProvider, type EditorServices } from "./services"
 
 export type SaveState =
   | { state: "saved"; at: string }
@@ -68,8 +70,12 @@ export interface DocEditorProps {
   blockUrl?: (blockId: string) => string
   /** Every string has an English default; Arabic comes in here. */
   labels?: Partial<EditorLabels>
+  /** Live data for rich blocks: records, charts, uploads (M3). Each checks the reader's permissions. */
+  services?: EditorServices
   className?: string
 }
+
+const NO_SERVICES: EditorServices = {}
 
 function actorName(actor: Actor): string {
   return actor.kind === "system" ? "Whity" : actor.name
@@ -99,6 +105,7 @@ function DocEditor({
   onCommandPalette,
   blockUrl = (id) => `${typeof window === "undefined" ? "" : window.location.href.split("#")[0]}#block-${id}`,
   labels: labelProp,
+  services = NO_SERVICES,
   className,
 }: DocEditorProps) {
   const labels = React.useMemo(() => ({ ...EDITOR_LABELS, ...labelProp }), [labelProp])
@@ -382,52 +389,55 @@ function DocEditor({
             <div className="mb-7 flex items-center gap-2 text-[0.8125rem] text-muted-foreground">
               <Badge variant="secondary">{labels[KIND_LABEL[doc.kind]]}</Badge>
             </div>
-            <div ref={contentRef} className="relative">
-              <EditorContent editor={editor} />
-              {editor && (
-                <>
-                  <BlockGutter editor={editor} labels={labels} container={contentRef} menuAt={menuAt} onMenuAtChange={setMenuAt} blockUrl={blockUrl} />
-                  <SelectionBubble editor={editor} labels={labels} onLink={() => openLink()} />
-                </>
-              )}
-              {editor && slash.open && slash.rect && (
-                <div className="absolute z-30" style={relative(slash.rect)}>
-                  <BlockList
-                    id="wy-slash"
-                    items={slashItems}
-                    active={Math.min(slashActive, Math.max(0, slashItems.length - 1))}
-                    onActive={setSlashActive}
-                    onPick={(item) => pickSlash(slashItems.indexOf(item))}
+            <EditorServicesProvider services={services} labels={labels}>
+              <div ref={contentRef} className="relative">
+                <EditorContent editor={editor} />
+                {editor && (
+                  <>
+                    <BlockToolbar editor={editor} labels={labels} container={contentRef} />
+                    <BlockGutter editor={editor} labels={labels} container={contentRef} menuAt={menuAt} onMenuAtChange={setMenuAt} blockUrl={blockUrl} />
+                    <SelectionBubble editor={editor} labels={labels} onLink={() => openLink()} />
+                  </>
+                )}
+                {editor && slash.open && slash.rect && (
+                  <div className="absolute z-30" style={relative(slash.rect)}>
+                    <BlockList
+                      id="wy-slash"
+                      items={slashItems}
+                      active={Math.min(slashActive, Math.max(0, slashItems.length - 1))}
+                      onActive={setSlashActive}
+                      onPick={(item) => pickSlash(slashItems.indexOf(item))}
+                      labels={labels}
+                      footer={
+                        slash.query && editor.state.selection.$from.parent.textContent.trim() !== `/${slash.query}` ? (
+                          <span>{labels.slashInsertAfter}</span>
+                        ) : (
+                          <>
+                            <span>{labels.slashMove}</span>
+                            <span>{labels.slashInsert}</span>
+                            <span>{labels.slashClose}</span>
+                          </>
+                        )
+                      }
+                    />
+                  </div>
+                )}
+                {editor && linkAt && <LinkPopover editor={editor} labels={labels} position={linkAt} onClose={() => setLinkAt(null)} />}
+                {editor && linkCard && !linkAt && (
+                  <LinkCard
+                    editor={editor}
                     labels={labels}
-                    footer={
-                      slash.query && editor.state.selection.$from.parent.textContent.trim() !== `/${slash.query}` ? (
-                        <span>{labels.slashInsertAfter}</span>
-                      ) : (
-                        <>
-                          <span>{labels.slashMove}</span>
-                          <span>{labels.slashInsert}</span>
-                          <span>{labels.slashClose}</span>
-                        </>
-                      )
-                    }
+                    href={linkCard.href}
+                    pos={linkCard.pos}
+                    position={{ top: linkCard.top, left: linkCard.left }}
+                    onEdit={(pos) => openLink(pos)}
+                    onClose={() => setLinkCard(null)}
+                    onPointerEnter={() => clearTimeout(cardTimer.current)}
+                    onPointerLeave={() => setLinkCard(null)}
                   />
-                </div>
-              )}
-              {editor && linkAt && <LinkPopover editor={editor} labels={labels} position={linkAt} onClose={() => setLinkAt(null)} />}
-              {editor && linkCard && !linkAt && (
-                <LinkCard
-                  editor={editor}
-                  labels={labels}
-                  href={linkCard.href}
-                  pos={linkCard.pos}
-                  position={{ top: linkCard.top, left: linkCard.left }}
-                  onEdit={(pos) => openLink(pos)}
-                  onClose={() => setLinkCard(null)}
-                  onPointerEnter={() => clearTimeout(cardTimer.current)}
-                  onPointerLeave={() => setLinkCard(null)}
-                />
-              )}
-            </div>
+                )}
+              </div>
+            </EditorServicesProvider>
           </article>
         </div>
       </div>

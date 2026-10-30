@@ -5,6 +5,7 @@ import * as React from 'react';
 import { Button } from '@whity-org/ui/button';
 import { DocEditor, type SaveState } from '@whity-org/ui/editor/doc-editor';
 import type { EditorMode, WhityDocument } from '@whity-org/ui/editor/contract';
+import type { EditorServices } from '@whity-org/ui/editor/services';
 import { useTranslation } from '../i18n';
 import { useEditorLabels } from './editor-labels';
 import type { DocumentEditorAdapter } from './types';
@@ -52,6 +53,7 @@ export function DocumentEditorScreen({
   const [conflict, setConflict] = React.useState(false);
   const [mode, setMode] = React.useState<EditorMode>('editing');
   const [loadCount, setLoadCount] = React.useState(0);
+  const [services, setServices] = React.useState<EditorServices | undefined>(undefined);
 
   const version = React.useRef(0);
   const pending = React.useRef<WhityDocument | null>(null);
@@ -79,6 +81,19 @@ export function DocumentEditorScreen({
       live = false;
     };
   }, [adapter, id, loadCount]);
+
+  React.useEffect(() => {
+    // A failure leaves the rich blocks without live data; the text still loads and saves.
+    let live = true;
+    setServices(undefined);
+    adapter.loadServices?.(id).then(
+      (next) => live && setServices(next),
+      () => live && setServices({}),
+    );
+    return () => {
+      live = false;
+    };
+  }, [adapter, id]);
 
   const flush = React.useCallback(async () => {
     const next = pending.current;
@@ -194,6 +209,7 @@ export function DocumentEditorScreen({
         save={save}
         onCommandPalette={onCommandPalette}
         labels={labels}
+        services={services}
       />
     </div>
   );

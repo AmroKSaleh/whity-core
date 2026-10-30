@@ -264,6 +264,20 @@ abstract class BaseCommand implements CliCommand, CommandHelp
         );
         \Whity\register_service(\Whity\Core\Inbox\InboxSourceRegistry::class, $inboxSourceRegistry);
 
+        // The editor's live Record and Chart blocks (editor M3), mirroring
+        // public/index.php: core's issued-document providers are attached here
+        // too, so a plugin that registers its own record types at boot finds the
+        // same catalogue from either entry point.
+        $documentEmbedRegistry = new \Whity\Core\Document\Embed\DocumentEmbedRegistry();
+        $embedDocuments = new \Whity\Core\Document\DocumentRepository($db->getPdo());
+        $embedVisibility = new \Whity\Core\Document\DocumentVisibilityPolicy(
+            new \Whity\Core\Document\Routing\RouteRecipientRepository($db->getPdo()),
+            new \Whity\Core\RBAC\ResourceRoleAssignmentRepository($db->getPdo(), $resourceTypeRegistry)
+        );
+        $documentEmbedRegistry->addRecordProvider(new \Whity\Core\Document\Embed\IssuedDocumentRecordProvider($embedDocuments, $embedVisibility));
+        $documentEmbedRegistry->addChartSource(new \Whity\Core\Document\Embed\IssuedDocumentsByMonthChartSource($embedDocuments, $embedVisibility));
+        \Whity\register_service(\Whity\Core\Document\Embed\DocumentEmbedRegistry::class, $documentEmbedRegistry);
+
         // DOCUMENT ORGANIZER registries (#978). Built here for the same reason
         // the routing rule catalogue above is: a CLI-driven caller resolving
         // either of these from the container must get the POPULATED one.

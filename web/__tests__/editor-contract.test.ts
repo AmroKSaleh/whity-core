@@ -56,6 +56,7 @@ const EVERY_TEXT_BLOCK: Block[] = [
   { id: 'b16', type: 'paragraph', content: [] },
 ];
 
+/** Every M3 block, plus a plugin block (M7), which travels through unknownBlock. */
 const LATER_BLOCKS: Block[] = [
   { id: 'c1', type: 'callout', kind: 'important', content: [text('Fiscal fields are required.')] },
   { id: 'c2', type: 'toggle', open: false, summary: [text('Terms')], children: [{ id: 'c2a', type: 'paragraph', content: [text('Net 30.')] }] },
@@ -66,6 +67,36 @@ const LATER_BLOCKS: Block[] = [
   { id: 'c7', type: 'plugin', plugin: 'com.example.delivery-tracker', blockType: 'deliveryStatus', schemaVersion: 2, data: { order: 'A-17', nested: { stops: [1, 2] } } },
   { id: 'c8', type: 'barcode', symbology: 'code128', value: [{ type: 'field', path: 'invoice.number', label: 'Invoice number' }], showText: true },
   { id: 'c9', type: 'pageBreak' },
+  { id: 'c10', type: 'callout', kind: 'note', content: [text('Background for the reader, '), { type: 'text', text: 'bold', marks: [{ type: 'bold' }] }] },
+  {
+    id: 'c11',
+    type: 'toggle',
+    open: true,
+    summary: [text('What if I already paid?')],
+    children: [
+      { id: 'c11a', type: 'bullet', level: 0, content: [text('Ignore this letter.')] },
+      { id: 'c11b', type: 'columns', columns: [[{ id: 'c11c', type: 'paragraph', content: [text('Nested left')] }], [{ id: 'c11d', type: 'math', tex: 'x^2' }]] },
+    ],
+  },
+  { id: 'c12', type: 'toggle', open: false, summary: [], children: [] },
+  { id: 'c13', type: 'columns', columns: [[], []] },
+  { id: 'c14', type: 'table', headerRow: false, columns: [], rows: [] },
+  { id: 'c15', type: 'image', src: '/api/v1/document-files/9/content', alt: '', width: 'full' },
+  { id: 'c16', type: 'file', fileId: '12', name: 'Bank letter.pdf', size: 493568, mime: 'application/pdf' },
+  { id: 'c17', type: 'record', ref: { type: 'document', id: '5' }, view: 'summary' },
+  { id: 'c18', type: 'chart', chart: 'bar', source: { query: 'documents_by_month', params: { months: '6' } }, title: 'Documents issued' },
+  { id: 'c19', type: 'chart', chart: 'donut', source: { query: 'documents_by_status' } },
+  {
+    id: 'c20',
+    type: 'signature',
+    signers: [{ name: [text('Rana Haddad')], role: [text('Owner, Example Bakery')] }],
+    date: [{ type: 'field', path: 'today', label: 'Today' }],
+    stamp: true,
+  },
+  { id: 'c21', type: 'barcode', symbology: 'ean13', value: [text('6291041500213')], showText: false, widthMm: 40, heightMm: 15 },
+  { id: 'c22', type: 'qr', value: [text('https://example.jo/v/INV-1042')], caption: [text('Scan to verify')], sizeMm: 24 },
+  { id: 'c23', type: 'qr', value: [{ type: 'field', path: 'invoice.url', label: 'Invoice link' }] },
+  { id: 'c24', type: 'math', tex: '\\sum_{i=1}^{n} a_i' },
 ];
 
 describe('WhityDocument round trip through the editor', () => {
@@ -73,7 +104,7 @@ describe('WhityDocument round trip through the editor', () => {
     expect(throughEditor(EVERY_TEXT_BLOCK)).toEqual(EVERY_TEXT_BLOCK);
   });
 
-  it('keeps blocks a later milestone edits exactly as they were', () => {
+  it('keeps every rich block, nested blocks and optional fields included', () => {
     expect(throughEditor(LATER_BLOCKS)).toEqual(LATER_BLOCKS);
   });
 

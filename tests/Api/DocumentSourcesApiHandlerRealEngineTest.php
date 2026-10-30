@@ -7,9 +7,17 @@ namespace Tests\Api;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
+use Whity\Api\DocumentEmbedsApiHandler;
 use Whity\Api\DocumentSourcesApiHandler;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Document\DocumentAccessPolicy;
+use Whity\Core\Document\DocumentRepository;
+use Whity\Core\Document\DocumentSourceFileStore;
+use Whity\Core\Document\DocumentVisibilityPolicy;
+use Whity\Core\Document\Embed\DocumentEmbedRegistry;
+use Whity\Core\Document\Embed\IssuedDocumentRecordProvider;
+use Whity\Core\Document\Embed\IssuedDocumentsByMonthChartSource;
+use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\Document\DocumentSourceRepository;
 use Whity\Core\Ou\OuReachResolver;
 use Whity\Core\RBAC\PermissionRegistry;
@@ -19,6 +27,7 @@ use Whity\Core\Request;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
 use Whity\Sdk\Http\Response;
+use Whity\Storage\LocalStorageDriver;
 
 /**
  * Real-engine tests for {@see DocumentSourcesApiHandler} (editor M2): the
@@ -29,6 +38,10 @@ use Whity\Sdk\Http\Response;
  * people (or one person in two tabs) saving the same document is the normal
  * case: a save made against an old version must be refused with 409 and the
  * current version, never quietly overwrite the newer work.
+ *
+ * M3 adds the files placed in a document (readable exactly when the
+ * document is) and the live Record and Chart lookups, which answer for the
+ * reader and never reveal a record the reader may not see.
  */
 final class DocumentSourcesApiHandlerRealEngineTest extends TestCase
 {
@@ -40,25 +53,164 @@ final class DocumentSourcesApiHandlerRealEngineTest extends TestCase
     private const WRITER = 12; // read + write, no publish
     private const FOREIGN = 20; // a writer in the other tenant
 
+    private const PNG = "\x89PNG\r\n\x1a\n" . 'not really an image, but its signature is';
+
     private PDO $pdo;
     private DocumentSourcesApiHandler $handler;
+    private DocumentEmbedsApiHandler $embeds;
+    private string $storageRoot;
 
     protected function setUp(): void
     {
         RoleChecker::clearCache();
         $this->pdo = $this->makeSchema();
+        $this->storageRoot = sys_get_temp_dir() . '/docsources-' . bin2hex(random_bytes(6));
+        mkdir($this->storageRoot, 0o777, true);
+        $roleChecker = new RoleChecker($this->wrap($this->pdo), new PermissionRegistry());
+        $resourceRoles = new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry());
         $this->handler = new DocumentSourcesApiHandler(
             new DocumentSourceRepository($this->pdo),
             new DocumentAccessPolicy(),
-            new RoleChecker($this->wrap($this->pdo), new PermissionRegistry()),
-            new OuReachResolver($this->pdo, new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())),
+            $roleChecker,
+            new OuReachResolver($this->pdo, $resourceRoles),
+            new DocumentSourceFileStore(new LocalStorageDriver($this->storageRoot), $this->pdo),
         );
+
+        $documents = new DocumentRepository($this->pdo);
+        $visibility = new DocumentVisibilityPolicy(new RouteRecipientRepository($this->pdo), $resourceRoles);
+        $registry = new DocumentEmbedRegistry();
+        $registry->addRecordProvider(new IssuedDocumentRecordProvider($documents, $visibility));
+        $registry->addChartSource(new IssuedDocumentsByMonthChartSource(
+            $documents,
+            $visibility,
+            static fn (): \DateTimeImmutable => new \DateTimeImmutable('2026-10-15 12:00:00', new \DateTimeZone('UTC')),
+        ));
+        $this->embeds = new DocumentEmbedsApiHandler($registry, $roleChecker);
     }
 
     protected function tearDown(): void
     {
         TenantContext::reset();
         RoleChecker::clearCache();
+        if (is_dir($this->storageRoot)) {
+            $files = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($this->storageRoot, \FilesystemIterator::SKIP_DOTS),
+                \RecursiveIteratorIterator::CHILD_FIRST,
+            );
+            foreach ($files as $file) {
+                $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
+            }
+            rmdir($this->storageRoot);
+        }
+    }
+
+    // ── files (M3) ──────────────────────────────────────────────────────────
+
+    public function testAFileUploadedIntoADocumentReadsBackWithItsType(): void
+    {
+        $id = $this->idOf($this->create(self::WRITER, ['kind' => 'note', 'title' => 'With a logo']));
+
+        $up = $this->upload(self::WRITER, $id, self::PNG, 'logo.png', 'image/png');
+        self::assertSame(201, $up->getStatusCode(), $up->getBody());
+        $file = $this->data($up);
+        self::assertSame('image/png', $file['content_type']);
+        self::assertSame('logo.png', $file['filename']);
+        self::assertSame('/api/v1/document-sources/' . $id . '/files/' . $file['id'] . '/content', $file['url']);
+        self::assertArrayNotHasKey('storage_key', $file, 'the storage key never leaves the server');
+
+        $read = $this->fileContent(self::WRITER, $id, (int) $file['id']);
+        self::assertSame(200, $read->getStatusCode());
+        self::assertSame(self::PNG, $read->getBody());
+        self::assertSame('image/png', self::header($read, 'Content-Type'));
+        self::assertStringStartsWith('inline;', (string) self::header($read, 'Content-Disposition'));
+        self::assertSame('nosniff', self::header($read, 'X-Content-Type-Options'));
+    }
+
+    public function testAFileIsReadableExactlyWhenItsDocumentIs(): void
+    {
+        $id = $this->idOf($this->create(self::WRITER, ['kind' => 'note', 'title' => 'Mine']));
+        $fileId = (int) $this->data($this->upload(self::WRITER, $id, self::PNG, 'a.png', 'image/png'))['id'];
+
+        self::assertSame(404, $this->fileContent(self::VIEWER, $id, $fileId)->getStatusCode(), 'a personal document hides its files');
+        self::assertSame(404, $this->upload(self::OWNER, $id, self::PNG, 'b.png', 'image/png')->getStatusCode(), 'nor can others add to it');
+        self::assertSame(404, $this->fileContent(self::FOREIGN, $id, $fileId, self::OTHER_TENANT)->getStatusCode());
+
+        // A file id is bound to its document: naming it under another one finds nothing.
+        $other = $this->idOf($this->create(self::WRITER, ['kind' => 'note', 'title' => 'Other']));
+        self::assertSame(404, $this->fileContent(self::WRITER, $other, $fileId)->getStatusCode());
+    }
+
+    public function testOnlyCheckedFileTypesAreStored(): void
+    {
+        $id = $this->idOf($this->create(self::WRITER, ['kind' => 'note', 'title' => 'Files']));
+
+        $svg = $this->upload(self::WRITER, $id, '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', 'x.svg', 'image/svg+xml');
+        self::assertSame(422, $svg->getStatusCode(), 'an SVG served from our origin would be a script');
+
+        $relabelled = $this->upload(self::WRITER, $id, self::PNG, 'x.pdf', 'application/pdf');
+        self::assertSame(422, $relabelled->getStatusCode(), 'the bytes and the declared type must agree');
+
+        $pdf = $this->upload(self::WRITER, $id, "%PDF-1.7\n%fake", 'price-list.pdf', 'application/pdf');
+        self::assertSame(201, $pdf->getStatusCode(), $pdf->getBody());
+        $read = $this->fileContent(self::WRITER, $id, (int) $this->data($pdf)['id']);
+        self::assertStringStartsWith('attachment;', (string) self::header($read, 'Content-Disposition'), 'anything but an image downloads');
+    }
+
+    // ── live records and charts (M3) ────────────────────────────────────────
+
+    public function testARecordIsShownOnlyToReadersWhoCanSeeIt(): void
+    {
+        $mine = $this->issue(self::WRITER, 'Receipt R-17', '2026-10-02 09:00:00');
+
+        $res = $this->record(self::WRITER, 'document', (string) $mine);
+        self::assertSame(200, $res->getStatusCode(), $res->getBody());
+        self::assertSame(['type_label' => 'Issued document', 'title' => 'Receipt R-17', 'subtitle' => 'Receipt', 'href' => '/admin/document-library/' . $mine], $this->data($res));
+
+        self::assertSame(404, $this->record(self::VIEWER, 'document', (string) $mine)->getStatusCode(), 'not theirs, not routed, not granted');
+        self::assertSame(404, $this->record(self::FOREIGN, 'document', (string) $mine, self::OTHER_TENANT)->getStatusCode());
+        self::assertSame(200, $this->record(self::OWNER, 'document', (string) $mine)->getStatusCode(), 'documents:read_all sees it');
+
+        // Missing, malformed and unknown types are all the same 404 as hidden.
+        self::assertSame(404, $this->record(self::WRITER, 'document', '99999')->getStatusCode());
+        self::assertSame(404, $this->record(self::WRITER, 'document', 'INV-1')->getStatusCode());
+        self::assertSame(404, $this->record(self::WRITER, 'invoice', (string) $mine)->getStatusCode());
+    }
+
+    public function testAChartCountsOnlyWhatTheReaderCanSee(): void
+    {
+        $this->issue(self::WRITER, 'A', '2026-08-03 10:00:00');
+        $this->issue(self::WRITER, 'B', '2026-10-01 10:00:00');
+        $this->issue(self::WRITER, 'C', '2026-10-09 10:00:00');
+        $this->issue(self::OWNER, 'D', '2026-10-10 10:00:00');
+        $this->issue(self::WRITER, 'Too old', '2026-04-30 23:00:00');
+
+        $writer = $this->data($this->chart(self::WRITER, 'documents-by-month'));
+        self::assertSame('Documents', $writer['value_label']);
+        self::assertSame('Last 6 months', $writer['subtitle']);
+        self::assertSame(
+            [['label' => 'May 2026', 'value' => 0], ['label' => 'Jun 2026', 'value' => 0], ['label' => 'Jul 2026', 'value' => 0],
+             ['label' => 'Aug 2026', 'value' => 1], ['label' => 'Sep 2026', 'value' => 0], ['label' => 'Oct 2026', 'value' => 2]],
+            $writer['points'],
+            'six months, oldest first, empty months as zero, only the writer\'s own documents',
+        );
+
+        $owner = $this->data($this->chart(self::OWNER, 'documents-by-month'));
+        self::assertSame(3, $owner['points'][5]['value'], 'documents:read_all counts the whole tenant');
+
+        $foreign = $this->data($this->chart(self::FOREIGN, 'documents-by-month', self::OTHER_TENANT));
+        self::assertSame([0, 0, 0, 0, 0, 0], array_column($foreign['points'], 'value'), 'another tenant counts nothing of ours');
+
+        self::assertSame(404, $this->chart(self::WRITER, 'revenue-by-month')->getStatusCode());
+    }
+
+    public function testTheCatalogueListsRecordTypesAndChartSources(): void
+    {
+        $res = $this->embeds->catalogue($this->request('GET', '/api/document-embeds', self::VIEWER));
+        self::assertSame(200, $res->getStatusCode());
+        self::assertSame([
+            'record_types' => [['key' => 'document', 'label' => 'Issued document']],
+            'chart_sources' => [['key' => 'documents-by-month', 'label' => 'Documents issued per month']],
+        ], $this->data($res));
     }
 
     // ── create and read ─────────────────────────────────────────────────────
@@ -234,6 +386,56 @@ final class DocumentSourcesApiHandlerRealEngineTest extends TestCase
     }
 
     // ── helpers ─────────────────────────────────────────────────────────────
+
+    private function upload(int $userId, int $id, string $bytes, string $filename, string $type, int $tenant = self::TENANT): Response
+    {
+        $boundary = '----WhityDocFile' . bin2hex(random_bytes(6));
+        $body = "--{$boundary}\r\n"
+            . "Content-Disposition: form-data; name=\"file\"; filename=\"{$filename}\"\r\n"
+            . "Content-Type: {$type}\r\n\r\n"
+            . $bytes
+            . "\r\n--{$boundary}--\r\n";
+        $req = $this->request('POST', '/api/document-sources/' . $id . '/files', $userId, $body, $tenant, ['Content-Type' => "multipart/form-data; boundary={$boundary}"]);
+
+        return $this->handler->uploadFile($req, ['id' => (string) $id]);
+    }
+
+    private function fileContent(int $userId, int $id, int $fileId, int $tenant = self::TENANT): Response
+    {
+        $path = '/api/document-sources/' . $id . '/files/' . $fileId . '/content';
+
+        return $this->handler->fileContent($this->request('GET', $path, $userId, '', $tenant), ['id' => (string) $id, 'fileId' => (string) $fileId]);
+    }
+
+    private function record(int $userId, string $type, string $id, int $tenant = self::TENANT): Response
+    {
+        return $this->embeds->record($this->request('GET', "/api/document-embeds/records/{$type}/{$id}", $userId, '', $tenant), ['type' => $type, 'id' => $id]);
+    }
+
+    private function chart(int $userId, string $key, int $tenant = self::TENANT): Response
+    {
+        return $this->embeds->chart($this->request('GET', "/api/document-embeds/charts/{$key}", $userId, '', $tenant), ['key' => $key]);
+    }
+
+    /** An issued document raised by $userId, as the issuer would write it. */
+    private function issue(int $userId, string $title, string $createdAt, int $tenant = self::TENANT): int
+    {
+        $this->pdo->prepare('INSERT INTO documents (tenant_id, template_name, title, created_by, created_at) VALUES (?, ?, ?, ?, ?)')
+            ->execute([$tenant, 'Receipt', $title, $userId, $createdAt]);
+
+        return (int) $this->pdo->lastInsertId();
+    }
+
+    private static function header(Response $res, string $name): ?string
+    {
+        foreach ($res->getHeaders() as $key => $value) {
+            if (strcasecmp($key, $name) === 0) {
+                return $value;
+            }
+        }
+
+        return null;
+    }
 
     /** The ETag header, whatever case the response normalised its name to. */
     private static function etagOf(Response $res): ?string
