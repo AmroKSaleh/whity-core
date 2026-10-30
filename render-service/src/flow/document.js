@@ -574,6 +574,106 @@ function validateFormBlock(block, i) {
   return null;
 }
 
+/** Each block's own checks; `at` names the array in messages ("content"). */
+function validateBlocks(content, at) {
+  for (let i = 0; i < content.length; i += 1) {
+    const block = content[i];
+    if (!isPlainObject(block)) {
+      return `"${at}[${i}]" must be an object`;
+    }
+    if (!BLOCK_TYPES.has(block.type)) {
+      return `"${at}[${i}].type" must be one of: ${[...BLOCK_TYPES].join(', ')}`;
+    }
+    const layoutError = validateBlockLayout(block, i);
+    if (layoutError !== null) {
+      return layoutError;
+    }
+    const formError = validateFormBlock(block, i);
+    if (formError !== null) {
+      return formError;
+    }
+    if (block.type === 'heading') {
+      const level = asFiniteNumber(block.level);
+      if (level === null || level < 1 || level > 6 || Math.trunc(level) !== level) {
+        return `"${at}[${i}].level" must be a whole number 1-6`;
+      }
+      if (typeof block.text !== 'string') {
+        return `"${at}[${i}].text" must be a string`;
+      }
+    }
+    if (block.type === 'paragraph' && typeof block.text !== 'string') {
+      return `"${at}[${i}].text" must be a string`;
+    }
+    if (block.type === 'paragraph' || block.type === 'heading') {
+      const runsError = validateRuns(block, `${at}[${i}]`);
+      if (runsError !== null) {
+        return runsError;
+      }
+    }
+    if (block.type === 'table') {
+      if (!Array.isArray(block.rows)) {
+        return `"${at}[${i}].rows" must be an array of row arrays`;
+      }
+      if (block.rows.length > MAX_TABLE_ROWS) {
+        return `"${at}[${i}].rows" exceeds the render service's hard limit (${MAX_TABLE_ROWS} rows)`;
+      }
+      for (const row of block.rows) {
+        if (!Array.isArray(row)) {
+          return `"${at}[${i}].rows" entries must be arrays of cell values`;
+        }
+      }
+      if (block.columns !== undefined && !Array.isArray(block.columns)) {
+        return `"${at}[${i}].columns" must be an array`;
+      }
+    }
+    if (block.type === 'qr') {
+      if (typeof block.value !== 'string' || block.value === '') {
+        return `"${at}[${i}].value" must be the non-empty string the code encodes`;
+      }
+      if (block.value.length > MAX_QR_VALUE_LENGTH) {
+        // A QR's capacity is finite and its readability degrades into an
+        // unscannable lattice well before the encoder refuses outright.
+        // Refusing here names the reason; letting it through produces a printed
+        // document carrying a mark that looks like a verification code and
+        // scans as nothing.
+        return `"${at}[${i}].value" exceeds ${MAX_QR_VALUE_LENGTH} characters, beyond which the code stops being reliably scannable`;
+      }
+      if (block.reference !== undefined && typeof block.reference !== 'string') {
+        return `"${at}[${i}].reference" must be a string`;
+      }
+    }
+    if (block.type === 'barcode') {
+      if (!Object.prototype.hasOwnProperty.call(BARCODE_SYMBOLOGIES, block.symbology)) {
+        return `"${at}[${i}].symbology" must be one of: ${Object.keys(BARCODE_SYMBOLOGIES).join(', ')}`;
+      }
+      if (typeof block.value !== 'string' || block.value === '' || block.value.length > MAX_BARCODE_VALUE_LENGTH) {
+        return `"${at}[${i}].value" must be 1-${MAX_BARCODE_VALUE_LENGTH} characters`;
+      }
+      if (block.showText !== undefined && typeof block.showText !== 'boolean') {
+        return `"${at}[${i}].showText" must be true or false`;
+      }
+    }
+    if (block.type === 'math') {
+      if (typeof block.tex !== 'string' || block.tex === '' || block.tex.length > MAX_MATH_LENGTH) {
+        return `"${at}[${i}].tex" must be 1-${MAX_MATH_LENGTH} characters of TeX`;
+      }
+    }
+    if (block.type === 'figure') {
+      if (typeof block.src !== 'string' || block.src === '') {
+        return `"${at}[${i}].src" must be a non-empty data: URI`;
+      }
+      if (!block.src.startsWith('data:')) {
+        // A flowing render must not reach the network: an http(s) figure src
+        // would turn every render into an outbound fetch from inside the
+        // render tier, which is both an SSRF surface and a source of
+        // non-deterministic output. Callers embed their images.
+        return `"${at}[${i}].src" must be a data: URI (remote images are not fetched)`;
+      }
+    }
+  }
+  return null;
+}
+
 function validateFlowPayload(payload) {
   if (!isPlainObject(payload)) {
     return 'Request body must be a JSON object';
@@ -635,100 +735,9 @@ function validateFlowPayload(payload) {
     return `"content" exceeds the render service's hard limit (${MAX_BLOCKS} blocks)`;
   }
 
-  for (let i = 0; i < content.length; i += 1) {
-    const block = content[i];
-    if (!isPlainObject(block)) {
-      return `"content[${i}]" must be an object`;
-    }
-    if (!BLOCK_TYPES.has(block.type)) {
-      return `"content[${i}].type" must be one of: ${[...BLOCK_TYPES].join(', ')}`;
-    }
-    const layoutError = validateBlockLayout(block, i);
-    if (layoutError !== null) {
-      return layoutError;
-    }
-    const formError = validateFormBlock(block, i);
-    if (formError !== null) {
-      return formError;
-    }
-    if (block.type === 'heading') {
-      const level = asFiniteNumber(block.level);
-      if (level === null || level < 1 || level > 6 || Math.trunc(level) !== level) {
-        return `"content[${i}].level" must be a whole number 1-6`;
-      }
-      if (typeof block.text !== 'string') {
-        return `"content[${i}].text" must be a string`;
-      }
-    }
-    if (block.type === 'paragraph' && typeof block.text !== 'string') {
-      return `"content[${i}].text" must be a string`;
-    }
-    if (block.type === 'paragraph' || block.type === 'heading') {
-      const runsError = validateRuns(block, `content[${i}]`);
-      if (runsError !== null) {
-        return runsError;
-      }
-    }
-    if (block.type === 'table') {
-      if (!Array.isArray(block.rows)) {
-        return `"content[${i}].rows" must be an array of row arrays`;
-      }
-      if (block.rows.length > MAX_TABLE_ROWS) {
-        return `"content[${i}].rows" exceeds the render service's hard limit (${MAX_TABLE_ROWS} rows)`;
-      }
-      for (const row of block.rows) {
-        if (!Array.isArray(row)) {
-          return `"content[${i}].rows" entries must be arrays of cell values`;
-        }
-      }
-      if (block.columns !== undefined && !Array.isArray(block.columns)) {
-        return `"content[${i}].columns" must be an array`;
-      }
-    }
-    if (block.type === 'qr') {
-      if (typeof block.value !== 'string' || block.value === '') {
-        return `"content[${i}].value" must be the non-empty string the code encodes`;
-      }
-      if (block.value.length > MAX_QR_VALUE_LENGTH) {
-        // A QR's capacity is finite and its readability degrades into an
-        // unscannable lattice well before the encoder refuses outright.
-        // Refusing here names the reason; letting it through produces a printed
-        // document carrying a mark that looks like a verification code and
-        // scans as nothing.
-        return `"content[${i}].value" exceeds ${MAX_QR_VALUE_LENGTH} characters, beyond which the code stops being reliably scannable`;
-      }
-      if (block.reference !== undefined && typeof block.reference !== 'string') {
-        return `"content[${i}].reference" must be a string`;
-      }
-    }
-    if (block.type === 'barcode') {
-      if (!Object.prototype.hasOwnProperty.call(BARCODE_SYMBOLOGIES, block.symbology)) {
-        return `"content[${i}].symbology" must be one of: ${Object.keys(BARCODE_SYMBOLOGIES).join(', ')}`;
-      }
-      if (typeof block.value !== 'string' || block.value === '' || block.value.length > MAX_BARCODE_VALUE_LENGTH) {
-        return `"content[${i}].value" must be 1-${MAX_BARCODE_VALUE_LENGTH} characters`;
-      }
-      if (block.showText !== undefined && typeof block.showText !== 'boolean') {
-        return `"content[${i}].showText" must be true or false`;
-      }
-    }
-    if (block.type === 'math') {
-      if (typeof block.tex !== 'string' || block.tex === '' || block.tex.length > MAX_MATH_LENGTH) {
-        return `"content[${i}].tex" must be 1-${MAX_MATH_LENGTH} characters of TeX`;
-      }
-    }
-    if (block.type === 'figure') {
-      if (typeof block.src !== 'string' || block.src === '') {
-        return `"content[${i}].src" must be a non-empty data: URI`;
-      }
-      if (!block.src.startsWith('data:')) {
-        // A flowing render must not reach the network: an http(s) figure src
-        // would turn every render into an outbound fetch from inside the
-        // render tier, which is both an SSRF surface and a source of
-        // non-deterministic output. Callers embed their images.
-        return `"content[${i}].src" must be a data: URI (remote images are not fetched)`;
-      }
-    }
+  const blocksError = validateBlocks(content, 'content');
+  if (blocksError !== null) {
+    return blocksError;
   }
 
   if (payload.frontMatter !== undefined) {
@@ -950,6 +959,12 @@ function normaliseRunning(spec) {
 module.exports = {
   BARCODE_SYMBOLOGIES,
   validateFlowPayload,
+  validateBlocks,
+  normaliseTheme,
+  isPlainObject,
+  asFiniteNumber,
+  HEX_COLOUR,
+  THEME_KEYS,
   normaliseFlowDocument,
   resolvePage,
   PAGE_PRESETS,

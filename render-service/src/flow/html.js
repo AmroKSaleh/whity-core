@@ -561,4 +561,4 @@ ${body}
 </html>`;
 }
 
-module.exports = { buildFlowHtml, isolateForeignRuns, escapeHtml, DEFAULT_FONT_STACK };
+module.exports = { buildFlowHtml, renderBlock, mm, FLOW_CSS, isolateForeignRuns, escapeHtml, DEFAULT_FONT_STACK };
