@@ -81,13 +81,29 @@ export function inlineText(content: Inline[] | null | undefined): string {
 /** Plain text back to inline content, keeping `{{label}}` fields that were there before. */
 export function textToInline(text: string, previous: Inline[] | null | undefined): Inline[] {
   const fields = new Map((previous ?? []).filter((r) => r.type === "field").map((r) => [`{{${(r as { label: string; path: string }).label || (r as { path: string }).path}}}`, r]))
+  // Scans for the known tokens rather than a {{…}} regex: only fields that were
+  // there before come back, and a run of "{" stays linear (CodeQL js/polynomial-redos).
   const out: Inline[] = []
-  for (const part of text.split(/(\{\{[^}]+\}\})/)) {
-    if (!part) continue
-    const field = fields.get(part)
-    if (field) out.push(field)
-    else out.push({ type: "text", text: part })
+  let from = 0
+  let i = text.indexOf("{{")
+  while (i !== -1) {
+    let token: string | undefined
+    for (const key of fields.keys()) {
+      if (text.startsWith(key, i)) {
+        token = key
+        break
+      }
+    }
+    if (token) {
+      if (i > from) out.push({ type: "text", text: text.slice(from, i) })
+      out.push(fields.get(token)!)
+      from = i + token.length
+      i = text.indexOf("{{", from)
+    } else {
+      i = text.indexOf("{{", i + 1)
+    }
   }
+  if (from < text.length) out.push({ type: "text", text: text.slice(from) })
   return out
 }
 
