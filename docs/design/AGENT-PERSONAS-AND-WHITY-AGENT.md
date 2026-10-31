@@ -1,6 +1,6 @@
 # Agent personas, presets and whity-agent
 
-Status: **draft, open questions in §9**. Nothing here is built yet. Part A's backend starts once the owner answers Q1 and Q2.
+Status: **draft, Q1 decided (2026-10-31), Q2 to Q6 open in §9**. Part A's backend has started with WHIT-815 (migration 180).
 Related: `MCP-TOOL-SURFACE.md` (§5.4 token toolsets, §5.11 agent model, §5.12 splits), `00-decision-register.md` (Scope grant, 5.6a and 5.6b agent words, 7.5a to 7.5c), `15-agents.md`, `12-engineering-handoff.md` items 10 and 11, ADR-0006 (MCP server), ADR-0014 (AGPL with plugin exception), ADR-0015 (OAuth resource server, Whity ID), `WHITY-BUILDER.md` (manifests), `templates/tauri-desktop`.
 
 The owner's words: "agents will need personalities and tools and presets from whity POV to be created... we will also need whity-agent a local desktop app that auto connects your local claude-code codex etc... to whity seemlessly to help you work and chat with whity".
@@ -71,7 +71,7 @@ The owner's words: "agents will need personalities and tools and presets from wh
 | B. Everything in the table, presets seeded as rows | One shape. | Plugins would write rows on install. Updates and uninstalls need migrations of tenant data, and Builder's per-tenant manifests are read per request, not seeded (`WHITY-BUILDER.md`). |
 | C. Everything as manifests | No new table. | Workspaces can't create or edit an agent without a plugin. That defeats "a way for a workspace to create agents". |
 
-**`agents` table** (migration number from the orchestrator):
+**`agents` table** (migration 180):
 
 | Column | Type | Notes |
 |---|---|---|
@@ -89,7 +89,7 @@ The owner's words: "agents will need personalities and tools and presets from wh
 | `status` | VARCHAR(16) | `active` · `archived`. Archiving stops every assignment's credentials at once. |
 | `created_by_profile_id`, `updated_by_profile_id`, timestamps | | Actor columns, as for every write. |
 
-**Who creates agents:** a new core permission, `agents:manage` (tenant admins by default), creates and edits workspace agents. A new `agents:use` (every member by default) lets a person grant an agent for themselves. Personal agents, which a person defines only for themselves, are Q1.
+**Who creates agents:** a new core permission, `agents:manage` (tenant admins by default), creates and edits workspace agents. A new `agents:use` (every member by default) lets a person grant an agent for themselves. Personal agents, which a person defines only for themselves, come later (Q1, decided).
 
 **Routes** (session or token, tenant-scoped, MCP-exposed as `core.agents`, `agentPolicy: refuse` on every write, so agents can't create or edit agents):
 - `GET /api/agents`, `GET /api/agents/{id}`, `POST /api/agents` (from scratch or `{presetKey}`), `PATCH /api/agents/{id}`, `POST /api/agents/{id}/archive`.
@@ -292,7 +292,7 @@ No card exists for these, so they are not to be invented. Built from existing co
 
 ## 9. Open questions (for the owner, one at a time through the orchestrator)
 
-1. **Who defines agents.** Recommend: workspace agents only, created by people with `agents:manage` (admins), from presets or from scratch; every member can grant one for themselves. Personal agents (only for me) come later. Also confirm this is an extension of the decided agent model and not a new subsystem under WHIT-667.
+1. **Who defines agents. Decided 2026-10-31: workspace agents only.** People with `agents:manage` (admins by default) create them from presets or from scratch. Every member can grant one for themselves (`agents:use`), with their own Off, Ask first or Allowed grant. Personal agents come later. **WHIT-667: confirmed** that agents, personas and presets extend the decided AI-principal, grant and proposal model and are not a new subsystem.
 2. **Connecting as yourself or as an agent.** Recommend: whity-agent and the wizard connect as **yourself** by default (as today), and offer an agent as a choice per tool. The alternative, agent by default, makes every write in a coding tool a proposal.
 3. **Chat model in whity-agent.** Recommend: A (use the person's Claude Code or Codex headless) first, B (own API key) next, C (Whity-hosted, paid) later.
 4. **whity-agent repo and licence.** Recommend: new public repo `whity-org/whity-agent`, MIT (like the client packages), free. Paid value stays in the services it connects to.
@@ -301,7 +301,7 @@ No card exists for these, so they are not to be invented. Built from existing co
 
 ## 10. Task breakdown
 
-Taskaat, project WHIT, section **Agents**. WHIT-816 also feeds the credential and grant screen of WHIT-810 (agent-collaboration work), which should use the assignment API. Migration numbers and SDK minors come from the orchestrator.
+Taskaat, project WHIT, section **Agents**. WHIT-816 also feeds the credential and grant screen of WHIT-810 (agent-collaboration work), which should use the assignment API. Migrations: `agents` is 180 and `agent_assignments` is 181 (reserved by the orchestrator). SDK minors come from the orchestrator.
 
 | Task | What | Depends on |
 |---|---|---|
