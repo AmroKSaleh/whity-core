@@ -1,1 +1,0 @@
-- **The web image builds again.** `next build` type-checked the Storybook helpers and stories, and one helper imports the Arabic catalogue from `database/i18n`, a folder the web image's build context leaves out. `next build` now type-checks against `web/tsconfig.build.json`, which leaves Storybook out; `tsc --noEmit` in CI still checks the stories (WHIT-720).
