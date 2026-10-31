@@ -4749,6 +4749,8 @@ $mcpDiscovery = new DiscoveryTools(
     // WHIT-754: a plugin's always-on tool is listed only once this workspace's
     // admin turned it on (the mcp.always_on_plugin_tools setting).
     $mcpEnabledPluginAlwaysOn,
+    // WHIT-825: get_proposal reads an agent's own proposals.
+    $agentProposals,
 );
 $mcpTransportHandler = new McpTransportHandler(
     new Dispatcher($mcpHandlers, $tokenValidator, $mcpRateLimiter, $tenantMcpEnabled, $mcpListChangedNotifier, $mcpRecordTokenUse),

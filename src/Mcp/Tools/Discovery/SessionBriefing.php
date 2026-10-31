@@ -108,8 +108,8 @@ final class SessionBriefing
                 }
             }
             $briefing['askFirst'] = $ar
-                ? 'العمليات المعلّمة askFirst لا تُنفَّذ فورًا: تصبح مقترحًا يوافق عليه الشخص الذي تعمل نيابة عنه أو يعدّله أو يرفضه، وتنتهي صلاحيته بعد ٧ أيام. أخبر الشخص بأن طلبك ينتظر موافقته. العملية التي لا يمكن التراجع عنها تحتاج دائمًا إلى موافقة.'
-                : 'Operations marked askFirst do not run straight away: they become a proposal the person you act for approves, edits or declines, and it expires after 7 days. Tell them it is waiting. Anything that can\'t be undone always needs approval.';
+                ? 'العمليات المعلّمة askFirst لا تُنفَّذ فورًا: تصبح مقترحًا يوافق عليه الشخص الذي تعمل نيابة عنه أو يعدّله أو يرفضه، وتنتهي صلاحيته بعد ٧ أيام. أخبر الشخص بأن طلبك ينتظر موافقته، وتحقّق من حالته عبر get_proposal. العملية التي لا يمكن التراجع عنها تحتاج دائمًا إلى موافقة.'
+                : 'Operations marked askFirst do not run straight away: they become a proposal the person you act for approves, edits or declines, and it expires after 7 days. Tell them it is waiting, and check on it with get_proposal. Anything that can\'t be undone always needs approval.';
             $briefing['rules'] = $ar
                 ? ['لا تغيّر المستندات مباشرة أبدًا: ما تكتبه فيها اقتراحات يقبلها شخص.', 'كل ما تفعله يُسجَّل باسمك نيابة عن الشخص.']
                 : ['Never change documents directly: what you write in them are suggestions a person accepts.', 'Everything you do is recorded as you, acting for that person.'];

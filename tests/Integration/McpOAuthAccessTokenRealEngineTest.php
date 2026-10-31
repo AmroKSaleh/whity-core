@@ -192,6 +192,99 @@ final class McpOAuthAccessTokenRealEngineTest extends TestCase
         self::assertNull($this->verifier()->verify($token));
     }
 
+    public function testAnAgentClientsTokenIsAnAgentActingForItsPerson(): void
+    {
+        $profileId = $this->linkedProfile('sub-1');
+        $this->member($profileId, 7);
+
+        $first  = $this->verifier()->verify($this->token(['sub' => 'sub-1', 'whity_agent' => true, 'client_id' => 'whity-builder', 'jti' => 'a', 'scope' => 'tools:call openid grant:users:manage=allow']));
+        $second = $this->verifier()->verify($this->token(['sub' => 'sub-1', 'whity_agent' => true, 'client_id' => 'whity-builder', 'jti' => 'b', 'scope' => 'tools:call']));
+
+        self::assertNotNull($first);
+        self::assertSame('ai-agent', $first->principalKind);
+        self::assertSame($profileId, $first->profileId);
+        self::assertSame(7, $first->tenantId);
+        // No grant entries ride on the token, even one it names: the default
+        // grant applies, so it can never be given more than Ask first for writes.
+        self::assertSame(['tools:call'], $first->scope);
+        // Stable across its access tokens, so its proposals stay its own.
+        self::assertSame($first->jti, $second?->jti);
+        self::assertStringStartsWith(OAuthAccessTokenVerifier::AGENT_ID_PREFIX, $first->jti);
+        self::assertLessThanOrEqual(64, strlen($first->jti));
+    }
+
+    public function testTwoAgentClientsAreTwoAgents(): void
+    {
+        $this->member($this->linkedProfile('sub-1'), 7);
+
+        $builder = $this->verifier()->verify($this->token(['sub' => 'sub-1', 'whity_agent' => true, 'client_id' => 'whity-builder']));
+        $other   = $this->verifier()->verify($this->token(['sub' => 'sub-1', 'whity_agent' => true, 'azp' => 'another-agent']));
+
+        self::assertNotSame($builder?->jti, $other?->jti);
+    }
+
+    /** @return array<string, array{mixed}> */
+    public static function notAnAgentClaim(): array
+    {
+        return [
+            'absent'   => [null],
+            'false'    => [false],
+            'a string' => ['true'],
+            'one'      => [1],
+            'a list'   => [[true]],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('notAnAgentClaim')]
+    public function testOnlyExactlyTrueMakesAnAgent(mixed $claim): void
+    {
+        $this->member($this->linkedProfile('sub-1'), 7);
+        $claims = ['sub' => 'sub-1', 'client_id' => 'whity-builder'] + ($claim !== null ? ['whity_agent' => $claim] : []);
+
+        self::assertSame('oauth', $this->verifier()->verify($this->token($claims))?->principalKind);
+    }
+
+    public function testAnAgentTokenMustNameItsClient(): void
+    {
+        $this->member($this->linkedProfile('sub-1'), 7);
+
+        $this->expectException(OAuthTokenRefusedException::class);
+        $this->expectExceptionMessage('client_id');
+        $this->verifier()->verify($this->token(['sub' => 'sub-1', 'whity_agent' => true]));
+    }
+
+    /** @return array<string, array{array<string, mixed>, bool}> */
+    public static function forgedAgentClaims(): array
+    {
+        return [
+            'another issuer'   => [['iss' => 'https://evil.test'], false],
+            'another resource' => [['aud' => 'https://elsewhere.test/mcp'], false],
+            'another key'      => [[], true],
+        ];
+    }
+
+    /**
+     * A claim the trusted issuer did not sign is never believed: the token is
+     * not valid at all, so it cannot become an agent or anything else.
+     *
+     * @param array<string, mixed> $claims
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('forgedAgentClaims')]
+    public function testAForgedAgentClaimIsNoPrincipalAtAll(array $claims, bool $otherKey): void
+    {
+        $this->member($this->linkedProfile('sub-1'), 7);
+        $pem = null;
+        if ($otherKey) {
+            $other = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
+            self::assertNotFalse($other);
+            openssl_pkey_export($other, $pem);
+        }
+
+        $token = $this->token(['sub' => 'sub-1', 'whity_agent' => true, 'client_id' => 'whity-builder'] + $claims, $pem);
+
+        self::assertNull($this->verifier()->verify($token));
+    }
+
     public function testAStrayBearerCostsNoFetch(): void
     {
         self::assertNull($this->verifier()->verify('not-a-jwt'));

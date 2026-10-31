@@ -349,6 +349,34 @@ final class ToolsCallHandler implements MethodHandler
     }
 
     /**
+     * The person behind the principal may make this call: the token's
+     * permission narrowing, then RBAC, as the execution path checks them.
+     *
+     * @param array<string, mixed> $access
+     * @throws McpException
+     */
+    private function assertPersonMay(McpPrincipal $principal, array $access): void
+    {
+        $tenantId = TenantContext::getTenantId();
+        if ($tenantId === null) {
+            throw new McpException(ErrorCode::UNAUTHENTICATED, 'No tenant context');
+        }
+        $permission = is_string($access['requiredPermission'] ?? null) && $access['requiredPermission'] !== '' ? $access['requiredPermission'] : null;
+        $role       = is_string($access['requiredRole'] ?? null) && $access['requiredRole'] !== '' ? $access['requiredRole'] : null;
+
+        if (!McpScope::of($principal)->allowsPermission($permission)) {
+            throw new McpException(ErrorCode::FORBIDDEN, 'Forbidden');
+        }
+        if ($permission !== null) {
+            if (!$this->roleChecker->hasPermissionForProfile($principal->userId, $permission, $tenantId)) {
+                throw new McpException(ErrorCode::FORBIDDEN, 'Forbidden');
+            }
+        } elseif ($role !== null && !$this->roleChecker->hasRoleForProfile($principal->userId, $role, $tenantId)) {
+            throw new McpException(ErrorCode::FORBIDDEN, 'Forbidden');
+        }
+    }
+
+    /**
      * Strip keys whose names contain sensitive substrings from a flat argument
      * map before the map is passed to the audit trail. Matches the same set of
      * forbidden substrings as {@see \Whity\Core\Audit\AuditLogger}.
@@ -402,6 +430,10 @@ final class ToolsCallHandler implements MethodHandler
         if ($this->proposals === null) {
             throw new McpException(ErrorCode::FORBIDDEN, 'This operation needs a person to approve it, and approvals are not available here.');
         }
+
+        // WHIT-825: nor a call its person could not make. An agent never
+        // reaches past the person it acts for; approval checks again anyway.
+        $this->assertPersonMay($principal, $access);
 
         // The schema is checked now, so a person is never asked to approve a
         // call that could not run.
