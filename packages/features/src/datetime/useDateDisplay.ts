@@ -53,6 +53,7 @@ import { useDateDisplayPreferences } from './date-display-context'
 import {
   formatDate,
   formatDateTime,
+  formatTime,
   relativeAge,
   type RelativeAge,
   type RelativeAgeUnit,
@@ -92,6 +93,8 @@ export interface DateDisplay {
   date(value: string | null | undefined): string | null
   /** A date and a time, under the same rule. */
   dateTime(value: string | null | undefined): string | null
+  /** A time of day alone, for a list that already names its day. */
+  time(value: string | null | undefined): string | null
   /** A bucketed age, or null under the same rule. {@see relativeAge}. */
   age(value: string | null | undefined): RelativeAge | null
   /** A bucketed age, already put into words by the caller's own labels. */
@@ -113,6 +116,11 @@ export function useDateDisplay(): DateDisplay {
 
   const dateTime = useCallback(
     (value: string | null | undefined): string | null => (hidden ? null : formatDateTime(value, locale)),
+    [hidden, locale]
+  )
+
+  const time = useCallback(
+    (value: string | null | undefined): string | null => (hidden ? null : formatTime(value, locale)),
     [hidden, locale]
   )
 
@@ -154,7 +162,7 @@ export function useDateDisplay(): DateDisplay {
   )
 
   return useMemo<DateDisplay>(
-    () => ({ hidden, date, dateTime, age, relative, dateColumns }),
-    [hidden, date, dateTime, age, relative, dateColumns]
+    () => ({ hidden, date, dateTime, time, age, relative, dateColumns }),
+    [hidden, date, dateTime, time, age, relative, dateColumns]
   )
 }

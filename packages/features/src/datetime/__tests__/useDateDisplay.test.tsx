@@ -18,7 +18,7 @@ import { useDateDisplay } from '../useDateDisplay'
 const WIRE = '2026-08-25 14:02:11'
 
 function Probe() {
-  const { hidden, date, dateTime, age, relative, dateColumns } = useDateDisplay()
+  const { hidden, date, dateTime, time, age, relative, dateColumns } = useDateDisplay()
 
   const columns = dateColumns<{ created_at: string }>([
     { id: 'created', header: 'Created', value: (row) => row.created_at },
@@ -32,6 +32,8 @@ function Probe() {
       <dd data-testid="date">{date(WIRE) ?? 'NULL'}</dd>
       <dt>dateTime</dt>
       <dd data-testid="dateTime">{dateTime(WIRE) ?? 'NULL'}</dd>
+      <dt>time</dt>
+      <dd data-testid="time">{time(WIRE) ?? 'NULL'}</dd>
       <dt>age</dt>
       <dd data-testid="age">{age(WIRE)?.unit ?? 'NULL'}</dd>
       <dt>relative</dt>
@@ -64,6 +66,7 @@ describe('useDateDisplay', () => {
     expect(screen.getByTestId('hidden')).toHaveTextContent('false')
     expect(screen.getByTestId('date')).not.toHaveTextContent('NULL')
     expect(screen.getByTestId('dateTime')).not.toHaveTextContent('NULL')
+    expect(screen.getByTestId('time')).not.toHaveTextContent('NULL')
     expect(screen.getByTestId('age')).not.toHaveTextContent('NULL')
     expect(screen.getByTestId('relative')).not.toHaveTextContent('NULL')
     expect(screen.getByTestId('columns')).toHaveTextContent('1')
@@ -77,9 +80,10 @@ describe('useDateDisplay', () => {
     )
 
     expect(screen.getByTestId('hidden')).toHaveTextContent('true')
-    // All four, not three: the one that is forgotten is the one that leaks.
+    // Every one of them: the one that is forgotten is the one that leaks.
     expect(screen.getByTestId('date')).toHaveTextContent('NULL')
     expect(screen.getByTestId('dateTime')).toHaveTextContent('NULL')
+    expect(screen.getByTestId('time')).toHaveTextContent('NULL')
     expect(screen.getByTestId('age')).toHaveTextContent('NULL')
     // Relative phrasing is NOT a middle ground: "3m ago" is still a date.
     expect(screen.getByTestId('relative')).toHaveTextContent('NULL')

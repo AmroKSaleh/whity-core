@@ -12,15 +12,15 @@ import {
 import { cn } from '@/lib/utils';
 
 /**
- * Per-type styling driven by the semantic color tokens from base.json
- * (success / warning / error / info). Errors map to the `error` token,
- * keeping them visually aligned with the `destructive` family.
+ * The status shows in the icon's colour only (the Toast card): the toast
+ * itself is a floating layer, the popover surface with the soft float shadow
+ * (register 4.4), so a row of toasts never turns into a row of coloured bars.
  */
-const toastStyles: Record<ToastType, string> = {
-  success: 'bg-success text-success-foreground',
-  error: 'bg-error text-error-foreground',
-  warning: 'bg-warning text-warning-foreground',
-  info: 'bg-info text-info-foreground',
+const iconStyles: Record<ToastType, string> = {
+  success: 'text-success-text',
+  error: 'text-error-text',
+  warning: 'text-warning-text',
+  info: 'text-info-text',
 };
 
 /** Assertive announcements for failures/warnings, polite for the rest. */
@@ -69,7 +69,7 @@ export function ToastContainer({
     <div
       role="region"
       aria-label={regionLabel}
-      className="fixed bottom-0 inset-e-0 z-[9999] flex flex-col gap-3 p-4 pointer-events-none"
+      className="fixed bottom-0 inset-e-0 z-[9999] flex w-[min(400px,100vw)] flex-col gap-2 p-4 pointer-events-none"
     >
       {toasts.map((toast) => (
         <div
@@ -77,20 +77,29 @@ export function ToastContainer({
           role="status"
           aria-live={toastPoliteness[toast.type]}
           aria-atomic="true"
-          className={cn(
-            'pointer-events-auto flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium shadow-lg animate-in duration-200 ltr:slide-in-from-right-full rtl:slide-in-from-left-full',
-            toastStyles[toast.type]
-          )}
+          className="pointer-events-auto flex items-start gap-2.5 rounded-control-lg border border-border bg-popover py-3 ps-3.5 pe-2.5 text-sm text-popover-foreground shadow-float animate-in duration-200 ltr:slide-in-from-right-full rtl:slide-in-from-left-full"
         >
-          <div className="flex items-center gap-3 flex-1">
+          <span className={cn('mt-px shrink-0', iconStyles[toast.type])}>
             <ToastIcon type={toast.type} />
-            <span>{toast.message}</span>
-          </div>
+          </span>
+          <span className="min-w-0 flex-1 font-medium leading-5">{toast.message}</span>
+          {toast.action && (
+            <button
+              type="button"
+              onClick={() => {
+                toast.action?.onClick();
+                removeToast(toast.id);
+              }}
+              className="shrink-0 rounded-sm text-sm font-medium text-primary outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {toast.action.label}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => removeToast(toast.id)}
             aria-label={dismissLabel}
-            className="opacity-70 hover:opacity-100 transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current/50 rounded-sm"
+            className="shrink-0 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <IconX className="size-4" aria-hidden="true" />
           </button>

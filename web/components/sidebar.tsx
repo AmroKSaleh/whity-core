@@ -9,8 +9,8 @@ import { useBranding } from '@/lib/branding-context';
 import { useThemeMode } from '@/lib/theme-mode-context';
 import { useToast } from '@/lib/toast-context';
 import { Button } from '@whity-org/ui/button';
-import { Switcher } from '@whity-org/ui/switcher';
-import { AppSidebar } from '@whity-org/ui/app-sidebar';
+import { TenantSwitcher as WorkspaceSwitcher } from '@whity-org/ui/tenant-switcher';
+import { AppSidebar, useForcedRail } from '@whity-org/ui/app-sidebar';
 import { navGroupsFromServerItems } from '@whity-org/features/nav';
 import { LanguageSwitcher, useI18nEnabled, useTranslation } from '@whity-org/features/i18n';
 import * as TablerIcons from '@tabler/icons-react';
@@ -18,12 +18,12 @@ import {
   IconLogout,
   IconDashboard,
   IconUserCog,
-  IconBuilding,
   IconWorld,
   IconSun,
   IconMoon,
 } from '@tabler/icons-react';
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
+import { WAITING_CHANGED_EVENT } from '@/lib/waiting-changed';
 import type { Icon } from '@tabler/icons-react';
 
 /**
@@ -71,13 +71,29 @@ function resolveIcon(name: string | undefined): Icon {
  */
 const NAV_GROUP_ORDER = [
   'overview',
-  'access',
+  'people',
+  'ai',
   'documents',
-  'records',
-  'extend',
-  'system',
+  'platform',
+  'settings',
   'plugins',
 ] as const;
+
+/**
+ * The groups core used before the app map's (WHIT-805), still accepted from
+ * plugins that name them: each lands in the group that now holds its pages,
+ * so a plugin's item sits beside its neighbours instead of under an old
+ * heading of its own.
+ */
+const LEGACY_NAV_GROUPS: Readonly<Record<string, string>> = {
+  access: 'people',
+  records: 'documents',
+  extend: 'platform',
+  system: 'platform',
+};
+
+/** The system tenant: the only one that runs the platform itself. */
+const SYSTEM_TENANT_ID = 0;
 
 /** Fallback heading for a group the shell has no translated label for. */
 function prettifyGroupId(groupId: string): string {
@@ -108,8 +124,13 @@ function TenantSwitcher({ memberships, activeTenantId, collapsed }: TenantSwitch
   const t = useTranslation('common');
   const [isSwitching, setIsSwitching] = useState(false);
 
-  const items = useMemo(
-    () => memberships.map((m) => ({ id: String(m.tenant_id), label: m.tenant_name })),
+  const workspaces = useMemo(
+    () =>
+      memberships.map((m) => ({
+        id: String(m.tenant_id),
+        name: m.tenant_name,
+        role: m.role ? m.role.charAt(0).toUpperCase() + m.role.slice(1) : undefined,
+      })),
     [memberships],
   );
 
@@ -136,21 +157,77 @@ function TenantSwitcher({ memberships, activeTenantId, collapsed }: TenantSwitch
     [activeTenantId, isSwitching, switchTenant, refreshNav, addToast, t],
   );
 
+  if (workspaces.length === 0) return null;
+
   return (
-    <Switcher
-      items={items}
-      activeId={activeTenantId !== undefined ? String(activeTenantId) : undefined}
+    <WorkspaceSwitcher
+      workspaces={workspaces}
+      currentId={activeTenantId !== undefined ? String(activeTenantId) : undefined}
       onChange={handleSwitch}
-      icon={<IconBuilding size={20} />}
-      switchLabel={t('sidebar.tenantSwitcher.label', 'Tenant')}
-      emptyLabel={t('sidebar.tenantSwitcher.empty', 'No tenant')}
       collapsed={collapsed}
       disabled={isSwitching}
+      labels={{
+        trigger: t('sidebar.tenantSwitcher.trigger', 'Switch workspace, current: {name}'),
+        find: t('sidebar.tenantSwitcher.find', 'Find a workspace'),
+        noResults: t('sidebar.tenantSwitcher.noResults', 'No workspace matches'),
+      }}
     />
   );
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * How many things wait for the person, by nav item id: the Inbox's open items,
+ * summed over its sources (`GET /api/me/inbox/sources` carries each source's
+ * open count for exactly this badge), and the agent proposals waiting for
+ * their approval (`GET /api/me/agent-proposals?status=waiting`). Re-read on every page change, so acting
+ * on an item and moving on updates the count. A failed read shows no count
+ * rather than a wrong one.
+ */
+function useWaitingCounts(pathname: string | null): Record<string, number> {
+  const [counts, setCounts] = useState<Record<string, number>>({});
+  // A page that just changed what waits (Approvals after a decision) says so
+  // with WAITING_CHANGED_EVENT, so the count follows without a navigation.
+  const [nudge, setNudge] = useState(0);
+  useEffect(() => {
+    const onChanged = () => setNudge((n) => n + 1);
+    window.addEventListener(WAITING_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(WAITING_CHANGED_EVENT, onChanged);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      let inbox = 0;
+      try {
+        const response = await fetch('/api/v1/me/inbox/sources', { credentials: 'include' });
+        if (response.ok) {
+          const body = (await response.json()) as { data?: { open_count?: number }[] };
+          inbox = (body.data ?? []).reduce((sum, source) => sum + (source.open_count ?? 0), 0);
+        }
+      } catch {
+        inbox = 0;
+      }
+      let approvals = 0;
+      try {
+        const response = await fetch('/api/v1/me/agent-proposals?status=waiting', { credentials: 'include' });
+        if (response.ok) {
+          const body = (await response.json()) as { data?: unknown[] };
+          approvals = body.data?.length ?? 0;
+        }
+      } catch {
+        approvals = 0;
+      }
+      if (!cancelled) setCounts((prev) => ({ ...prev, inbox, approvals }));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname, nudge]);
+
+  return counts;
+}
 
 /**
  * The app's composed sidebar: it owns the DATA (nav items from
@@ -177,23 +254,34 @@ export function Sidebar() {
   // The icon rail is a DESKTOP mode: the mobile drawer is full-width, so a
   // collapse chosen on a wide viewport must not follow the user into it and
   // leave them with unlabelled icons in a 16rem-wide sheet.
-  const collapsed = isCollapsed && !isMobileOpen;
+  // Between 768 and 1023px the sidebar is the rail whatever the toggle says
+  // (register 4.5); the logo, switcher and footer follow the same state.
+  const forcedRail = useForcedRail();
+  const collapsed = (isCollapsed || forcedRail) && !isMobileOpen;
 
   // Literal `t()` calls, not a computed key — `i18n:extract` rebuilds the
   // catalogue by scanning the source for them, so a dynamic
   // `t('sidebar.group.' + id)` would never make it into the translations
   // table and every heading would render as a raw key.
-  const groupLabels = useMemo<Record<string, string>>(
+  const isSystemTenant = user?.tenant_id === SYSTEM_TENANT_ID;
+  const counts = useWaitingCounts(pathname);
+
+  // The top group (Dashboard, Inbox) has no heading, as on the app map. The
+  // admin group is the Platform on the system tenant, which runs the whole
+  // deployment, and the Workspace everywhere else.
+  const groupLabels = useMemo<Record<string, string | undefined>>(
     () => ({
-      overview: t('sidebar.group.overview', 'Overview'),
-      access: t('sidebar.group.access', 'Access'),
+      overview: undefined,
+      people: t('sidebar.group.people', 'People'),
+      ai: t('sidebar.group.ai', 'AI'),
       documents: t('sidebar.group.documents', 'Documents'),
-      records: t('sidebar.group.records', 'Records'),
-      extend: t('sidebar.group.extend', 'Extend'),
-      system: t('sidebar.group.system', 'System'),
+      platform: isSystemTenant
+        ? t('sidebar.group.platform', 'Platform')
+        : t('sidebar.group.workspace', 'Workspace'),
+      settings: t('sidebar.group.settings', 'Settings'),
       plugins: t('sidebar.group.plugins', 'Plugins'),
     }),
-    [t],
+    [t, isSystemTenant],
   );
 
   // The same literal-`t()` discipline as the group headings above, for the
@@ -212,6 +300,7 @@ export function Sidebar() {
     () => ({
       dashboard: t('sidebar.item.dashboard', 'Dashboard'),
       inbox: t('sidebar.item.inbox', 'Inbox'),
+      approvals: t('sidebar.item.approvals', 'Approvals'),
       users: t('sidebar.item.users', 'Users'),
       roles: t('sidebar.item.roles', 'Roles'),
       ous: t('sidebar.item.ous', 'Organizational Units'),
@@ -238,20 +327,32 @@ export function Sidebar() {
     [t],
   );
 
-  const groups = useMemo(
-    () =>
-      navGroupsFromServerItems(navItems, {
-        currentPath: pathname,
-        groupOrder: NAV_GROUP_ORDER,
-        groupLabel: (groupId) => groupLabels[groupId] ?? prettifyGroupId(groupId),
-        itemLabel: (itemId) => itemLabels[itemId],
-        renderIcon: (icon) => {
-          const IconComponent = resolveIcon(icon);
-          return <IconComponent size={20} />;
-        },
-      }),
-    [navItems, pathname, groupLabels, itemLabels],
-  );
+  const groups = useMemo(() => {
+    const regrouped = navItems.map((item) =>
+      item.group && LEGACY_NAV_GROUPS[item.group]
+        ? { ...item, group: LEGACY_NAV_GROUPS[item.group] }
+        : item,
+    );
+    const built = navGroupsFromServerItems(regrouped, {
+      currentPath: pathname,
+      groupOrder: NAV_GROUP_ORDER,
+      groupLabel: (groupId) =>
+        groupId in groupLabels ? groupLabels[groupId] : prettifyGroupId(groupId),
+      itemLabel: (itemId) => itemLabels[itemId],
+      renderIcon: (icon) => {
+        const IconComponent = resolveIcon(icon);
+        return <IconComponent size={20} />;
+      },
+    });
+    const countLabel = (count: number) =>
+      t('sidebar.count.waiting', '{count} waiting').replace('{count}', String(count));
+    return built.map((group) => ({
+      ...group,
+      items: group.items.map((item) =>
+        counts[item.id] ? { ...item, count: counts[item.id], countLabel: countLabel(counts[item.id]) } : item,
+      ),
+    }));
+  }, [navItems, pathname, groupLabels, itemLabels, counts, t]);
 
   const handleLogout = () => {
     logout();
@@ -279,9 +380,8 @@ export function Sidebar() {
           className="h-8 w-auto max-w-[180px] object-contain"
         />
       ) : (
-        <h1 className="text-2xl font-semibold">{branding.siteName}</h1>
+        <h1 className="text-xl font-semibold">{branding.siteName}</h1>
       )}
-      <p className="mt-1 text-sm text-muted-foreground">{t('sidebar.subtitle', 'Admin')}</p>
     </>
   );
 
@@ -319,12 +419,6 @@ export function Sidebar() {
           <IconUserCog size={20} className="shrink-0 text-muted-foreground" />
         </Link>
       )}
-      {/* Tenant switcher (WC-f8164c87) */}
-      <TenantSwitcher
-        memberships={memberships}
-        activeTenantId={user?.tenant_id}
-        collapsed={collapsed}
-      />
       {/*
         Interface language. This is ALSO the direction control: each
         language carries its own writing direction, so choosing Arabic
@@ -394,6 +488,14 @@ export function Sidebar() {
     <AppSidebar
       groups={groups}
       header={header}
+      tenantSwitcher={
+        // Under the logo, as on the TenantSwitcher card (WC-f8164c87).
+        <TenantSwitcher
+          memberships={memberships}
+          activeTenantId={user?.tenant_id}
+          collapsed={collapsed}
+        />
+      }
       footer={footer}
       collapsed={collapsed}
       onCollapsedChange={setIsCollapsed}

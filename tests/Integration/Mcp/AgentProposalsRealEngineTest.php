@@ -98,6 +98,26 @@ final class AgentProposalsRealEngineTest extends TestCase
         self::assertSame(['name' => 'Leave request'], $stored['arguments']);
     }
 
+    public function testTheInboxNamesTheAgentByItsCredential(): void
+    {
+        $this->pdo->prepare("INSERT INTO mcp_tokens (jti, profile_id, tenant_id, name, principal_kind, scope, expires_at, created_at)
+                             VALUES ('jti-billing-assistant', ?, ?, 'Billing assistant', 'ai-agent', '[]', '2099-01-01 00:00:00', CURRENT_TIMESTAMP)")
+            ->execute([self::RANA, self::TENANT]);
+        ($this->toolsCall)(['name' => 'post_api_forms', 'arguments' => ['name' => 'Leave request']], 'bearer');
+
+        $listed = json_decode($this->inbox->list($this->as(self::RANA))->getBody(), true)['data'][0];
+
+        self::assertSame(['name' => 'Billing assistant'], $listed['agent']);
+        self::assertArrayNotHasKey('agent_principal_id', $listed, 'the credential id stays server-side');
+    }
+
+    public function testAnAgentWhoseCredentialIsGoneHasNoName(): void
+    {
+        ($this->toolsCall)(['name' => 'post_api_forms', 'arguments' => ['name' => 'Leave request']], 'bearer');
+
+        self::assertSame(['name' => null], json_decode($this->inbox->list($this->as(self::RANA))->getBody(), true)['data'][0]['agent']);
+    }
+
     public function testAnInvalidCallIsNeverPutToAPerson(): void
     {
         $result = ($this->toolsCall)(['name' => 'post_api_forms', 'arguments' => []], 'bearer');

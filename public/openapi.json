@@ -41059,6 +41059,18 @@
                     "id": {
                         "type": "integer"
                     },
+                    "agent": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "type": "string",
+                                "nullable": true
+                            }
+                        },
+                        "required": [
+                            "name"
+                        ]
+                    },
                     "status": {
                         "type": "string",
                         "enum": [
@@ -41110,6 +41122,7 @@
                 },
                 "required": [
                     "id",
+                    "agent",
                     "status",
                     "tool",
                     "summary",
