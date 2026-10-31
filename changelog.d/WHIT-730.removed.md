@@ -1,1 +1,0 @@
-- **The old Document designer's API and Whity Render's canvas route.** `/api/document-templates`, `/api/document-blocks`, `POST /api/document-templates/{id}/render` and Whity Render's `POST /render` are gone, and the `documents:convert-legacy` command with them, since the upgrade converts. The render image must come from the same release (WHIT-730).

@@ -1,1 +1,0 @@
-- **MCP tokens can be limited to toolsets.** A token's scope may now name `toolset:core.forms` or `toolset:acme.*`. Such a token sees and can call only the tools in those toolsets; a call to any other tool is refused, not just hidden. Tokens that name no toolset are unchanged. See ADR 0006, amendment 5 (WHIT-749).

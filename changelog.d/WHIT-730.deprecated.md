@@ -1,1 +1,0 @@
-- **`Whity\Sdk\Render\DocumentRenderer::issue()` (plugin SDK 1.49).** Use `Documents::issue()`, which issues from a template the workspace publishes, once it ships. Until then `issue()` keeps working through the issuing service and takes an optional origin key. It is removed in SDK 2.0.0 (WHIT-730).
