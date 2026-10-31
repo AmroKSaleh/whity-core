@@ -24,13 +24,12 @@ use Whity\Core\Document\Qr\DocumentQrPolicy;
 use Whity\Core\Document\Qr\DocumentQrService;
 use Whity\Core\Document\Routing\RouteEventRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
-use Whity\Core\Document\Slots\SlotBindings;
 use Whity\Core\Document\Slots\TemplateSlotRegistry;
 use Whity\Core\Document\Issuing\ActingAs;
 use Whity\Core\Document\Issuing\DocumentIssuing;
-use Whity\Core\Document\Issuing\DocumentOriginKeyConflictException;
-use Whity\Core\Document\Issuing\IssueRequest;
-use Whity\Sdk\Hooks\HookVetoException;
+use Whity\Core\Document\Issuing\DocumentIssueRefused;
+use Whity\Core\Document\Issuing\IssueInput;
+use Whity\Core\Document\Issuing\TemplateIssuing;
 use Whity\Core\Ou\OuSubtree;
 use Whity\Core\Ou\PrimaryMembershipOu;
 use Whity\Core\RBAC\CorePermissions;
@@ -144,20 +143,6 @@ use Whity\Storage\StorageException;
  */
 final class DocumentsApiHandler
 {
-    /**
-     * How many unrecognised field names a 422 will list before it stops.
-     *
-     * A fixed ceiling rather than a setting, deliberately: it is not a limit on
-     * what a caller may SEND (the render ceilings in
-     * {@see \Whity\Core\Settings\SettingsRegistry} are, and those are
-     * per-tenant overridable), it is how long one error message is allowed to
-     * get. Nothing about a tenant makes a different answer right, and an
-     * operator asked to tune it would have no basis to choose. Ten is past the
-     * point where a reader is still reading and well short of a response bigger
-     * than the request.
-     */
-    private const UNKNOWN_FIELDS_REPORTED = 10;
-
     public function __construct(
         private readonly DocumentRepository $documents,
         private readonly DocumentArtifactRepository $artifacts,
@@ -218,6 +203,18 @@ final class DocumentsApiHandler
     ) {
     }
 
+    /** The one issuing path (WHIT-742), shared with the SDK and automations. */
+    private function templateIssuing(): TemplateIssuing
+    {
+        return new TemplateIssuing(
+            $this->issuing,
+            $this->fields,
+            $this->settings,
+            fn (int $id, int $tenantId, int $callerId): ?array => $this->sources->visibleRow($id, $tenantId, $callerId),
+            $this->slots,
+        );
+    }
+
     /**
      * POST /api/documents — raise a document from an editor template.
      *
@@ -258,121 +255,13 @@ final class DocumentsApiHandler
         }
         [$tenantId, $callerId] = $ctx;
 
-        $body = JsonBody::parsed($request);
-
-        // A plugin names its slot (WHIT-742) and the workspace decides which
-        // template fills it; anyone else names the template.
-        $slotKey = $body['slot'] ?? null;
-        if ($slotKey !== null) {
-            if (array_key_exists('document_source_id', $body)) {
-                return Response::error("Send 'slot' or 'document_source_id', not both", 422);
-            }
-            $source = $this->slotSource($slotKey, $tenantId, $callerId);
-            if ($source instanceof Response) {
-                return $source;
-            }
-        } else {
-            $sourceId = $body['document_source_id'] ?? null;
-            // A string id is accepted: JSON from a form-driven client routinely
-            // carries numbers as strings.
-            if (is_string($sourceId) && ctype_digit($sourceId)) {
-                $sourceId = (int) $sourceId;
-            }
-            if (!is_int($sourceId) || $sourceId <= 0) {
-                return Response::error("'document_source_id' must be the id of a template to issue this document from, or send 'slot'", 422);
-            }
-
-            // 404 rather than 403 on a miss: a 403 would confirm the template exists.
-            $source = $this->sources->visibleRow($sourceId, $tenantId, $callerId);
-            if ($source === null) {
-                return Response::error('Template not found', 404);
-            }
-        }
-        if ($source['kind'] === 'template') {
-            $version = $this->issuing->published($tenantId, $source);
-            if ($version === null) {
-                return Response::error('This template has no published version yet', 409);
-            }
-        } elseif (in_array($source['kind'], ['letter', 'report'], true)) {
-            // A one-off document ("Edit before issuing"): what it says now is frozen as a version.
-            $version = $this->issuing->freeze($tenantId, $callerId, $source);
-            if ($version === null) {
-                return Response::error('The document changed while it was being issued; try again', 409);
-            }
-        } else {
-            return Response::error('Only templates, letters and reports issue documents; a label sheet prints labels', 422);
-        }
-
-        $hasPermission = $this->permissionResolver($callerId, $tenantId);
-        $type = $source['record_type'] !== null ? (string) $source['record_type'] : null;
-        $record = self::parseRecord($body['record'] ?? null);
-        if ($type !== null && ($record === null || $record[0] !== $type)) {
-            return Response::error('record must be "' . $type . ':<id>"', 422);
-        }
-        $resolved = $this->fields->resolve($tenantId, $callerId, $hasPermission, $type, $record[1] ?? null);
-        if ($resolved === null) {
-            return Response::error('Record not found', 404);
-        }
-
-        $given = self::givenValues(
-            $body['values'] ?? null,
-            $version['own_fields'] ?? null,
-            $this->fields->paths($tenantId, $type),
-            $resolved['values'],
-        );
-        if ($given instanceof Response) {
-            return $given;
-        }
-        $values = $given + $resolved['values'];
-
-        $actor = new ActingAs($tenantId, $callerId, $hasPermission);
-        $missing = $this->issuing->missing(new IssueRequest($source, $version, $values, ''), $actor);
-        if ($missing !== []) {
-            return Response::error('Required fields have no value for this record', 422, ['missing' => $missing]);
-        }
-
-        // The caller's own name for what this document is: issuing it again returns it.
-        $originKey = $body['origin_key'] ?? null;
-        if ($originKey !== null && (!is_string($originKey) || preg_match('/^[A-Za-z0-9:._\/-]{1,160}$/', $originKey) !== 1)) {
-            return Response::error("'origin_key' must be 1 to 160 letters, digits or : . _ / -", 422);
-        }
-
-        $title = $body['title'] ?? null;
-        $title = is_string($title) && trim($title) !== ''
-            ? trim($title)
-            : ($resolved['label'] !== '' ? $version['title'] . ' · ' . $resolved['label'] : (string) $version['title']);
-
-        $effective = $this->settings->effective($tenantId);
-        $renderable = ($effective[SettingsRegistry::DOCUMENTS_RENDER_ENABLED] ?? 'false') === 'true';
-        // The artifact half only: an operator who capped storage can still raise documents.
-        $persistable = ($effective[SettingsRegistry::DOCUMENTS_PERSIST_ENABLED] ?? 'true') === 'true';
-
-        // Tri-state: true = "I require an artifact"; false = "record only";
-        // absent = "render if this instance can".
-        $requested = $body['render'] ?? null;
-        if ($requested === true && !$renderable) {
-            return Response::error('Server-side document rendering is disabled on this instance', 503);
-        }
-        if ($requested === true && !$persistable) {
-            return Response::error('Persisting rendered documents is disabled on this instance', 503);
-        }
-
         try {
-            $issued = $this->issuing->issue(new IssueRequest(
-                source: $source,
-                version: $version,
-                values: $values,
-                title: $title,
-                recordLabel: $resolved['label'],
-                render: is_bool($requested) ? $requested : null,
-                record: $record !== null ? $record[0] . ':' . $record[1] : null,
-                originKey: $originKey,
-            ), $actor);
-        } catch (HookVetoException $e) {
-            // A `document.issuing` listener refused it; nothing was written.
-            return Response::error($e->reason(), 409, ['code' => 'vetoed', 'reason' => 'blocked_by_plugin']);
-        } catch (DocumentOriginKeyConflictException $e) {
-            return Response::error('This origin key already names another document', 409, ['code' => 'origin_key_conflict', 'document_id' => $e->documentId]);
+            $issued = $this->templateIssuing()->issue(
+                new ActingAs($tenantId, $callerId, $this->permissionResolver($callerId, $tenantId)),
+                IssueInput::fromBody(JsonBody::parsed($request)),
+            );
+        } catch (DocumentIssueRefused $e) {
+            return Response::error($e->clientMessage, $e->status, $e->details);
         } catch (\Throwable $e) {
             error_log('[DocumentsApiHandler] raising the document failed: ' . $e->getMessage());
             return Response::error('The document could not be created', 503);
@@ -384,127 +273,6 @@ final class DocumentsApiHandler
             'render' => $issued['render'],
             'replayed' => $issued['replayed'],
         ], $issued['replayed'] ? 200 : 201);
-    }
-
-    /**
-     * The template bound to a slot, as the caller may see it, or why it
-     * can't be issued from (WHIT-742, DOCUMENT-AUTOMATION.md 3.2). A slot
-     * whose plugin is off, or that nothing fills, is a 409 the plugin can show;
-     * a bound template that no longer fits (unpublished, made personal, a
-     * different record type) is a 409 naming why, not a silent fallback.
-     *
-     * @return array<string, mixed>|Response
-     */
-    private function slotSource(mixed $key, int $tenantId, int $callerId): array|Response
-    {
-        if (!is_string($key) || $key === '') {
-            return Response::error("'slot' must be a slot key such as bakery.order_confirmation", 422);
-        }
-        $slot = $this->slots?->find($tenantId, $key);
-        if ($slot === null) {
-            $plugin = strstr($key, '.', true);
-
-            return Response::error('This slot is unknown here, or its plugin is off', 409, [
-                'code' => 'slot_unavailable',
-                'plugin' => $plugin !== false ? $plugin : $key,
-            ]);
-        }
-        $effective = $this->settings->effective($tenantId);
-        $templateId = SlotBindings::parse((string) ($effective[SettingsRegistry::DOCUMENTS_SLOT_BINDINGS] ?? ''))[$slot->key] ?? null;
-        if ($templateId === null) {
-            return Response::error('No template is bound to this slot yet', 409, ['code' => 'slot_unbound', 'slot' => $slot->key]);
-        }
-        // 404 rather than 403 on a miss: a 403 would confirm the template exists.
-        $source = $this->sources->visibleRow($templateId, $tenantId, $callerId);
-        if ($source === null) {
-            return Response::error('Template not found', 404);
-        }
-        $problem = DocumentTemplateSlotsApiHandler::misfit($slot, $source);
-        if ($problem !== null) {
-            return Response::error('The template bound to this slot no longer fits it: ' . $problem['message'], 409, [
-                'code' => 'slot_misfit',
-                'slot' => $slot->key,
-                'reason' => $problem['code'],
-            ]);
-        }
-
-        return $source;
-    }
-
-    /**
-     * The values a request filled, or why they are refused (merge data,
-     * DOCUMENT-AUTOMATION.md 3.3). A value may fill a template's own field
-     * (`template.<key>`) or a field the record left empty; a value for a field
-     * the record RESOLVED is a 422 `field_conflict`, so a caller can't
-     * overwrite an amount, a tax number or any other value the record owns.
-     * An unknown name is echoed (up to a few) so a developer can see the typo
-     * rather than compare two JSON blobs by eye.
-     *
-     * @param array<string, true>         $paths    The fields the template is offered.
-     * @param array<string, string|null> $resolved What the record resolved.
-     * @return array<string, string>|Response
-     */
-    private static function givenValues(mixed $values, mixed $ownFields, array $paths, array $resolved): array|Response
-    {
-        if ($values === null) {
-            return [];
-        }
-        if (!is_array($values) || ($values !== [] && array_is_list($values))) {
-            return Response::error("'values' must be an object of field paths and their text", 422);
-        }
-        $declared = $paths;
-        foreach (is_array($ownFields) ? $ownFields : [] as $field) {
-            if (is_array($field) && is_string($field['key'] ?? null)) {
-                $declared['template.' . $field['key']] = true;
-            }
-        }
-        $out = [];
-        $unknown = [];
-        $conflicts = [];
-        foreach ($values as $path => $value) {
-            $path = (string) $path;
-            if (!isset($declared[$path])) {
-                if (count($unknown) < self::UNKNOWN_FIELDS_REPORTED) {
-                    $unknown[] = $path;
-                }
-                continue;
-            }
-            if (($resolved[$path] ?? null) !== null && $resolved[$path] !== '') {
-                $conflicts[] = $path;
-                continue;
-            }
-            if (!is_string($value) || mb_strlen($value) > 1000) {
-                return Response::error("'values." . $path . "' must be text of at most 1000 characters", 422);
-            }
-            $out[$path] = $value;
-        }
-        if ($unknown !== []) {
-            return Response::error('These are not fields of this template: ' . implode(', ', $unknown), 422);
-        }
-        if ($conflicts !== []) {
-            return Response::error(
-                'These fields come from the record and can\'t be given a value: ' . implode(', ', array_slice($conflicts, 0, self::UNKNOWN_FIELDS_REPORTED)),
-                422,
-                ['code' => 'field_conflict', 'conflicts' => $conflicts],
-            );
-        }
-
-        return $out;
-    }
-
-    /**
-     * "type:id" as [type, id], or null. A workspace plugin's type keeps its
-     * plugin's casing and can be 129 characters (`CakeOrders.order`, WHIT-742).
-     *
-     * @return array{0: string, 1: string}|null
-     */
-    private static function parseRecord(mixed $value): ?array
-    {
-        if (!is_string($value) || preg_match('/^([A-Za-z0-9._-]{1,160}):([A-Za-z0-9._-]{1,64})$/', $value, $m) !== 1) {
-            return null;
-        }
-
-        return [$m[1], $m[2]];
     }
 
     /**

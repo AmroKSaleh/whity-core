@@ -18,6 +18,13 @@ use Whity\Core\Document\DocumentCollectionRepository;
 use Whity\Core\Document\DocumentIssuer;
 use Whity\Core\Document\DocumentRepository;
 use Whity\Core\Document\DocumentVisibilityPolicy;
+use Whity\Core\Document\Issuing\ActingAs;
+use Whity\Core\Document\Issuing\DocumentIssueRefused;
+use Whity\Core\Document\Issuing\IssueInput;
+use Whity\Core\Document\Issuing\TemplateIssuing;
+use Whity\Core\Document\Issuing\WorkerDocumentIssuing;
+use Whity\Core\Document\Embed\DocumentEmbedRegistry;
+use Whity\Core\RBAC\ScopedPermissionSet;
 use Whity\Core\Document\Organizer\CoreDocumentSubstrates;
 use Whity\Core\Document\Organizer\CoreDocumentViews;
 use Whity\Core\Document\Organizer\DocumentSubstrateRegistry;
@@ -1090,6 +1097,100 @@ final class DocumentCreateApiRealEngineTest extends TestCase
         $values = $this->storedValues(self::data($res)['id']);
         self::assertSame('Example Bakery', $values['record.customer'] ?? null);
         self::assertSame('18.000 JOD', $values['record.price'] ?? null);
+    }
+
+    /**
+     * The service automations and the SDK call (WHIT-742) refuses with a
+     * stable `reason` and writes nothing; the REST route maps each one to the
+     * status and body above.
+     */
+    public function testTheIssuingServiceRefusesWithAStableReason(): void
+    {
+        $service = new TemplateIssuing(
+            $this->editor->issuing,
+            $this->editor->fields,
+            $this->settings,
+            fn (int $id, int $tenantId, int $callerId): ?array => $this->editor->sources->visibleRow($id, $tenantId, $callerId),
+            $this->slots,
+        );
+        $actor = new ActingAs(self::TENANT, self::RAISER, static fn (): bool => true);
+        $reason = static function (callable $issue): ?string {
+            try {
+                $issue();
+            } catch (DocumentIssueRefused $e) {
+                return $e->reason;
+            }
+
+            return null;
+        };
+        $about = $this->seedDocument(self::RAISER, 'Order 4812');
+
+        self::assertSame('slot_unavailable', $reason(fn () => $service->issue($actor, new IssueInput(slot: 'Courier.receipt'))));
+        $this->registerSlot();
+        self::assertSame('slot_unbound', $reason(fn () => $service->issue($actor, new IssueInput(slot: 'Courier.receipt'))));
+        self::assertSame('template_not_found', $reason(fn () => $service->issue($actor, new IssueInput(sourceId: 99999))));
+        self::assertSame('invalid_request', $reason(fn () => $service->issue($actor, new IssueInput())));
+        self::assertSame('template_unpublished', $reason(fn () => $service->issue($actor, new IssueInput(sourceId: $this->editor->draft(self::TENANT, self::RAISER, 'Draft')))));
+
+        $templateId = $this->slotTemplate();
+        $this->bindSlot($templateId);
+        self::assertSame('record_not_found', $reason(fn () => $service->issue($actor, new IssueInput(slot: 'Courier.receipt', record: 'document:99999'))));
+        self::assertSame('field_conflict', $reason(fn () => $service->issue($actor, new IssueInput(
+            slot: 'Courier.receipt',
+            record: 'document:' . $about,
+            values: ['document.title' => 'Overwritten'],
+        ))));
+        self::assertSame(1, $this->countDocuments(), 'only the seeded document');
+
+        $issued = $service->issue($actor, new IssueInput(slot: 'Courier.receipt', record: 'document:' . $about, originKey: 'automation:1:2', render: false));
+        self::assertFalse($issued['replayed']);
+        $again = $service->issue($actor, new IssueInput(slot: 'Courier.receipt', record: 'document:' . $about, originKey: 'automation:1:2', render: false));
+        self::assertTrue($again['replayed'], 'a retried step returns the first document');
+        self::assertSame($issued['document']['id'], $again['document']['id']);
+    }
+
+    /**
+     * What `queue:work` and `events:relay` resolve (WHIT-742): the issuing
+     * service built from the connection and the environment alone, with the
+     * template's visibility checked as the editor checks it. It issues the
+     * same document the REST route would.
+     */
+    public function testTheWorkerBuiltServiceIssuesFromASlot(): void
+    {
+        $roleChecker = new RoleChecker($this->wrapSqlite($this->pdo), new PermissionRegistry());
+        $service = WorkerDocumentIssuing::build(
+            $this->pdo,
+            $this->settings,
+            $this->editor->hooks,
+            $roleChecker,
+            new ResourceTypeRegistry(),
+            $this->editor->fields,
+            new DocumentEmbedRegistry(),
+            $this->slots,
+            ['ENCRYPTION_KEY' => str_repeat('k', 32), 'STORAGE_DRIVER' => 'local'],
+            $this->storageRoot,
+        );
+        $about = $this->seedDocument(self::RAISER, 'Order 4812');
+        $templateId = $this->slotTemplate();
+        $this->bindSlot($templateId);
+        $actor = new ActingAs(self::TENANT, self::RAISER, ScopedPermissionSet::forProfile($roleChecker, self::RAISER, self::TENANT));
+
+        $issued = $service->issue($actor, new IssueInput(slot: 'Courier.receipt', record: 'document:' . $about, render: false));
+
+        self::assertSame($templateId, $issued['document']['document_source_id']);
+        self::assertSame(2, $this->countDocuments());
+
+        // Read with the actor's own permissions: a profile with none in this
+        // workspace can't read the record (membership itself is the caller's
+        // to establish, as the auth layer does for a request).
+        $outsider = new ActingAs(self::TENANT, self::OTHER_TENANT_ADMIN, ScopedPermissionSet::forProfile($roleChecker, self::OTHER_TENANT_ADMIN, self::TENANT));
+        try {
+            $service->issue($outsider, new IssueInput(slot: 'Courier.receipt', record: 'document:' . $about, render: false));
+            self::fail('an outsider issued from the slot');
+        } catch (DocumentIssueRefused $e) {
+            self::assertSame('record_not_found', $e->reason);
+        }
+        self::assertSame(2, $this->countDocuments(), 'the refusal wrote nothing');
     }
 
     private function rebuildHandler(): void

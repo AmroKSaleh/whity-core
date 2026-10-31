@@ -104,7 +104,7 @@ final class DocumentTemplateSlotsApiHandler
             if ($template === null) {
                 return Response::error('Template not found', 404);
             }
-            $problem = self::misfit($slot, $template);
+            $problem = $slot->misfit($template);
             if ($problem !== null) {
                 return Response::error($problem['message'], 422, ['code' => $problem['code']]);
             }
@@ -119,34 +119,6 @@ final class DocumentTemplateSlotsApiHandler
     }
 
     /**
-     * Why a template can't fill a slot, or null when it fits. Checked when it
-     * is bound and again when a document is issued from the slot, since the
-     * template can change in between.
-     *
-     * @param array<string, mixed> $template a document_sources row
-     * @return array{code: string, message: string}|null
-     */
-    public static function misfit(TemplateSlot $slot, array $template): ?array
-    {
-        $kind = (string) ($template['kind'] ?? '');
-        if (!in_array($kind, $slot->kinds, true)) {
-            return ['code' => 'kind_mismatch', 'message' => "This slot takes a " . implode(' or ', $slot->kinds) . ", not a {$kind}"];
-        }
-        if (($template['record_type'] ?? null) !== $slot->recordType) {
-            return ['code' => 'record_type_mismatch', 'message' => "This slot's documents are for {$slot->recordType}; the template is for "
-                . (is_string($template['record_type'] ?? null) ? $template['record_type'] : 'no record')];
-        }
-        if (($template['scope'] ?? null) === 'personal') {
-            return ['code' => 'personal_template', 'message' => 'A personal template can\'t fill a slot; share it with the workspace first'];
-        }
-        if (($template['published_version'] ?? null) === null) {
-            return ['code' => 'unpublished', 'message' => 'The template has no published version yet'];
-        }
-
-        return null;
-    }
-
-    /**
      * @return array<string, mixed>
      */
     private function present(TemplateSlot $slot, ?int $templateId, int $tenantId, int $callerId): array
@@ -154,7 +126,7 @@ final class DocumentTemplateSlotsApiHandler
         $binding = null;
         if ($templateId !== null) {
             $template = $this->sources->visibleRow($templateId, $tenantId, $callerId);
-            $problem = $template !== null ? self::misfit($slot, $template) : ['code' => 'template_missing', 'message' => 'The bound template is gone or hidden from you'];
+            $problem = $template !== null ? $slot->misfit($template) : ['code' => 'template_missing', 'message' => 'The bound template is gone or hidden from you'];
             $binding = [
                 'template_id' => $templateId,
                 'title' => $template !== null ? (string) $template['title'] : null,

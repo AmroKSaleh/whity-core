@@ -464,6 +464,50 @@ abstract class BaseCommand implements CliCommand, CommandHelp
         );
         $pluginLoader->load();
 
+        // Issuing documents outside a request (WHIT-742, DOCUMENT-AUTOMATION
+        // 3.5): `queue:work` runs workspace automations and plugin jobs, and
+        // `events:relay` runs listeners, that issue documents. Built after the
+        // plugins load, so their field providers and `document.issuing`
+        // listeners are in place, and registered for those jobs to resolve.
+        // A worker lives for many jobs, so each read of a workspace's plugins
+        // starts fresh rather than from the last job's.
+        $tenantManifestHost = new \Whity\Core\Plugin\Tenant\TenantManifestHost(
+            new \Whity\Core\Plugin\Tenant\TenantPluginRepository($db->getPdo()),
+            $permissionRegistry
+        );
+        $liveManifests = static function (int $tenantId) use ($tenantManifestHost): array {
+            $tenantManifestHost->resetRequest();
+
+            return $tenantManifestHost->manifestsFor($tenantId);
+        };
+        $tenantRecordRepository = new \Whity\Core\Plugin\Tenant\TenantRecordRepository($db->getPdo());
+        $documentFieldRegistry->addTenantSource(
+            static fn (int $tenantId): array => \Whity\Core\Document\Fields\TenantRecordFieldProvider::forManifests(
+                $liveManifests($tenantId),
+                $tenantRecordRepository,
+                null,
+                null,
+                static fn (int $tenant, int $profileId): ?string => $tenantRecordRepository->memberName($tenant, $profileId),
+            )
+        );
+        $templateSlotRegistry = new \Whity\Core\Document\Slots\TemplateSlotRegistry($liveManifests);
+        \Whity\register_service(\Whity\Core\Document\Slots\TemplateSlotRegistry::class, $templateSlotRegistry);
+        \Whity\register_service(
+            \Whity\Core\Document\Issuing\TemplateIssuing::class,
+            \Whity\Core\Document\Issuing\WorkerDocumentIssuing::build(
+                $db->getPdo(),
+                $settingsService,
+                $hookManager,
+                $roleChecker,
+                $resourceTypeRegistry,
+                $documentFieldRegistry,
+                $documentEmbedRegistry,
+                $templateSlotRegistry,
+                $_ENV,
+                getenv('STORAGE_ROOT') ?: ($baseDir . '/storage'),
+            )
+        );
+
         // Register API handlers (copied from public/index.php)
         // WC-203: permission-gated, mirroring public/index.php.
         $usersHandler = new UsersApiHandler($db->getPdo(), $hookManager);
