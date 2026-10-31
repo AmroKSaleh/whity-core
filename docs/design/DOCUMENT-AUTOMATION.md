@@ -222,6 +222,16 @@ interface Documents   // resolved with \Whity\app(Documents::class) in HTTP, job
 - `POST /api/documents`, batches and slot binding are actions with effects outside the document (a numbered, QR-coded document exists). Under the agent rules they must be a proposal a person accepts (section 12 item 10, `agent_proposals`). Until that exists, these routes refuse agent principals; people's own MCP clients acting as themselves can call them. M6 adds an authored `document_issue_propose` tool.
 - `POST …/drafts` is safe for agents in the sense of E.4 only if the draft is theirs to suggest into; proposed: agents may start a draft in **personal** scope for the person they act for, recorded with both.
 - MCP token scopes narrow by permission name as today; no new scope mechanism.
+- Mechanism: the declarative `agentPolicy` and `toolset` keys from the MCP tool-surface design. Reads go in a `documents.automation` toolset (visibility `discoverable`). `POST /api/documents`, batches and slot binding are `propose` (behaves as `refuse` until `agent_proposals` exists); the policy is enforced at the route, so an agent calling REST directly gets the same answer as over MCP.
+- Plugins contribute slots, field providers and starters as data; they don't add MCP tools for documents. Core's tools expose what they declare.
+
+### 3.11 Declarative use (no-code builder)
+
+The no-code plugin builder (`WHITY-BUILDER.md`, separate session) needs three things, all covered:
+
+- **Declarative data.** Slots and starters have a canonical JSON form validated by JSON Schema, loadable from `resources/document-slots/*.json` and `resources/document-starters/*.json` without plugin PHP. A starter is a `WhityDocument` (plus `slot` and `theme.ref`). Field providers are the exception: they read records, so a builder-made plugin gets them from the records it declares (its data types), not from code it writes.
+- **A render step in a flow.** An automation step "issue from slot X for this record" is a call to `DocumentIssuing` with merge data and an `originKey` derived from the flow run and step, under the acting principal's permissions; in the background it needs the allow-list in 3.7.
+- **Export.** A workspace template exports as starter JSON (blocks, page, own fields, theme ref, slot) and a theme as theme JSON, so builder-made pieces move into a code plugin unchanged.
 
 ## 4. Phasing
 
