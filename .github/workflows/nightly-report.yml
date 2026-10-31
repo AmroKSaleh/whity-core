@@ -1,0 +1,66 @@
+name: Nightly report
+
+# WHIT-801. PRs into develop no longer run everything: the coverage floor and the
+# dialect shards are off the PR path, and Playwright runs only when the change
+# can move what it drives (see "What runs where" in automated-tests.yml). The
+# merge queue still runs the dialect shards and Playwright, so breakage cannot
+# land on develop, but a coverage drop now shows up after merge, on a push to
+# develop or in the nightly run. A red run that nobody opens is not a signal, so
+# this turns a red nightly into an issue.
+#
+# One open issue per workflow, found by its exact title: a failure opens it or
+# adds a comment to the one already open, and the next green nightly closes it.
+# A cancelled or timed-out nightly counts as red: it verified nothing.
+#
+# Runs from workflow_run rather than as a job inside those workflows because
+# both end in a gate whose self-check requires every job to be in the gate's
+# `needs`, and a reporter after the gate cannot be.
+on:
+  workflow_run:
+    workflows: ['Automated Tests', 'E2E']
+    types: [completed]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  report:
+    name: Open or close the nightly issue
+    # Only the nightly runs; PR, queue and push runs report on their own checks.
+    if: github.event.workflow_run.event == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open, update or close the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          WORKFLOW: ${{ github.event.workflow_run.name }}
+          CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          title="Nightly ${WORKFLOW} failed on develop"
+          number=$(gh issue list --state open --search "\"${title}\" in:title" \
+            --json number,title --jq ".[] | select(.title == \"${title}\") | .number" | head -n1)
+
+          if [ "$CONCLUSION" = "success" ]; then
+            if [ -n "$number" ]; then
+              gh issue close "$number" --comment "Green again: ${RUN_URL} (${HEAD_SHA:0:8})."
+              echo "Closed #${number}."
+            else
+              echo "Green, and no open issue."
+            fi
+            exit 0
+          fi
+
+          body="The nightly ${WORKFLOW} run ended \`${CONCLUSION}\` on develop at ${HEAD_SHA:0:8}: ${RUN_URL}
+
+          It runs every job, including the ones PRs into develop skip (the coverage floor, and Playwright for changes outside the frontend and API paths). Whatever broke it merged in the last day."
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "Still red: \`${CONCLUSION}\` at ${HEAD_SHA:0:8}, ${RUN_URL}"
+            echo "Commented on #${number}."
+          else
+            gh issue create --title "$title" --body "$body"
+          fi
