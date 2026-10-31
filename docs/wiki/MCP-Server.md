@@ -202,6 +202,16 @@ The access tokens it issues are accepted on `/mcp` alongside MCP tokens (`OAuthA
 
 The principal's `principalKind` is `oauth`; RBAC, the per-tenant MCP switch, rate limits and audit apply exactly as for an MCP token.
 
+#### Workspace lookup for the consent screen (WHIT-802)
+
+To let a person pick the workspace that goes into the access token as `tenant_id`, the authorization server asks this instance which workspaces they belong to: `GET /api/v1/oauth/workspaces` (`OAuthWorkspacesHandler`).
+
+- **Assertion:** `Authorization: Bearer <JWT>`, signed by the authorization server with a key from its published JWKS and verified exactly like an access token (`IssuerJwtVerifier`, shared with `OAuthAccessTokenVerifier`; asymmetric keys only). The header `typ` must be `whity-workspaces+jwt`, so an access token (`at+jwt`) can't be replayed here. `iss` must equal `MCP_OAUTH_ISSUER`, `aud` must be exactly `APP_URL/api/v1/oauth/workspaces` (a string, or an array containing it), `exp` is required and at most 120 seconds after `iat`, and `sub` is the person at the authorization server.
+- **Who:** `(iss, sub)` through the global-trust links of `external_identities`, as for access tokens. A tenant identity provider's link never resolves.
+- **Answer (200):** `{"linked": true, "workspaces": [{"id": 3, "name": "Example Bakery", "slug": "example-bakery"}]}`. Only active memberships, never the system tenant, in workspace id order; `slug` may be `null`. An unlinked subject gets `{"linked": false, "workspaces": []}`, so the consent screen can tell the person to sign in to Whity once first.
+- **Errors:** a missing, invalid or expired assertion gets a bare **401** with no detail. With OAuth off (`MCP_OAUTH_ISSUER` or `APP_URL` unset) the route answers **404**, like the metadata documents.
+- **Access:** machine to machine. There is no user RBAC; the authorization server's signing key is the authorisation. The route skips tenant resolution (no workspace is chosen yet), is covered by the kernel's per-IP rate limit, and is never an MCP tool (`'mcp' => ['expose' => false]`).
+
 MCP tokens are 90-day HS256 JWTs with `aud: mcp` and `type: mcp`. They are issued, listed, and revoked through a dedicated REST sub-API:
 
 | Method | Path | Action |

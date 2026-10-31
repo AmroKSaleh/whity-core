@@ -23858,6 +23858,78 @@
                 ]
             }
         },
+        "/api/v1/oauth/workspaces": {
+            "get": {
+                "operationId": "get_api_v1_oauth_workspaces",
+                "summary": "List the workspaces of a person, for the consent screen of the OAuth authorization server",
+                "tags": [
+                    "auth"
+                ],
+                "description": "Called by the authorization server configured as MCP_OAUTH_ISSUER, with `Authorization: Bearer <assertion>`: a JWT signed with a key from the JWKS of the issuer (asymmetric only), header `typ` `whity-workspaces+jwt`, `iss` the issuer, `aud` exactly APP_URL + /api/v1/oauth/workspaces, `exp` at most 120 seconds after `iat`, and `sub` the person at the issuer. The person is found through their global single sign-on link. Only active memberships are listed, never the system workspace, in workspace id order. An unlinked subject is `linked: false` with no workspaces. 404 while OAuth is off.",
+                "responses": {
+                    "200": {
+                        "description": "Whether the subject is linked, and its active workspaces",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/OAuthWorkspacesResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing, invalid or expired assertion",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "OAuth is not configured on this instance",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "Too many requests",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/ou-types": {
             "get": {
                 "operationId": "get_api_v1_ou_types",
@@ -47913,6 +47985,44 @@
                 },
                 "required": [
                     "preferences"
+                ]
+            },
+            "OAuthWorkspace": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "name": {
+                        "type": "string"
+                    },
+                    "slug": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "id",
+                    "name",
+                    "slug"
+                ]
+            },
+            "OAuthWorkspacesResponse": {
+                "type": "object",
+                "properties": {
+                    "linked": {
+                        "type": "boolean"
+                    },
+                    "workspaces": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/OAuthWorkspace"
+                        }
+                    }
+                },
+                "required": [
+                    "linked",
+                    "workspaces"
                 ]
             },
             "OpenApiDocumentResponse": {

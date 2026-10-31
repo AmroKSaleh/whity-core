@@ -6,6 +6,7 @@ namespace Tests\Unit\Mcp;
 
 use PHPUnit\Framework\TestCase;
 use Whity\Mcp\McpExposure;
+use Whity\Mcp\Tools\ToolDeriver;
 use Whity\OpenAPI\CoreApiSchemas;
 
 /**
@@ -57,6 +58,8 @@ final class McpExposureTest extends TestCase
             'POST /api/billing/webhook',
             'GET /api/public/forms/{slug}',
             'GET /api/health',
+            // WHIT-802: the authorization server's workspace lookup.
+            'GET /api/oauth/workspaces',
         ] as $hidden) {
             self::assertArrayHasKey($hidden, $exposed, "route moved: {$hidden}");
             self::assertFalse($exposed[$hidden], "should not be offered to agents: {$hidden}");
@@ -72,5 +75,28 @@ final class McpExposureTest extends TestCase
         ] as $shown) {
             self::assertTrue($exposed[$shown] ?? false, "should be offered to agents: {$shown}");
         }
+    }
+
+    /**
+     * WHIT-802: the workspace lookup is for the OAuth authorization server,
+     * authorised by its signing key. It is derived like every declared route
+     * but must never reach tools/list, which offers only exposed tools.
+     */
+    public function testTheOAuthWorkspaceLookupIsNeverAnMcpTool(): void
+    {
+        ToolDeriver::clearCache();
+        $deriver = new ToolDeriver(CoreApiSchemas::routes(), CoreApiSchemas::components(), null, static fn (string $m): null => null);
+
+        $found = 0;
+        foreach ($deriver->deriveTools() as $tool) {
+            $declaration = $deriver->findDeclarationByName((string) $tool['name']);
+            if (($declaration['path'] ?? null) === '/api/oauth/workspaces') {
+                $found++;
+                self::assertFalse($deriver->isExposed((string) $tool['name']), 'the OAuth workspace lookup must not be an MCP tool');
+            }
+        }
+        ToolDeriver::clearCache();
+
+        self::assertSame(1, $found, 'the route is declared, so the check above is not vacuous');
     }
 }
