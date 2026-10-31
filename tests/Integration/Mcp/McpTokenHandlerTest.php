@@ -161,6 +161,36 @@ final class McpTokenHandlerTest extends TestCase
         self::assertSame(422, $this->createWithScope('["tools:call","users:read"]')->getStatusCode());
     }
 
+    // ── Agent credentials (WHIT-754) ────────────────────────────────────────
+
+    public function testCreate_issuesAnAgentCredentialWithItsGrant(): void
+    {
+        $handler = new McpTokenHandler(new TokenValidator($this->jwtParser, $this->pdo), new McpTokenService($this->pdo, $this->jwtParser), new PermissionRegistry());
+        $_COOKIE['access_token'] = $this->mintAccessToken();
+        $response = $handler->create(new Request('POST', '/api/mcp/tokens', ['Content-Type' => 'application/json'],
+            '{"name":"Billing assistant","agent":true,"scope":["tools:call","grant:users:read=allow"]}'));
+
+        self::assertSame(201, $response->getStatusCode(), $response->getBody());
+        $body = json_decode($response->getBody(), true);
+        self::assertTrue($body['agent']);
+        self::assertSame('ai-agent', $this->jwtParser->parse((string) $body['token'])['principal_kind'] ?? null);
+    }
+
+    public function testCreate_refusesAGrantOnAPersonsOwnToken(): void
+    {
+        $response = $this->createWithScope('["tools:call","grant:users:read=allow"]', new PermissionRegistry());
+
+        self::assertSame(422, $response->getStatusCode());
+        self::assertStringContainsString('agent credentials only', $response->getBody());
+    }
+
+    public function testCreate_aPersonsOwnTokenIsNotAnAgent(): void
+    {
+        $response = $this->createWithScope('["tools:call"]');
+
+        self::assertFalse(json_decode($response->getBody(), true)['agent']);
+    }
+
     // ── GET /api/mcp/tokens ───────────────────────────────────────────────────
 
     public function testList_returns401_withoutAccessToken(): void

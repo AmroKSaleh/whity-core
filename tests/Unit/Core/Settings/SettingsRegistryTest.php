@@ -23,6 +23,7 @@ final class SettingsRegistryTest extends TestCase
              'branding_logo_wide', 'branding_logo_square', 'branding_favicon',
              'branding_main_color',
              'mcp.enabled',
+             'mcp.always_on_plugin_tools',
              'auth.self_registration_enabled', 'auth.registration_approval_required',
              'auth.registration_payment_required',
              'auth.self_password_reset_enabled', 'auth.password_reset_approval_required',
@@ -268,7 +269,9 @@ final class SettingsRegistryTest extends TestCase
         // 35 since branding_main_color: each workspace has its own main colour (2.8).
         // 36 since editor M4d: documents.print_color became the workspace's
         // default theme, documents.theme, with documents.theme_by_kind beside it.
-        self::assertCount(36, SettingsRegistry::tenantTextKeys());
+        // 37 since WHIT-754: mcp.always_on_plugin_tools, each workspace's own
+        // choice of plugin tools listed directly to MCP clients.
+        self::assertCount(37, SettingsRegistry::tenantTextKeys());
 
         // The desktop-login TTL is per-tenant overridable (NOT global-only) and a
         // plain numeric string key.
@@ -419,7 +422,8 @@ final class SettingsRegistryTest extends TestCase
         // 87 since editor M4's documents.print_color (stage 6, --doc-accent).
         // 88 since branding_main_color, the workspace main colour (2.8).
         // 89 since editor M4d: print_color out, documents.theme and theme_by_kind in.
-        self::assertCount(89, $describe);
+        // 90 since WHIT-754's mcp.always_on_plugin_tools.
+        self::assertCount(90, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]
