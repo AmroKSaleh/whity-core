@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.53).
+ * SDK identity (v1.54).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -861,13 +861,21 @@ namespace Whity\Sdk;
  * steps this host doesn't run yet by name; {@see Manifest\PluginManifest::automations()}
  * reads them (WHIT-763).
  *
+ * Purely additive.) ->
+ * 1.54 (MANIFEST TESTS: `plugin.json` gains `tests`, examples a record type's
+ * rules must keep: create a record, or from a given one update fields or make
+ * a move, acting with the roles `as` names, and expect it refused (on which
+ * fields) or the fields and state it leaves. Values are literals. Checked by
+ * {@see Manifest\ManifestTestValidator}; {@see Manifest\PluginManifest::tests()}
+ * reads them; the host runs them before a version can be published (WHIT-764).
+ *
  * Purely additive.)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.53.0';
+    public const VERSION = '1.54.0';
 
     /**
      * Static identity only — never instantiated.

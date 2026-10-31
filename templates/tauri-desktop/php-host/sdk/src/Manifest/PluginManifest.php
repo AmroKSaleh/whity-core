@@ -269,6 +269,18 @@ final class PluginManifest
         return $this->map('automations');
     }
 
+    /**
+     * Examples the record types' rules must keep (SDK 1.54), as declared. The
+     * host runs them before a version can be published.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function tests(): array
+    {
+        /** @var list<array<string, mixed>> */
+        return array_values($this->data['tests'] ?? []);
+    }
+
     /** @return array<string, mixed> */
     private function plugin(): array
     {

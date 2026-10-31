@@ -7,6 +7,7 @@ namespace Whity\Api;
 use Throwable;
 use Whity\Core\Audit\AuditLogger;
 use Whity\Core\Plugin\Tenant\ManifestImpact;
+use Whity\Core\Plugin\Tenant\ManifestTestRunner;
 use Whity\Core\Plugin\Tenant\TenantManifestPublisher;
 use Whity\Core\Plugin\Tenant\TenantPluginRepository;
 use Whity\Core\Request;
@@ -24,6 +25,7 @@ use Whity\Sdk\PluginNamespace;
  *   GET  /api/workspace-plugins                                    plugins:read
  *   POST /api/workspace-plugins/validate        {manifest}         plugins:build
  *   POST /api/workspace-plugins/impact          {manifest}         plugins:build
+ *   POST /api/workspace-plugins/test            {manifest}         plugins:build
  *   POST /api/workspace-plugins                 {manifest, notes?, confirmDestructive?}
  *                                                                  plugins:publish
  *   GET  /api/workspace-plugins/{plugin}/versions                  plugins:read
@@ -34,6 +36,8 @@ use Whity\Sdk\PluginNamespace;
  * The route permissions are checked by the RBAC middleware. Publishing and
  * activating compare the version with the live one first ({@see ManifestImpact})
  * and answer 409 with the plan when it is destructive and wasn't confirmed.
+ * Publishing runs the manifest's own tests first ({@see ManifestTestRunner},
+ * the publish check) and answers 422 with the results when one fails.
  * Every publish, activation and refused publish is audited.
  *
  * Versions are immutable and all kept, so a rollback (activating an older
@@ -47,6 +51,7 @@ final class TenantPluginVersionsApiHandler
         private readonly TenantPluginRepository $plugins,
         private readonly TenantManifestPublisher $publisher,
         private readonly ManifestImpact $impact,
+        private readonly ManifestTestRunner $tests,
         private readonly ?AuditLogger $audit = null,
     ) {
     }
@@ -93,6 +98,24 @@ final class TenantPluginVersionsApiHandler
         });
     }
 
+    /** Run a draft's tests, rolled back; nothing is published. */
+    public function test(Request $request): Response
+    {
+        return $this->guarded(function (int $tenantId) use ($request): Response {
+            $manifest = JsonBody::parsed($request)['manifest'] ?? null;
+            if (!is_array($manifest)) {
+                return self::invalid(['manifest: required, the plugin.json object']);
+            }
+            try {
+                $draft = $this->publisher->check($tenantId, $manifest);
+            } catch (InvalidManifestException $e) {
+                return self::invalid($e->getErrors());
+            }
+
+            return Response::json(['data' => $this->tests->run($tenantId, $draft)]);
+        });
+    }
+
     public function publish(Request $request): Response
     {
         return $this->guarded(function (int $tenantId) use ($request): Response {
@@ -111,6 +134,16 @@ final class TenantPluginVersionsApiHandler
                 return self::invalid($e->getErrors());
             }
 
+            $tests = $this->tests->run($tenantId, $draft);
+            if ($tests['failed'] > 0) {
+                $this->refused($tenantId, $actor, $draft->name(), 'tests_failed', ['version' => $draft->version(), 'failed' => $tests['failed']]);
+
+                return Response::json([
+                    'error' => 'The plugin\'s own tests don\'t pass',
+                    'details' => ['reason' => 'tests_failed', 'tests' => $tests],
+                ], 422);
+            }
+
             $plan = $this->impact->plan($tenantId, $this->live($tenantId, $draft->name()), $draft);
             if ($plan['level'] === ManifestImpact::DESTRUCTIVE && ($body['confirmDestructive'] ?? false) !== true) {
                 $this->refused($tenantId, $actor, $draft->name(), 'destructive_unconfirmed', ['version' => $draft->version()]);
@@ -120,7 +153,7 @@ final class TenantPluginVersionsApiHandler
 
             $published = $this->publisher->publish($tenantId, $manifest, $actor, null, null, $notes);
 
-            return Response::json(['data' => $published + ['impact' => $plan]], 201);
+            return Response::json(['data' => $published + ['impact' => $plan, 'tests' => $tests]], 201);
         });
     }
 

@@ -54,6 +54,7 @@ final class RouteCatalogueCompletenessTest extends TestCase
         'POST /api/workspace-plugins',
         'POST /api/workspace-plugins/validate',
         'POST /api/workspace-plugins/impact',
+        'POST /api/workspace-plugins/test',
         'GET /api/workspace-plugins/{plugin}/versions',
         'GET /api/workspace-plugins/{plugin}/versions/{id}',
         'POST /api/workspace-plugins/{plugin}/versions/{id}/activate',
