@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.46).
+ * SDK identity (v1.47).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -782,13 +782,27 @@ namespace Whity\Sdk;
  * Purely additive. A one-parameter handler keeps working, since PHP ignores
  * the extra argument; on an older host a two-parameter handler is called with
  * one argument and fails, so a tool that needs the context should declare
- * `^1.46`.)
+ * `^1.46`.) ->
+ * 1.47 (PLUGIN MANIFEST: a plugin's declarations can live in `plugin.json`,
+ * format `whity.plugin/1` ({@see Manifest\ManifestValidator}, JSON Schema in
+ * `resources/plugin-manifest.schema.json`). Extending
+ * {@see Manifest\ManifestPlugin} with an empty class answers identity,
+ * requirements, permissions, roles, `blocks` screens, owned tables, data types
+ * and limits from the file, in the shapes the existing interfaces define, so
+ * the host registers them exactly as it registers PHP declarations. A
+ * subclass adds routes, hooks and migrations in PHP. The manifest is checked
+ * as a whole (a role may grant only declared permissions, a screen must be
+ * gated by one, a data type must live in a declared tenant table, every label
+ * carries English and Arabic, unknown keys are refused) and an invalid one
+ * refuses the whole plugin rather than loading part of it (WHIT-758).
+ *
+ * Purely additive. Nothing changes for a plugin that doesn't use it.)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.46.0';
+    public const VERSION = '1.47.0';
 
     /**
      * Static identity only — never instantiated.

@@ -254,7 +254,9 @@ export function DocumentEditorScreen({
   }
 
   return (
-    <div className="grid h-full grid-rows-[auto_1fr]">
+    // A column, not a grid: with no bar there is no first row to take space,
+    // whatever classes the host app happens to generate.
+    <div className="flex h-full flex-col">
       {conflict ? (
         <div role="alert" className="flex items-center gap-3 border-b border-border bg-warning-tint px-4 py-2 text-sm">
           <span className="flex-1">
@@ -267,57 +269,57 @@ export function DocumentEditorScreen({
             {t('blockEditor.conflict.reload', 'Load the newer version')}
           </Button>
         </div>
-      ) : (
-        <span />
-      )}
-      <DocEditor
-        key={loadCount}
-        document={doc}
-        onChange={onChange}
-        canEdit={canEdit && !conflict}
-        mode={mode}
-        onModeChange={setMode}
-        back={onBack ? { label: labels.back, onClick: onBack } : undefined}
-        path={path}
-        save={save}
-        onCommandPalette={onCommandPalette}
-        labels={labels}
-        services={services}
-        {...(printed && template
-          ? {
-              fields: template.fields,
-              letterhead: template.letterhead,
-              accent: template.accent,
-              pageFields,
-              preview,
-              onPreview: adapter.preview ? () => (recordType ? setPickerFor('preview') : void showPreview(null)) : undefined,
-              onClosePreview: () => {
-                setPreview(null);
-                setPreviewRecord(null);
-              },
-              // E.43: a label sheet prints labels, one per record or CSV row, not one PDF.
-              onExportPdf:
-                adapter.exportPdf && doc.kind !== 'label'
-                  ? () => (recordType && !previewRecord ? setPickerFor('pdf') : exportPdf(previewRecord))
-                  : undefined,
-              onPrintLabels: adapter.printLabels && doc.kind === 'label' ? () => setPrintingLabels(true) : undefined,
-              publish:
-                adapter.publishCheck && adapter.publish
-                  ? {
-                      publishedVersion,
-                      check: async () => {
-                        await flushNow();
-                        return adapter.publishCheck!(id);
-                      },
-                      publish: async () => {
-                        await flushNow();
-                        setPublishedVersion(await adapter.publish!(id, version.current));
-                      },
-                    }
-                  : undefined,
-            }
-          : {})}
-      />
+      ) : null}
+      <div className="min-h-0 flex-1">
+        <DocEditor
+          key={loadCount}
+          document={doc}
+          onChange={onChange}
+          canEdit={canEdit && !conflict}
+          mode={mode}
+          onModeChange={setMode}
+          back={onBack ? { label: labels.back, onClick: onBack } : undefined}
+          path={path}
+          save={save}
+          onCommandPalette={onCommandPalette}
+          labels={labels}
+          services={services}
+          {...(printed && template
+            ? {
+                fields: template.fields,
+                letterhead: template.letterhead,
+                accent: template.accent,
+                pageFields,
+                preview,
+                onPreview: adapter.preview ? () => (recordType ? setPickerFor('preview') : void showPreview(null)) : undefined,
+                onClosePreview: () => {
+                  setPreview(null);
+                  setPreviewRecord(null);
+                },
+                // E.43: a label sheet prints labels, one per record or CSV row, not one PDF.
+                onExportPdf:
+                  adapter.exportPdf && doc.kind !== 'label'
+                    ? () => (recordType && !previewRecord ? setPickerFor('pdf') : exportPdf(previewRecord))
+                    : undefined,
+                onPrintLabels: adapter.printLabels && doc.kind === 'label' ? () => setPrintingLabels(true) : undefined,
+                publish:
+                  adapter.publishCheck && adapter.publish
+                    ? {
+                        publishedVersion,
+                        check: async () => {
+                          await flushNow();
+                          return adapter.publishCheck!(id);
+                        },
+                        publish: async () => {
+                          await flushNow();
+                          setPublishedVersion(await adapter.publish!(id, version.current));
+                        },
+                      }
+                    : undefined,
+              }
+            : {})}
+        />
+      </div>
       {printed && template && adapter.printLabels && doc.kind === 'label' && (
         <PrintLabelsDialog
           open={printingLabels}

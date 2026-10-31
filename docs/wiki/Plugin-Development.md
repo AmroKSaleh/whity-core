@@ -1362,6 +1362,66 @@ there, render inside the request, or have the job enqueue the document's
 
 ---
 
+## Step 13 — Declare it in `plugin.json` instead (SDK 1.47)
+
+Everything a plugin only *declares* can live in a JSON file instead of PHP methods: its identity and requirements, permissions, roles, `blocks` screens, owned tables, data types and limits. Put `plugin.json` next to an empty class:
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace CakeOrders;
+
+final class CakeOrdersPlugin extends \Whity\Sdk\Manifest\ManifestPlugin
+{
+}
+```
+
+```json
+{
+  "manifest": "whity.plugin/1",
+  "plugin": { "name": "CakeOrders", "version": "1.0.0", "label": { "en": "Cake orders", "ar": "طلبات الكيك" } },
+  "requires": { "sdk": "^1.47" },
+  "permissions": [
+    { "slug": "cake_orders:read", "label": { "en": "See cake orders", "ar": "عرض طلبات الكيك" } }
+  ],
+  "roles": {
+    "baker": { "label": { "en": "Baker", "ar": "خباز" }, "permissions": ["cake_orders:read"] }
+  },
+  "screens": [
+    {
+      "id": "cake-orders-today",
+      "label": { "en": "Today's orders", "ar": "طلبات اليوم" },
+      "permission": "cake_orders:read",
+      "blocks": [{ "type": "heading", "level": 2, "text": "Today" }]
+    }
+  ]
+}
+```
+
+`ManifestPlugin` answers every capability from the file, in the same shape the PHP interfaces return, so the host registers a manifest plugin exactly like any other plugin. The full format is in [`sdk/resources/plugin-manifest.schema.json`](../../sdk/resources/plugin-manifest.schema.json). `Whity\Sdk\Manifest\ManifestValidator` is authoritative.
+
+**The manifest is checked as a whole, and refused as a whole.** A role may grant only permissions the manifest declares. A screen must be gated by one of them, and its blocks must pass the block contract. A data type must live in a table declared under `tables` with scope `tenant`, and a limit's key must start with the plugin's lowercase name. Every label needs `en` and `ar`, and an unknown key anywhere is an error, not a silent no-op. When anything fails, the constructor throws `InvalidManifestException` with every error, and the plugin doesn't load. Loading half of it would leave a role granting a permission that was dropped.
+
+**Behaviour stays in PHP, in the same class.** JSON declares no routes, hooks, jobs or migrations. Override the method and call the parent to keep the declared part:
+
+```php
+public function getRoutes(): array
+{
+    return [/* your routes and handlers */];
+}
+
+public function getPermissions(): array
+{
+    return [...parent::getPermissions(), 'cake_orders:export'];
+}
+```
+
+**Reloads.** Editing `plugin.json` changes the plugin tree's fingerprint, so a reload picks it up just as it does a PHP edit.
+
+**Why prefer it.** The declarations become data that tools can read, diff and generate. This is the format Whity Builder publishes, and editor M7's plugin manifest is the same format. Plugin screen and nav labels are English-only in the host today; the manifest already carries the Arabic (`labelAr` on each screen), ready for when the host reads it.
+
 ## Checklist
 
 - [ ] Directory `plugins/HelloWorld/` with namespace prefix `HelloWorld\`.

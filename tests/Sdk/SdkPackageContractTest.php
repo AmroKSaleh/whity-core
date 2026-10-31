@@ -242,9 +242,13 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.46.0',
+            '1.47.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.46 PASSES AN McpToolContext TO AUTHORED MCP TOOLS: a handler is called as '
+            'SDK 1.47 ADDS THE PLUGIN MANIFEST: a plugin may declare identity, requirements, '
+            . 'permissions, roles, blocks screens, owned tables, data types and limits in plugin.json '
+            . '(format whity.plugin/1) by extending Manifest\ManifestPlugin; the manifest is validated '
+            . 'as a whole and an invalid one refuses the whole plugin (WHIT-758). Purely additive. '
+            . 'SDK 1.46 PASSES AN McpToolContext TO AUTHORED MCP TOOLS: a handler is called as '
             . 'fn(array $arguments, McpToolContext $context), and the context carries the tenant '
             . 'the call is authorized in and the calling profile, so a multi-tenant tool can scope '
             . 'its queries without reaching into the internal tenant state of core (#1419). Purely '
