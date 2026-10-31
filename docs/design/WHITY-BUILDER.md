@@ -280,13 +280,14 @@ Tool names keep to `[A-Za-z0-9_-]{1,64}`, as that design requires. That design (
 
 **Agents act, people approve, in builder plugins too.** The register's agent model (scope grant, 7.5a proposal, 7.5c undo) applies to a builder plugin's operations exactly as to core's:
 
-- **Every agent is an AI principal** with a scoped credential that never exceeds the person who granted it. A builder plugin's permissions appear in the scope grant like any others, each set to **Off**, **Ask first** or **Allowed** by that person. The manifest's `agentPolicy` is the ceiling the plugin author sets: `refuse` means the operation can only be Off for agents; `propose` means it can be at most Ask first; `allow` leaves all three open. (How `suggest-only` maps onto the three settings is the MCP design's to settle.)
-- **Ask first is enforced on the server.** The call becomes a stored proposal holding the operation, its arguments, the diff, the scope used and the undo window. A person approves, edits or declines, and approval executes as the granting person.
-- **Every write records its actor:** a person, an agent for a person, or the system. An automation run (2.5) records the plugin as system acting for the person who caused the event, if there was one.
+- **Every agent is an `ai-agent` principal** acting for the person who granted it, never above that person's RBAC (MCP-TOOL-SURFACE.md 5.11, WHIT-753, WHIT-784). A builder action gets its mode from the grant on the permission it declares: the person sets each of the plugin's permissions to **Off**, **Ask first** or **Allowed** in the scope grant, like any other permission.
+- **A manifest may set a ceiling per action** (`agentPolicy`): `propose` means always Ask first even if the grant says Allowed; `refuse` means never for agents. Without one, the grant decides. Core's manifest `publish` and `activate` routes carry `propose` as a fixed ceiling.
+- **Ask first is enforced on the server.** The call becomes a stored proposal holding the operation, its arguments, the diff, the permissions used and the undo window. A person approves, edits or declines, and approval executes it for the granting person in the proposal's tenant.
+- **Every write records its actor** in the same four actor columns core uses: a person, an agent for a person, or the system. An automation run (2.5, WHIT-763) writes `actor_kind` system, or agent for person when an agent's call started it, with the person who caused the event recorded beside it.
 - **Undo.** Each write operation declares an undo window in the manifest (default proposed: 30 minutes for record changes, none for sent webhooks and issued documents, which are compensated, not undone). Undo shows on the toast and stays on the activity item for that window. Publishing a manifest version is undone by rollback (2.7), which has no time limit.
 - **Building is always Ask first for agents.** `builder_propose_publish` and `builder_propose_rollback` can never be set to Allowed: a person approves every change to company logic.
 
-Anything here the register doesn't already decide (the default undo windows, the `agentPolicy` ceiling mapping) is proposed for the owner to confirm, not decided (question 11).
+Anything here the register doesn't already decide (the default undo windows per kind of builder write) is proposed for the owner to confirm, not decided (question 11).
 
 ### 2.7 Versions, drafts, preview and tests
 
@@ -428,4 +429,4 @@ Phases A and B are the minimum that delivers the owner's sentence: users and the
 8. **One manifest.** Should M7's plugin manifest and block registry be this manifest, and should code plugins be encouraged to declare their data types, screens and permissions in `plugin.json`?
 9. **Pricing dimensions.** Per workspace, per published plugin, per AI usage, or per seat: `[plan name]` and `[price]` stay open; this only decides what the builder meters.
 10. **How the `whity-builder` toolset reaches core's MCP catalogue.** Proposed: a small closed connector plugin (ADR 0014 exception) that contributes the toolset and forwards calls to the hosted service, installed when a workspace connects the builder. The alternative is a generic "remote toolset" mechanism in core, which is new core surface.
-11. **Agent defaults for builder plugins.** Confirm the proposed `agentPolicy` ceilings over Off, Ask first and Allowed, the default undo windows per kind of write, and that publishing and rollback are always Ask first for agents (2.6).
+11. **Agent defaults for builder plugins.** Confirm the default undo windows per kind of write (2.6). Modes come from the scope grant and per-action ceilings, as the MCP design decided; publishing and rollback stay always Ask first.
