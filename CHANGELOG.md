@@ -13,6 +13,7 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ### Fixed
 
+- **Printed documents follow the register's type rules, and the title prints without a print colour (stage 6, E.33).** The open renderer's flowing mode set a 10.5pt body with 16, 13 and 11.5pt headings and some labels as small as 6.5pt. It now prints the 9.5pt body, 14, 12 and 10.5pt headings, a 22pt title and nothing under the 11px floor, which matches the editor's page view. Arabic gets line heights of 1.7 for text and 1.5 for headings. Text is set in Noto Sans, with Noto Sans Arabic for Arabic (it was Noto Naskh Arabic first). Titles ask for Readex Pro and codes for Geist Mono, falling back to the installed fonts until the image ships them. A letterhead title with no print colour set printed transparent, so it was invisible. It now prints in ink.
 - **Printed documents now carry the tenant logo in the letterhead.** The editor's page view showed the logo, but the PDF from Whity Render printed the name alone (stage 6, decision 6.2: logo, address and tax number at the start side). The wide logo is used, else the square one. A logo Whity Render can't draw, or one over its 512 KiB image limit, is left out and the name prints alone, so the render never fails because of it.
 
 ## [0.2.19] - 2026-10-29
