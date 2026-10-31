@@ -493,13 +493,14 @@ final class DocumentsApiHandler
     }
 
     /**
-     * "type:id" as [type, id], or null.
+     * "type:id" as [type, id], or null. A workspace plugin's type keeps its
+     * plugin's casing and can be 129 characters (`CakeOrders.order`, WHIT-742).
      *
      * @return array{0: string, 1: string}|null
      */
     private static function parseRecord(mixed $value): ?array
     {
-        if (!is_string($value) || preg_match('/^([a-z0-9._-]{1,64}):([A-Za-z0-9._-]{1,64})$/', $value, $m) !== 1) {
+        if (!is_string($value) || preg_match('/^([A-Za-z0-9._-]{1,160}):([A-Za-z0-9._-]{1,64})$/', $value, $m) !== 1) {
             return null;
         }
 
