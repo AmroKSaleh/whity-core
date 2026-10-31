@@ -6,6 +6,10 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+### Changed
+
+- **The document type scales are design tokens now (E.33, stage 6).** The editor's sheet and page view sizes (16px body and 24, 20, 18px headings on screen; 9.5pt body, 8.5pt labels, 14, 12, 10.5pt headings and the 22pt title on paper) come from a `document` group in `base.json`, emitted as `--doc-text-*` and `--doc-leading-*` in `web/app/globals.css` and `@whity-org/tokens` (now 0.2.0; `@whity-org/ui` requires it). Nothing looks different; the open renderer and document themes build on the same values next. The generator refuses any document size below the 11px floor.
+
 ### Fixed
 
 - **Printed documents now carry the tenant logo in the letterhead.** The editor's page view showed the logo, but the PDF from Whity Render printed the name alone (stage 6, decision 6.2: logo, address and tax number at the start side). The wide logo is used, else the square one. A logo Whity Render can't draw, or one over its 512 KiB image limit, is left out and the name prints alone, so the render never fails because of it.

@@ -33,10 +33,12 @@ interface GeneratorModule {
   oklchToCssHex: (value: string) => string;
   toCamelCase: (value: string) => string;
   remToPx: (value: string) => number;
+  cssLengthToPx: (value: string) => number | null;
   generateTokensJson: (base: unknown) => string;
   generateThemeJson: (base: unknown) => string;
   generateDart: (base: unknown) => string;
   generateCssRegion: (base: unknown) => string;
+  generateTokensPackageCss: (base: unknown) => string;
   syncGlobalsCss: (existing: string, base: unknown) => string;
   buildTargets: (base: unknown, opts?: Record<string, boolean>) => Target[];
   findStaleTargets: (targets: Target[]) => string[];
@@ -142,6 +144,37 @@ describe('validateBase', () => {
   it('rejects malformed OKLCH in the source', () => {
     const base = makeValidBase() as { colors: { light: Record<string, string> } };
     base.colors.light.primary = 'rgb(0,0,0)';
+    expect(() => gen.validateBase(base)).toThrow(gen.TokenValidationError);
+  });
+});
+
+describe('document type scales (E.33, 6.5)', () => {
+  it('converts rem, px and pt to CSS pixels', () => {
+    expect(gen.cssLengthToPx('1rem')).toBe(16);
+    expect(gen.cssLengthToPx('11px')).toBe(11);
+    expect(gen.cssLengthToPx('9.5pt')).toBeCloseTo(12.667, 3);
+    expect(gen.cssLengthToPx('large')).toBeNull();
+  });
+
+  it('emits the sheet and print scales in both CSS outputs', () => {
+    const base = gen.loadBase();
+    for (const css of [gen.generateCssRegion(base), gen.generateTokensPackageCss(base)]) {
+      expect(css).toContain('--doc-text-sheet-body: 1rem;');
+      expect(css).toContain('--doc-text-print-body: 9.5pt;');
+      expect(css).toContain('--doc-text-print-title: 22pt;');
+      expect(css).toContain('--doc-leading-body-arabic: 1.7;');
+    }
+  });
+
+  it('rejects a document size below the 11px floor (3.5a)', () => {
+    const base = gen.loadBase() as { document: { fontSize: Record<string, string> } };
+    base.document.fontSize['print-label'] = '8pt';
+    expect(() => gen.validateBase(base)).toThrow(/below 11px/);
+  });
+
+  it('rejects a document size that is not a length', () => {
+    const base = gen.loadBase() as { document: { fontSize: Record<string, string> } };
+    base.document.fontSize['print-body'] = 'small';
     expect(() => gen.validateBase(base)).toThrow(gen.TokenValidationError);
   });
 });
