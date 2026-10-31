@@ -6,6 +6,9 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+### Changed
+
+- **The document type scales are design tokens now (E.33, stage 6).** The editor's sheet and page view sizes (16px body and 24, 20, 18px headings on screen; 9.5pt body, 8.5pt labels, 14, 12, 10.5pt headings and the 22pt title on paper) come from a `document` group in `base.json`, emitted as `--doc-text-*` and `--doc-leading-*` in `web/app/globals.css` and `@whity-org/tokens` (now 0.2.0; `@whity-org/ui` requires it). Nothing looks different; the open renderer and document themes build on the same values next. The generator refuses any document size below the 11px floor.
 ### Added
 
 - **A workspace can set its own main colour, and the app takes its look from it (decision 2.8).** A new tenant setting, `branding_main_color` (`#RRGGBB`), is turned into the full set of brand tokens for light and dark mode on the server, using the same maths as the design system's `Whity.tenantTheme()`: the label on the colour is white or near-black, whichever reaches 4.5:1, and a colour neither label can read on is darkened until white does. `GET /api/v1/branding` now returns `mainColor` and `theme` (`light` and `dark` token maps), and the web app applies them before any plugin's colour overrides, which still win. With no main colour set, nothing changes: Whity Blue stays. Document themes will use it as the default print colour.

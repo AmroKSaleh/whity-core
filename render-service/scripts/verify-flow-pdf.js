@@ -250,10 +250,12 @@ async function verify(options) {
       continue;
     }
     const footer = lines[lines.length - 1];
-    const numbers = footer.items
-      .map((i) => i.str.trim())
-      .filter((s) => /^\d+$/.test(s))
-      .map(Number);
+    // Read the numbers out of the line's TEXT, not off whole runs: how a line
+    // splits into runs depends on the font. With Noto Sans a left-to-right
+    // "Page 3 of 137" comes back as one run, where the old fallback font
+    // happened to split it; the bidi-isolated right-to-left footer still
+    // splits. Either way the line says the same thing.
+    const numbers = (footer.text.match(/\d+/g) || []).map(Number);
     if (!numbers.includes(p) || !numbers.includes(doc.numPages)) {
       report.footerMismatches.push({
         page: p,

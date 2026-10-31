@@ -240,6 +240,29 @@
       "wider": "0.05em"
     }
   },
+  "document": {
+    "rationale": "Document type scales (E.33, stage 6 decision 6.5): the continuous sheet on screen (16px body, headings 24, 20 and 18px) and the page view and print (9.5pt body, 8.5pt labels, headings 14, 12 and 10.5pt, the title in Readex Pro 600 at 22pt). The page view is A4 at 96 dpi, so a pt here is the same size on screen and on paper. Line heights follow 3.6 (Arabic 1.7). Emitted as --doc-text-* and --doc-leading-*; nothing may resolve below the 11px floor (3.5a).",
+    "fontSize": {
+      "sheet-body": "1rem",
+      "sheet-h1": "1.5rem",
+      "sheet-h2": "1.25rem",
+      "sheet-h3": "1.125rem",
+      "print-title": "22pt",
+      "print-body": "9.5pt",
+      "print-h1": "14pt",
+      "print-h2": "12pt",
+      "print-h3": "10.5pt",
+      "print-label": "8.5pt"
+    },
+    "lineHeight": {
+      "body": 1.5,
+      "body-arabic": 1.7,
+      "h1": 1.25,
+      "h2": 1.3,
+      "h3": 1.35,
+      "title": 1.15
+    }
+  },
   "spacing": {
     "unit": "8px",
     "description": "8px base grid. The 4px step is a half-unit for fine adjustments.",

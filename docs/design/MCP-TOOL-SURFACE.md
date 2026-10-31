@@ -127,7 +127,7 @@ Checked against the 2026-07-28 specification and the SEP index on 2026-10-31.
 | My inbox | `get_api_me_inbox` | 614 |
 | Get a document | `get_api_documents_id` | 346 |
 | List templates | `get_api_document_sources` (editor M4c replaced `get_api_document_templates`, 259) | not yet measured |
-| Search records | `get_api_search` (new `GET /api/search`, WHIT-783); `get_api_documents` stands in until it ships | about 600 (estimate) |
+| Search records | `get_api_search` (`GET /api/search`, WHIT-783, toolset `core.search`) | about 900 |
 
 Core has no cross-record search route today; nothing derived matches search, find or lookup. The owner decided to build `GET /api/search` (WHIT-783, §5.13), which serves this tool and the ⌘K command palette (register 2.1c). Until it ships, document listing stands in. Measured with document listing, the five cost 2,885 bytes, about 720 tokens. With search and call, the bare `/mcp` comes to about 1.1k tokens.
 

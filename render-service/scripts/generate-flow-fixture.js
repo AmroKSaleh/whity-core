@@ -109,7 +109,11 @@ function headingText(random, direction, token) {
     words.push(pick(random, pool));
   }
   const text = words.join(' ');
-  return `${text.charAt(0).toUpperCase() + text.slice(1)} ${token}`;
+  // The token LEADS the heading. At the end of a long heading a wrap may fall
+  // at its hyphen ("SEC-" / "018"), and the verifier, which reads tokens back
+  // line by line, would then find no ground truth for it. At the start of a
+  // line it cannot be split.
+  return `${token} ${text}`;
 }
 
 /* A generated placeholder figure: bands, a grid and a label, all drawn from

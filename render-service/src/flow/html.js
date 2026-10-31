@@ -41,10 +41,12 @@ const PAGINATE_JS = fs.readFileSync(path.join(ASSET_DIR, 'paginate.js'), 'utf8')
  * apply an identical rule. See src/flow/bidi.js. */
 const BIDI_JS = fs.readFileSync(require.resolve('../flow/bidi.js'), 'utf8');
 
-/** The default stack. Noto Naskh/Sans Arabic are baked into the image
- * (Dockerfile: fonts-noto-core), so Arabic shapes rather than printing tofu. */
+/** The default stack: Noto Sans, with Noto Sans Arabic for Arabic (3.2, 3.3),
+ * both in the image (Dockerfile: fonts-noto-core), so Arabic shapes rather
+ * than printing tofu. Noto Sans has no Arabic glyphs, so Arabic text falls
+ * through to Noto Sans Arabic while Latin stays in Noto Sans. */
 const DEFAULT_FONT_STACK =
-  "'Noto Naskh Arabic', 'Noto Sans Arabic', 'DejaVu Sans', 'Liberation Sans', Arial, sans-serif";
+  "'Noto Sans', 'Noto Sans Arabic', 'DejaVu Sans', 'Liberation Sans', Arial, sans-serif";
 
 const { escapeHtml, isolateForeignRuns } = require('./bidi');
 const { QR_SIZE_MM, MAX_FIELD_BOXES, MAX_ANSWER_LINES, BARCODE_SYMBOLOGIES } = require('./document');
@@ -511,7 +513,10 @@ function buildFlowHtml(doc) {
         .join('') +
       // Table and answer-line rules follow the theme's line colour only when
       // it names one; a theme that sets just an accent keeps the darker grid.
-      (doc.theme.line ? `  --flow-grid: ${doc.theme.line};\n` : '')
+      (doc.theme.line ? `  --flow-grid: ${doc.theme.line};\n` : '') +
+      // The letterhead title takes the print colour when there is one (6.3);
+      // without it the title stays ink rather than the transparent accent.
+      (doc.theme.accent ? `  --flow-title: ${doc.theme.accent};\n` : '')
     : '';
 
   // Everything the browser-side paginator needs: geometry, the running

@@ -43,6 +43,17 @@ describe('letterhead', () => {
     expect(html).toContain(`src="${PNG}"`);
   });
 
+  test('the title is ink without a print colour and the print colour with one (6.3)', () => {
+    // flow.css: the title reads --flow-title, falling back to ink. The accent's
+    // own default is transparent, so without this fallback it printed nothing.
+    const plain = buildFlowHtml(normaliseFlowDocument(doc([LETTERHEAD])));
+    expect(plain).not.toContain('--flow-title:');
+    expect(plain).toContain('color: var(--flow-title, var(--flow-ink));');
+
+    const branded = buildFlowHtml(normaliseFlowDocument(doc([LETTERHEAD], { theme: { accent: '#b74c05' } })));
+    expect(branded).toContain('--flow-title: #b74c05;');
+  });
+
   test('either side may be left out', () => {
     expect(validateFlowPayload(doc([{ type: 'letterhead', end: { title: 'Statement' } }]))).toBeNull();
     expect(body(doc([{ type: 'letterhead', end: { title: 'Statement' } }]))).toContain('class="flow-letterhead-start"></div>');
