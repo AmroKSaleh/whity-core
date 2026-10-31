@@ -9,6 +9,7 @@ use Whity\Mcp\Tools\ToolSurfaceRequest;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Mcp\Auth\McpPrincipal;
 use Whity\Mcp\Auth\McpScope;
+use Whity\Mcp\Auth\OAuth\OAuthAccessTokenVerifier;
 use Whity\Mcp\Auth\OAuth\OAuthTokenRefusedException;
 use Whity\Mcp\McpFeatureDisabledException;
 use Whity\Mcp\Notifications\ListChangedNotifier;
@@ -165,7 +166,9 @@ final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSou
                 $this->notifyClientKey = $principal->jti;
 
                 // WHIT-697: bookkeeping, so it must never cost the caller the call.
-                if ($this->recordTokenUse !== null && !in_array($principal->principalKind, ['session', 'oauth'], true)) {
+                // A signed-in agent (WHIT-825) has no MCP token row either.
+                if ($this->recordTokenUse !== null && !in_array($principal->principalKind, ['session', 'oauth'], true)
+                    && !str_starts_with($principal->jti, OAuthAccessTokenVerifier::AGENT_ID_PREFIX)) {
                     try {
                         ($this->recordTokenUse)($principal);
                     } catch (\Throwable $e) {

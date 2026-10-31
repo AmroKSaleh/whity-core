@@ -1,0 +1,1 @@
+- An agent can no longer put a request to a person that the person could not carry out themselves. The call is refused up front instead of waiting for approval and failing then (WHIT-825).
