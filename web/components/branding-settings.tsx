@@ -55,7 +55,7 @@ interface AssetMeta {
   labelKey: string;
   label: string;
   accept: string;
-  urlField: keyof Branding;
+  urlField: 'logoWideUrl' | 'logoSquareUrl' | 'faviconUrl';
   descriptionKey: string;
   description: string;
 }

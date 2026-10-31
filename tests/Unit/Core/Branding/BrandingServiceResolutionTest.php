@@ -78,7 +78,26 @@ final class BrandingServiceResolutionTest extends TestCase
         $settings = new SettingsService(new GlobalSettingsRepository($pdo), new TenantSettingsRepository($pdo));
         $settings->setTenant(1, 'support_email', 'secret@acme.com');
         $arr = (new BrandingService($settings))->effective(1)->toArray();
-        self::assertSame(['siteName', 'logoWideUrl', 'logoSquareUrl', 'faviconUrl'], array_keys($arr));
+        self::assertSame(['siteName', 'logoWideUrl', 'logoSquareUrl', 'faviconUrl', 'mainColor', 'theme'], array_keys($arr));
         self::assertStringNotContainsString('secret@acme.com', (string) json_encode($arr));
+    }
+
+    public function testTheMainColourDerivesTheLightAndDarkTheme(): void
+    {
+        $pdo = SchemaFromMigrations::make(true);
+        $pdo->exec("INSERT INTO tenants (id, name) VALUES (1, 't1')");
+        $settings = new SettingsService(new GlobalSettingsRepository($pdo), new TenantSettingsRepository($pdo));
+        $service = new BrandingService($settings);
+
+        $none = $service->effective(1);
+        self::assertNull($none->mainColor, 'no main colour: clients keep Whity Blue');
+        self::assertNull($none->theme);
+
+        $settings->setTenant(1, 'branding_main_color', '#B74C05');
+        $branding = $service->effective(1);
+        self::assertSame('#b74c05', $branding->mainColor);
+        self::assertNotNull($branding->theme);
+        self::assertSame('#b74c05', $branding->theme['light']['primary']);
+        self::assertSame('#e97c47', $branding->theme['dark']['primary'], '2.8c: the demo colour on dark');
     }
 }

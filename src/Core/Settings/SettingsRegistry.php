@@ -42,6 +42,11 @@ final class SettingsRegistry
     public const BRANDING_LOGO_SQUARE = 'branding_logo_square';
     public const BRANDING_FAVICON = 'branding_favicon';
 
+    // The workspace's one main colour (decision 2.8): a #RRGGBB hex, or empty
+    // for Whity Blue. Branding derives the light and dark token sets from it
+    // (TenantTheme). Tenant-overridable: each workspace is its own brand.
+    public const BRANDING_MAIN_COLOR = 'branding_main_color';
+
     // MCP feature flag (WC-149b2fc9). Value is the literal string 'true' or
     // 'false'; an admin sets it per-tenant to enable the MCP endpoint.
     public const MCP_ENABLED = 'mcp.enabled';
@@ -892,6 +897,7 @@ final class SettingsRegistry
         self::BRANDING_LOGO_WIDE => '',
         self::BRANDING_LOGO_SQUARE => '',
         self::BRANDING_FAVICON => '',
+        self::BRANDING_MAIN_COLOR => '',
         self::MCP_ENABLED => 'false',
         // Secure-by-default: signup CLOSED, approval REQUIRED when opened.
         self::SELF_REGISTRATION_ENABLED => 'false',
@@ -1322,6 +1328,7 @@ final class SettingsRegistry
             self::TIMEZONE => self::validateTimezone($value),
             self::LOCALE => self::validateLocale($value),
             self::SUPPORT_EMAIL => self::validateSupportEmail($value),
+            self::BRANDING_MAIN_COLOR => $value === '' ? null : self::validateHexColor($value, self::BRANDING_MAIN_COLOR),
             self::MCP_ENABLED => self::validateMcpEnabled($value),
             self::SELF_REGISTRATION_ENABLED => self::validateBoolean($value, self::SELF_REGISTRATION_ENABLED),
             self::REGISTRATION_APPROVAL_REQUIRED => self::validateBoolean($value, self::REGISTRATION_APPROVAL_REQUIRED),

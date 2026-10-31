@@ -141,7 +141,8 @@ final class SettingsApiRealEngineTest extends TestCase
         // browser-bearing container runs is an operator's decision.
         // 31 since #billing: eight invoicing keys are tenant-overridable.
         // 34 since editor M4: documents.print_color, each tenant's print colour.
-        self::assertCount(34, $data['registry']);
+        // 35 since branding_main_color (2.8), each workspace's main colour.
+        self::assertCount(35, $data['registry']);
         self::assertArrayNotHasKey('auth.self_registration_enabled', $data['effective']);
         self::assertSame([], $data['overridden']);
     }

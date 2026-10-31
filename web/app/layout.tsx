@@ -11,7 +11,7 @@ import { CapabilitiesProvider } from "@/lib/capabilities-context";
 import { ToastContainerMount } from "@/components/ui/toast-container-mount";
 import { PluginScreenRegistrations } from "@/lib/plugin-screens";
 import { ReferralCapture } from "@/components/referral-capture";
-import { getBranding } from "@/lib/branding";
+import { getBranding, getBrandThemeCss } from "@/lib/branding";
 import { BrandingProvider } from "@/lib/branding-context";
 import { getThemeOverrides } from "@/lib/theme";
 import { ThemeModeProvider, ThemeModeInitScript } from "@/lib/theme-mode-context";
@@ -76,6 +76,9 @@ export default async function RootLayout({
   // and values to strict '#rrggbb' hex, so building this CSS string by plain
   // concatenation is safe — neither component can contain quotes or braces.
   const themeOverrides = await getThemeOverrides();
+  // Decision 2.8: the workspace main colour's light and dark sets. Emitted
+  // before the plugin overrides in the JSX below, so a plugin's colours still win.
+  const brandCss = await getBrandThemeCss();
   const overrideCss = Object.entries(themeOverrides)
     .map(([key, value]) => `--${key}:${value};`)
     .join("");
@@ -147,6 +150,7 @@ export default async function RootLayout({
         */}
         <ReferralCapture />
         {/* React 19 hoists <style> into <head> regardless of nesting position. */}
+        {brandCss !== "" && <style>{brandCss}</style>}
         {overrideCss !== "" && <style>{`:root{${overrideCss}}`}</style>}
         <BrandingProvider initial={branding}>
           <ThemeModeProvider>
