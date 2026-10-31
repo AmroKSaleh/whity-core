@@ -188,6 +188,28 @@ leak rather than a protection.
 
 ---
 
+## Making records searchable (`search`)
+
+`GET /api/search` (WHIT-783) searches documents, forms, people and organisational units, and the records of any data type that opts in. It serves the ⌘K palette and the always-on "search records" MCP tool. To opt in, add a `search` key to the declaration:
+
+```php
+'record' => [
+    'table'       => 'acme_records',
+    'label'       => ['en' => 'Supplies', 'ar' => 'المواد'],
+    'permissions' => ['read' => 'acme:read', /* … */],
+    'search'      => [
+        'title'    => 'name',               // required: the column people search by
+        'subtitle' => 'code',               // optional: shown under the title
+        'url'      => '/acme/records/{id}', // optional: where the result opens; {id} is the key
+    ],
+],
+```
+
+- **A `read` permission is required.** The declaration is refused without one, because a type nobody gates would be readable by everyone through search. A caller without that permission gets nothing from your type, not even that it exists.
+- **Only your declared table is read**, scoped to the caller's tenant through your `tenant_column`. Records in the trashed state are left out.
+- **Matching is loose for Arabic:** أ/إ/آ/ٱ match ا, ة matches ه, ى matches ي, and harakat and tatweel are ignored. Latin text is case-insensitive.
+- The published entry (`GET /api/data-types`) echoes `search` back as the host accepted it, or `null`.
+
 ## What outlives a record, and what dies with it
 
 `blocks_delete` and `cascade_delete` answer the **same question with opposite

@@ -132,6 +132,7 @@ final class CoreApiSchemas
             self::documentRoutingRoutes(),
             self::documentQrRoutes(),
             self::meInboxRoutes(),
+            self::searchRoutes(),
             self::userGroupRoutes(),
             self::documentRouteTemplateRoutes(),
             self::documentCollectionRoutes(),
@@ -174,6 +175,10 @@ final class CoreApiSchemas
         'PUT /api/me/notification-preferences',
         'GET /api/me/inbox/sources',
         'GET /api/me/inbox',
+        // WHIT-783: searches only the record types the caller may list, each
+        // with its list route's per-record rule.
+        'GET /api/search',
+        'GET /api/search/types',
         'GET /api/data-types',
         'GET /api/data-types/{type}/{id}',
         'POST /api/data-types/{type}/{id}/trash',
@@ -5299,6 +5304,27 @@ final class CoreApiSchemas
                 'open_count' => self::int(),
             ], ['key', 'label', 'origin', 'item_fields', 'open_count']),
             'InboxSourceListResponse' => self::listEnvelope('InboxSource'),
+            // ── Search (WHIT-783) ─────────────────────────────────────────────
+            'SearchLabel' => self::object(['en' => self::str(), 'ar' => self::str()], ['en', 'ar']),
+            'SearchHit' => self::object([
+                'type' => self::str(),
+                'id' => self::str(),
+                'title' => self::str(),
+                'subtitle' => self::str(true),
+                // A path in the web app, or null when the type has no page.
+                'url' => self::str(true),
+            ], ['type', 'id', 'title', 'subtitle', 'url']),
+            'SearchGroup' => self::object([
+                'type' => self::str(),
+                'label' => SchemaBuilder::ref('SearchLabel'),
+                'results' => ['type' => 'array', 'items' => SchemaBuilder::ref('SearchHit')],
+            ], ['type', 'label', 'results']),
+            'SearchResponse' => self::listEnvelope('SearchGroup'),
+            'SearchType' => self::object([
+                'type' => self::str(),
+                'label' => SchemaBuilder::ref('SearchLabel'),
+            ], ['type', 'label']),
+            'SearchTypeListResponse' => self::listEnvelope('SearchType'),
             // ── The document organizer (#978, implementing #947 item 5) ───────
             // A "folder" is a NAMED QUERY, never a stored container: a document
             // raised centrally and needed by fifteen units has no single home,
@@ -8139,6 +8165,14 @@ final class CoreApiSchemas
                 'cascade_delete' => ['type' => 'array', 'items' => SchemaBuilder::ref('DataTypeComposition')],
                 'actions' => ['type' => 'array', 'items' => ['type' => 'string', 'enum' => ['read', 'trash', 'restore', 'retire', 'delete']]],
                 'permissions' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
+                // WHIT-783: how GET /api/search finds this type's records, or
+                // null when the plugin did not opt in.
+                'search' => [
+                    'type' => 'object',
+                    'nullable' => true,
+                    'properties' => ['title' => self::str(), 'subtitle' => self::str(true), 'url' => self::str(true)],
+                    'required' => ['title', 'subtitle', 'url'],
+                ],
             ], ['key', 'source', 'label', 'lifecycle', 'blocks_delete', 'cascade_delete', 'actions']),
             'DataTypeListResponse' => self::listEnvelope('DataType'),
             // A counted set of rows with the plugin's own label for them. Used
@@ -10839,6 +10873,56 @@ final class CoreApiSchemas
                     'responses' => [
                         200 => self::jsonResponse("That source's items, with pagination", 'InboxItemListResponse'),
                         422 => self::errorResponse("'source' is missing or names no registered source"),
+                    ] + self::authErrors(),
+                ],
+            ],
+        ];
+    }
+
+    /**
+     * Search across record types (WHIT-783, docs/design/MCP-TOOL-SURFACE.md §5.13).
+     *
+     * No route gate: each record type is searched only when the caller holds
+     * that type's list permission, so the handler authorises per type, and a
+     * caller sees nothing about types they can't list.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function searchRoutes(): array
+    {
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/search',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'Search records: documents, forms, people, units and plugin records you can see',
+                    'description' => 'One search across every record type the caller may list, filtered exactly as each list is. '
+                        . 'Arabic spellings are matched loosely (أ/إ/آ/ا, ة/ه, ى/ي, diacritics and tatweel ignored, Arabic-Indic digits read as Western). '
+                        . 'Results are grouped by type, newest first, at most `limit` per type.',
+                    'tags' => ['search'],
+                    'parameters' => [
+                        self::queryParam('q', 'string', 'REQUIRED. Words to look for, at least 2 characters after folding, at most 200', true),
+                        self::queryParam('types', 'string', 'Comma-separated types to search (document, form, person, ou, or a plugin data-type key). Default: all you may list'),
+                        self::queryParam('limit', 'integer', 'Most results per type (default 5, max 20)'),
+                    ],
+                    'responses' => [
+                        200 => self::jsonResponse('Matches grouped by type; a type with no match is left out', 'SearchResponse'),
+                        422 => self::errorResponse("'q' is missing or too long"),
+                    ] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'GET',
+                'path' => '/api/search/types',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'The record types you can search',
+                    'tags' => ['search'],
+                    'responses' => [
+                        200 => self::jsonResponse('Each searchable type and its label', 'SearchTypeListResponse'),
                     ] + self::authErrors(),
                 ],
             ],

@@ -4616,6 +4616,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search records: documents, forms, people, units and plugin records you can see
+         * @description One search across every record type the caller may list, filtered exactly as each list is. Arabic spellings are matched loosely (أ/إ/آ/ا, ة/ه, ى/ي, diacritics and tatweel ignored, Arabic-Indic digits read as Western). Results are grouped by type, newest first, at most `limit` per type.
+         */
+        get: operations["get_api_v1_search"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/search/types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The record types you can search */
+        get: operations["get_api_v1_search_types"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings": {
         parameters: {
             query?: never;
@@ -5854,6 +5891,11 @@ export interface components {
             permissions?: {
                 [key: string]: string;
             };
+            search?: {
+                title: string;
+                subtitle: string | null;
+                url: string | null;
+            } | null;
         };
         DataTypeBlocker: {
             table: string;
@@ -8585,6 +8627,32 @@ export interface components {
         };
         RoutingRuleListResponse: {
             data: components["schemas"]["RoutingRule"][];
+        };
+        SearchGroup: {
+            type: string;
+            label: components["schemas"]["SearchLabel"];
+            results: components["schemas"]["SearchHit"][];
+        };
+        SearchHit: {
+            type: string;
+            id: string;
+            title: string;
+            subtitle: string | null;
+            url: string | null;
+        };
+        SearchLabel: {
+            en: string;
+            ar: string;
+        };
+        SearchResponse: {
+            data: components["schemas"]["SearchGroup"][];
+        };
+        SearchType: {
+            type: string;
+            label: components["schemas"]["SearchLabel"];
+        };
+        SearchTypeListResponse: {
+            data: components["schemas"]["SearchType"][];
         };
         SelectTenantRequest: {
             tenant_id: number;
@@ -34418,6 +34486,152 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RoutingRuleListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_search: {
+        parameters: {
+            query: {
+                /** @description REQUIRED. Words to look for, at least 2 characters after folding, at most 200 */
+                q: string;
+                /** @description Comma-separated types to search (document, form, person, ou, or a plugin data-type key). Default: all you may list */
+                types?: string;
+                /** @description Most results per type (default 5, max 20) */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Matches grouped by type; a type with no match is left out */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 'q' is missing or too long */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_search_types: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Each searchable type and its label */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchTypeListResponse"];
                 };
             };
             /** @description Missing or invalid authentication */

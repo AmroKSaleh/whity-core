@@ -3821,6 +3821,24 @@ $meInboxHandler = new \Whity\Api\MeInboxApiHandler($tokenValidator, $inboxSource
 $router->register('GET', '/api/me/inbox/sources', [$meInboxHandler, 'sources'], null);
 $router->register('GET', '/api/me/inbox',         [$meInboxHandler, 'list'],    null);
 
+// WHIT-783: one search across documents, forms, people, units and plugin
+// records that opted in, for the "search records" MCP tool and ⌘K. Session-
+// gated and unpermissioned at the route: each record type is searched only when
+// the caller holds that type's list permission. Plugin types are read from the
+// registry on each search, so types registered at plugin load are included.
+$searchPdo = $db->getPdo();
+$searchHandler = new \Whity\Api\SearchApiHandler(
+    new \Whity\Core\Search\SearchService(
+        static fn (): array => array_merge(
+            \Whity\Core\Search\CoreSearchSources::all($searchPdo),
+            \Whity\Core\Search\DataTypeSearchSource::fromRegistry($searchPdo, $dataTypeRegistry),
+        ),
+    ),
+    $roleChecker,
+);
+$router->register('GET', '/api/search',       [$searchHandler, 'search'], null);
+$router->register('GET', '/api/search/types', [$searchHandler, 'types'],  null);
+
 // 13a-nonies-quinquies. Per-user collections (#978), and the star that is one
 // of them under a well-known key. Gated on documents:read rather than a
 // permission of their own: a collection is invisible to everyone but its owner

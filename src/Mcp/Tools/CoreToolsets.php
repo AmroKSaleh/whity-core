@@ -39,6 +39,11 @@ final class CoreToolsets
             'titleAr'     => 'حسابي',
             'description' => 'Who you are signed in as, your permissions, emails and your own activity.',
         ],
+        'core.search' => [
+            'title'       => 'Search',
+            'titleAr'     => 'البحث',
+            'description' => 'Find documents, forms, people, units and plugin records you can see.',
+        ],
         'core.inbox' => [
             'title'       => 'Inbox and notifications',
             'titleAr'     => 'الوارد والإشعارات',
@@ -104,6 +109,7 @@ final class CoreToolsets
     /** OpenAPI tag => core toolset. */
     public const TAG_TOOLSET = [
         'me'                       => 'core.me',
+        'search'                   => 'core.search',
         'inbox'                    => 'core.inbox',
         'notifications'            => 'core.inbox',
         'users'                    => 'core.people',
@@ -150,15 +156,15 @@ final class CoreToolsets
 
     /**
      * Core's always-on operations: read-only, everyday, listed directly next to
-     * search and call (owner decision 4, 2026-10-31). `get_api_documents`
-     * stands in for "search records" until `GET /api/search` ships (WHIT-783).
+     * search and call (owner decision 4, 2026-10-31). "Search records" is
+     * `GET /api/search` (WHIT-783).
      */
     public const ALWAYS_ON = [
         'get_api_me',
         'get_api_me_inbox',
         'get_api_documents_id',
         'get_api_document_templates',
-        'get_api_documents',
+        'get_api_search',
     ];
 
     /**
