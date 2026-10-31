@@ -4634,6 +4634,23 @@ $mcpTransportHandler = new McpTransportHandler(
         recordTokenUse: $mcpRecordTokenUse,
     ),
     protectedResource: $mcpProtectedResource,
+    // WHIT-748: /mcp?tools=default lists the always-on tools, then the same
+    // discovery tools, which reach everything else. Its list changes only when
+    // the always-on set does, so it announces no list_changed either.
+    defaultDispatcher: new Dispatcher(
+        array_merge($mcpHandlers, [
+            'initialize' => new InitializeHandler(listChanged: false),
+            'server/discover' => new DiscoverHandler(
+                'A few everyday tools are listed directly. Everything else is reached through search_tools: search for what you need, describe_tool to see its arguments, then call_tool.',
+            ),
+            'tools/list' => $mcpDiscovery->defaultListHandler(),
+            'tools/call' => $mcpDiscovery->callHandler(),
+        ]),
+        $tokenValidator,
+        $mcpRateLimiter,
+        $tenantMcpEnabled,
+        recordTokenUse: $mcpRecordTokenUse,
+    ),
 );
 $router->registerUnversioned('GET', '/.well-known/oauth-protected-resource', [$mcpProtectedResource, 'metadata']);
 $router->registerUnversioned('GET', '/.well-known/oauth-protected-resource/mcp', [$mcpProtectedResource, 'metadata']);

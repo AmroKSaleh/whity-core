@@ -11,6 +11,9 @@ use Whity\Mcp\JsonRpc\McpException;
 use Whity\Mcp\JsonRpc\MethodHandler;
 use Whity\Mcp\Tools\ToolsCallHandler;
 use Whity\Mcp\Tools\ToolsListHandler;
+use Whity\Mcp\Tools\CoreToolsets;
+use Whity\Mcp\Tools\ToolSurface;
+use Whity\Mcp\Tools\ToolSurfaceRequest;
 
 /**
  * Discovery mode: three tools in place of the whole catalogue (WHIT-707).
@@ -62,6 +65,53 @@ final class DiscoveryTools
                 return ['tools' => DiscoveryTools::definitions()];
             }
         };
+    }
+
+    /**
+     * The tools/list handler for `?tools=default` (WHIT-748): the always-on
+     * tools this caller may use, then the discovery tools for everything else.
+     */
+    public function defaultListHandler(): MethodHandler
+    {
+        $self = $this;
+        return new class ($self) implements MethodHandler {
+            public function __construct(private readonly DiscoveryTools $discovery) {}
+
+            /** @param array<string, mixed>|null $params */
+            public function __invoke(?array $params, ?string $bearerToken): mixed
+            {
+                return ['tools' => [...$this->discovery->alwaysOnTools($params, $bearerToken), ...DiscoveryTools::definitions()]];
+            }
+        };
+    }
+
+    /**
+     * The always-on tools the caller may use, in the stable order, within the
+     * request's `?toolsets=`. Plugin tools are not listed here yet: a plugin's
+     * always-on tool shows only once a tenant admin enables it, which arrives
+     * with SDK support (WHIT-752, WHIT-754). Until then they are found through
+     * search like any other plugin tool.
+     *
+     * @param array<string, mixed>|null $params
+     * @return list<array<string, mixed>>
+     */
+    public function alwaysOnTools(?array $params, ?string $bearerToken): array
+    {
+        $principal = $bearerToken !== null ? $this->tokenValidator->validateBearerForMcp($bearerToken) : null;
+        if ($principal === null) {
+            return [];
+        }
+        $surface = ToolSurfaceRequest::fromParams($params);
+
+        return array_values(array_filter(
+            $this->toolsList->listFor($principal, TenantContext::getTenantId()),
+            static function (array $tool) use ($surface): bool {
+                $meta = is_array($tool['_meta'] ?? null) ? $tool['_meta'] : [];
+                return ($meta[ToolSurface::META_VISIBILITY] ?? null) === ToolSurface::VISIBILITY_ALWAYS_ON
+                    && CoreToolsets::isAlwaysOn((string) ($tool['name'] ?? ''))
+                    && $surface->selectsTool($tool);
+            },
+        ));
     }
 
     /** The tools/call handler for discovery mode. */
@@ -144,9 +194,11 @@ final class DiscoveryTools
         /** @var array<string, mixed> $arguments */
         $arguments = is_array($params['arguments'] ?? null) ? $params['arguments'] : [];
 
+        $surface = ToolSurfaceRequest::fromParams($params);
+
         return match ($name) {
-            self::SEARCH   => $this->search($arguments, $bearerToken),
-            self::DESCRIBE => $this->describe($arguments, $bearerToken),
+            self::SEARCH   => $this->search($arguments, $bearerToken, $surface),
+            self::DESCRIBE => $this->describe($arguments, $bearerToken, $surface),
             self::CALL     => $this->callThrough($arguments, $bearerToken),
             // A real tool called by its own name: the real handler decides.
             default        => ($this->toolsCall)($params, $bearerToken),
@@ -157,7 +209,7 @@ final class DiscoveryTools
      * @param array<string, mixed> $arguments
      * @return array<string, mixed>
      */
-    private function search(array $arguments, ?string $bearerToken): array
+    private function search(array $arguments, ?string $bearerToken, ToolSurfaceRequest $surface): array
     {
         $query = is_string($arguments['query'] ?? null) ? $arguments['query'] : '';
         $limit = is_int($arguments['limit'] ?? null) ? max(1, min(self::MAX_LIMIT, $arguments['limit'])) : self::DEFAULT_LIMIT;
@@ -173,7 +225,7 @@ final class DiscoveryTools
         ));
 
         $scored = [];
-        foreach ($this->visibleTools($bearerToken) as $tool) {
+        foreach ($this->visibleTools($bearerToken, $surface) as $tool) {
             $score = $terms === [] ? 1 : self::score($tool, $terms);
             if ($score > 0) {
                 $scored[] = [$score, $tool];
@@ -204,10 +256,10 @@ final class DiscoveryTools
      * @param array<string, mixed> $arguments
      * @return array<string, mixed>
      */
-    private function describe(array $arguments, ?string $bearerToken): array
+    private function describe(array $arguments, ?string $bearerToken, ToolSurfaceRequest $surface): array
     {
         $name = is_string($arguments['name'] ?? null) ? $arguments['name'] : '';
-        foreach ($this->visibleTools($bearerToken) as $tool) {
+        foreach ($this->visibleTools($bearerToken, $surface) as $tool) {
             if ($tool['name'] === $name) {
                 return self::result($tool);
             }
@@ -242,13 +294,16 @@ final class DiscoveryTools
     }
 
     /** @return list<array<string, mixed>> */
-    private function visibleTools(?string $bearerToken): array
+    private function visibleTools(?string $bearerToken, ?ToolSurfaceRequest $surface = null): array
     {
         $principal = $bearerToken !== null ? $this->tokenValidator->validateBearerForMcp($bearerToken) : null;
         if ($principal === null) {
             throw new McpException(ErrorCode::UNAUTHENTICATED, 'Unauthenticated');
         }
-        return $this->toolsList->listFor($principal, TenantContext::getTenantId());
+        $tools = $this->toolsList->listFor($principal, TenantContext::getTenantId());
+
+        // WHIT-748: `?toolsets=` limits what search and describe look at.
+        return $surface === null ? $tools : array_values(array_filter($tools, static fn (array $tool): bool => $surface->selectsTool($tool)));
     }
 
     /**

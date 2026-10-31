@@ -7,6 +7,8 @@ namespace Whity\Mcp\Transport;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Mcp\Auth\OAuth\ProtectedResource;
+use Whity\Mcp\JsonRpc\Dispatcher;
+use Whity\Mcp\Tools\ToolSurfaceRequest;
 use Whity\Mcp\McpFeatureDisabledException;
 use Whity\Mcp\RateLimit\McpRateLimitException;
 
@@ -46,6 +48,9 @@ final class McpTransportHandler
         // WHIT-709: names the Protected Resource Metadata in the 401 challenge,
         // so an OAuth client learns where to sign in. Null: a bare challenge.
         private readonly ?ProtectedResource $protectedResource = null,
+        // WHIT-748: serves `/mcp?tools=default`, the always-on tools plus the
+        // discovery tools. Null: that mode falls back to the full list.
+        private readonly ?McpRequestHandlerInterface $defaultDispatcher = null,
     ) {}
 
     /**
@@ -66,7 +71,8 @@ final class McpTransportHandler
 
         $bearer     = $this->extractBearer($request);
         $rawBody    = $request->getBody();
-        $dispatcher = $this->dispatcherFor($request);
+        $surface    = ToolSurfaceRequest::fromQuery(self::query($request));
+        $dispatcher = $this->dispatcherFor($surface);
 
         // WHIT-708: the headers 2026-07-28 mirrors from the body, for the
         // dispatcher to check against it. Earlier versions send only the first.
@@ -77,6 +83,9 @@ final class McpTransportHandler
                 $mcpHeaders[strtolower($name)] = trim($value);
             }
         }
+        // WHIT-748: the URL's tool-surface selection, for the handlers. Only the
+        // three headers above are taken from the client, so a client can't set this.
+        $mcpHeaders[Dispatcher::TOOL_SURFACE_HEADER] = (string) json_encode($surface->toArray());
 
         try {
             $rawResponse = $dispatcher->handle($rawBody, $bearer, $mcpHeaders);
@@ -192,22 +201,36 @@ final class McpTransportHandler
      * `Bearer <token>` format. Auth validation is the dispatcher's responsibility.
      */
     /**
-     * The discovery dispatcher when the URL asks for it (`?tools=discover`),
-     * else the full one. An unknown value gets the full catalogue: it is what
-     * every client got before discovery mode existed.
+     * The dispatcher for the requested mode (WHIT-748): discovery tools only,
+     * always-on plus discovery, or the full list. A mode this host has not
+     * wired falls back to the full list, which is what every client got
+     * before the modes existed.
      */
-    private function dispatcherFor(Request $request): McpRequestHandlerInterface
+    private function dispatcherFor(ToolSurfaceRequest $surface): McpRequestHandlerInterface
     {
-        if ($this->discoveryDispatcher === null) {
-            return $this->dispatcher;
+        return match ($surface->mode) {
+            ToolSurfaceRequest::MODE_DISCOVER => $this->discoveryDispatcher ?? $this->dispatcher,
+            ToolSurfaceRequest::MODE_DEFAULT  => $this->defaultDispatcher ?? $this->dispatcher,
+            default                           => $this->dispatcher,
+        };
+    }
+
+    /**
+     * The query parameters. Request::fromGlobals() keeps only the path, so in
+     * production the query is in $_GET (reset per request by the worker); a
+     * Request built with the query in its path (tests, internal callers) is
+     * read too, and wins. The same two sources AuditLogApiHandler reads.
+     *
+     * @return array<string, mixed>
+     */
+    private static function query(Request $request): array
+    {
+        parse_str((string) parse_url($request->getPath(), PHP_URL_QUERY), $fromPath);
+        $query = [];
+        foreach ($fromPath + $_GET as $key => $value) {
+            $query[(string) $key] = $value;
         }
-        // Request::fromGlobals() keeps only the path, so in production the query
-        // is in $_GET (reset per request by the worker); a Request built with
-        // the query in its path (tests, internal callers) is read too. The same
-        // two sources AuditLogApiHandler reads.
-        parse_str((string) parse_url($request->getPath(), PHP_URL_QUERY), $query);
-        $mode = $query['tools'] ?? $_GET['tools'] ?? null;
-        return $mode === 'discover' ? $this->discoveryDispatcher : $this->dispatcher;
+        return $query;
     }
 
     private function extractBearer(Request $request): ?string
