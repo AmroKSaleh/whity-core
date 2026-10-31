@@ -133,6 +133,7 @@ final class CoreApiSchemas
             self::documentQrRoutes(),
             self::meInboxRoutes(),
             self::searchRoutes(),
+            self::agentProposalRoutes(),
             self::userGroupRoutes(),
             self::documentRouteTemplateRoutes(),
             self::documentCollectionRoutes(),
@@ -5261,6 +5262,24 @@ final class CoreApiSchemas
                 'label' => SchemaBuilder::ref('SearchLabel'),
             ], ['type', 'label']),
             'SearchTypeListResponse' => self::listEnvelope('SearchType'),
+            // ── Agent proposals (WHIT-784) ────────────────────────────────────
+            'AgentProposal' => self::object([
+                'id' => self::int(),
+                // waiting · approved · declined · expired · undone
+                'status' => ['type' => 'string', 'enum' => ['waiting', 'approved', 'declined', 'expired', 'undone']],
+                'tool' => self::str(),
+                'summary' => self::str(),
+                'arguments' => ['type' => 'object', 'additionalProperties' => true],
+                'diff' => ['nullable' => true, 'description' => 'What would change, when the operation can preview it'],
+                'permissions' => ['type' => 'array', 'items' => self::str()],
+                'undoWindowSeconds' => self::int(true),
+                'result' => ['nullable' => true, 'description' => 'What the operation answered when it ran'],
+                'decidedAt' => self::str(true),
+                'expiresAt' => self::str(),
+                'createdAt' => self::str(),
+            ], ['id', 'status', 'tool', 'summary', 'arguments', 'diff', 'permissions', 'undoWindowSeconds', 'result', 'decidedAt', 'expiresAt', 'createdAt']),
+            'AgentProposalListResponse' => self::listEnvelope('AgentProposal'),
+            'AgentProposalResponse' => self::dataEnvelope(SchemaBuilder::ref('AgentProposal')),
             // ── The document organizer (#978, implementing #947 item 5) ───────
             // A "folder" is a NAMED QUERY, never a stored container: a document
             // raised centrally and needed by fifteen units has no single home,
@@ -10862,6 +10881,68 @@ final class CoreApiSchemas
                         200 => self::jsonResponse('Each searchable type and its label', 'SearchTypeListResponse'),
                     ] + self::authErrors(),
                 ],
+            ],
+        ];
+    }
+
+    /**
+     * The approvals inbox for agent proposals (WHIT-784, register 7.5a/7.5b).
+     *
+     * No route gate: each route answers only for proposals made on the
+     * caller's own behalf. NOT agent-callable, on purpose: an agent must never
+     * be able to approve its own proposal, so these stay off the MCP surface.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function agentProposalRoutes(): array
+    {
+        $decision = static fn (string $summary, string $description, bool $editable): array => [
+            'summary' => $summary,
+            'description' => $description,
+            'tags' => ['me'],
+            'parameters' => [['name' => 'id', 'in' => 'path', 'required' => true, 'description' => 'ID of the proposal.', 'schema' => ['type' => 'integer']]],
+            'request' => $editable ? self::object(['arguments' => ['type' => 'object', 'additionalProperties' => true, 'description' => 'Edited arguments to run with instead of the agent\'s (optional).']], []) : null,
+            'responses' => [
+                200 => self::jsonResponse('The proposal after the decision', 'AgentProposalResponse'),
+                404 => self::errorResponse('No such proposal made on your behalf'),
+                409 => self::errorResponse('The proposal is no longer waiting (decided or expired)'),
+            ] + self::authErrors(),
+        ];
+
+        return [
+            [
+                'method' => 'GET',
+                'path' => '/api/me/agent-proposals',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => [
+                    'summary' => 'What agents acting for you are waiting for you to approve, and what you decided',
+                    'tags' => ['me'],
+                    'parameters' => [self::queryParam('status', 'string', 'waiting, approved, declined, expired or undone; all when omitted')],
+                    'responses' => [200 => self::jsonResponse('Your proposals, newest first', 'AgentProposalListResponse')] + self::authErrors(),
+                ],
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/me/agent-proposals/{id:\d+}/approve',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => array_filter($decision(
+                    'Approve an agent\'s proposal and run it for you',
+                    'Runs the operation as your delegate, after checking again that you and the agent may. Edit the arguments by sending them. Runs once, however many times it is approved.',
+                    true,
+                ), static fn (mixed $v): bool => $v !== null),
+            ],
+            [
+                'method' => 'POST',
+                'path' => '/api/me/agent-proposals/{id:\d+}/decline',
+                'requiredRole' => null,
+                'requiredPermission' => null,
+                'schema' => array_filter($decision(
+                    'Decline an agent\'s proposal',
+                    'Nothing runs. The agent can ask again.',
+                    false,
+                ), static fn (mixed $v): bool => $v !== null),
             ],
         ];
     }
