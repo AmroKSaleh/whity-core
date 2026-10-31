@@ -17,6 +17,7 @@ use Throwable;
 use Whity\Mcp\JsonRpc\McpException;
 use Whity\Mcp\JsonRpc\MethodHandler;
 use Whity\Core\Request;
+use Whity\Mcp\Auth\AgentScopeGrant;
 use Whity\Mcp\Auth\McpScope;
 
 /**
@@ -269,6 +270,7 @@ final class ToolsCallHandler implements MethodHandler
             if ($authored !== null) {
                 try {
                     $this->assertInTokenToolsets($principal, $this->authoredTools?->toolsetOf($toolName));
+                    $this->assertAgentMayRun($principal, $this->authoredTool($toolName), $authored);
                     return $this->executeAuthored($toolName, $arguments, $authored, $principal);
                 } finally {
                     $this->auditLogger?->record('mcp.tools.call', [
@@ -295,6 +297,7 @@ final class ToolsCallHandler implements MethodHandler
         // outcome (RBAC denial, handler error, or success).
         try {
             $this->assertInTokenToolsets($principal, $this->toolDeriver->toolsetOf($toolName));
+            $this->assertAgentMayRun($principal, $this->toolDeriver->toolFor($toolName) ?? [], $this->toolDeriver->buildAccessMap()[$toolName] ?? []);
             return $this->executeResolved($toolName, $arguments, $declaration, $principal);
         } finally {
             $this->auditLogger?->record('mcp.tools.call', [
@@ -331,6 +334,46 @@ final class ToolsCallHandler implements MethodHandler
             $clean[$key] = is_array($value) ? $this->redactArgs($value) : $value;
         }
         return $clean;
+    }
+
+    /**
+     * WHIT-753: what an agent's scope grant lets it do with this tool. Off is
+     * refused. Ask first would store a proposal for the granting person to
+     * approve; until agent proposals exist (WHIT-784) it is refused too, and
+     * no agent credential is issued in the meantime (owner decision 12), so
+     * this only ever answers a credential that should not exist yet.
+     *
+     * @param array<string, mixed> $tool
+     * @param array<string, mixed> $access
+     * @throws McpException
+     */
+    private function assertAgentMayRun(McpPrincipal $principal, array $tool, array $access): void
+    {
+        if (!AgentScopeGrant::appliesTo($principal)) {
+            return;
+        }
+        $mode = ToolsListHandler::agentModeFor($tool, $access, $principal);
+        if ($mode === AgentScopeGrant::OFF) {
+            throw new McpException(ErrorCode::FORBIDDEN, 'This agent is not granted this operation.');
+        }
+        if ($mode === AgentScopeGrant::ASK) {
+            throw new McpException(ErrorCode::FORBIDDEN, 'This operation needs a person to approve it, and approvals are not available yet.');
+        }
+    }
+
+    /**
+     * The tool object of an authored tool, as tools/list publishes it.
+     *
+     * @return array<string, mixed>
+     */
+    private function authoredTool(string $name): array
+    {
+        foreach ($this->authoredTools?->toolObjects() ?? [] as $tool) {
+            if (($tool['name'] ?? null) === $name) {
+                return $tool;
+            }
+        }
+        return [];
     }
 
     /**
