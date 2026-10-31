@@ -26,9 +26,12 @@ export interface AgentActivityItem {
   actorKind?: ActorKind
   onBehalfOf?: string
   text: React.ReactNode
-  /** Already formatted ("13:58"). */
-  time: string
-  /** The ISO time, for the <time> element. */
+  /**
+   * Already formatted ("13:58") by the caller's date display, which honours a
+   * workspace that hides dates; empty when it does.
+   */
+  timeLabel: string
+  /** The wire timestamp, for the <time> element and ordering. */
   dateTime?: string
   tool?: string
   extra?: React.ReactNode
@@ -57,6 +60,17 @@ const KIND_ICON: Record<AgentActivityKind, IconName> = {
   approve: "check",
   undo: "undo",
   error: "alert",
+}
+
+/**
+ * The row's time, already formatted by the caller's date display (which
+ * returns nothing when the workspace hides dates), so nothing here formats
+ * or prints a raw timestamp.
+ */
+function ActivityTime({ item }: { item: AgentActivityItem }) {
+  const { timeLabel, dateTime } = item
+  if (timeLabel === "") return null
+  return <time dateTime={dateTime}>{timeLabel}</time>
 }
 
 function AgentActivity({ items, filter = false, label = "Agent activity", labels, className }: AgentActivityProps) {
@@ -104,7 +118,7 @@ function AgentActivity({ items, filter = false, label = "Agent activity", labels
               <span className={cn("text-sm", item.kind === "read" && "text-muted-foreground")}>{item.text}</span>
             </div>
             <div className="flex flex-wrap gap-2 text-muted-foreground tabular-nums">
-              <time dateTime={item.dateTime}>{item.time}</time>
+              <ActivityTime item={item} />
               {item.tool && (
                 <code className="rounded-sm bg-muted px-[5px] py-px font-mono text-xs text-foreground">{item.tool}</code>
               )}

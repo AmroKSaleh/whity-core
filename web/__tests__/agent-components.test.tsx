@@ -135,8 +135,8 @@ describe('UndoBar and AgentActivity', () => {
       <AgentActivity
         filter
         items={[
-          { id: 'a', kind: 'read', actor: 'Billing assistant', text: 'Read 48 invoices', time: '13:58', tool: 'invoices.list' },
-          { id: 'b', kind: 'act', actor: 'HR assistant', text: 'Approved leave', time: '14:00' },
+          { id: 'a', kind: 'read', actor: 'Billing assistant', text: 'Read 48 invoices', timeLabel: '13:58', tool: 'invoices.list' },
+          { id: 'b', kind: 'act', actor: 'HR assistant', text: 'Approved leave', timeLabel: '14:00' },
         ]}
       />,
     );
