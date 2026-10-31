@@ -1,0 +1,1 @@
+- Plan for the agent collaboration layer and the unified app shell: what the web app has today against the design, the gaps, and the phased build (docs/design/AGENT-LAYER-AND-SHELL-PLAN.md).
