@@ -1,6 +1,6 @@
 # Document themes: design (grounding pass)
 
-Status: **approved by the owner on 31 Oct 2026** (WHIT-731), with the changes in section 12: E.44-E.47 are in the register, personal themes and font pairs are out of v1, and the workspace main colour is stored server-side. Sibling: `DOCUMENT-AUTOMATION.md` (WHIT-740), plugins creating and rendering documents from templates. Nothing here is built, and no implementation PR opens until the owner approves this document and the register additions in section 9. Written 31 Oct 2026 against `origin/develop` at `0b3e2d4e` (M4b merged; M4c branch has no commits yet).
+Status: **approved by the owner on 31 Oct 2026** (WHIT-731), fully decided (all nine questions answered in section 12), with these changes: E.44-E.47 are in the register, personal themes and font pairs are out of v1, and the workspace main colour is stored server-side. Sibling: `DOCUMENT-AUTOMATION.md` (WHIT-740), plugins creating and rendering documents from templates. Nothing here is built, and no implementation PR opens until the owner approves this document and the register additions in section 9. Written 31 Oct 2026 against `origin/develop` at `0b3e2d4e` (M4b merged; M4c branch has no commits yet).
 
 A document theme decides how a document looks in the editor's page view, in the continuous sheet and in the PDF Whity Render makes. This document proposes how tenants, people and plugins customise that look, through the API and the plugin SDK, without breaking the decision register.
 
@@ -13,7 +13,7 @@ A document theme decides how a document looks in the editor's page view, in the 
 - **Published means frozen.** Publishing a template stores its resolved theme with the version, as synced saved blocks are pinned (E.38). Changing a theme reaches printed documents only when a person republishes.
 - **`documents.print_color` moves into the workspace's default theme** and the setting is removed (no-legacy rule).
 - **Plugins** declare themes through a new SDK interface, `PluginDocumentThemesInterface`. The existing `PluginThemeInterface` (app colours over `GET /api/theme`) is unrelated and stays as it is.
-- **Whity Render is a closed, paid service** (owner, 31 Oct 2026). Core owns the theme model and sends the resolved theme in the render payload; the font and print-size work (phase 1, WHIT-733) lands in the Whity Render service, wherever its code lives after the split. The editor's page view stays in the open core.
+- **Two renderers, one contract** (owner, 31 Oct 2026, Q9). The basic open renderer (`render-service/`, image `ghcr.io/whity-org/render`) stays in whity-core so free self-hosted installs print PDFs, themes included. Whity Render is the paid, hosted upgrade (Arabic shaping polish, JoFotara invoices, batches, higher limits, an SLA) and takes the same payload. Core owns the theme model and sends the resolved theme either way; the font and print-size work (phase 1, WHIT-733) is core work on the open renderer.
 - **Sequencing (owner, 31 Oct 2026):** the letterhead logo is its own small PR now (WHIT-734); the token work (phase 1) can start now; the model and API are **M4d, right after M4c**; the theme SDK goes with M7 and the type options (title face, large print) with M8.
 
 ## 1. What exists today
@@ -315,4 +315,4 @@ Theming is part of the free core. A plugin can put its own themes behind its own
 | 6 | The letterhead logo gets its own small PR now, independent of themes and M4c | WHIT-734 |
 | 7 | Store the workspace main colour server-side; the document accent defaults to it | Section 4.5, part of M4d |
 | 8 | Commission the theme picker and Document themes screen designs before phase 3 | A design task |
-| 9 | Open: what a free core install prints with, now that Whity Render is closed and paid | Decides where WHIT-733 lives |
+| 9 | Keep a basic **open renderer in core** (`render-service/`, `ghcr.io/whity-org/render`) so free self-hosted installs print PDFs, themes included. Whity Render is the paid, hosted upgrade (Arabic shaping polish, JoFotara invoices, batches, higher limits, SLA) with the same contract | WHIT-733 stays in core and targets the open renderer |
