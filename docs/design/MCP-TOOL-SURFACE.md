@@ -1,4 +1,4 @@
-# MCP tool surface: toolsets, visibility and budgets
+# MCP tool surface: toolsets, visibility, splits and budgets
 
 Status: proposal for owner review (2026-10-31). Nothing here is built yet.
 Related: ADR-0006 and its amendments (MCP server), ADR-0015 (OAuth), `docs/design/DOCUMENT-THEMES.md` §6 and §7, `docs/design/DOCUMENT-AUTOMATION.md` §3.10 (both on branch `design/document-themes`).
@@ -15,6 +15,7 @@ The owner's problem: "too many mcp tools in one create a disaster... and not all
 - **Budgets with lints.** Tool names stay within `[A-Za-z0-9_-]{1,64}`. Authored descriptions are capped at 500 characters. The default list is capped at 30 tools and about 6k tokens. A CI test holds core to its budget, and the plugin loader enforces the per-plugin limits at load.
 - **SDK 1.47, additive** (the next SDK minor; the document designs also add SDK interfaces, so the number goes to whichever ships first). Authored tool descriptors gain `toolset`, `visibility` and `agentPolicy`. A new optional `PluginMcpToolsetsInterface` declares a plugin's toolsets (title and one-line description). Derived routes opt in or out through the existing `schema['mcp']` key, which now also takes an array.
 - **Agent policy.** Routes and authored tools can declare `agentPolicy` (`allow`, `refuse`, `suggest-only` or `propose`), enforced at the route so REST and MCP agree. The document designs already rely on it. It needs a way to tell an agent token from a person's own client, which Whity doesn't have yet (§5.12).
+- **Splits ("MCP splitter").** `/mcp/<split>` serves one slice (a core area or a plugin) as its own MCP server, with its own URL, OAuth resource and Server Card and a hard boundary (tools outside the slice don't exist there), all from the same Whity server and RBAC. A plugin's root toolset gets a split automatically. Splits sit alongside in-server discovery and don't replace it (§5.13).
 - **Back-compat.** Existing tool names don't change. `/mcp` with no query keeps returning the full permitted list until the owner decides to flip the default (§10, Q1). `?tools=discover` keeps working, and so do tokens without toolset entries and descriptors without the new keys.
 
 ## 2. What exists today
@@ -114,6 +115,8 @@ A toolset has:
 | `title` | English, at most 40 characters, with an Arabic label (register rule: every visible string). |
 | `description` | One sentence, at most 160 characters. It is shown by `search_tools` and in the connect wizard. |
 | `owner` | `core` or the plugin key. A plugin can only declare toolsets under its own key. |
+| `requiresEntitlement` | Optional `EntitlementRegistry` key. Tenants without it don't see the toolset's tools, in any mode or split (§5.13). For paid slices such as Whity-Builder. |
+| `split` | Optional, plugins: whether a sub-toolset gets its own endpoint (§5.13). A root toolset always does. |
 
 **Core toolsets** are a curated map in a new `src/Mcp/Tools/CoreToolsets.php`, about 15 entries, merging the 40 OpenAPI tags into areas a person would name: `core.me`, `core.people` (users, roles, ous, groups, memberships), `core.documents` (documents, templates, blocks, collections, routes), `core.forms`, `core.convening`, `core.inbox` (inbox and notifications), `core.taxonomy` (tags, data types), `core.time`, `core.settings` (settings, branding, languages, translations), `core.billing` (plans, subscriptions, entitlements, licensing), `core.security` (auth providers, SSO, security, 2FA recovery, audit), `core.platform` (platform-ops, tenants, instance, plugins). A derived core tool takes its toolset from its route's first tag through that map. `RouteCatalogueCompletenessTest` gains a check that every exposed core route maps to a toolset.
 
@@ -210,7 +213,7 @@ A `toolset` outside the plugin's own key is refused, and so is a `visibility` ot
 ```php
 interface PluginMcpToolsetsInterface
 {
-    /** @return list<array{id: string, title: string, titleAr?: string, description: string}> */
+    /** @return list<array{id: string, title: string, titleAr?: string, description: string, split?: bool, requiresEntitlement?: string}> */
     public function getMcpToolsets(): array;
 }
 ```
@@ -283,6 +286,62 @@ Register rule: agents never change anything directly. What they do is a suggesti
 - Default for write routes without a declaration: `allow` in phase 1, so nothing changes. The owner decides whether writes default to `propose` once proposals exist (Q5).
 - **Prerequisite: Whity has no "agent principal" today.** MCP principals are `user` (an MCP token) or `session`. A token held by a person's own Claude or Cursor and one held by an unattended agent look the same. `agentPolicy` needs that distinction first (Q5). This design proposes an `agent` flag on the token, set by the issuing screen and by OAuth client registration, shown in the audit trail.
 
+### 5.13 MCP splits: one endpoint per slice (owner addition: "we also want mcp splitter")
+
+Read here as: split Whity's single MCP server into several MCP endpoints, so a client connects only to the slice it needs, and each slice carries its own permission-filtered tool list. Other readings are in Q6.
+
+**What a split is.** A split is a named, published selection of toolsets, served at its own URL by the same server: the same process, Dispatcher, auth, RBAC, audit and rate limits. To a client it is a separate MCP server, with its own URL, `serverInfo` and OAuth resource. To Whity it is a fixed `toolsets` selection plus one hard rule: **tools outside the split don't exist on that endpoint.** `tools/call` for them answers "unknown tool", as if the client had connected to a different server. That is the difference from `?toolsets=`, which only changes what is listed.
+
+**How a split is defined.**
+
+| Source | Splits | Rule |
+|---|---|---|
+| Core | A curated list in `CoreToolsets.php`, initially one per core area that is useful on its own: `documents`, `forms`, `convening`, `people` (users, roles, OUs, groups), `inbox`, `admin` (settings, branding, languages), `billing`, `security` (auth providers, SSO, audit), `platform` (platform operators only) | Each names one or more core toolsets. Owner reviews the list (Q7). |
+| Plugin | The plugin's root toolset always gets a split. A sub-toolset gets one only if it declares `split: true` (§5.7). | Plugins can only split their own toolsets. |
+| Operator | `MCP_SPLITS` config, for example `sales=core.forms,acme.*` | Composite splits for one deployment. No tenant-level splits in phase 1. |
+
+A split's tools are its toolsets' tools, filtered by exposure, the token (scope and audience) and RBAC, exactly as in §2.2. Inside a split the default mode is `full`, because a split is meant to be small, but `?tools=default` and `?tools=discover` still work. A split over 40 tools or 10k tokens gets a CI warning (core) or a load warning (plugin). `core.documents` (39 tools now, more with themes and automation) is the first that may need a sub-split (`documents-templates`).
+
+**URL scheme.**
+
+- `POST /mcp/<split>`, where `<split>` is `[a-z0-9-]+` for core and `<pluginKey>` or `<pluginKey>-<sub>` for plugins. Core split names and plugin keys share one namespace. Core names are reserved, and a plugin whose key collides is served under `/mcp/x-<pluginKey>` with a load warning.
+- `GET /mcp/<split>` answers 405, like `/mcp`.
+- `/mcp/<split>/server-card` serves the split's MCP Server Card (SEP-2127).
+- `/mcp` itself stays the whole server: every split's tools, in the modes of §5.3.
+- `serverInfo.name` is `whity-core/<split>`, and `instructions` names the split and the sibling splits, so a client showing several Whity servers can tell them apart.
+- One router entry (`/mcp/{split}`) resolves the split per request into the same `ToolSurfaceRequest` as §5.3, so no per-split worker state is needed. An unknown or unavailable split answers 404.
+
+**Auth and token scoping per split.**
+
+- **OAuth tokens (ADR-0015).** Each split is its own RFC 8707 resource, `https://<host>/mcp/<split>`, with Protected Resource Metadata at `/.well-known/oauth-protected-resource/mcp/<split>` and a 401 challenge naming it. A token whose `aud` is the split URL works only on that split. A token whose `aud` is `/mcp` works on `/mcp` and on every split, so existing tokens keep working. `OAuthAccessTokenVerifier` accepts exactly one resource today; it changes to accept `/mcp` or the URL of the split being called.
+- **Whity-issued MCP tokens.** These have no `aud`. The connect wizard issues them with `toolset:` scope entries matching the split (§5.4), so a token made for `/mcp/documents` can't be used for the people tools on `/mcp` either.
+- **Rate limits** stay per principal and per tenant across all splits. Splitting must not multiply a client's budget.
+- **Audit:** `mcp.tools.call` records the split.
+- **Entitlements:** a toolset may declare `requiresEntitlement` (an `EntitlementRegistry` key). A split whose toolsets all need an entitlement the tenant lacks answers 404 for that tenant and is left out of discovery. The tools themselves are filtered the same way on `/mcp`. This is how a paid service's slice, such as the Whity-Builder toolset, stays invisible to tenants without it. It is checked per request through `FeatureService` / `EntitlementService`, as the MCP feature itself already is (`mcp.access`).
+
+**Discovery of splits.**
+
+- `GET /api/mcp/splits` (authenticated): the splits the caller can reach in their tenant, with URL, title, description, tool count and estimated size. The connect wizard and admin page read it. This is the main path, because what a split contains depends on the caller.
+- `search_tools` with an empty query on `/mcp` (§5.5) includes each toolset's split URL, so an agent can tell a person "connect `/mcp/billing` for this".
+- `/.well-known/ai-catalog.json` lists the core splits' Server Cards and is public, as SEP-2127 intends. Plugin splits are listed there only when the operator turns it on (`MCP_PUBLIC_PLUGIN_SPLITS`), because a public list of installed plugins is information an operator may not want to publish. Server Cards never list tools (SEP-2127 excludes primitives), so nothing per-user leaks.
+
+**How plugins register a split.** Through `PluginMcpToolsetsInterface` (§5.7). The root toolset is a split automatically; a sub-toolset adds `'split' => true`; either may add `'requiresEntitlement' => '<key>'`. A plugin has no route to register and no handler to write: the host serves the endpoint. Builder-made plugins (the Whity-Builder design) get their models' and actions' tools under their own plugin key, and a split, through the same path.
+
+**Change notification per split.** `CatalogSignature` is computed per split as well as for `/mcp`, so installing plugin B doesn't send `list_changed` to a client connected only to `/mcp/documents`.
+
+**How splits relate to in-server lazy discovery.** They are complementary; neither replaces the other.
+
+| Need | Use |
+|---|---|
+| One connection that reaches everything, with a small context | `/mcp?tools=default` (default list plus search) |
+| A client that does one job (a documents assistant, a billing bot) | `/mcp/<split>`: a small full list, a hard boundary, its own token |
+| A person who wants areas as separate servers they can switch on and off in their client | Several splits. Most clients already let people switch whole servers on and off. |
+| A very large plugin | `/mcp/<plugin>?tools=discover` |
+
+The connect wizard offers both: "One connection for everything (recommended)" or "Separate connections per area", the second issuing one URL and token per chosen split. With splits, most people won't need `?toolsets=`. It stays for advanced clients and tests.
+
+**What splits don't do.** They don't run in separate processes. Because a split is a path, a reverse proxy can later route `/mcp/<split>` to a separate deployment if one slice ever needs isolation or its own scaling, but that is not proposed now (Q6a).
+
 ## 6. Back-compat
 
 | Who | What they see after phase 1 |
@@ -299,7 +358,7 @@ Phase 2 flips the default only after the owner decides (Q1), with a changelog en
 
 - **`enable_toolset` / `disable_toolset` tools that change `tools/list`.** Some MCP servers do this. Rejected: 2026-07-28 says the list MUST NOT vary as a side effect of other requests. Our server keeps no connection state to hang it on. And 2026 clients get no `list_changed` from us (no `subscriptions/listen`), so they would never see the change. Search plus `call_tool` reaches the same tools statelessly.
 - **Pagination as a size control.** Rejected: clients fetch every page before using the list, so context is the same.
-- **One MCP endpoint per plugin.** Rejected: every client would need N connections and N tokens, and core's RBAC, audit and rate limits would be duplicated or bypassed. A toolset filter on one endpoint (`?toolsets=acme.*`) gives the same isolation.
+- **A separate MCP server process per area or plugin.** Rejected for now: core's RBAC, audit and rate limits would be duplicated or bypassed, and each deployment would need its own token handling. Splits (§5.13) give clients separate endpoints from one server, and a proxy can still move one split to its own deployment later.
 - **Renaming derived tools to `core_documents_list`.** Better names for a model, but every name is published in `openapi.json` and the typed clients, and saved prompts use them. Possible later as aliases, not in this design.
 - **Toolsets as a permission concept** (a role grants toolsets). Rejected: RBAC already says who may do what, and a second grant system would drift from it. Toolsets narrow tokens, and that is all.
 - **Dots in tool names for namespacing** (`acme.palettes.suggest`). Allowed by the spec, but rejected because some model APIs refuse dots in function names (§3).
@@ -327,6 +386,8 @@ Agreed with the document-theme and document-automation designs (`DOCUMENT-THEMES
 3. **Core default visibility.** Is the 15-tool list in §5.2 right? It is read-only on purpose; there are no writes in the default list.
 4. **Plugin limits.** 3 default-visibility tools per plugin, a 30-tool and about 6k-token default list, and 500-character descriptions. Are these right?
 5. **Agent principals.** Is an `agent` flag on the token the right way to tell an unattended agent from a person's own MCP client (§5.12)? And once `agent_proposals` exists, should undeclared write routes default to `propose` for agents?
+6. **What "MCP splitter" means.** This design reads it as several MCP endpoints served by one server (§5.13). If something else was meant, which: (a) separate deployments or processes per slice, for isolation or scaling (possible later behind a proxy, not proposed now); (b) splitting by tenant or role rather than by area; (c) splitting large tools into smaller ones, or large tool results into pages; (d) a gateway that splits third-party MCP servers for Whity users?
+7. **Core split list.** Are `documents`, `forms`, `convening`, `people`, `inbox`, `admin`, `billing`, `security` and `platform` the right slices? Should plugin splits be listed in the public AI catalog by default (proposed: no)?
 
 ## 11. Task breakdown
 
@@ -344,4 +405,5 @@ Taskaat, project WHIT, section "Plugins, SDK & API" (WHIT-755 is in "Docs & Ops"
 | WHIT-754 admin and wizard | admin MCP page columns and size estimate; connect wizard toolset step and `?tools=default` URL | WHIT-748, WHIT-749 |
 | WHIT-753 agent policy | `agent` flag on MCP tokens (issuing screen, OAuth registration, audit), `agentPolicy` on route schemas and authored descriptors, route middleware, `_meta`; ADR-0006 amendment | WHIT-746 (Q5) |
 | WHIT-755 docs | MCP-Server and MCP-Client-Connection wiki pages, runbook, changelog | WHIT-747 to WHIT-752 |
+| WHIT-765 splits | `/mcp/{split}` route, split registry (core list, plugin root and `split: true`, `MCP_SPLITS`), toolset `requiresEntitlement`, hard boundary on call, per-split OAuth resource and metadata, verifier accepting `/mcp` or the split, per-split `CatalogSignature`, `GET /api/mcp/splits`, Server Cards and AI catalog, connect wizard "separate connections" option | WHIT-747, WHIT-748, WHIT-749 (Q6, Q7) |
 | Phase 2 (later) | flip the bare endpoint default (if Q1 says so); tenant `mcp.default_toolsets` | WHIT-746 decision |
