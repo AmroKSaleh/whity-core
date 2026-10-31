@@ -219,6 +219,9 @@ final class FrontendFeaturesApiHandler
         $this->labels = $labels;
     }
 
+    /** Where a workspace plugin's own routes live, as written in its manifest. */
+    private const WORKSPACE_API_PATHS = '/api/x/';
+
     /**
      * Version every `/api/x/...` string in a workspace plugin's block tree
      * through the router, so the prefix is decided in one place.
@@ -226,7 +229,9 @@ final class FrontendFeaturesApiHandler
     private function versionApiPaths(mixed $node): mixed
     {
         if (is_string($node)) {
-            return str_starts_with($node, '/api/x/') ? $this->router->versionedPath($node) : $node;
+            $isWorkspaceApi = str_starts_with($node, self::WORKSPACE_API_PATHS);
+
+            return $isWorkspaceApi ? $this->router->versionedPath($node) : $node;
         }
         if (!is_array($node)) {
             return $node;
