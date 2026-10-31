@@ -1,0 +1,2 @@
+- The admin MCP tools page shows each tool's toolset, how apps see it (always listed, found by search, not offered) and what agents may do with it, plus what each list mode costs an app in tokens. Administrators turn a plugin's always-on tool on or off there (WHIT-754).
+- The connect wizard hands out the plain `/mcp` (a few everyday actions plus search) and offers "Load every action at once" (`?tools=full`) as an opt-in, instead of switching to `?tools=discover` (WHIT-754).

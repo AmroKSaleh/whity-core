@@ -58,8 +58,8 @@ interface Issued {
   jti: string;
   token: string;
   name: string;
-  /** WHIT-707: connect through tool search (`?tools=discover`). */
-  toolSearch: boolean;
+  /** Load every tool at once (`?tools=full`) instead of search and call (WHIT-754). */
+  allTools: boolean;
 }
 
 const CAPABILITIES = ['tools:call', 'resources:read', 'prompts:read'];
@@ -103,8 +103,8 @@ export function ConnectWizard({
   const [connected, setConnected] = useState(false);
   const [waitedLong, setWaitedLong] = useState(false);
   const [oldRevoked, setOldRevoked] = useState<boolean | null>(null);
-  // null = follow the recommendation; true/false = the user chose.
-  const [toolSearchChoice, setToolSearchChoice] = useState<boolean | null>(null);
+  // The plain /mcp (search and call) unless the user asks for every action.
+  const [allTools, setAllTools] = useState(false);
 
   // ── Pre-flight: where to connect, and whether it can work at all ──────────
   useEffect(() => {
@@ -212,7 +212,7 @@ export function ConnectWizard({
     setConnected(false);
     setWaitedLong(false);
     setOldRevoked(null);
-    setToolSearchChoice(null);
+    setAllTools(false);
   };
 
   const close = (open: boolean) => {
@@ -243,10 +243,10 @@ export function ConnectWizard({
         const body = (await response.json().catch(() => ({}))) as { message?: string };
         throw new Error(body.message ?? t('aiPrincipals.connect.createError', 'Could not create the connection'));
       }
-      const body = (await response.json()) as Omit<Issued, 'toolSearch'>;
-      // A renewal skips the access step, so there is no tool count to judge
-      // by. Tool search reaches a catalogue of any size, so it is the safe one.
-      setIssued({ jti: body.jti, token: body.token, name: body.name, toolSearch: renew !== null ? true : toolSearch });
+      const body = (await response.json()) as Omit<Issued, 'allTools'>;
+      // A renewal skips the access step, so it gets the plain /mcp: search
+      // and call reach a catalogue of any size.
+      setIssued({ jti: body.jti, token: body.token, name: body.name, allTools: renew === null && allTools });
       setStep('connect');
       onConnected();
     } catch (error) {
@@ -260,9 +260,8 @@ export function ConnectWizard({
   };
 
   const client = clientId !== null ? mcpClient(clientId) : null;
-  const recommendedToolSearch =
+  const tooManyForApp =
     client !== null && previewTools !== null && recommendsToolSearch(client, previewTools.length);
-  const toolSearch = toolSearchChoice ?? recommendedToolSearch;
   const otherLabel = t('aiPrincipals.connect.app.other', 'Another app');
   // A product name is not translated; "other" is not a product.
   const appName = client === null ? '' : client.id === 'other' ? otherLabel : client.name;
@@ -374,32 +373,28 @@ export function ConnectWizard({
             <PreviewPanel scope={scope} tools={previewTools} loading={previewLoading} />
 
             {previewTools !== null && previewTools.length > 0 && (
-              <label htmlFor="mcp-tool-search" className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3">
+              <label htmlFor="mcp-all-tools" className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3">
                 <Checkbox
-                  id="mcp-tool-search"
-                  checked={toolSearch}
-                  onCheckedChange={(checked) => setToolSearchChoice(checked === true)}
+                  id="mcp-all-tools"
+                  checked={allTools}
+                  onCheckedChange={(checked) => setAllTools(checked === true)}
                   className="mt-0.5"
                 />
                 <span className="space-y-0.5">
                   <span className="block text-sm font-medium">
-                    {t('aiPrincipals.connect.toolSearch.label', 'Let the app search for actions instead of loading them all')}
-                    {recommendedToolSearch && (
-                      <Badge variant="secondary" className="ms-2">
-                        {t('aiPrincipals.connect.toolSearch.recommended', 'Recommended')}
-                      </Badge>
-                    )}
+                    {t('aiPrincipals.connect.allTools.label', 'Load every action at once')}
                   </span>
                   <span className="block text-xs text-muted-foreground">
-                    {recommendedToolSearch
+                    {tooManyForApp
                       ? t(
-                          'aiPrincipals.connect.toolSearch.helpRecommended',
-                          '{app} works best with fewer actions than this. It will get three: search, describe and use, which reach all {count} on demand.',
+                          'aiPrincipals.connect.allTools.helpTooMany',
+                          'Not recommended: {app} works best with fewer actions than these {count}. Without this, it gets a few everyday actions and searches for the rest when it needs them.',
                           { app: appName, count: previewTools.length }
                         )
                       : t(
-                          'aiPrincipals.connect.toolSearch.help',
-                          'The app gets three actions (search, describe and use) that reach the others on demand. Useful when an app slows down or ignores some actions.'
+                          'aiPrincipals.connect.allTools.help',
+                          'Without this, the app gets a few everyday actions and searches for the other {count} when it needs them, which keeps it fast.',
+                          { count: previewTools.length }
                         )}
                   </span>
                 </span>
@@ -422,7 +417,7 @@ export function ConnectWizard({
           <div className="space-y-5">
             <ConnectSetup
               clientId={clientId}
-              connection={{ name: issued.name, url: mcpEndpoint(endpoint, { toolSearch: issued.toolSearch }), token: issued.token }}
+              connection={{ name: issued.name, url: mcpEndpoint(endpoint, { allTools: issued.allTools }), token: issued.token }}
             />
             <ConnectionStatus connected={connected} waitedLong={waitedLong} app={appName} />
             {renew !== null && oldRevoked === true && (
