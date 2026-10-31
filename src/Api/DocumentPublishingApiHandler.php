@@ -13,6 +13,7 @@ use Whity\Core\Document\Embed\DocumentEmbedRegistry;
 use Whity\Core\Document\Fields\DocumentFieldRegistry;
 use Whity\Core\Document\Print\DocumentPublishCheck;
 use Whity\Core\Document\Print\LabelCsv;
+use Whity\Core\Document\Print\LetterheadLogo;
 use Whity\Core\Document\Print\PrintLabels;
 use Whity\Core\Document\Print\WhityDocumentPrinter;
 use Whity\Core\Document\Render\DocumentRenderRejectedException;
@@ -75,6 +76,7 @@ final class DocumentPublishingApiHandler
         private readonly ?DocumentSourceFileStore $files = null,
         ?PrintLabels $printLabels = null,
         private readonly ?MeterService $meters = null,
+        private readonly ?LetterheadLogo $logo = null,
     ) {
         $this->printLabels = $printLabels ?? new PrintLabels();
     }
@@ -281,7 +283,7 @@ final class DocumentPublishingApiHandler
 
         $payload = $printer->payload(
             ['title' => $doc['title'], 'lang' => (string) $row['lang'], 'page' => $doc['page'], 'blocks' => $doc['blocks']],
-            ($doc['page']['letterhead'] ?? true) === false ? null : $this->letterhead($tenantId),
+            ($doc['page']['letterhead'] ?? true) === false ? null : $this->printedLetterhead($tenantId),
             $resolved['label'] !== '' ? $resolved['label'] : null,
             $values['today'] ?? null,
             $this->accent($tenantId),
@@ -533,7 +535,7 @@ final class DocumentPublishingApiHandler
 
     /**
      * The tenant's letterhead as it invoices: its name, address and tax number
-     * (stage 6). The logo is the editor's to show; Whity Render prints the name.
+     * (stage 6). The editor shows the logo itself; printedLetterhead() adds it for the PDF.
      *
      * @return array{name: string, lines: list<string>}
      */
@@ -555,6 +557,17 @@ final class DocumentPublishingApiHandler
         }
 
         return ['name' => $name, 'lines' => $lines];
+    }
+
+    /**
+     * The letterhead as it prints: the same name and lines, plus the tenant's
+     * logo (6.2) when it has one Whity Render can draw.
+     *
+     * @return array{name: string, lines: list<string>, logo: string|null}
+     */
+    private function printedLetterhead(int $tenantId): array
+    {
+        return $this->letterhead($tenantId) + ['logo' => $this->logo?->dataUri($tenantId)];
     }
 
     private function accent(int $tenantId): ?string
