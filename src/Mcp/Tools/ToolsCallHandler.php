@@ -268,6 +268,7 @@ final class ToolsCallHandler implements MethodHandler
             $authored = $this->authoredTools?->get($toolName);
             if ($authored !== null) {
                 try {
+                    $this->assertInTokenToolsets($principal, $this->authoredTools?->toolsetOf($toolName));
                     return $this->executeAuthored($toolName, $arguments, $authored, $principal);
                 } finally {
                     $this->auditLogger?->record('mcp.tools.call', [
@@ -293,6 +294,7 @@ final class ToolsCallHandler implements MethodHandler
         // From here the tool is known — audit the invocation regardless of
         // outcome (RBAC denial, handler error, or success).
         try {
+            $this->assertInTokenToolsets($principal, $this->toolDeriver->toolsetOf($toolName));
             return $this->executeResolved($toolName, $arguments, $declaration, $principal);
         } finally {
             $this->auditLogger?->record('mcp.tools.call', [
@@ -329,6 +331,26 @@ final class ToolsCallHandler implements MethodHandler
             $clean[$key] = is_array($value) ? $this->redactArgs($value) : $value;
         }
         return $clean;
+    }
+
+    /**
+     * WHIT-749: a token that names toolsets may only CALL tools in them, not
+     * just list them (owner decision 3). Refused as forbidden rather than
+     * answered "unknown": the tool exists and the caller may well hold its
+     * permission; it is this token that can't reach it, and saying which
+     * toolsets it can reach tells the person what to change.
+     *
+     * @throws McpException
+     */
+    private function assertInTokenToolsets(McpPrincipal $principal, ?string $toolset): void
+    {
+        $scope = McpScope::of($principal);
+        if (!$scope->allowsToolset($toolset)) {
+            throw new McpException(
+                ErrorCode::FORBIDDEN,
+                'This token can only use the toolsets: ' . implode(', ', $scope->toolsetEntries()),
+            );
+        }
     }
 
     /**
