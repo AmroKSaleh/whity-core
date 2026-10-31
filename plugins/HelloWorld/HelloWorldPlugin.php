@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace HelloWorld;
 
 use HelloWorld\Api\GreetingsApiHandler;
+use HelloWorld\Documents\GreetingFieldProvider;
 use HelloWorld\Jobs\GreetingDigestJob;
 use HelloWorld\Migrations\CreateHelloGreetingsTable;
 use Whity\Sdk\Hooks\Events;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
+use Whity\Sdk\Documents\TemplateSlot;
+use Whity\Sdk\PluginDocumentsInterface;
 use Whity\Sdk\PluginEventsInterface;
 use Whity\Sdk\PluginFrontendInterface;
 use Whity\Sdk\PluginInterface;
@@ -58,7 +61,7 @@ use Whity\Sdk\PluginRolesInterface;
  * time (see {@see self::resolvePdo()}), analogous to the migration runner
  * injecting a PDO into plugin migrations.
  */
-final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface, PluginRolesInterface, PluginMcpInterface, PluginJobsInterface, PluginEventsInterface, PluginOuTypesInterface
+final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInterface, PluginFrontendInterface, PluginRolesInterface, PluginMcpInterface, PluginJobsInterface, PluginEventsInterface, PluginOuTypesInterface, PluginDocumentsInterface
 {
     /**
      * @inheritDoc
@@ -602,6 +605,39 @@ final class HelloWorldPlugin implements PluginInterface, PluginRequirementsInter
                 $this->announceGreetingCreated($greeting);
             }
         );
+    }
+
+    /**
+     * SDK 1.56 (WHIT-742): the plugin's place for a document template. Each
+     * workspace binds one of its published templates for `HelloWorld.greeting`
+     * to `HelloWorld.greeting_card`, and the plugin issues a card with
+     * `\Whitypp(Documents::class)->issue(new IssueRequest(TemplateRef::slot(
+     * 'HelloWorld.greeting_card'), record: 'HelloWorld.greeting:7'))`, as the
+     * person whose request it is.
+     *
+     * @return list<TemplateSlot>
+     */
+    public function getTemplateSlots(): array
+    {
+        return [
+            new TemplateSlot('greeting_card', ['en' => 'Greeting card', 'ar' => 'بطاقة تهنئة'], GreetingFieldProvider::TYPE),
+        ];
+    }
+
+    /**
+     * SDK 1.56: greetings as merge fields, so a template can print one.
+     *
+     * @return list<GreetingFieldProvider>
+     */
+    public function getDocumentFieldProviders(): array
+    {
+        return [new GreetingFieldProvider(fn (): \PDO => $this->resolvePdo())];
+    }
+
+    /** SDK 1.56: greeting cards are only issued in a request, never in the background. */
+    public function issuesInBackground(): bool
+    {
+        return false;
     }
 
     /**

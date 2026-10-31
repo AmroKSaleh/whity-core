@@ -62,6 +62,28 @@ final class DocumentIssuingEntryPointWiringTest extends TestCase
         }
     }
 
+    public function testBothEntryPointsGiveTheLoaderTheDocumentRegistriesBeforeLoading(): void
+    {
+        foreach (self::ENTRY_POINTS as $relative) {
+            self::assertMatchesRegularExpression(
+                '/\$pluginLoader->setDocumentRegistries\(\$templateSlotRegistry, \$documentFieldRegistry\);\s*\$pluginLoader->load\(\);/',
+                $this->read($relative),
+                "{$relative} must hand the loader the slot and field registries before load(), or code plugins' slots never register there."
+            );
+        }
+    }
+
+    public function testBothEntryPointsRegisterTheSdkDocumentsService(): void
+    {
+        foreach (self::ENTRY_POINTS as $relative) {
+            self::assertMatchesRegularExpression(
+                '/register_service\(\s*\\\\?Whity\\\\Sdk\\\\Documents\\\\Documents::class,\s*new \\\\?Whity\\\\Core\\\\Document\\\\Issuing\\\\SdkDocuments\(/',
+                $this->read($relative),
+                "{$relative} must register the SDK's Documents, or a plugin resolving it gets an exception."
+            );
+        }
+    }
+
     public function testTheWorkerReadsAFreshSetOfPluginsForEachIssue(): void
     {
         // A worker lives for many jobs; a manifest cached from the last job

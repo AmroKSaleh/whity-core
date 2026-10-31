@@ -33,6 +33,36 @@ final class DocumentFieldRegistry implements HostWiredService
     /** @var array<int, array<string, DocumentFieldProvider>> per tenant, for this request */
     private array $tenantTyped = [];
 
+    /** @var array<string, string> record type => the plugin that registered it */
+    private array $owners = [];
+
+    /**
+     * A plugin's record type (SDK 1.56, WHIT-742). The plugin may register it
+     * again when it reloads; any other owner, or core, keeps its own.
+     */
+    public function addOwned(string $owner, DocumentFieldProvider $provider): void
+    {
+        $type = $provider->recordType();
+        if (($this->owners[$type] ?? null) === $owner) {
+            $this->typed[$type] = $provider;
+            $this->tenantTyped = [];
+
+            return;
+        }
+        $this->add($provider);
+        $this->owners[$type] = $owner;
+        $this->tenantTyped = [];
+    }
+
+    /** Forget every record type a plugin registered (it was unloaded or switched off). */
+    public function removeOwner(string $owner): void
+    {
+        foreach (array_keys($this->owners, $owner, true) as $type) {
+            unset($this->typed[$type], $this->owners[$type]);
+        }
+        $this->tenantTyped = [];
+    }
+
     /**
      * Record types that exist only in some workspaces, supplied per tenant.
      *
