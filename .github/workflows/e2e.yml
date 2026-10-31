@@ -15,10 +15,16 @@ on:
   # GitHub's merge queue on develop runs the required checks on the queued
   # merge commit (develop + the PRs ahead of it), so they must run here too.
   merge_group:
+  # Nightly full run on develop, whatever changed. A red nightly opens an
+  # issue (nightly-report.yml).
+  schedule:
+    - cron: '30 1 * * *'   # 01:30 UTC, 04:30 Amman
+  workflow_dispatch: {}
 
 # A newer push to the same ref obsoletes the in-flight run; never queue two.
+# The nightly run has its own group so a merge cannot cancel it.
 concurrency:
-  group: e2e-${{ github.ref }}
+  group: e2e-${{ github.event_name == 'schedule' && 'nightly' || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -28,22 +34,64 @@ jobs:
   # runs at all — and a required check that never reports blocks the PR
   # forever. Filtering per job keeps the shards cheap on a docs-only change
   # while still reporting a verdict branch protection can require.
+  #
+  # WHIT-801. On a PR into develop the shards run only when the change can move
+  # what Playwright drives: the frontend, the packages it compiles, the HTTP and
+  # API layer, the schema and the stack it boots (`pr` below). Everywhere else
+  # (merge queue, pushes, release PRs into main) any non-doc change runs them,
+  # and the nightly run always does. A PR into develop can only land through
+  # the merge queue, so a domain change under src/Core that breaks a flow is
+  # still caught before it reaches develop, one step later than before.
   changes:
     name: Detect changed areas
     runs-on: ubuntu-latest
     outputs:
-      app: ${{ steps.filter.outputs.app }}
+      app: ${{ steps.mode.outputs.all == 'true' && 'true' || (steps.mode.outputs.narrow == 'true' && steps.filter.outputs.pr || steps.filter.outputs.app) }}
     steps:
+      - name: Decide the run mode
+        id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          all=false; narrow=false
+          case "$EVENT" in
+            schedule|workflow_dispatch) all=true ;;
+            pull_request) if [ "$BASE" != "main" ]; then narrow=true; fi ;;
+          esac
+          echo "event=$EVENT base=${BASE:-none}: all=$all narrow=$narrow"
+          { echo "all=$all"; echo "narrow=$narrow"; } >> "$GITHUB_OUTPUT"
+
       - name: Checkout code
+        if: steps.mode.outputs.all != 'true'
         uses: actions/checkout@v7
 
       - name: Filter changed paths
+        if: steps.mode.outputs.all != 'true'
         uses: dorny/paths-filter@v4
         id: filter
         with:
           filters: |
             app:
               - '!(docs/**|**/*.md|LICENSE)'
+            pr:
+              - 'web/**'
+              - 'packages/**'
+              - 'public/**'
+              - 'src/Api/**'
+              - 'src/Http/**'
+              - 'src/Auth/**'
+              - 'src/Mcp/**'
+              - 'src/OpenAPI/**'
+              - 'database/**'
+              - 'plugins/**'
+              - 'composer.json'
+              - 'composer.lock'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'Dockerfile'
+              - 'docker-compose.yml'
+              - '.github/workflows/e2e.yml'
 
   e2e:
     # Keep this `/4`, the matrix below and the `--shard=` flag at the bottom in
