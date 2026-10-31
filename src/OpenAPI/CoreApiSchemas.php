@@ -10054,6 +10054,9 @@ final class CoreApiSchemas
             // existing install holds. See public/index.php's registration.
             self::permissionRoute('POST', '/api/documents', 'documents:issue', [
                 'summary' => 'Issue a document from a template, for a record and with the template\'s own fields',
+                // Issuing can't be undone (a numbered, QR-verified document), so an agent
+                // only ever proposes it, whatever its grant says (MCP-TOOL-SURFACE.md 5.11).
+                'mcp' => ['agentPolicy' => 'propose'],
                 'description' =>
                     'The record is the deliverable and the rendered artifact is opportunistic. '
                     . '`documents.render_enabled` defaults to FALSE, so on a default install this '
@@ -10157,6 +10160,9 @@ final class CoreApiSchemas
             ]),
             self::permissionRoute('POST', '/api/documents/{id:\\d+}/render', 'documents:issue', [
                 'summary' => 'Re-render the document and APPEND a new artifact (never replaces one)',
+                // Issuing can't be undone (a numbered, QR-verified document), so an agent
+                // only ever proposes it, whatever its grant says (MCP-TOOL-SURFACE.md 5.11).
+                'mcp' => ['agentPolicy' => 'propose'],
                 'description' =>
                     'Re-renders the template version the document was issued from, with the values it '
                     . 'printed; records and charts are read again. A document issued from the old Document '
@@ -11394,6 +11400,9 @@ final class CoreApiSchemas
             ]),
             self::permissionRoute('POST', '/api/document-sources/{id:\d+}/render', 'documents:render', [
                 'summary' => 'Print a template through Whity Render',
+                // Issuing can't be undone (a numbered, QR-verified document), so an agent
+                // only ever proposes it, whatever its grant says (MCP-TOOL-SURFACE.md 5.11).
+                'mcp' => ['agentPolicy' => 'propose'],
                 'description' =>
                     'The published version (or the draft, as a preview) filled for one record. Field values, '
                     . 'Record and Chart blocks are read now, for the caller, and frozen into the PDF (E.16). A '

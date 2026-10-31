@@ -6,19 +6,10 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
-### Changed
-
-- **Documents are issued from the document editor's templates, and the old Document designer is gone (editor M4c).** Upgrading runs migration 164 once: every workspace's old templates become editor drafts (a canvas in reading order, saved blocks placed where they were used, placeholders as the template's own fields), documents issued from them point at their copies, and the `document_templates` and `document_blocks` tables are dropped. If any template can't be converted, nothing is dropped and the upgrade names it. Documents issued from old templates keep their PDFs, codes and routes but can't be re-rendered. `/api/document-templates`, `/api/document-blocks` and Whity Render's canvas `/render` route are removed; `POST /api/documents` takes `document_source_id`, `record` and `values`.
-- **Issuing has its own permission, `documents:issue`.** It gates creating a document, correcting it, and minting or withdrawing its QR code. `documents:render` now means a PDF preview and label printing, which store nothing. Migration 165 grants `documents:issue` to every role that holds `documents:render`, so nobody loses access on upgrade.
-
 ### Added
 
-- **One issuing service.** Every way of issuing a document (the editor, `POST /api/documents`, the editor's render route with `persist`, and plugins) goes through it, so every issued document records its template and version and gets its QR code. An `origin_key` names what a document is (for example `order:4812:invoice`): issuing again with it returns the first document instead of a second one. A value given with the request can fill a template's own fields and any field the record left empty, never one the record resolved.
-- **Document events (plugin SDK 1.47).** `document.issuing` (a listener may refuse with `HookVetoException`), `document.issued` and `document.rendered`, with `.async` forms. They carry ids, never field values.
-
-### Deprecated
-
-- **`Whity\Sdk\Render\DocumentRenderer::issue()` (plugin SDK 1.47).** Use `Documents::issue()`, which issues from a template the workspace publishes, once it ships. Until then `issue()` keeps working through the issuing service and takes an optional origin key. It is removed in SDK 2.0.0.
+- **An expression language for plugin manifests (plugin SDK 1.48).** Manifest rules, computed fields and conditions are written as a JSON tree with a closed set of operators, for example "deposit is at least 30% of price". It covers comparisons, arithmetic, money in minor units, text, dates and lists over a record's own lines. There are no loops and no references outside the record, and every expression is capped in size, depth and evaluation steps. It runs in PHP (`Whity\Sdk\Expression`) and in TypeScript (`@whity-org/features/expressions`), and both pass one shared fixture file, so a form and the server always agree. A describer writes any expression in plain English or Arabic for the person approving it. See `docs/wiki/Manifest-Expressions.md` (WHIT-759).
+- **Plugins can declare themselves in `plugin.json` (plugin SDK 1.47).** Permissions, roles, `blocks` screens, owned tables, data types and limits can now live in a JSON manifest (format `whity.plugin/1`) instead of PHP methods. A plugin class that extends `Whity\Sdk\Manifest\ManifestPlugin` and has an empty body reads the file next to it, and the host registers what it declares exactly as it registers PHP declarations. The manifest is checked as a whole: a role may grant only permissions the manifest declares, a screen must be gated by one, a data type must live in a declared tenant table, every label needs English and Arabic, and unknown keys are refused. An invalid manifest stops the whole plugin from loading, so it never half-loads. Routes, hooks and migrations stay in PHP, in the same class. Editing `plugin.json` now triggers a plugin reload like editing PHP does. This is the first piece of Whity Builder's core runtime (WHIT-758).
 
 ### Fixed
 

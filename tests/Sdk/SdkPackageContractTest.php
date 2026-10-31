@@ -242,11 +242,19 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.47.0',
+            '1.49.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.47 ADDS THE DOCUMENT EVENTS (document.issuing, which a listener may veto, '
+            'SDK 1.49 ADDS THE DOCUMENT EVENTS (document.issuing, which a listener may veto, '
             . 'document.issued and document.rendered) and deprecates DocumentRenderer::issue(), '
             . 'which now goes through the one issuing service. Purely additive. '
+            . 'SDK 1.48 ADDS MANIFEST EXPRESSIONS: Expression\Expression validates and evaluates the '
+            . 'closed JSON-tree language manifest rules are written in, bounded by node, depth and step '
+            . 'caps, with an English and Arabic describer; the TypeScript twin passes the same fixtures '
+            . '(WHIT-759). Purely additive. '
+            . 'SDK 1.47 ADDS THE PLUGIN MANIFEST: a plugin may declare identity, requirements, '
+            . 'permissions, roles, blocks screens, owned tables, data types and limits in plugin.json '
+            . '(format whity.plugin/1) by extending Manifest\ManifestPlugin; the manifest is validated '
+            . 'as a whole and an invalid one refuses the whole plugin (WHIT-758). Purely additive. '
             . 'SDK 1.46 PASSES AN McpToolContext TO AUTHORED MCP TOOLS: a handler is called as '
             . 'fn(array $arguments, McpToolContext $context), and the context carries the tenant '
             . 'the call is authorized in and the calling profile, so a multi-tenant tool can scope '

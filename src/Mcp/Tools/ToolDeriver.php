@@ -141,11 +141,13 @@ final class ToolDeriver
             if (!is_array($schema) || $schema === []) {
                 continue;
             }
-            $tools[] = $this->deriveTool(
+            $tool = $this->deriveTool(
                 (string) ($route['method'] ?? ''),
                 (string) ($route['path'] ?? ''),
                 $schema,
             );
+            $tool['_meta'] = $this->surfaceMeta($route, (string) $tool['name']);
+            $tools[] = $tool;
         }
 
         return self::$toolsCache = $tools;
@@ -341,6 +343,52 @@ final class ToolDeriver
             // client can run reads unasked and confirm before deletes.
             'annotations' => ToolAnnotations::forRoute($method, $schema, $description),
         ];
+    }
+
+    /**
+     * Toolset, visibility and agent policy for one derived operation (WHIT-747),
+     * as the `_meta` keys {@see ToolSurface} names.
+     *
+     * A plugin route (one carrying a `namespacePrefix`) lands in its plugin's
+     * toolset, or a sub-toolset of it the schema names; it can never claim a
+     * core toolset or another plugin's. A core route lands in the toolset its
+     * schema names when that is a core one, else the one its permission or
+     * first tag maps to ({@see CoreToolsets}).
+     *
+     * @param array<string, mixed> $route
+     * @return array<string, string>
+     */
+    private function surfaceMeta(array $route, string $name): array
+    {
+        $schema  = is_array($route['schema'] ?? null) ? $route['schema'] : [];
+        $options = ToolSurface::routeOptions($schema);
+        $prefix  = $route['namespacePrefix'] ?? null;
+
+        if (is_string($prefix) && $prefix !== '') {
+            $root    = CoreToolsets::pluginToolsetId($prefix);
+            $toolset = $options['toolset'] !== null && ToolSurface::isWithin($options['toolset'], $root)
+                ? $options['toolset']
+                : $root;
+            $visibility = $options['visibility'] ?? ToolSurface::VISIBILITY_DISCOVERABLE;
+        } else {
+            $named   = $options['toolset'];
+            $toolset = $named !== null && self::isCoreToolset($named) ? $named : CoreToolsets::forCoreRoute($route);
+            $visibility = $options['visibility']
+                ?? (CoreToolsets::isAlwaysOn($name) ? ToolSurface::VISIBILITY_ALWAYS_ON : ToolSurface::VISIBILITY_DISCOVERABLE);
+        }
+
+        return ToolSurface::meta($toolset, $visibility, $options['agentPolicy'] ?? ToolSurface::AGENT_ALLOW);
+    }
+
+    /** A core toolset, or a sub-toolset of one (`core.documents.themes`). */
+    private static function isCoreToolset(string $id): bool
+    {
+        foreach (array_keys(CoreToolsets::TOOLSETS) as $core) {
+            if (ToolSurface::isWithin($id, $core)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.47).
+ * SDK identity (v1.49).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -783,7 +783,33 @@ namespace Whity\Sdk;
  * the extra argument; on an older host a two-parameter handler is called with
  * one argument and fails, so a tool that needs the context should declare
  * `^1.46`.) ->
- * 1.47 (DOCUMENT EVENTS: `Hooks\Events::DOCUMENT_ISSUING`, where a listener
+ * 1.47 (PLUGIN MANIFEST: a plugin's declarations can live in `plugin.json`,
+ * format `whity.plugin/1` ({@see Manifest\ManifestValidator}, JSON Schema in
+ * `resources/plugin-manifest.schema.json`). Extending
+ * {@see Manifest\ManifestPlugin} with an empty class answers identity,
+ * requirements, permissions, roles, `blocks` screens, owned tables, data types
+ * and limits from the file, in the shapes the existing interfaces define, so
+ * the host registers them exactly as it registers PHP declarations. A
+ * subclass adds routes, hooks and migrations in PHP. The manifest is checked
+ * as a whole (a role may grant only declared permissions, a screen must be
+ * gated by one, a data type must live in a declared tenant table, every label
+ * carries English and Arabic, unknown keys are refused) and an invalid one
+ * refuses the whole plugin rather than loading part of it (WHIT-758).
+ *
+ * Purely additive. Nothing changes for a plugin that doesn't use it.) ->
+ * 1.48 (MANIFEST EXPRESSIONS: {@see Expression\Expression}, the closed
+ * expression language manifest rules, computed fields and conditions are
+ * written in — a JSON tree, one operator per object, no loops, no references
+ * outside the record, bounded by node, depth and step caps. With
+ * {@see Expression\ExpressionContext} for what it may read,
+ * {@see Expression\ExpressionError} for type and budget failures, and
+ * {@see Expression\ExpressionDescriber} for the English and Arabic words a
+ * person approving a rule reads. Held to `resources/expression-fixtures.json`,
+ * which the TypeScript twin in `@whity-org/features/expressions` passes too
+ * (WHIT-759).
+ *
+ * Purely additive.) ->
+ * 1.49 (DOCUMENT EVENTS: `Hooks\Events::DOCUMENT_ISSUING`, where a listener
  * may refuse a document with HookVetoException before anything is written,
  * and `DOCUMENT_ISSUED` and `DOCUMENT_RENDERED` with their `.async` forms.
  * Payloads carry ids, never field values. Every issued document now goes
@@ -801,7 +827,7 @@ namespace Whity\Sdk;
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.47.0';
+    public const VERSION = '1.49.0';
 
     /**
      * Static identity only — never instantiated.

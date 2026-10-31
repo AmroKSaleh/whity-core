@@ -94,7 +94,7 @@ final class Events
     public const OU_ROLE_ASSIGNED = 'ou.role_assigned';
     public const OU_ROLE_REMOVED = 'ou.role_removed';
 
-    // ---- documents (SDK 1.47; DOCUMENT-AUTOMATION.md) ----
+    // ---- documents (SDK 1.49; DOCUMENT-AUTOMATION.md) ----
     // Before a document is issued: a listener may veto with HookVetoException,
     // and nothing is written. Payload: tenant_id, source_id, version, record,
     // origin_key, actor — ids only, never field values.
