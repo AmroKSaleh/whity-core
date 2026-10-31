@@ -44,6 +44,13 @@ export interface AppSidebarNavItem {
   icon?: React.ReactNode
   /** Marks the item as the current page (styling only — routing is the caller's job). */
   active?: boolean
+  /**
+   * Things waiting for the person (Inbox, Approvals). A pill beside the label;
+   * in the rail, a dot on the icon (AppShellCollapsed). Zero or absent shows nothing.
+   */
+  count?: number
+  /** Accessible text for the count, e.g. "3 waiting". Defaults to the number. */
+  countLabel?: string
 }
 
 export interface AppSidebarNavGroup {
@@ -134,6 +141,25 @@ export interface AppSidebarProps {
   className?: string
 }
 
+/**
+ * True between 768 and 1023px, where the sidebar is the 56px rail whatever the
+ * collapse toggle says (register 4.5). Below 768 it is the drawer; from 1024
+ * the person's own choice applies. Exported so the composed wrapper can size
+ * its own slot content (logo, switcher, footer) to the same state.
+ */
+export function useForcedRail(): boolean {
+  const [forced, setForced] = React.useState(false)
+  React.useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return
+    const query = window.matchMedia("(min-width: 768px) and (max-width: 1023.98px)")
+    const update = () => setForced(query.matches)
+    update()
+    query.addEventListener?.("change", update)
+    return () => query.removeEventListener?.("change", update)
+  }, [])
+  return forced
+}
+
 /** Case-insensitive substring match, tolerant of surrounding whitespace. */
 function matches(label: string, normalizedQuery: string): boolean {
   return label.toLocaleLowerCase().includes(normalizedQuery)
@@ -168,7 +194,8 @@ export function AppSidebar({
   className,
 }: AppSidebarProps) {
   const [collapsedState, setCollapsedState] = React.useState(false)
-  const collapsed = collapsedProp ?? collapsedState
+  const forcedRail = useForcedRail()
+  const collapsed = (forcedRail && !(mobileOpenProp ?? false)) || (collapsedProp ?? collapsedState)
   const setCollapsed = (next: boolean) => {
     setCollapsedState(next)
     onCollapsedChange?.(next)
@@ -253,16 +280,20 @@ export function AppSidebar({
     <nav
       data-slot="app-sidebar-nav"
       aria-label={navLabel}
-      className="flex-1 space-y-4 overflow-y-auto px-2 py-4"
+      className={cn("flex-1 space-y-3 overflow-x-hidden overflow-y-auto px-3 py-3", collapsed && "px-2")}
     >
-      {rendered.map(({ group, items }) => {
+      {rendered.map(({ group, items }, index) => {
         const open = isGroupOpen(group)
         const showHeading = Boolean(group.label) && !collapsed
         const isDisclosure = showHeading && collapsibleGroups && !searching
         const bodyId = `app-sidebar-group-${group.id}`
 
         return (
-          <div key={group.id} className="space-y-1">
+          <div
+            key={group.id}
+            data-slot="app-sidebar-group"
+            className={cn("grid gap-px", collapsed && index > 0 && "border-t border-sidebar-border pt-2")}
+          >
             {showHeading && isDisclosure && (
               <button
                 type="button"
@@ -271,7 +302,7 @@ export function AppSidebar({
                 aria-expanded={open}
                 aria-controls={bodyId}
                 onClick={() => toggleGroup(group.id)}
-                className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-[0.625rem] font-semibold tracking-wider text-muted-foreground uppercase outline-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring/30"
+                className="flex w-full items-center gap-1 rounded-md px-2 py-1 text-[0.6875rem] font-semibold tracking-wider text-muted-foreground uppercase outline-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {open ? (
                   <IconChevronDown className="size-3 shrink-0" />
@@ -282,7 +313,7 @@ export function AppSidebar({
               </button>
             )}
             {showHeading && !isDisclosure && (
-              <div className="px-2 text-[0.625rem] font-semibold tracking-wider text-muted-foreground uppercase">
+              <div className="px-2 py-1 text-[0.6875rem] font-semibold tracking-wider text-muted-foreground uppercase">
                 {group.label}
               </div>
             )}
@@ -302,25 +333,46 @@ export function AppSidebar({
               permission filtering would keep passing after that filtering
               broke. Either query by CSS or open the group first.
             */}
-            <div id={bodyId} hidden={!open} className="space-y-1">
-              {items.map((item) => (
-                <Link
-                  key={item.id}
-                  href={item.href}
-                  aria-current={item.active ? "page" : undefined}
-                  title={collapsed ? item.label : undefined}
-                  className={cn(
-                    "flex items-center gap-2 rounded-md px-2 py-1.5 text-xs/relaxed font-medium transition-colors",
-                    item.active
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                      : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                    collapsed && "justify-center"
-                  )}
-                >
-                  {item.icon && <span className="shrink-0 [&_svg]:size-4">{item.icon}</span>}
-                  {!collapsed && <span className="truncate">{item.label}</span>}
-                </Link>
-              ))}
+            <div id={bodyId} hidden={!open} className="grid gap-px">
+              {items.map((item) => {
+                const count = item.count && item.count > 0 ? item.count : 0
+                const countText = item.countLabel ?? String(count)
+                return (
+                  <Link
+                    key={item.id}
+                    href={item.href}
+                    aria-current={item.active ? "page" : undefined}
+                    title={collapsed ? item.label : undefined}
+                    aria-label={collapsed && count > 0 ? `${item.label}, ${countText}` : undefined}
+                    className={cn(
+                      "relative flex items-center gap-2.5 rounded-md px-2 py-[7px] text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      item.active
+                        ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                        : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                      collapsed && "mx-auto h-9 w-10 justify-center px-0 py-0"
+                    )}
+                  >
+                    {item.icon && <span className="shrink-0 [&_svg]:size-5">{item.icon}</span>}
+                    {!collapsed && <span className="min-w-0 flex-1 truncate">{item.label}</span>}
+                    {count > 0 && !collapsed && (
+                      <span
+                        data-slot="app-sidebar-count"
+                        className="rounded-full bg-primary px-1.5 py-px text-[0.6875rem] leading-4 font-semibold text-primary-foreground tabular-nums"
+                      >
+                        <span aria-hidden="true">{count}</span>
+                        <span className="sr-only">{countText}</span>
+                      </span>
+                    )}
+                    {count > 0 && collapsed && (
+                      <span
+                        data-slot="app-sidebar-count-dot"
+                        aria-hidden="true"
+                        className="absolute end-2 top-[7px] size-[7px] rounded-full bg-primary ring-2 ring-sidebar"
+                      />
+                    )}
+                  </Link>
+                )
+              })}
             </div>
           </div>
         )
@@ -390,10 +442,10 @@ export function AppSidebar({
         data-slot="app-sidebar"
         data-collapsed={collapsed || undefined}
         className={cn(
-          "fixed inset-y-0 start-0 z-50 flex h-screen w-64 -translate-x-full flex-col border-e border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-200 rtl:translate-x-full",
+          "fixed inset-y-0 start-0 z-50 flex h-screen w-60 -translate-x-full flex-col border-e border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-200 rtl:translate-x-full",
           mobileOpen && "translate-x-0 rtl:translate-x-0",
           "md:sticky md:top-0 md:z-auto md:h-screen md:shrink-0 md:translate-x-0 rtl:md:translate-x-0",
-          collapsed && "md:w-16",
+          collapsed && "md:w-14",
           className
         )}
       >
@@ -407,8 +459,8 @@ export function AppSidebar({
         </button>
 
         {(header || tenantSwitcher || teamSwitcher) && (
-          <div className="flex flex-col gap-2.5 px-2.5 pt-3 pe-10 md:pe-2.5">
-            {header && <div className="px-1 py-1">{header}</div>}
+          <div className={cn("flex flex-col gap-3 px-3 pt-4 pe-10 md:pe-3", collapsed && "items-center md:px-2")}>
+            {header && <div className="px-1.5 pt-0.5 pb-1.5">{header}</div>}
             {(tenantSwitcher || teamSwitcher) && (
               <div className="flex flex-col gap-1.5">
                 {tenantSwitcher}
@@ -426,7 +478,10 @@ export function AppSidebar({
           type="button"
           aria-label={collapsed ? expandAriaLabel : collapseAriaLabel}
           onClick={() => setCollapsed(!collapsed)}
-          className="hidden items-center justify-center gap-1.5 border-t border-sidebar-border px-3 py-2 text-xs/relaxed text-sidebar-foreground/70 outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring/30 md:flex"
+          className={cn(
+            "hidden items-center justify-center gap-1.5 border-t border-sidebar-border px-3 py-2 text-xs text-muted-foreground outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring",
+            !forcedRail && "md:flex"
+          )}
         >
           {collapsed ? (
             <IconChevronRight className="size-3.5 rtl:rotate-180" />

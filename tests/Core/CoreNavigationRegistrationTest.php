@@ -47,7 +47,8 @@ use PHPUnit\Framework\TestCase;
 final class CoreNavigationRegistrationTest extends TestCase
 {
     /**
-     * Groups the shell knows how to order and label. Mirrors NAV_GROUP_ORDER in
+     * Groups the shell knows how to order and label: the app map's sidebar
+     * (docs/design/13-app-map.md, WHIT-805). Mirrors NAV_GROUP_ORDER in
      * web/components/sidebar.tsx. An unlisted group still RENDERS (after the
      * declared ones, unlabelled beyond its prettified id) — this list exists so
      * that happens on purpose rather than through a typo.
@@ -56,11 +57,11 @@ final class CoreNavigationRegistrationTest extends TestCase
      */
     private const KNOWN_GROUPS = [
         'overview',
-        'access',
+        'people',
+        'ai',
         'documents',
-        'records',
-        'extend',
-        'system',
+        'platform',
+        'settings',
         'plugins',
     ];
 
