@@ -134,19 +134,19 @@ export const Activity: Story = {
       <AgentActivity
         filter
         items={[
-          { id: "1", kind: "read", actor: "Billing assistant", text: "Read 48 open invoices", time: "13:58", tool: "invoices.list" },
-          { id: "2", kind: "propose", actor: "Billing assistant", text: "Asked to send 12 reminders", time: "13:59", tool: "invoices.remind" },
-          { id: "3", kind: "approve", actor: "Rana Haddad", actorKind: "person", text: "Approved INV-1042 as paid", time: "11:20" },
+          { id: "1", kind: "read", actor: "Billing assistant", text: "Read 48 open invoices", timeLabel: "13:58", tool: "invoices.list" },
+          { id: "2", kind: "propose", actor: "Billing assistant", text: "Asked to send 12 reminders", timeLabel: "13:59", tool: "invoices.remind" },
+          { id: "3", kind: "approve", actor: "Rana Haddad", actorKind: "person", text: "Approved INV-1042 as paid", timeLabel: "11:20" },
           {
             id: "4",
             kind: "act",
             actor: "Billing assistant",
             text: "Marked INV-1042 paid",
-            time: "11:20",
+            timeLabel: "11:20",
             tool: "invoices.update",
             extra: <UndoBar text="Marked INV-1042 paid" remainingLabel="24 minutes" remaining={24} total={30} onUndo={() => {}} />,
           },
-          { id: "5", kind: "act", actor: "HR assistant", text: "Recorded leave for Lina", time: "10:02", tool: "leave.create" },
+          { id: "5", kind: "act", actor: "HR assistant", text: "Recorded leave for Lina", timeLabel: "10:02", tool: "leave.create" },
         ]}
       />
       <UndoBar text="Emailed the statement" state="undone" undoneBy="Rana Haddad" />

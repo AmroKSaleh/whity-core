@@ -93,6 +93,16 @@ export function formatDate(value: string | null | undefined, locale: DateLocale)
   return parsed === null ? null : parsed.toLocaleDateString(locale)
 }
 
+/**
+ * A time of day alone, 24-hour, under {@see formatDate}'s rules: for a list
+ * that already says which day it covers (an activity timeline headed "Today").
+ */
+export function formatTime(value: string | null | undefined, locale: DateLocale): string | null {
+  const parsed = parseWireDate(value)
+
+  return parsed === null ? null : parsed.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12: false })
+}
+
 /** A date and a time, under {@see formatDate}'s rules. */
 export function formatDateTime(value: string | null | undefined, locale: DateLocale): string | null {
   const parsed = parseWireDate(value)
