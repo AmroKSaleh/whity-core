@@ -49,6 +49,9 @@ final class ToolDeriver
     /** @var array<string, true>|null */
     private static ?array $exposedCache = null;
 
+    /** @var array<string, string>|null name => toolset (WHIT-749) */
+    private static ?array $toolsetCache = null;
+
     /**
      * Clear the worker-boot caches.
      *
@@ -61,6 +64,7 @@ final class ToolDeriver
         self::$toolsCache        = null;
         self::$accessMapCache    = null;
         self::$exposedCache      = null;
+        self::$toolsetCache      = null;
     }
 
     /** @var \Closure(string): void */
@@ -229,6 +233,25 @@ final class ToolDeriver
         }
 
         return isset(self::$exposedCache[$toolName]);
+    }
+
+    /**
+     * The toolset a derived tool belongs to (WHIT-747), or null for an unknown
+     * name. What tools/call checks a token's toolset narrowing against
+     * (WHIT-749), read from the same `_meta` tools/list publishes.
+     */
+    public function toolsetOf(string $toolName): ?string
+    {
+        if (self::$toolsetCache === null) {
+            $map = [];
+            foreach ($this->deriveTools() as $tool) {
+                $meta = is_array($tool['_meta'] ?? null) ? $tool['_meta'] : [];
+                $map[(string) $tool['name']] = (string) ($meta[ToolSurface::META_TOOLSET] ?? '');
+            }
+            self::$toolsetCache = $map;
+        }
+
+        return self::$toolsetCache[$toolName] ?? null;
     }
 
     /** @param array<string, mixed> $decl */

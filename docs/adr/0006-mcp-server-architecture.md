@@ -329,6 +329,14 @@ one-minute windows, `mcp:rate:tenant:{tenant_id}` (300 calls by default, `MCP_RA
 and `mcp:rate:principal:{profile_id}` (60, `MCP_RATE_PRINCIPAL_LIMIT`). There is no per-tool
 counter. The response on a limit is unchanged.
 
+## Amendment 5 (2026-10-31, WHIT-747, WHIT-749)
+
+Decided by the owner with `docs/design/MCP-TOOL-SURFACE.md`.
+
+**Toolsets (WHIT-747).** Every tool belongs to one toolset, carried in its `_meta` as `dev.whity/toolset`, with `dev.whity/visibility` and `dev.whity/agentPolicy` beside it. Core tools map to the `core.<area>` toolsets through their OpenAPI tag (`CoreToolsets`), and a plugin's tools land in a toolset named after its namespace. A route schema may also say `'mcp' => ['expose' => false]`, which keeps even a gated route off the agent surface.
+
+**Token toolsets are a third kind of scope entry (WHIT-749).** Besides capabilities and permissions, a scope may name `toolset:<id>` or `toolset:<prefix>.*`. A token naming any reaches only tools in those toolsets: they are filtered out of `tools/list` (and so out of discovery search) and refused on `tools/call` with `-32003`. The message names the token's toolsets, because the tool exists and the caller may hold its permission; it is the token that can't reach it. A token naming none is unchanged. `toolset:` is a reserved prefix, and issuance refuses an unknown `core.` toolset or a malformed id. A plugin toolset can only be checked for shape, since a token may be issued before the plugin is installed. Toolsets narrow and never widen, exactly like permission entries; RBAC still applies.
+
 ## Alternatives Considered
 
 - **Adopt the HTTP+SSE transport (MCP 2024-11-05)** — two separate endpoints (`POST /mcp` +

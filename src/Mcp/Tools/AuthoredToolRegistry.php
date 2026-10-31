@@ -243,6 +243,12 @@ final class AuthoredToolRegistry implements HostWiredService
         return $out;
     }
 
+    /** The toolset an authored tool belongs to (its plugin's), or null for an unknown name. */
+    public function toolsetOf(string $name): ?string
+    {
+        return isset($this->tools[$name]) ? CoreToolsets::pluginToolsetIdForClass($this->tools[$name]['plugin']) : null;
+    }
+
     public function has(string $name): bool
     {
         return isset($this->tools[$name]);
