@@ -1,0 +1,1 @@
+- **`@hono/node-server` is now 2.1.5 (GHSA-rmxm-3fg6-px4f).** A root `package.json` override had pinned it to the 1.x line, so the earlier Dependabot update changed nothing; the override and lockfile now resolve 2.1.5. Its only consumer, `@modelcontextprotocol/sdk`, accepts both lines (WHIT-717).
