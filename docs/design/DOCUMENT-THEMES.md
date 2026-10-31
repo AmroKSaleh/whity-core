@@ -196,7 +196,7 @@ Components: `DocumentTheme`, `DocumentThemeInput`, `DocumentThemePatch`, `Docume
 
 - Read routes (`list`, `schema`, `get`, `usage`, `resolve`) are derived tools as usual, annotated read-only.
 - Write routes refuse agent principals, the same rule as `PUT …/draft` (E.4: agents never change anything directly). The derived tools still exist for people's own MCP clients acting as themselves.
-- Mechanism: the declarative `agentPolicy` (`allow` · `refuse` · `suggest-only` · `propose`) and `toolset` keys proposed by the MCP tool-surface design, set on the route schema and enforced at the route for any agent principal, so REST and MCP behave the same. Theme reads sit in a `documents.themes` toolset (visibility `discoverable`); theme writes are `refuse` now and the document's theme becomes `suggest-only` with M6.
+- Mechanism: the declarative `agentPolicy` (`allow` · `refuse` · `suggest-only` · `propose`) and `toolset` keys proposed by the MCP tool-surface design, set on the route schema and enforced at the route for any agent principal, so REST and MCP behave the same. Theme reads sit in a `core.documents.themes` toolset (visibility `discoverable`); theme writes are `refuse` now and the document's theme becomes `suggest-only` with M6. Whity has no agent principal yet (MCP principals are `user` or `session`), so `agentPolicy` depends on the agent flag on tokens proposed in `MCP-TOOL-SURFACE.md` (its owner question Q5); until then these rules have nothing to apply to.
 - For agents, a document's theme changes through a suggestion: a new patch type `set-theme` (`{ ref?, overrides? }`) in IMPLEMENTATION-NOTES 3.3, created by an authored tool `document_suggest_theme` in M6. Changing a workspace theme by an agent goes through `agent_proposals` (section 12 item 10) once that exists; until then it isn't offered.
 
 ## 7. Plugin SDK
@@ -229,7 +229,7 @@ final class DocumentThemeDefinition
 - Starters a plugin ships (WHIT-687) can name a plugin theme in `theme.ref`.
 - SDK minor bump (additive); covered by the conformance kit when WHIT-272 lands.
 - **The definition is data.** Its canonical form is JSON (`{key, name, nameAr, extends, tokens, kinds, entitlement}`) validated by the same JSON Schema as `GET /api/document-themes/schema`; the PHP class is a typed way to produce it. A plugin can instead ship `resources/document-themes/*.json` and core validates and loads them without running plugin PHP. The same JSON is the export format: a workspace theme exports to a file a code plugin (or the no-code builder, `WHITY-BUILDER.md`) can ship unchanged.
-- Plugins contribute data only, never MCP tools for themes: core's `documents.themes` tools expose plugin themes like any other.
+- Plugins contribute data only, never MCP tools for themes: core's `core.documents.themes` tools expose plugin themes like any other.
 
 What plugins can't do in v1: add token keys, ship CSS, ship fonts. Fonts go through the core catalogue (WHIT-558) so every font is self-hosted, licensed, has an Arabic partner and is embedded by Whity Render. A plugin asking for a new key is a register conversation, not an SDK feature.
 
