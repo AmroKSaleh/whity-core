@@ -18,8 +18,9 @@ namespace Whity\Mcp\Tools;
  *
  * None of this decides access. `?toolsets=` is the client choosing what to
  * look at; the token's own `toolset:` entries (WHIT-749) are what restrict.
- * An unknown `tools=` value gives the default mode, which is still `full`
- * until search and call ships (WHIT-750).
+ * A bare `/mcp`, or an unknown `tools=` value, gets {@see self::BARE_MODE}:
+ * search and call since WHIT-750 (owner decision 2). `?tools=full` keeps the
+ * old full list.
  *
  * The transport passes it to the handlers in `params._meta` under
  * {@see self::META_KEY}, written by the server and never taken from the client.
@@ -32,8 +33,11 @@ final class ToolSurfaceRequest
 
     public const MODES = [self::MODE_FULL, self::MODE_DEFAULT, self::MODE_DISCOVER];
 
-    /** What a bare `/mcp` (or an unknown `tools=`) gets. */
-    public const BARE_MODE = self::MODE_FULL;
+    /**
+     * What a bare `/mcp` (or an unknown `tools=`) gets. The one switch for the
+     * WHIT-750 switch-over: set it back to MODE_FULL to hold the old list.
+     */
+    public const BARE_MODE = self::MODE_DEFAULT;
 
     public const META_KEY = 'dev.whity/toolSurface';
 
