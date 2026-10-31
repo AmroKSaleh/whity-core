@@ -17,7 +17,8 @@
     "./sync": "./src/sync/index.ts",
     "./i18n": "./src/i18n/index.ts",
     "./mcp": "./src/mcp/index.ts",
-    "./document-editor": "./src/document-editor/index.ts"
+    "./document-editor": "./src/document-editor/index.ts",
+    "./expressions": "./src/expressions/index.ts"
   },
   "files": [
     "src"

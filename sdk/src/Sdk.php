@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.47).
+ * SDK identity (v1.48).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -796,13 +796,25 @@ namespace Whity\Sdk;
  * carries English and Arabic, unknown keys are refused) and an invalid one
  * refuses the whole plugin rather than loading part of it (WHIT-758).
  *
- * Purely additive. Nothing changes for a plugin that doesn't use it.)
+ * Purely additive. Nothing changes for a plugin that doesn't use it.) ->
+ * 1.48 (MANIFEST EXPRESSIONS: {@see Expression\Expression}, the closed
+ * expression language manifest rules, computed fields and conditions are
+ * written in — a JSON tree, one operator per object, no loops, no references
+ * outside the record, bounded by node, depth and step caps. With
+ * {@see Expression\ExpressionContext} for what it may read,
+ * {@see Expression\ExpressionError} for type and budget failures, and
+ * {@see Expression\ExpressionDescriber} for the English and Arabic words a
+ * person approving a rule reads. Held to `resources/expression-fixtures.json`,
+ * which the TypeScript twin in `@whity-org/features/expressions` passes too
+ * (WHIT-759).
+ *
+ * Purely additive.)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.47.0';
+    public const VERSION = '1.48.0';
 
     /**
      * Static identity only — never instantiated.
