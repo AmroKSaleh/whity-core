@@ -331,8 +331,8 @@ const PAGED_MEDIA_HTML = `<!doctype html>
  * parser). See `scripts/render-paged-media-probe.js` and
  * `scripts/verify-paged-media-text.js`.
  *
- * The margin is non-zero on purpose. `margin: 0` is right for the fixed-canvas
- * mode and leaves nowhere to draw a margin box — which is the whole reason
+ * The margin is non-zero on purpose. `margin: 0` leaves nowhere to draw a
+ * margin box — which is the whole reason
  * #1072 gives for why running headers and footers were unavailable.
  *
  * Three blocks, so the count is a number a mistake could not coincidentally

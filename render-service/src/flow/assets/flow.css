@@ -1,12 +1,10 @@
 /*
  * Flowing-document stylesheet (#1072, first half).
  *
- * Owned entirely by the flowing mode. The fixed-canvas mode's stylesheet
- * (render-service/harness/styles.css) is a different file for a different
- * document shape and is not loaded here — the two modes never share a page.
+ * Owned entirely by the flowing mode.
  *
  * The geometry is the important part. Chromium is given `@page { margin: 0 }`
- * exactly as the fixed-canvas mode is, and one `.flow-page` element per
+ * and one `.flow-page` element per
  * output page at the exact physical size, because the paginator has already
  * decided what goes on each page. The document's REAL margins are the inset
  * of `.flow-page-content` inside that box, which is what lets the running
@@ -316,9 +314,8 @@ body {
 /* ---- Verification code -------------------------------------------------- */
 
 /* Centred rather than corner-placed, and in the flow rather than pinned to a
- * page. The fixed-canvas mode puts the code where a designer dropped it, which
- * it can because it knows how many pages there are and what is on each. Here
- * neither is known until after layout, so the code is a block like any other
+ * page. How many pages there are and what is on each is not known until after
+ * layout, so the code is a block like any other
  * and lands wherever the document ends — the same place a signature would. */
 .flow-qr {
   margin: 8mm 0 5mm;

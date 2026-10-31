@@ -88,8 +88,7 @@ describe('the fixture the verdict is about', () => {
   });
 
   it('leaves room to draw one', () => {
-    // `margin: 0` is correct for the fixed-canvas mode and leaves nowhere for a
-    // margin box — the exact reason #1072 gives for running headers being
+    // `margin: 0` leaves nowhere for a margin box — the exact reason #1072 gives for running headers being
     // unavailable. A fixture that inherited it would report "no box drew" on a
     // browser that supports them perfectly well.
     expect(PAGED_MEDIA_TEXT_HTML).toMatch(/@page\s*\{[^}]*margin:\s*20mm/);

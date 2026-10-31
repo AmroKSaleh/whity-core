@@ -13,10 +13,9 @@
  *     probe. The flowing mode's page numbers are only as good as the browser's
  *     fragmentation; refusing is the same call its own paginator already makes
  *     when its checks disagree (src/flow/render.js).
- *   - It does NOT touch `POST /render`. #1134 says not to change the
- *     fixed-canvas path, and that mode's failure mode — a PDF at the wrong
- *     physical size — is visible in the first document anyone opens, unlike a
- *     hundred-page document numbered wrongly.
+ *   - It does NOT touch `POST /render/labels`. A label sheet has no
+ *     paginator: each sheet is one page, so a browser that fragments content
+ *     differently cannot number it wrongly.
  *   - The probe FAILING TO RUN gates nothing. A detector that can stop the
  *     service converts a diagnostic into an outage.
  *   - The gate is overridable. A gate with no escape hatch is itself a new way
@@ -31,14 +30,10 @@ const flowPayload = () => ({
   content: [{ type: 'paragraph', text: 'hello' }],
 });
 
-const fixedPayload = () => ({
-  template: {
-    version: 2,
-    page: { widthMm: 50, heightMm: 25, marginMm: 2, background: '#fff' },
-    placeholders: [],
-    pages: [{ id: 'p1', elements: [] }],
-  },
-  dataRows: [{}],
+const labelsPayload = () => ({
+  sheet: { preset: 'a4' },
+  grid: { columns: 3, rows: 7, widthMm: 63.5, heightMm: 38.1, gapXMm: 2.5, gapYMm: 0 },
+  labels: [[{ type: 'paragraph', text: 'Example Bakery' }]],
 });
 
 const report = (overrides) => ({
@@ -73,7 +68,6 @@ function boot(probeResult, env = {}) {
   }
 
   jest.doMock('../src/renderer', () => ({
-    renderToPdf: jest.fn(async () => Buffer.from('%PDF-1.4\nfixed\n%%EOF')),
     getBrowser: jest.fn(async () => ({})),
     shutdown: jest.fn(async () => {}),
   }));
@@ -81,6 +75,10 @@ function boot(probeResult, env = {}) {
     renderFlowToPdf: jest.fn(async () => ({
       pdf: Buffer.from('%PDF-1.4\nflow\n%%EOF'),
       pagination: { pageCount: 3, frontMatterPages: 0, paginateMs: 12 },
+    })),
+    renderHtmlToPdf: jest.fn(async () => ({
+      pdf: Buffer.from('%PDF-1.4\nlabels\n%%EOF'),
+      pagination: { pageCount: 1, frontMatterPages: 0, problems: [], clipped: 0 },
     })),
   }));
 
@@ -178,12 +176,12 @@ describe('a REQUIRED capability failure', () => {
     expect(renderFlowToPdf).not.toHaveBeenCalled();
   });
 
-  // #1134's own constraint: do not change the fixed-canvas render path.
-  test('does NOT touch POST /render', async () => {
+  // A label sheet has no paginator for the probe's findings to bear on.
+  test('does NOT touch POST /render/labels', async () => {
     const { request, app, startCapabilityProbe } = boot(DEGRADED);
     await startCapabilityProbe();
 
-    const res = await request(app).post('/render').set('X-Render-Secret', SECRET).send(fixedPayload());
+    const res = await request(app).post('/render/labels').set('X-Render-Secret', SECRET).send(labelsPayload());
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toContain('application/pdf');
   });
@@ -236,7 +234,6 @@ describe('everything short of a required failure gates nothing', () => {
     process.env.RENDER_SHARED_SECRET = SECRET;
 
     jest.doMock('../src/renderer', () => ({
-      renderToPdf: jest.fn(async () => Buffer.from('%PDF')),
       getBrowser: jest.fn(async () => ({})),
       shutdown: jest.fn(async () => {}),
     }));
@@ -286,7 +283,6 @@ describe('the flow route waits for the probe rather than racing it', () => {
     // eslint-disable-next-line global-require
     const realProbe = jest.requireActual('../src/capability-probe');
     jest.doMock('../src/renderer', () => ({
-      renderToPdf: jest.fn(async () => Buffer.from('%PDF')),
       getBrowser: jest.fn(async () => ({})),
       shutdown: jest.fn(async () => {}),
     }));
@@ -334,7 +330,6 @@ describe('the flow route waits for the probe rather than racing it', () => {
     process.env.RENDER_FLOW_CAPABILITY_WAIT_MS = '50';
 
     jest.doMock('../src/renderer', () => ({
-      renderToPdf: jest.fn(async () => Buffer.from('%PDF')),
       getBrowser: jest.fn(async () => ({})),
       shutdown: jest.fn(async () => {}),
     }));

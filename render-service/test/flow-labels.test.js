@@ -107,7 +107,6 @@ describe('POST /render/labels', () => {
     process.env.RENDER_SHARED_SECRET = SECRET;
     process.env.PORT = '8131';
     jest.doMock('../src/renderer', () => ({
-      renderToPdf: jest.fn(async () => Buffer.from('%PDF-1.4\n%%EOF')),
       getBrowser: jest.fn(async () => ({})),
       shutdown: jest.fn(async () => {}),
     }));

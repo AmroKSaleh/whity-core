@@ -3,47 +3,61 @@
 /**
  * Server-level tests for the whity_render HTTP API, with the Puppeteer
  * renderer MOCKED (no real Chromium involved — this suite verifies the
- * request/auth/validation plumbing, not the actual render). The real
- * Puppeteer round-trip (a genuine PDF from real Chromium, exercising Arabic
- * text + math + rich-text + barcode/QR) is proven separately by a real Docker
- * build/run, not by a fast unit test — see the PHP-side
- * DocumentRenderServiceDockerTest and the task's local verification steps.
+ * health/auth/rate-limit plumbing, not the actual render). The real Puppeteer
+ * round-trip (a genuine PDF from real Chromium) is proven separately by a real
+ * Docker build/run, not by a fast unit test — see the render-tier CI job.
+ *
+ * The flow route's own contract is in test/flow-server.test.js; the shared
+ * secret and the rate limiter are exercised through it here because every
+ * POST route shares them.
  */
 
 const SECRET = 'a'.repeat(32);
 
+const flowPayload = () => ({
+  direction: 'ltr',
+  page: { preset: 'a4', margin: { topMm: 25, rightMm: 20, bottomMm: 25, leftMm: 20 } },
+  content: [{ type: 'paragraph', text: 'hello' }],
+});
+
+/** Load the server with the browser and the flow renderer mocked. */
+function loadServer() {
+  jest.doMock('../src/renderer', () => ({
+    getBrowser: jest.fn(async () => ({})),
+    shutdown: jest.fn(async () => {}),
+  }));
+  jest.doMock('../src/flow/render', () => ({
+    renderFlowToPdf: jest.fn(async () => ({
+      pdf: Buffer.from('%PDF-1.4\nfake\n%%EOF'),
+      pagination: { pageCount: 1, frontMatterPages: 0, paginateMs: 1 },
+    })),
+    renderHtmlToPdf: jest.fn(),
+  }));
+  // eslint-disable-next-line global-require
+  const { app } = require('../src/server');
+  // eslint-disable-next-line global-require
+  const { renderFlowToPdf } = require('../src/flow/render');
+  return { app, renderFlowToPdf };
+}
+
 describe('whity_render server', () => {
   let request;
   let app;
-  let renderToPdf;
+  let renderFlowToPdf;
 
   beforeEach(() => {
     jest.resetModules();
     process.env.RENDER_SHARED_SECRET = SECRET;
     process.env.PORT = '8130';
 
-    jest.doMock('../src/renderer', () => ({
-      renderToPdf: jest.fn(async () => Buffer.from('%PDF-1.4\nfake\n%%EOF')),
-      shutdown: jest.fn(async () => {}),
-    }));
-
     // eslint-disable-next-line global-require
     request = require('supertest');
-    // eslint-disable-next-line global-require
-    ({ app } = require('../src/server'));
-    // eslint-disable-next-line global-require
-    ({ renderToPdf } = require('../src/renderer'));
+    ({ app, renderFlowToPdf } = loadServer());
   });
 
   afterEach(() => {
     jest.resetModules();
     delete process.env.RENDER_SHARED_SECRET;
-  });
-
-  const minimalTemplate = () => ({
-    page: { widthMm: 50, heightMm: 25, marginMm: 2, background: '#fff' },
-    placeholders: [],
-    pages: [{ id: 'p1', elements: [] }],
   });
 
   test('GET /health returns 200 with no auth required', async () => {
@@ -82,90 +96,54 @@ describe('whity_render server', () => {
     expect(res.body.capabilities.status).toBe('not_run');
   });
 
-  test('POST /render without the secret header is 401', async () => {
-    const res = await request(app).post('/render').send({ template: minimalTemplate() });
-    expect(res.status).toBe(401);
-    expect(renderToPdf).not.toHaveBeenCalled();
+  test('the harness mount is gone', async () => {
+    const res = await request(app).get('/_harness/index.html');
+    expect(res.status).toBe(404);
   });
 
-  test('POST /render with the wrong secret is 401', async () => {
-    const res = await request(app)
-      .post('/render')
-      .set('X-Render-Secret', 'wrong-secret-wrong-secret-wrong-secret')
-      .send({ template: minimalTemplate() });
-    expect(res.status).toBe(401);
-    expect(renderToPdf).not.toHaveBeenCalled();
-  });
-
-  test('POST /render with the correct secret and a valid payload returns a PDF', async () => {
-    const res = await request(app)
-      .post('/render')
-      .set('X-Render-Secret', SECRET)
-      .send({ template: minimalTemplate(), dataRows: [{ a: '1' }] });
-
-    expect(res.status).toBe(200);
-    expect(res.headers['content-type']).toMatch(/application\/pdf/);
-    expect(Buffer.from(res.body).toString('utf8')).toMatch(/^%PDF-/);
-    expect(renderToPdf).toHaveBeenCalledTimes(1);
-  });
-
-  test('POST /render rejects a malformed template with 422 and never calls the renderer', async () => {
-    const res = await request(app)
-      .post('/render')
-      .set('X-Render-Secret', SECRET)
-      .send({ template: { not: 'a template' } });
-
-    expect(res.status).toBe(422);
-    expect(renderToPdf).not.toHaveBeenCalled();
-  });
-
-  test('POST /render surfaces a renderer failure as a generic 500', async () => {
-    renderToPdf.mockRejectedValueOnce(new Error('boom: internal Puppeteer detail'));
-
-    const res = await request(app)
-      .post('/render')
-      .set('X-Render-Secret', SECRET)
-      .send({ template: minimalTemplate() });
-
-    expect(res.status).toBe(500);
-    expect(JSON.stringify(res.body)).not.toMatch(/boom/);
-  });
-
-  test('POST /render is refused when RENDER_SHARED_SECRET is not configured', async () => {
+  test('a render route is refused when RENDER_SHARED_SECRET is not configured', async () => {
     jest.resetModules();
     delete process.env.RENDER_SHARED_SECRET;
-    jest.doMock('../src/renderer', () => ({
-      renderToPdf: jest.fn(async () => Buffer.from('%PDF-1.4\nfake\n%%EOF')),
-      shutdown: jest.fn(async () => {}),
-    }));
-    // eslint-disable-next-line global-require
-    const { app: unconfiguredApp } = require('../src/server');
+    const { app: unconfiguredApp, renderFlowToPdf: unconfiguredRender } = loadServer();
 
     const res = await request(unconfiguredApp)
-      .post('/render')
+      .post('/render/flow')
       .set('X-Render-Secret', 'anything-at-all-anything-at-all')
-      .send({ template: minimalTemplate() });
+      .send(flowPayload());
+
+    expect(res.status).toBe(401);
+    expect(unconfiguredRender).not.toHaveBeenCalled();
+  });
+
+  test('a render route is refused when RENDER_SHARED_SECRET is shorter than 32 characters', async () => {
+    jest.resetModules();
+    process.env.RENDER_SHARED_SECRET = 'short-secret';
+    const { app: weakApp } = loadServer();
+
+    const res = await request(weakApp).post('/render/flow').set('X-Render-Secret', 'short-secret').send(flowPayload());
 
     expect(res.status).toBe(401);
   });
 
-  test('POST /render rate-limits after RENDER_RATE_LIMIT_MAX requests in the window', async () => {
+  test('a secret of the right length but the wrong value is 401', async () => {
+    const res = await request(app).post('/render/flow').set('X-Render-Secret', 'b'.repeat(32)).send(flowPayload());
+    expect(res.status).toBe(401);
+    expect(renderFlowToPdf).not.toHaveBeenCalled();
+  });
+
+  test('the render routes rate-limit after RENDER_RATE_LIMIT_MAX requests in the window, across routes', async () => {
     jest.resetModules();
     process.env.RENDER_SHARED_SECRET = SECRET;
     process.env.RENDER_RATE_LIMIT_MAX = '2';
-    jest.doMock('../src/renderer', () => ({
-      renderToPdf: jest.fn(async () => Buffer.from('%PDF-1.4\nfake\n%%EOF')),
-      shutdown: jest.fn(async () => {}),
-    }));
-    // eslint-disable-next-line global-require
-    const { app: limitedApp } = require('../src/server');
+    const { app: limitedApp } = loadServer();
 
-    const send = () =>
-      request(limitedApp).post('/render').set('X-Render-Secret', SECRET).send({ template: minimalTemplate() });
+    const flow = () => request(limitedApp).post('/render/flow').set('X-Render-Secret', SECRET).send(flowPayload());
 
-    const first = await send();
-    const second = await send();
-    const third = await send();
+    const first = await flow();
+    const second = await flow();
+    // One limiter for one Chromium: the third request is refused even on the
+    // other route.
+    const third = await request(limitedApp).post('/render/labels').set('X-Render-Secret', SECRET).send({});
 
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);

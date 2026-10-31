@@ -4,12 +4,6 @@
  * The FLOWING-document payload: validation, normalisation and numbering
  * (#1072, first half).
  *
- * This is the second of the render tier's two modes and it shares nothing
- * with the first. The fixed-canvas mode (`POST /render`, src/renderer.js)
- * takes a designer TEMPLATE — pages of absolutely-placed, mm-positioned
- * elements — and prints one PDF page per template page at `margin: 0`. It is
- * correct for what it serves and is not touched by any of this.
- *
  * The flowing mode (`POST /render/flow`) takes a CONTENT TREE — headings,
  * paragraphs, tables, figures — with no positions at all, and lets the
  * renderer decide how many pages it becomes. Everything that makes such a
@@ -66,8 +60,7 @@ const BLOCK_TYPES = new Set([
   'figure',
   'pageBreak',
   'spacer',
-  // The platform's verification code (#1036 for the fixed-canvas mode, extended
-  // to this one). Drawn here rather than embedded as a `figure` by the caller
+  // The platform's verification code (#1036). Drawn here rather than embedded as a `figure` by the caller
   // because the caller has no barcode encoder and this service already does —
   // and because an image the caller supplies is an image the caller chose,
   // which is the wrong property for the one mark on a document that is supposed
@@ -208,9 +201,8 @@ function asFiniteNumber(value) {
 /**
  * Validate a flow payload's SHAPE and size.
  *
- * Returns an error string (the 422 body) or null. Deliberately mirrors
- * src/limits.js's `validatePayload` in style: a flat, first-error-wins check
- * that never throws, so the server can answer 422 with something a caller can
+ * Returns an error string (the 422 body) or null: a flat, first-error-wins
+ * check that never throws, so the server can answer 422 with something a caller can
  * act on rather than 500 with a stack trace.
  *
  * @param {unknown} payload

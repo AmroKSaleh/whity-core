@@ -205,7 +205,7 @@ services:
       # profile, so a `:?` here would make an ordinary two-tier `up` (which is
       # what deploy-staging.yml runs, with no render secret in scope) fail on a
       # service it never intended to start. The service itself covers the gap:
-      # it logs a loud warning at boot and refuses every POST /render with 401
+      # it logs a loud warning at boot and refuses every POST /render/* with 401
       # until the secret is at least 32 chars.
       RENDER_SHARED_SECRET: ${RENDER_SHARED_SECRET:-}
     # Not published to the host by default: this is an INTERNAL service reached

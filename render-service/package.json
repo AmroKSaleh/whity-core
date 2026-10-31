@@ -2,16 +2,15 @@
   "name": "whity-render-service",
   "version": "0.1.0",
   "private": true,
-  "description": "Server-side PDF/PNG export microservice for the whity-core document/label designer (ADR 0012). Loads the SAME React renderer the browser preview uses (web/components/documents/print-document.tsx) via headless Chromium, so exported output stays pixel-parity with the designer preview.",
+  "description": "Server-side PDF export microservice for whity-core (ADR 0012). Prints the document editor's documents (flowing, paginated in headless Chromium) and label sheets.",
   "license": "AGPL-3.0-only",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "build:harness": "node scripts/build-harness.js",
     "build:info": "node scripts/write-build-info.js",
     "build:browser-info": "node scripts/write-browser-info.js",
-    "start": "npm run build:harness && npm run build:info && node src/server.js",
+    "start": "npm run build:info && node src/server.js",
     "test": "jest",
     "flow:fixture": "node scripts/generate-flow-fixture.js",
     "flow:verify": "node scripts/verify-flow-pdf.js",
@@ -22,12 +21,9 @@
     "express": "^5.3.0",
     "express-rate-limit": "^8.7.1",
     "katex": "^0.19.1",
-    "puppeteer-core": "^25.16.0",
-    "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "puppeteer-core": "^25.16.0"
   },
   "devDependencies": {
-    "esbuild": "^0.28.2",
     "jest": "^30.5.2",
     "pdfjs-dist": "^6.4.299",
     "supertest": "^7.3.1"
