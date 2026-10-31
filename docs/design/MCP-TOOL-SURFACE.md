@@ -1,6 +1,6 @@
 # MCP tool surface: search and call, toolsets, splits and budgets
 
-Status: revised to the owner's answers of 2026-10-31 (§10). Nothing here is built yet.
+Status: **decided** (owner answers of 2026-10-31, §10). Nothing here is built yet; implementation starts when the owner says to build.
 Related: ADR-0006 and its amendments (MCP server), ADR-0015 (OAuth; the authorization server is Whity ID), `00-decision-register.md` (agent model: Scope grant, 7.5a to 7.5c), `12-engineering-handoff.md` items 10 and 11, `docs/design/DOCUMENT-THEMES.md` §6 and §7, `docs/design/DOCUMENT-AUTOMATION.md` §3.10 (both on branch `design/document-themes`), `docs/design/WHITY-BUILDER.md` (branch `design/whity-builder`).
 
 The owner's problem: "too many mcp tools in one create a disaster... and not all users have or get all the tools permissions yet get them in the context anyway in addition plugins add more and more tools... we need an sdk way to manage this correctly".
@@ -127,9 +127,9 @@ Checked against the 2026-07-28 specification and the SEP index on 2026-10-31.
 | My inbox | `get_api_me_inbox` | 614 |
 | Get a document | `get_api_documents_id` | 346 |
 | List templates | `get_api_document_templates` | 259 |
-| Search records | `get_api_documents` (list documents with filters) for now | 1,389 |
+| Search records | `get_api_search` (new `GET /api/search`, WHIT-783); `get_api_documents` stands in until it ships | about 600 (estimate) |
 
-Core has no cross-record search route today; nothing derived matches search, find or lookup. Until one exists, document listing stands in, and building a real `GET /api/search` is open question 1 (§10, WHIT-783). Together the five cost 2,885 bytes, about 720 tokens. With search and call the bare `/mcp` comes to about 1.1k tokens.
+Core has no cross-record search route today; nothing derived matches search, find or lookup. The owner decided to build `GET /api/search` (WHIT-783, §5.13), which serves this tool and the ⌘K command palette (register 2.1c). Until it ships, document listing stands in. Measured with document listing, the five cost 2,885 bytes, about 720 tokens. With search and call, the bare `/mcp` comes to about 1.1k tokens.
 
 **Plugin always-on tools.** A plugin may mark **one** tool `always-on`. Any more are demoted to `discoverable` at load, with a warning. The one tool is listed only after a tenant admin enables it on the admin MCP page (stored per tenant as `mcp.always_on_plugin_tools`; the operator can block it instance-wide). It must be read-only (`readOnlyHint: true`), because every write goes through search and call. Its description is capped at 500 characters, like every other description.
 
@@ -275,7 +275,7 @@ interface PluginMcpToolsetsInterface
 
 ### 5.11 Agents: scope grant, proposals, undo and actor
 
-The source of truth is the agent model in `00-decision-register.md`: the Scope grant row, 7.5a Proposal, 7.5b Approvals inbox and 7.5c Undo. The server side is engineering handoff items 10 and 11 (`12-engineering-handoff.md`); `IMPLEMENTATION-NOTES.md` §1 notes that neither exists yet. MCP is how agents reach Whity, so this design defines how every MCP call obeys that model. Where the register is silent, the choice is marked **(proposed)** and listed in §10.
+The source of truth is the agent model in `00-decision-register.md`: the Scope grant row, 7.5a Proposal, 7.5b Approvals inbox and 7.5c Undo. The server side is engineering handoff items 10 and 11 (`12-engineering-handoff.md`); `IMPLEMENTATION-NOTES.md` §1 notes that neither exists yet. MCP is how agents reach Whity, so this design defines how every MCP call obeys that model. Where the register was silent, the owner decided on 2026-10-31 (§10, decisions 8 to 12).
 
 **Who is an agent.** An agent is an **AI principal**: a credential of principal kind `ai-agent` (ADR-0006 §3 names this kind, but nothing mints it yet). It is issued by a person, the *granting person*, and always acts for them. The owner's "agent flag on the token" is this principal kind. A person's own client (their Claude, their Cursor) holds an ordinary `user` or `oauth` token and acts as that person, under that person's RBAC, with no grant and no proposals. Whity ID, the OIDC service and ADR-0015's authorization server, marks an OAuth client registration as an agent client so that its tokens map to `ai-agent`.
 
@@ -288,8 +288,8 @@ The source of truth is the agent model in `00-decision-register.md`: the Scope g
 | Allowed | Found, marked `mode: allowed`. | Runs, as "agent for person". |
 
 - **Never more than the granting person.** On every call the effective permission is the granting person's RBAC in that tenant, intersected with the grant. If the person loses a permission, the agent loses it at once, whatever the grant says.
-- **Operations gated by a role, or open,** have no permission to set a mode on. **(proposed)** For agents, their writes are Ask first and their reads Allowed.
-- **Defaults for a new grant (proposed):** permissions ending `:read` are Allowed. Every other permission the person holds is Ask first. Nothing is Allowed for writes until the person says so. Owner question 2 (A).
+- **Operations gated by a role, or open,** have no permission to set a mode on. For agents, their writes are Ask first and their reads Allowed (decided).
+- **Defaults for a new grant (decided):** every read permission the person holds starts Allowed. Every other permission starts Ask first. Nothing is Allowed for writes until the person says so.
 
 **Route ceiling (`agentPolicy`).** A route or authored tool can cap what any grant allows. This is the mechanism the document designs already use:
 
@@ -306,17 +306,19 @@ The effective mode is the stricter of the grant and the ceiling. People's own cl
 
 1. An agent's call in Ask first mode stores an `agent_proposals` row (the table is planned in `IMPLEMENTATION-NOTES.md`). The row holds: the AI principal, the granting person, the tenant, the operationId, the arguments, a diff, the permissions it would use (scope), the undo window, and the status (waiting · approved · declined · expired · undone).
 2. `call_operation` returns a normal tool result, not an error. It carries `proposal: {id, status: "waiting", summary, permissions, undoWindowSeconds}`, so the model can tell the person what is waiting.
-3. **The diff.** An operation can declare a preview: a read-only dry run that returns what would change. **(proposed)** Core write routes get one where it is cheap, such as updates (before → after of the touched fields). An operation without one stores the arguments, and the card shows them as "Show all".
-4. **Who decides.** The granting person approves, edits or declines in the approvals inbox (7.5b). **(proposed)** Only the granting person, not their admins, because approving executes as them.
+3. **The diff.** An operation can declare a preview: a read-only dry run that returns what would change. Core write routes get one where it is cheap, such as updates (before → after of the touched fields). An operation without one stores the arguments, and the card shows them as "Show all".
+4. **Who decides.** The granting person approves, edits or declines in the approvals inbox (7.5b). Only the granting person may approve, edit or decline (decided), because approving executes as them.
 5. **Approval executes it.** At approval the server re-checks everything for the granting person in the proposal's own tenant: exposure, entitlement, token toolsets, the grant and RBAC. It then runs the operation with actor "agent for person", and the approver recorded as the decider. The tenant comes from the row, never from ambient state. If the arguments were edited, they are validated again.
-6. **Expiry.** **(proposed)** A waiting proposal expires after 7 days, or earlier if the operation says so, and shows "Ask again" (register proposal states). Owner question 3 (B).
+6. **Expiry (decided).** A waiting proposal expires after 7 days, or earlier if the operation says so, and shows "Ask again" (register proposal states).
 7. A proposal is never executed twice. Approval is idempotent on the proposal id.
 
 **Undo (register 7.5c).**
 
 - An operation may declare an undo window and an inverse: an undo operation, or a handler that reverses it from the stored result. Example: send email, 30 minutes.
 - After an agent's Allowed call, or an approved proposal, the result carries `undo: {token, until}`. The activity item shows Undo until then. Undo runs the inverse with actor "person" (the one who clicked) and marks the proposal `undone`.
-- **(proposed)** An operation with no undo can't be Allowed for agents: it is always Ask first, because the register keeps confirmation for what can't be undone. Owner question 4 (C).
+- **No undo means Ask first (decided).** An operation with no undo window is always Ask first for agents, even when the grant says Allowed. The register keeps confirmation for what can't be undone.
+
+**Rollout (decided).** No `ai-agent` credentials are issued until proposals exist (WHIT-784). People's own clients keep connecting as themselves, so nothing can skip Ask first in the meantime.
 
 **Actor on every write.** Every write records its actor:
 
@@ -359,6 +361,17 @@ A split serves one slice at its own URL, from the same server, with the same aut
   - `/.well-known/ai-catalog.json` lists **core splits only**. Plugin splits are never in the public catalog.
 - **Plugins** get a split by declaring toolsets (§5.7). They have no route or handler to write.
 
+### 5.13 Core search (`GET /api/search`)
+
+Decided 2026-10-31 (WHIT-783). One permission-filtered search across records. It serves the "search records" always-on MCP tool (`get_api_search`) and the ⌘K command palette (register 2.1c: "searches records, pages and actions").
+
+- **What it searches:** documents (titles, numbers, sources), forms (titles; submissions the caller can see), people (users and OUs the caller may list), and plugin records from plugins that opt in.
+- **Filtered per record:** each result is checked against the caller's permissions and tenant, the same as the record's own list route. Nothing appears that its list route would hide. For agents, the scope grant applies (a type set to Off isn't searched).
+- **Arabic-aware:** text is normalised before matching. Alef forms (أ إ آ → ا), taa marbuta and haa (ة/ه), alef maqsura and yaa (ى/ي), diacritics and tatweel are folded, Arabic-Indic digits become Western, and Latin text is case-folded. Results show the record's own language label.
+- **Plugins opt in** through an SDK declaration (with WHIT-752): the record type, the fields to index, the permission that gates it, and how to build a link. This works for code plugins and Whity-Builder manifest plugins alike.
+- **Shape:** `GET /api/search?q=&types=&limit=` returns `{type, id, title, subtitle, url, matched}` grouped by type, plus pages and actions for ⌘K. Pages and actions come from the app map, not the database.
+- **Engine:** start with database text search per dialect behind one interface: PostgreSQL full-text search with an unaccent-style normaliser, and LIKE on normalised columns for MySQL and SQLite. Each searchable type keeps a normalised search column, kept up to date on write. A dedicated engine can come later behind the same interface.
+
 ## 6. Back-compat and release notes
 
 | Who | What changes in the next release |
@@ -386,7 +399,6 @@ A split serves one slice at its own URL, from the same server, with the same aut
 ## 8. Later, not in this design
 
 - Sandboxed code execution (Code Mode) once search and call has usage data.
-- A core cross-record search route if open question 1 says so.
 - Per-toolset guidance through the Skills extension (SEP-2640), as `skill://whity/<toolset>/SKILL.md`.
 - Toolsets for prompts and resources.
 - `outputSchema` on derived operations, blocked on WHIT-120.
@@ -408,7 +420,7 @@ A split serves one slice at its own URL, from the same server, with the same aut
 - Builder plugin splits never appear in the public AI catalog.
 - `core.plugins` is unchanged.
 
-## 10. Owner decisions (2026-10-31) and remaining questions
+## 10. Owner decisions (2026-10-31)
 
 Decided:
 
@@ -419,19 +431,18 @@ Decided:
 5. **Plugins:** at most one always-on tool, shown only after an admin enables it. Descriptions are capped at 500 characters. Everything else is reached through search.
 6. **Agents:** an `agent` flag on the token, refined the same day. Agents follow the register's model: a per-permission scope grant (Off, Ask first or Allowed) for an AI principal acting for its granting person. Ask first stores a real proposal that approval executes for that person. Every write records its actor. RBAC and tenant isolation apply on every MCP call (§5.11).
 7. **Splits:** optional, for narrow clients and hard boundaries. Each also runs search and call. The core areas stay as listed. Plugin splits are not in the public AI catalog. The wizard recommends the single `/mcp`.
+8. **Search records:** build `GET /api/search` across documents, forms, people and plugin records. It is permission-filtered and Arabic-aware, plugins opt in, and it serves both the always-on tool and the ⌘K palette (§5.13, WHIT-783).
+9. **Grant defaults:** every read the person holds starts Allowed; every other permission starts Ask first. Writes gated only by a role, or not gated at all, are Ask first for agents.
+10. **Proposals:** expire after 7 days. Only the granting person can approve, edit or decline.
+11. **No undo window:** always Ask first for agents, even if the grant says Allowed.
+12. **Rollout:** no `ai-agent` credentials until proposals exist. People's own clients still connect as themselves.
+13. **Old names:** `search_tools`, `describe_tool` and `call_tool` stay as unlisted aliases for one minor release, then are removed. The release notes say so.
 
-Still open:
-
-1. **"Search records".** Core has no cross-record search route. For now the fifth always-on tool is document listing (`get_api_documents`). Should core get a `GET /api/search` across documents, forms, people and plugin records, and what should it cover?
-2. **Grant defaults (A).** For a new grant: reads Allowed and every other held permission Ask first? And role-gated or open writes treated as Ask first?
-3. **Proposal expiry and deciders (B).** Expire waiting proposals after 7 days? Only the granting person may approve, not their admins?
-4. **No undo means no Allowed (C).** An operation with no undo window is always Ask first for agents, even if the grant says Allowed?
-5. **Before proposals ship.** Until handoff item 10 exists, no `ai-agent` credentials are issued at all, so nothing can bypass Ask first. Agree?
-6. **Old discovery names** (`search_tools`, `describe_tool`, `call_tool`): is one minor release of unlisted aliases enough?
+Nothing is left open. Implementation starts when the owner says to build.
 
 ## 11. Task breakdown
 
-Taskaat, project WHIT, section "Plugins, SDK & API" (WHIT-755 is in "Docs & Ops"). The design is decided; implementation starts when the owner approves this revision.
+Taskaat, project WHIT, section "Plugins, SDK & API" (WHIT-755 is in "Docs & Ops", WHIT-784 in "Auth, RBAC & Security"). The design is decided; implementation starts when the owner says to build.
 
 | Task | What | Depends on |
 |---|---|---|
@@ -442,9 +453,9 @@ Taskaat, project WHIT, section "Plugins, SDK & API" (WHIT-755 is in "Docs & Ops"
 | WHIT-750 search and call | `search_operations` (query, toolset, operationId describe, table of contents, Arabic), `call_operation`, old names as unlisted aliases, `McpSearchEvalTest` | WHIT-748, WHIT-749 |
 | WHIT-751 budgets in CI | `McpToolBudgetTest`: names, descriptions, summaries, schema size, always-on and search-and-call sizes | WHIT-747 |
 | WHIT-752 SDK 1.47 | descriptor `toolset` / `visibility` / `agentPolicy`, `PluginMcpToolsetsInterface`, name prefix, one always-on read-only tool, loader enforcement, docs, conformance checks | WHIT-747 |
-| WHIT-753 AI principals and scope grant | `ai-agent` principal (Whity tokens and Whity ID agent clients), per-permission Off / Ask first / Allowed stored with the scope (handoff item 11), never above the granting person, `agentPolicy` ceilings at the route, mode in search, actor columns and actor context on every write | WHIT-746 (A) |
-| WHIT-784 agent proposals and undo | `agent_proposals` (handoff item 10): store on Ask first, preview diffs, approve, edit or decline (approval executes for the granting person in the row's tenant), expiry, idempotent approval; undo windows and inverses (7.5c) | WHIT-753 (B, C) |
+| WHIT-753 AI principals and scope grant | `ai-agent` principal (Whity tokens and Whity ID agent clients), per-permission Off / Ask first / Allowed with the decided defaults (handoff item 11), never above the granting person, `agentPolicy` ceilings at the route, mode in search, actor columns and actor context on every write. No `ai-agent` credentials issued until WHIT-784 ships. | WHIT-746 |
+| WHIT-784 agent proposals and undo | `agent_proposals` (handoff item 10): store on Ask first, preview diffs, approve, edit or decline (approval executes for the granting person in the row's tenant), expiry, idempotent approval; undo windows and inverses (7.5c) | WHIT-753 |
 | WHIT-754 admin and wizard | admin MCP page (toolset, visibility, policy, sizes, enabling plugin always-on tools); wizard recommends `/mcp`, optional toolsets and splits | WHIT-748, WHIT-749 |
 | WHIT-755 docs and release notes | MCP-Server and MCP-Client-Connection wiki pages, runbook, the changelog and release-notes callout for the switch | WHIT-747 to WHIT-752 |
 | WHIT-765 splits | `/mcp/{split}` in search-and-call mode, split registry, hard boundary, per-split OAuth resource, `GET /api/mcp/splits`, Server Cards, core-only AI catalog | WHIT-748, WHIT-749, WHIT-750 |
-| WHIT-783 core search route | decide and, if yes, build `GET /api/search` for the "search records" always-on tool (open question 1) | owner answer |
+| WHIT-783 core search | `GET /api/search` (§5.13): documents, forms, people, opted-in plugin records; per-record permission filter; Arabic normalisation; SDK opt-in; serves `get_api_search` and ⌘K | WHIT-752 (plugin opt-in) |
