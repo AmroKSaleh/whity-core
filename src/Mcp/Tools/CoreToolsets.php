@@ -157,10 +157,11 @@ final class CoreToolsets
     /**
      * Core's always-on operations: read-only, everyday, listed directly next to
      * search and call (owner decision 4, 2026-10-31). "Search records" is
-     * `GET /api/search` (WHIT-783).
+     * `GET /api/search` (WHIT-783). "Who am I" is answered by `init_session`
+     * (WHIT-794), which is always-on beside these, so the set stays at five;
+     * `get_api_me` is still found through search.
      */
     public const ALWAYS_ON = [
-        'get_api_me',
         'get_api_me_inbox',
         'get_api_documents_id',
         // The editor's templates (editor M4c replaced /api/document-templates).

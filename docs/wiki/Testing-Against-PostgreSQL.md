@@ -70,10 +70,17 @@ longer.
 
 | Job | Engine | Scope |
 | --- | --- | --- |
-| `test` (4 shards) | SQLite | The whole suite, with coverage |
+| `test` (3 shards) | SQLite | The whole suite; with coverage except on PRs into develop |
 | `postgres-migrations` | PostgreSQL | `migrate` / `seed` / idempotent re-`migrate`, plus `tests/Security` |
 | `postgres-integration` (5 shards) | PostgreSQL | `tests/Integration` |
-| `postgres-dialect` (2 shards) | PostgreSQL | Every real-engine test *outside* those two suites |
+| `postgres-dialect` (2 shards) | PostgreSQL | Every real-engine test *outside* those two suites; not on PRs into develop |
+
+On a PR into develop, `postgres-migrations` and `postgres-integration` run;
+`postgres-dialect` runs in the merge queue, on pushes to develop and main, on
+release PRs and nightly. A PR can only reach develop through the merge queue,
+so a dialect failure still keeps it out of develop: it is reported in the
+queue rather than on the PR. To run it on a PR before queueing, run
+**Automated Tests** by hand (`workflow_dispatch`) on the branch.
 
 `postgres-dialect` selects its files by content — anything referencing
 `SchemaFromMigrations` or `RelationsSchema` — so a real-engine test you add

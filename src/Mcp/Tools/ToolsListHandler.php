@@ -9,6 +9,7 @@ use Whity\Auth\TokenValidator;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Mcp\Auth\McpPrincipal;
 use Whity\Mcp\JsonRpc\MethodHandler;
+use Whity\Mcp\Auth\AgentScopeGrant;
 use Whity\Mcp\Auth\McpScope;
 
 /**
@@ -76,7 +77,10 @@ final class ToolsListHandler implements MethodHandler
             }
             $access = $accessMap[$name] ?? ['requiredRole' => null, 'requiredPermission' => null];
             if (self::inTokenToolsets($tool, $principal) && $this->callerCanUse($access, $principal, $tenantId)) {
-                $tools[] = $tool;
+                $tool = self::withAgentMode($tool, $access, $principal);
+                if ($tool !== null) {
+                    $tools[] = $tool;
+                }
             }
         }
 
@@ -97,7 +101,10 @@ final class ToolsListHandler implements MethodHandler
                 $name   = (string) ($tool['name'] ?? '');
                 $access = $authoredAccess[$name] ?? ['requiredRole' => null, 'requiredPermission' => null];
                 if (self::inTokenToolsets($tool, $principal) && $this->callerCanUse($access, $principal, $tenantId)) {
-                    $tools[] = $tool;
+                    $tool = self::withAgentMode($tool, $access, $principal);
+                    if ($tool !== null) {
+                        $tools[] = $tool;
+                    }
                 }
             }
         }
@@ -133,6 +140,59 @@ final class ToolsListHandler implements MethodHandler
         usort($tools, static fn (array $a, array $b): int => $key($a) <=> $key($b));
 
         return $tools;
+    }
+
+    /**
+     * WHIT-753: for an agent, what its grant lets it do with the tool, as
+     * `_meta` `dev.whity/agentMode` (`allow` or `ask`), so search can say ahead
+     * of time what will need a person's approval. A tool the grant turns Off is
+     * left out, like any tool the caller can't use. Other callers: unchanged.
+     *
+     * @param array<string, mixed> $tool
+     * @param array<string, mixed> $access
+     * @return array<string, mixed>|null
+     */
+    private static function withAgentMode(array $tool, array $access, ?McpPrincipal $principal): ?array
+    {
+        if ($principal === null || !AgentScopeGrant::appliesTo($principal)) {
+            return $tool;
+        }
+        $mode = self::agentModeFor($tool, $access, $principal);
+        if ($mode === AgentScopeGrant::OFF) {
+            return null;
+        }
+        $meta = is_array($tool['_meta'] ?? null) ? $tool['_meta'] : [];
+        $meta[self::META_AGENT_MODE] = $mode;
+        $tool['_meta'] = $meta;
+
+        return $tool;
+    }
+
+    public const META_AGENT_MODE = 'dev.whity/agentMode';
+
+    /**
+     * The agent's effective mode for a tool: its grant for the tool's
+     * permission, lowered by the tool's agent policy and by having no undo.
+     * Shared with tools/call so the list and the call cannot disagree.
+     *
+     * @param array<string, mixed> $tool
+     * @param array<string, mixed> $access
+     */
+    public static function agentModeFor(array $tool, array $access, McpPrincipal $principal): string
+    {
+        $annotations = is_array($tool['annotations'] ?? null) ? $tool['annotations'] : [];
+        $meta        = is_array($tool['_meta'] ?? null) ? $tool['_meta'] : [];
+        $permission  = is_string($access['requiredPermission'] ?? null) ? $access['requiredPermission'] : null;
+        $policy      = is_string($meta[ToolSurface::META_AGENT_POLICY] ?? null) ? $meta[ToolSurface::META_AGENT_POLICY] : ToolSurface::AGENT_ALLOW;
+
+        // No operation declares an undo yet (WHIT-784 adds them), so every
+        // write is Ask first for agents for now (owner decision 11).
+        return AgentScopeGrant::of($principal)->effectiveMode(
+            $permission,
+            ($annotations['readOnlyHint'] ?? false) === true,
+            $policy,
+            false,
+        );
     }
 
     /**

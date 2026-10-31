@@ -75,21 +75,44 @@ final class DiscoveryToolsTest extends TestCase
         ToolDeriver::clearCache();
     }
 
-    public function testListOffersExactlyTheThreeDiscoveryTools(): void
+    public function testListOffersExactlySearchAndCall(): void
     {
         $tools = ($this->discovery()->listHandler())(null, self::BEARER)['tools'];
 
-        self::assertSame(['search_tools', 'describe_tool', 'call_tool'], array_column($tools, 'name'));
+        self::assertSame(['search_operations', 'call_operation'], array_column($tools, 'name'));
         self::assertTrue($tools[0]['annotations']['readOnlyHint']);
-        self::assertTrue($tools[1]['annotations']['readOnlyHint']);
-        self::assertArrayNotHasKey('destructiveHint', $tools[2]['annotations'], 'call_tool may delete; it keeps the cautious default');
+        self::assertArrayNotHasKey('destructiveHint', $tools[1]['annotations'], 'call_operation may delete; it keeps the cautious default');
+    }
+
+    public function testAnEmptyQueryListsTheAreasNotTheOperations(): void
+    {
+        $this->grantAll();
+
+        $toc = $this->decode($this->call('search_operations', ['query' => '']));
+
+        self::assertArrayNotHasKey('matches', $toc);
+        self::assertSame(3, array_sum(array_column($toc['toolsets'], 'operations')));
+    }
+
+    public function testTheWhit707NamesStillAnswer(): void
+    {
+        $this->grantAll();
+
+        $found = $this->decode($this->call('search_tools', ['query' => 'delete users']));
+        self::assertSame(['delete_api_users_id'], array_column($found['matches'], 'operationId'));
+
+        $described = $this->decode($this->call('describe_tool', ['name' => 'delete_api_users_id']));
+        self::assertSame('delete_api_users_id', $described['operationId']);
+
+        $this->call('call_tool', ['name' => 'get_api_users', 'arguments' => []]);
+        self::assertSame(['list users []'], $this->called);
     }
 
     public function testSearchFindsToolsByWhatTheyDo(): void
     {
         $this->grantAll();
 
-        $names = array_column($this->search('delete users')['matches'], 'name');
+        $names = array_column($this->search('delete users')['matches'], 'operationId');
 
         self::assertSame(['delete_api_users_id'], $names, 'every term must match, and "users" finds "user"');
     }
@@ -99,7 +122,7 @@ final class DiscoveryToolsTest extends TestCase
         $this->grantAll();
 
         $found = $this->search('users');
-        $byName = array_column($found['matches'], null, 'name');
+        $byName = array_column($found['matches'], null, 'operationId');
 
         self::assertSame(2, $found['total']);
         self::assertTrue($byName['get_api_users']['readOnly']);
@@ -112,7 +135,7 @@ final class DiscoveryToolsTest extends TestCase
         $this->roleChecker->method('hasPermissionForProfile')
             ->willReturnCallback(static fn (int $id, string $permission): bool => $permission === 'users:read');
 
-        $everything = array_column($this->search('')['matches'], 'name');
+        $everything = array_column($this->search('api')['matches'], 'operationId');
 
         self::assertSame(['get_api_users'], $everything, 'no RBAC-denied tool, and no ungated route like login');
     }
@@ -121,7 +144,7 @@ final class DiscoveryToolsTest extends TestCase
     {
         $this->grantAll();
 
-        $found = $this->search('', 1);
+        $found = $this->search('api', 1);
 
         self::assertCount(1, $found['matches']);
         self::assertSame(3, $found['total']);
@@ -132,19 +155,20 @@ final class DiscoveryToolsTest extends TestCase
     {
         $this->grantAll();
 
-        $tool = $this->decode($this->call('describe_tool', ['name' => 'delete_api_users_id']));
+        $tool = $this->decode($this->call('search_operations', ['operationId' => 'delete_api_users_id']));
 
-        self::assertSame('delete_api_users_id', $tool['name']);
+        self::assertSame('delete_api_users_id', $tool['operationId']);
         self::assertSame(['id'], $tool['inputSchema']['required']);
-        self::assertTrue($tool['annotations']['destructiveHint']);
+        self::assertTrue($tool['destructive']);
+        self::assertSame('allow', $tool['agentPolicy']);
     }
 
     public function testDescribeTreatsHiddenAndUnknownAlike(): void
     {
         $this->roleChecker->method('hasPermissionForProfile')->willReturn(false);
 
-        $hidden  = $this->call('describe_tool', ['name' => 'get_api_users']);
-        $unknown = $this->call('describe_tool', ['name' => 'no_such_tool']);
+        $hidden  = $this->call('search_operations', ['operationId' => 'get_api_users']);
+        $unknown = $this->call('search_operations', ['operationId' => 'no_such_tool']);
 
         self::assertTrue($hidden['isError']);
         self::assertSame(
@@ -157,7 +181,7 @@ final class DiscoveryToolsTest extends TestCase
     {
         $this->grantAll();
 
-        $this->call('call_tool', ['name' => 'delete_api_users_id', 'arguments' => ['id' => '42']]);
+        $this->call('call_operation', ['operationId' => 'delete_api_users_id', 'arguments' => ['id' => '42']]);
 
         self::assertSame(['delete user {"id":"42"}'], $this->called);
     }
@@ -166,12 +190,12 @@ final class DiscoveryToolsTest extends TestCase
     {
         $this->roleChecker->method('hasPermissionForProfile')->willReturn(false);
 
-        try {
-            $this->call('call_tool', ['name' => 'delete_api_users_id', 'arguments' => ['id' => '42']]);
-            self::fail('the real call handler must refuse');
-        } catch (McpException $e) {
-            self::assertNotSame(0, $e->getCode());
-        }
+        // Refused by the real call handler, and reported to the model as a
+        // tool error it can read (WHIT-710), not a protocol error.
+        $result = $this->call('call_operation', ['operationId' => 'delete_api_users_id', 'arguments' => ['id' => '42']]);
+
+        self::assertTrue($result['isError']);
+        self::assertStringContainsString('Not allowed', $result['content'][0]['text']);
         self::assertSame([], $this->called);
     }
 
@@ -188,17 +212,17 @@ final class DiscoveryToolsTest extends TestCase
     {
         // WHIT-710: the name is an argument the model chose, so the error is a
         // tool result it can read, not a protocol error it may never see.
-        $result = $this->call('call_tool', ['name' => 'delete_everything', 'arguments' => []]);
+        $result = $this->call('call_operation', ['operationId' => 'delete_everything', 'arguments' => []]);
 
         self::assertTrue($result['isError']);
-        self::assertStringContainsString('Use search_tools', $result['content'][0]['text']);
+        self::assertStringContainsString('Use search_operations', $result['content'][0]['text']);
     }
 
     public function testCallToolReportsBadArgumentsAsAToolError(): void
     {
         $this->grantAll();
 
-        $result = $this->call('call_tool', ['name' => 'delete_api_users_id', 'arguments' => []]);
+        $result = $this->call('call_operation', ['operationId' => 'delete_api_users_id', 'arguments' => []]);
 
         self::assertTrue($result['isError']);
         self::assertStringContainsString('Missing required argument: id', $result['content'][0]['text']);
@@ -207,7 +231,7 @@ final class DiscoveryToolsTest extends TestCase
 
     public function testCallToolRefusesToCallADiscoveryTool(): void
     {
-        $result = $this->call('call_tool', ['name' => 'call_tool', 'arguments' => []]);
+        $result = $this->call('call_operation', ['operationId' => 'call_operation', 'arguments' => []]);
 
         self::assertTrue($result['isError']);
     }
@@ -236,7 +260,7 @@ final class DiscoveryToolsTest extends TestCase
             'Authorization' => 'Bearer ' . self::BEARER,
         ], $body);
 
-        self::assertSame(['search_tools', 'describe_tool', 'call_tool'], $names($transport->handlePost($request('/mcp?tools=discover'))));
+        self::assertSame(['search_operations', 'call_operation'], $names($transport->handlePost($request('/mcp?tools=discover'))));
         self::assertContains('get_api_users', $names($transport->handlePost($request('/mcp'))));
         self::assertContains('get_api_users', $names($transport->handlePost($request('/mcp?tools=everything'))));
     }
@@ -262,7 +286,7 @@ final class DiscoveryToolsTest extends TestCase
         }
 
         self::assertSame(
-            ['search_tools', 'describe_tool', 'call_tool'],
+            ['search_operations', 'call_operation'],
             array_column(json_decode($response->getBody(), true)['result']['tools'], 'name'),
         );
     }
@@ -292,7 +316,7 @@ final class DiscoveryToolsTest extends TestCase
     private function search(string $query, ?int $limit = null): array
     {
         $arguments = ['query' => $query] + ($limit !== null ? ['limit' => $limit] : []);
-        return $this->decode($this->call('search_tools', $arguments));
+        return $this->decode($this->call('search_operations', $arguments));
     }
 
     /**

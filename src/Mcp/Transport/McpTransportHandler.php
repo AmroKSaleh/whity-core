@@ -40,8 +40,8 @@ final class McpTransportHandler
     public function __construct(
         private readonly McpRequestHandlerInterface $dispatcher,
         private readonly bool $enabled = true,
-        // WHIT-707: serves `/mcp?tools=discover`, three discovery tools in
-        // place of the whole catalogue. Its own dispatcher rather than a flag
+        // WHIT-707, WHIT-750: serves `/mcp?tools=discover`, search and call
+        // in place of the whole catalogue. Its own dispatcher rather than a flag
         // threaded through every handler, so the mode never sits in state a
         // persistent worker would carry into the next request.
         private readonly ?McpRequestHandlerInterface $discoveryDispatcher = null,
