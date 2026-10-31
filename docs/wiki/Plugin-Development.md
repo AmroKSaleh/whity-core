@@ -1079,6 +1079,43 @@ guidance see [MCP-Server.md](./MCP-Server.md).
 
 ---
 
+### Toolsets, visibility, agent policy and undo (SDK 1.52)
+
+Since SDK 1.52 an MCP client doesn't see every tool up front. It sees a handful of everyday tools plus `search_operations` and `call_operation`, and finds the rest by searching (`docs/design/MCP-TOOL-SURFACE.md`). Four optional keys on a descriptor decide how your tool shows up:
+
+```php
+[
+    'name'               => 'period_close_lock',       // [A-Za-z0-9_-]{1,64}; start with your plugin's slug
+    'description'        => 'Lock a closed period so nothing more can be posted to it.', // at most 500 characters
+    'inputSchema'        => [...],
+    'handler'            => fn (array $args, McpToolContext $ctx) => ...,
+    'requiredPermission' => 'periods:manage',
+    'toolset'            => 'locks',                    // under your plugin's toolset: period-close.locks
+    'visibility'         => 'discoverable',             // or 'always-on': one read-only tool per plugin, admin-enabled
+    'agentPolicy'        => 'propose',                  // 'allow' | 'propose' | 'suggest-only' | 'refuse'
+    'undo'               => ['windowSeconds' => 1800, 'operation' => 'period_close_unlock'],
+]
+```
+
+- **`toolset`:** your tools live in your plugin's toolset (`Plugins\PeriodClose` → `period-close`). You may put a tool in a sub-toolset, but never in core's or another plugin's. Tokens can be limited to toolsets (`toolset:period-close.*`).
+- **`visibility`:** almost everything should stay `discoverable`. One read-only tool may ask to be `always-on`, and it shows only after a tenant admin enables it.
+- **`agentPolicy`:** caps what an AI agent may do with the tool, on top of the person's scope grant. Use `propose` for anything with effects a person should approve.
+- **`undo`:** the tool that reverses this one, and for how long. A write without undo is always Ask first for agents.
+
+Implement `PluginMcpToolsetsInterface` to give your toolsets a title (English and Arabic) and a one-line description. Search shows these before any tool:
+
+```php
+public function getMcpToolsets(): array
+{
+    return [
+        ['id' => '', 'title' => 'Period close', 'titleAr' => 'إقفال الفترة', 'description' => 'Close accounting periods and lock them.'],
+        ['id' => 'locks', 'title' => 'Locks', 'titleAr' => 'الأقفال', 'description' => 'Lock and unlock closed periods.'],
+    ];
+}
+```
+
+The host refuses a name outside `[A-Za-z0-9_-]{1,64}`, a description over 500 characters, a toolset outside yours, an always-on tool that isn't read-only, and unknown visibility, policy or undo values. Each refusal is logged against your plugin, which still loads. An unprefixed name loads with a deprecation warning.
+
 ## Step 10 — Run work in the background (async jobs, SDK 1.28)
 
 Implement [`PluginJobsInterface`](../../sdk/src/PluginJobsInterface.php) to

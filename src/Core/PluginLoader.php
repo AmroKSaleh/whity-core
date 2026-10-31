@@ -55,6 +55,7 @@ use Whity\Sdk\PluginInterface;
 use Whity\Sdk\PluginJobsInterface;
 use Whity\Sdk\PluginMcpInterface;
 use Whity\Sdk\PluginMcpToolsInterface;
+use Whity\Sdk\PluginMcpToolsetsInterface;
 use Whity\Sdk\PluginRequirementsInterface;
 use Whity\Core\Entitlement\PluginEntitlements;
 use Whity\Sdk\PluginEntitlementsInterface;
@@ -1645,7 +1646,7 @@ class PluginLoader
     {
         foreach ($this->registeredPlugins as $pluginKey => $info) {
             $plugin = $info['plugin'];
-            if (!$plugin instanceof PluginMcpToolsInterface) {
+            if (!$plugin instanceof PluginMcpToolsInterface && !$plugin instanceof PluginMcpToolsetsInterface) {
                 continue;
             }
 
@@ -1654,6 +1655,20 @@ class PluginLoader
             }
             $lifecycle = $this->lifecycles[$pluginKey] ?? null;
             if ($lifecycle === null || !$lifecycle->isActive()) {
+                continue;
+            }
+
+            // SDK 1.49 (WHIT-752): the plugin's toolset titles and descriptions.
+            if ($plugin instanceof PluginMcpToolsetsInterface) {
+                try {
+                    foreach ($registry->registerToolsets($plugin->getMcpToolsets(), $pluginKey) as $reason) {
+                        $this->logWarning("[Plugin:{$pluginKey}] getMcpToolsets(): {$reason}.");
+                    }
+                } catch (Throwable $e) {
+                    $this->handlePluginThrowable($pluginKey, $e, 'getMcpToolsets');
+                }
+            }
+            if (!$plugin instanceof PluginMcpToolsInterface) {
                 continue;
             }
 
@@ -1673,6 +1688,9 @@ class PluginLoader
                 if ($reason !== null) {
                     $this->logWarning("[Plugin:{$pluginKey}] getMcpTools(): {$reason}.");
                 }
+            }
+            foreach ($registry->drainWarnings() as $warning) {
+                $this->logWarning("[Plugin:{$pluginKey}] getMcpTools(): {$warning}.");
             }
 
             // Read AFTER the descriptors, and in its own try: a plugin whose
