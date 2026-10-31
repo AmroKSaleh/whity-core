@@ -1119,6 +1119,26 @@ final class SchemaFromMigrations
         }
     }
 
+    /**
+     * The migration classes from number `$first` on, in the order they run.
+     * An upgrade test runs their `down()` newest first to get the schema of an
+     * older release, then their `up()` with today's code, as an upgrade does.
+     *
+     * @return list<string>
+     */
+    public static function migrationClassesFrom(int $first): array
+    {
+        self::loadMigrationClasses();
+        $classes = [];
+        foreach (self::migrationFiles() as $file) {
+            if ((int) basename($file) >= $first) {
+                $classes[] = self::resolveMigrationClass($file);
+            }
+        }
+
+        return $classes;
+    }
+
     private static function resolveMigrationClass(string $file): string
     {
         $name  = pathinfo($file, PATHINFO_FILENAME); // e.g. 001_create_users_roles
