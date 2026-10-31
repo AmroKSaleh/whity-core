@@ -5908,6 +5908,11 @@ final class CoreApiSchemas
                 'meta' => self::object(['total' => self::int()], ['total']),
             ], ['data', 'meta']),
             'DocumentThemeResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentTheme')),
+            'DocumentThemeArchiveResponse' => self::object([
+                'data' => SchemaBuilder::ref('DocumentTheme'),
+                'warning' => self::str() + ['description' => 'Present when the theme is still in use: what uses it keeps its look.'],
+                'usage' => SchemaBuilder::ref('DocumentThemeUsage'),
+            ], ['data']),
             'DocumentThemeSchemaResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentThemeSchema')),
             'DocumentThemeUsageResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentThemeUsage')),
             'ResolvedDocumentThemeResponse' => self::dataEnvelope(SchemaBuilder::ref('ResolvedDocumentTheme')),
@@ -11811,11 +11816,12 @@ final class CoreApiSchemas
                 'summary' => 'Archive a workspace document theme',
                 'description' =>
                     'It leaves the list but keeps working where it is already used. A document that names an '
-                    . 'archived theme still resolves it. Restore it with POST …/restore.',
+                    . 'archived theme still resolves it. Restore it with POST …/restore. Archiving a theme that is '
+                    . 'still in use is allowed with a warning: the response then carries `warning` and `usage`.',
                 'tags' => ['documents'],
                 'mcp' => $mcp,
                 'responses' => [
-                    200 => self::jsonResponse('The archived theme', 'DocumentThemeResponse'),
+                    200 => self::jsonResponse('The archived theme, with a warning and its usage when it is still in use', 'DocumentThemeArchiveResponse'),
                     400 => self::errorResponse('Tenant context is required'),
                     404 => self::errorResponse('Theme not found'),
                     409 => self::errorResponse('Whity\'s standard theme can\'t be archived'),

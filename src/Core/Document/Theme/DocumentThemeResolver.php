@@ -126,7 +126,10 @@ final class DocumentThemeResolver
             ];
             $tokens['accent'] = $readable['color'];
         }
-        if (!is_string($tokens['accentOnDark'] ?? null)) {
+        // Derived unless a theme set one, and derived again when the document
+        // changed the print colour after it: a theme's dark title matches its
+        // own accent, not the document's (screen only, never printed).
+        if (!is_string($tokens['accentOnDark'] ?? null) || $sources['accent'] === 'document') {
             $tokens['accentOnDark'] = TenantTheme::onDark((string) $tokens['accent']);
             $sources['accentOnDark'] = $sources['accent'];
         }

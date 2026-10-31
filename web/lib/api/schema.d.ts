@@ -1764,7 +1764,7 @@ export interface paths {
         put?: never;
         /**
          * Archive a workspace document theme
-         * @description It leaves the list but keeps working where it is already used. A document that names an archived theme still resolves it. Restore it with POST …/restore.
+         * @description It leaves the list but keeps working where it is already used. A document that names an archived theme still resolves it. Restore it with POST …/restore. Archiving a theme that is still in use is allowed with a warning: the response then carries `warning` and `usage`.
          */
         post: operations["post_api_v1_document_themes_ref_archive"];
         delete?: never;
@@ -6784,6 +6784,12 @@ export interface components {
             to?: string;
             /** @description What happened, in English */
             message: string;
+        };
+        DocumentThemeArchiveResponse: {
+            data: components["schemas"]["DocumentTheme"];
+            /** @description Present when the theme is still in use: what uses it keeps its look. */
+            warning?: string;
+            usage?: components["schemas"]["DocumentThemeUsage"];
         };
         DocumentThemeInput: {
             /** @description The key: 1 to 40 lower-case letters, digits and underscores. The theme is then tenant.<key>. It can't be changed later. */
@@ -19091,13 +19097,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The archived theme */
+            /** @description The archived theme, with a warning and its usage when it is still in use */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DocumentThemeResponse"];
+                    "application/json": components["schemas"]["DocumentThemeArchiveResponse"];
                 };
             };
             /** @description Tenant context is required */

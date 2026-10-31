@@ -302,7 +302,18 @@ final class DocumentThemesApiHandler
             return Response::error('Theme not found', 404);
         }
 
-        return Response::json(['data' => $this->present($saved, $this->defaults($tenantId))]);
+        $body = ['data' => $this->present($saved, $this->defaults($tenantId))];
+        if ($archived) {
+            // Archiving a theme still in use is allowed, with a warning (5):
+            // what names it keeps its look, but the theme leaves the list.
+            $usage = $this->usageOf($tenantId, $ref);
+            if ($usage['drafts'] !== [] || $usage['published'] !== [] || $usage['defaults'] !== []) {
+                $body['warning'] = 'This theme is still in use. What uses it keeps its look, but it no longer appears in the list of themes to choose.';
+                $body['usage'] = $usage;
+            }
+        }
+
+        return Response::json($body);
     }
 
     /**

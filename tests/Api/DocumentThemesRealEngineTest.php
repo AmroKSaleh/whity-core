@@ -146,6 +146,21 @@ final class DocumentThemesRealEngineTest extends TestCase
         self::assertSame('document', $theme['sources']['letterhead.lines']);
     }
 
+    public function testADocumentsOwnPrintColourGetsAMatchingTitleOnDark(): void
+    {
+        $this->themes->create(self::TENANT, 'house', 'House', 'الدار', null, [
+            'accent' => self::ORANGE,
+            'accentOnDark' => '#f0b48a',
+        ], self::OWNER);
+
+        $theirs = $this->resolver->resolve(self::TENANT, ['ref' => 'tenant.house']);
+        self::assertSame('#f0b48a', $theirs['tokens']['accentOnDark'], "the theme's own dark title stands with its own accent");
+
+        $mine = $this->resolver->resolve(self::TENANT, ['ref' => 'tenant.house', 'overrides' => ['accent' => '#1f6f43']]);
+        self::assertSame(TenantTheme::onDark('#1f6f43'), $mine['tokens']['accentOnDark'], "derived again from the document's colour");
+        self::assertSame('document', $mine['sources']['accentOnDark']);
+    }
+
     public function testADocumentWithoutARefUsesTheDefaultForItsKindThenTheWorkspaceDefault(): void
     {
         $this->themes->create(self::TENANT, 'labels', 'Labels', 'الملصقات', null, ['accent' => '#1f6f43'], self::OWNER);
@@ -259,6 +274,10 @@ final class DocumentThemesRealEngineTest extends TestCase
 
         $archived = $this->call('archive', 'POST', '/api/document-themes/tenant.house/archive', null, $params);
         self::assertTrue($this->data($archived)['archived']);
+        $warned = json_decode($archived->getBody(), true);
+        self::assertIsArray($warned);
+        self::assertArrayHasKey('warning', $warned, 'archiving a default is allowed, with a warning');
+        self::assertSame(['workspace'], $warned['usage']['defaults']);
         self::assertSame(['whity.standard'], array_column($this->data($this->call('list', 'GET', '/api/document-themes')), 'ref'));
         self::assertSame('tenant.house', $this->resolver->resolve(self::TENANT)['ref'], 'an archived theme still prints what names it');
 

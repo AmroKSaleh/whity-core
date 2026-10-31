@@ -68,7 +68,9 @@ with the current resolution.
 `documents:themes` is granted on upgrade (migration 172) to every role that
 holds `documents:publish`. The old `documents.print_color` setting is gone:
 migration 173 moved it into a workspace theme named `workspace`, made the
-default.
+default. That theme pins the print colour, so documents keep their look but no
+longer follow the workspace main colour. To follow it again, clear the accent
+on the `workspace` theme, or set the default back to `whity.standard`.
 
 The theme picker and the Document themes screen come once their designs exist
 (WHIT-736). Plugin themes come with the M7 SDK (WHIT-738).

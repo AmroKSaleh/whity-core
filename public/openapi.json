@@ -11696,7 +11696,7 @@
                 "tags": [
                     "documents"
                 ],
-                "description": "It leaves the list but keeps working where it is already used. A document that names an archived theme still resolves it. Restore it with POST \u2026/restore.",
+                "description": "It leaves the list but keeps working where it is already used. A document that names an archived theme still resolves it. Restore it with POST \u2026/restore. Archiving a theme that is still in use is allowed with a warning: the response then carries `warning` and `usage`.",
                 "parameters": [
                     {
                         "name": "ref",
@@ -11709,11 +11709,11 @@
                 ],
                 "responses": {
                     "200": {
-                        "description": "The archived theme",
+                        "description": "The archived theme, with a warning and its usage when it is still in use",
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/DocumentThemeResponse"
+                                    "$ref": "#/components/schemas/DocumentThemeArchiveResponse"
                                 }
                             }
                         }
@@ -43965,6 +43965,24 @@
                     "token",
                     "from",
                     "message"
+                ]
+            },
+            "DocumentThemeArchiveResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/DocumentTheme"
+                    },
+                    "warning": {
+                        "type": "string",
+                        "description": "Present when the theme is still in use: what uses it keeps its look."
+                    },
+                    "usage": {
+                        "$ref": "#/components/schemas/DocumentThemeUsage"
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "DocumentThemeInput": {
