@@ -4576,9 +4576,9 @@ $mcpHandlers = [
 $mcpRecordTokenUse = static function (\Whity\Mcp\Auth\McpPrincipal $principal) use ($mcpTokenService): void {
     $mcpTokenService->recordUse($principal->jti, $principal->tenantId);
 };
-// WHIT-707: /mcp?tools=discover answers tools/list with three discovery tools
-// that search, describe and call the real catalogue through the handlers
-// above. Everything else -- auth, the tenant switch, rate limits, resources,
+// WHIT-707, WHIT-750: /mcp?tools=discover answers tools/list with
+// search_operations and call_operation, which search and call the real
+// catalogue through the handlers above. Everything else -- auth, the tenant switch, rate limits, resources,
 // prompts -- is the same. Its tool list never changes, so it announces no
 // list_changed.
 // WHIT-709: where an OAuth client signs in (MCP_OAUTH_ISSUER). Off when unset.
@@ -4597,7 +4597,25 @@ $mcpOAuthVerifier = \Whity\Mcp\Auth\OAuth\OAuthAccessTokenVerifier::fromEnv(
 if ($mcpOAuthVerifier !== null) {
     $tokenValidator->acceptOAuthAccessTokens($mcpOAuthVerifier);
 }
-$mcpDiscovery = new DiscoveryTools($mcpToolsListHandler, $mcpToolsCallHandler, $tokenValidator);
+// WHIT-794: init_session's briefing names the caller and the workspace.
+$mcpBriefingPdo = $db->getPdo();
+$mcpDiscovery = new DiscoveryTools(
+    $mcpToolsListHandler,
+    $mcpToolsCallHandler,
+    $tokenValidator,
+    new \Whity\Mcp\Tools\Discovery\SessionBriefing(
+        static function (int $profileId, int $tenantId) use ($mcpBriefingPdo): array {
+            $name = $mcpBriefingPdo->prepare('SELECT display_name FROM profiles WHERE id = :id');
+            $name->execute([':id' => $profileId]);
+            $workspace = $mcpBriefingPdo->prepare('SELECT name FROM tenants WHERE id = :id');
+            $workspace->execute([':id' => $tenantId]);
+            $display = trim((string) $name->fetchColumn());
+            $tenant  = trim((string) $workspace->fetchColumn());
+            return ['name' => $display !== '' ? $display : null, 'workspace' => $tenant !== '' ? $tenant : null];
+        },
+        $mcpRateLimiter->limits(),
+    ),
+);
 $mcpTransportHandler = new McpTransportHandler(
     new Dispatcher($mcpHandlers, $tokenValidator, $mcpRateLimiter, $tenantMcpEnabled, $mcpListChangedNotifier, $mcpRecordTokenUse),
     enabled: $mcpServerEnabled,
@@ -4605,7 +4623,7 @@ $mcpTransportHandler = new McpTransportHandler(
         array_merge($mcpHandlers, [
             'initialize' => new InitializeHandler(listChanged: false),
             'server/discover' => new DiscoverHandler(
-                'This server offers its actions through search_tools: search for what you need, describe_tool to see its arguments, then call_tool.',
+                'This server offers its operations through search_operations: search for what you need, search again with its operationId to see its arguments, then call_operation.',
             ),
             'tools/list' => $mcpDiscovery->listHandler(),
             'tools/call' => $mcpDiscovery->callHandler(),
@@ -4621,9 +4639,9 @@ $mcpTransportHandler = new McpTransportHandler(
     // the always-on set does, so it announces no list_changed either.
     defaultDispatcher: new Dispatcher(
         array_merge($mcpHandlers, [
-            'initialize' => new InitializeHandler(listChanged: false),
+            'initialize' => new InitializeHandler(listChanged: false, instructions: \Whity\Mcp\Tools\Discovery\SessionBriefing::instructions()),
             'server/discover' => new DiscoverHandler(
-                'A few everyday tools are listed directly. Everything else is reached through search_tools: search for what you need, describe_tool to see its arguments, then call_tool.',
+                \Whity\Mcp\Tools\Discovery\SessionBriefing::instructions() . ' A few everyday tools are listed directly. Add ?tools=full to the URL for every operation as its own tool.',
             ),
             'tools/list' => $mcpDiscovery->defaultListHandler(),
             'tools/call' => $mcpDiscovery->callHandler(),

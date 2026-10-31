@@ -194,6 +194,11 @@ final class McpScope
             $errors[] = 'scope must include at least one of: ' . implode(', ', self::CAPABILITIES);
         }
 
+        // WHIT-753: an agent's per-permission grant (`grant:<permission>=<mode>`).
+        foreach (AgentScopeGrant::issuanceErrors($normalized->scope, $knownPermissions) as $error) {
+            $errors[] = $error;
+        }
+
         foreach ($normalized->toolsetEntries() as $toolset) {
             $error = self::toolsetError($toolset);
             if ($error !== null) {
@@ -256,7 +261,8 @@ final class McpScope
     {
         return array_values(array_filter(
             array_diff($this->scope, self::CAPABILITIES),
-            static fn (string $entry): bool => !str_starts_with($entry, self::TOOLSET_PREFIX),
+            static fn (string $entry): bool => !str_starts_with($entry, self::TOOLSET_PREFIX)
+                && !str_starts_with($entry, AgentScopeGrant::PREFIX),
         ));
     }
 }

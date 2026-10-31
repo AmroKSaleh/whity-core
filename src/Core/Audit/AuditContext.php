@@ -37,6 +37,13 @@ final class AuditContext
     private static ?string $ipAddress = null;
 
     /**
+     * Who is acting (WHIT-753): a person, an agent for a person, or the
+     * system. Null until something sets it; {@see self::getActor()} then
+     * derives a person from the actor id, or the system without one.
+     */
+    private static ?Actor $actor = null;
+
+    /**
      * The queued job currently being executed, or null outside the worker (#935).
      *
      * Lives here rather than on {@see AuditOrigin} because it changes per unit of
@@ -59,6 +66,28 @@ final class AuditContext
     {
         self::$actorUserId = $actorUserId;
         self::$ipAddress = $ipAddress;
+        self::$actor = null;
+    }
+
+    /**
+     * Set who is acting, when it is more than a person acting themselves: an
+     * agent credential acting for its granting person (WHIT-753). The actor id
+     * becomes that person's, so existing readers of the actor id keep working.
+     */
+    public static function setActor(Actor $actor, ?string $ipAddress = null): void
+    {
+        self::$actorUserId = $actor->profileId;
+        self::$ipAddress = $ipAddress;
+        self::$actor = $actor;
+    }
+
+    /** Who is acting: what {@see self::setActor()} set, else a person for the actor id, else the system. */
+    public static function getActor(): Actor
+    {
+        if (self::$actor !== null) {
+            return self::$actor;
+        }
+        return self::$actorUserId !== null ? Actor::person(self::$actorUserId) : Actor::system();
     }
 
     /**
@@ -115,5 +144,6 @@ final class AuditContext
         self::$actorUserId = null;
         self::$ipAddress = null;
         self::$job = null;
+        self::$actor = null;
     }
 }

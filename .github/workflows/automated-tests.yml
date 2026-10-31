@@ -31,16 +31,48 @@ on:
   # GitHub's merge queue on develop runs the required checks on the queued
   # merge commit (develop + the PRs ahead of it), so they must run here too.
   merge_group:
+  # Nightly full run on develop (the default branch): every job regardless of
+  # paths, with coverage. A red nightly opens an issue (nightly-report.yml).
+  schedule:
+    - cron: '30 1 * * *'   # 01:30 UTC, 04:30 Amman
+  workflow_dispatch: {}
 
 # A newer push to the same ref obsoletes the in-flight run; never let two full
 # suites race (this is what burned a duplicate ~13-min run when a fix commit
 # landed on a PR before the prior run finished). Mirrors e2e.yml.
 #
 # The group is workflow-wide, so it keeps covering every job below — including
-# the shard matrices and the `coverage` fan-in — as one cancellable unit.
+# the shard matrices and the `coverage` fan-in — as one cancellable unit. The
+# nightly run gets its own group: it runs on develop's ref too, and a merge
+# landing at 01:30 must not cancel the one run that is always complete.
 concurrency:
-  group: tests-${{ github.ref }}
+  group: tests-${{ github.event_name == 'schedule' && 'nightly' || github.ref }}
   cancel-in-progress: true
+
+# ---------------------------------------------------------------------------
+# What runs where (WHIT-801)
+#
+#                            PR->develop  merge queue  push     nightly  PR->main
+#   SQLite shards            no pcov      no pcov      pcov     pcov     pcov
+#   Coverage merge & floor   -            -            yes      yes      yes
+#   Dialect shards (PG)      -            yes          yes      yes      yes
+#   every other job          by path      by path      by path  all      by path
+#
+# Measured over 18 runs (31 Oct 2026) the jobs themselves take 1-8 min, but a
+# job waits a median 3-10 min (up to 18) for a free runner: the runner pool is
+# shared by every open PR, the merge queue and the develop pushes. So the PR
+# path is made cheaper in runner-minutes, not only shorter.
+#
+# Nothing that catches breakage leaves the path to develop. A PR can only land
+# on develop through the merge queue, and the `merge_group` run still runs the
+# dialect shards, so a Postgres-only bug fails in the queue and the PR is
+# removed from it before it reaches develop. Coverage is not breakage: the
+# floor is a trend gate, judged on every push to develop or main, nightly, and
+# on release PRs into main, so a drop shows up there, after merge.
+#
+# The mode is decided once, in the `changes` job (`all`, `full`, `coverage`),
+# so every job reads the same answer.
+# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Job graph (WC-ci-wallclock)
@@ -78,19 +110,45 @@ jobs:
   changes:
     name: Detect changed areas
     runs-on: ubuntu-latest
+    # On a nightly or manual run (`all`) there is no diff to filter on, and
+    # paths-filter would compare develop with itself and find nothing, so every
+    # area is forced on instead.
     outputs:
-      backend: ${{ steps.filter.outputs.backend }}
-      frontend: ${{ steps.filter.outputs.frontend }}
-      render_service: ${{ steps.filter.outputs.render_service }}
-      i18n: ${{ steps.filter.outputs.i18n }}
-      date_display: ${{ steps.filter.outputs.date_display }}
-      desktop_host: ${{ steps.filter.outputs.desktop_host }}
-      watchdog: ${{ steps.filter.outputs.watchdog }}
+      backend: ${{ steps.mode.outputs.all == 'true' && 'true' || steps.filter.outputs.backend }}
+      frontend: ${{ steps.mode.outputs.all == 'true' && 'true' || steps.filter.outputs.frontend }}
+      render_service: ${{ steps.mode.outputs.all == 'true' && 'true' || steps.filter.outputs.render_service }}
+      i18n: ${{ steps.mode.outputs.all == 'true' && 'true' || steps.filter.outputs.i18n }}
+      date_display: ${{ steps.mode.outputs.all == 'true' && 'true' || steps.filter.outputs.date_display }}
+      desktop_host: ${{ steps.mode.outputs.all == 'true' && 'true' || steps.filter.outputs.desktop_host }}
+      watchdog: ${{ steps.mode.outputs.all == 'true' && 'true' || steps.filter.outputs.watchdog }}
+      # full: the dialect shards run. coverage: the SQLite shards run under
+      # pcov and the coverage floor is enforced. See "What runs where" above.
+      full: ${{ steps.mode.outputs.full }}
+      coverage: ${{ steps.mode.outputs.coverage }}
     steps:
+      - name: Decide the run mode
+        id: mode
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.base_ref }}
+        run: |
+          all=false; full=true; coverage=true
+          case "$EVENT" in
+            schedule|workflow_dispatch) all=true ;;
+            merge_group) coverage=false ;;
+            pull_request)
+              # A release PR into main is gated on everything.
+              if [ "$BASE" != "main" ]; then full=false; coverage=false; fi ;;
+          esac
+          echo "event=$EVENT base=${BASE:-none}: all=$all full=$full coverage=$coverage"
+          { echo "all=$all"; echo "full=$full"; echo "coverage=$coverage"; } >> "$GITHUB_OUTPUT"
+
       - name: Checkout code
+        if: steps.mode.outputs.all != 'true'
         uses: actions/checkout@v7
 
       - name: Filter changed paths
+        if: steps.mode.outputs.all != 'true'
         uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -247,7 +305,7 @@ jobs:
     if: needs.changes.outputs.backend == 'true'
     # Keep the `/3` here in step with the matrix below; the shard arithmetic
     # itself reads `strategy.job-total`, so only this label is manual.
-    name: Tests shard ${{ matrix.shard }}/3 (SQLite, coverage)
+    name: Tests shard ${{ matrix.shard }}/3 (SQLite${{ needs.changes.outputs.coverage == 'true' && ', coverage' || '' }})
     runs-on: ubuntu-latest
 
     strategy:
@@ -273,7 +331,9 @@ jobs:
         with:
           php-version: '8.4'
           extensions: mbstring, pdo, pdo_sqlite
-          coverage: pcov
+          # pcov only where the coverage floor is judged; otherwise the shards
+          # run the same tests uninstrumented, which is several times faster.
+          coverage: ${{ needs.changes.outputs.coverage == 'true' && 'pcov' || 'none' }}
 
       # Unified composer cache key (WC-232ec317): the vendor/ tree is identical
       # across the test / postgres / mutation / e2e jobs (they differ only in
@@ -300,7 +360,9 @@ jobs:
       - name: Plan shard ${{ matrix.shard }}
         run: php scripts/ci-test-shard.php plan ${{ matrix.shard }} ${{ strategy.job-total }} phpunit.shard.xml
 
-      - name: Run ParaTest with coverage (shard ${{ matrix.shard }})
+      - name: Run ParaTest (shard ${{ matrix.shard }})
+        env:
+          COVERAGE: ${{ needs.changes.outputs.coverage }}
         run: |
           mkdir -p coverage-shards junit
           # NO `-d memory_limit=` for the workers, and that is not an oversight.
@@ -310,10 +372,14 @@ jobs:
           # in phpunit.xml; see the comment there for why it is a number and not
           # -1. Each worker now holds a quarter of the shard's coverage, so it
           # sits further below that ceiling than the old serial run did.
+          coverage_args=()
+          if [ "$COVERAGE" = "true" ]; then
+            coverage_args=(--coverage-php "coverage-shards/shard-${{ matrix.shard }}.cov")
+          fi
           vendor/bin/paratest \
             --processes "$(nproc)" \
             --configuration phpunit.shard.xml \
-            --coverage-php "coverage-shards/shard-${{ matrix.shard }}.cov" \
+            "${coverage_args[@]}" \
             --log-junit "junit/shard-${{ matrix.shard }}.xml"
 
       # Per-file seconds for the next timings refresh (the `coverage` job turns
@@ -330,7 +396,7 @@ jobs:
       # `always()`: PHPUnit writes the coverage report even when tests fail, and
       # a partial report is still useful when diagnosing a red run.
       - name: Upload shard coverage data
-        if: always()
+        if: always() && needs.changes.outputs.coverage == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: coverage-shard-${{ matrix.shard }}
@@ -341,11 +407,13 @@ jobs:
   # The coverage floor is a PROJECT-WIDE aggregate, so it can only be judged
   # once every shard's data is back. This job is the gate that used to be the
   # `Enforce coverage floor` step of the old single `test` job — it is not
-  # optional, not PR-skippable, and it fails the run exactly as before.
+  # optional and it fails the run exactly as before, but it is judged on pushes
+  # to develop and main, nightly and on release PRs, not on every PR into
+  # develop (see "What runs where" at the top).
   coverage:
     name: Coverage merge & floor (SQLite)
     needs: [changes, test]
-    if: needs.changes.outputs.backend == 'true'
+    if: needs.changes.outputs.backend == 'true' && needs.changes.outputs.coverage == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -1069,7 +1137,14 @@ jobs:
     # itself reads `strategy.job-total`, so only this label is manual.
     name: Dialect shard ${{ matrix.shard }}/2 (real-engine suites on PostgreSQL)
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    # Not on PRs into develop. It does not duplicate the Integration shards (it
+    # excludes tests/Integration and tests/Security); it re-runs on Postgres the
+    # real-engine tests the SQLite shards already run, and it is the longest
+    # job here (7-8 min median). It does run in the merge queue, so a
+    # Postgres-only bug still cannot reach develop: the PR learns about it in
+    # the queue instead. The Integration shards and the migrations + Security
+    # job stay on every PR, so every PR still runs on real Postgres.
+    if: needs.changes.outputs.backend == 'true' && needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
 
     strategy:

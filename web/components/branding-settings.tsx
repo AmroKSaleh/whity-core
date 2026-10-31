@@ -10,7 +10,8 @@
  * uploaders are hidden and a WC-224-style notice is shown instead (mirroring
  * `TenantSettingsSection` in the settings page).
  *
- * A custom-host field is surfaced only with `settings:manage`.
+ * A custom-host field is surfaced only with `settings:manage`. Both cards open
+ * with the main colour (decision 2.8, BrandingMainColour).
  */
 
 import { useRef, useState } from 'react';
@@ -28,6 +29,7 @@ import {
 import { Button } from '@whity-org/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@whity-org/ui/card';
 import { Input } from '@/components/ui/input';
+import { BrandingMainColour } from '@/components/branding-main-colour';
 import { useTranslation } from '@whity-org/features/i18n';
 import {
   IconDeviceFloppy,
@@ -341,6 +343,12 @@ export function BrandingSettings({ tenantOverridable = true, variant = 'tenant' 
     addToast(message, 'error');
   };
 
+  // A colour save returns no branding, so drop the overlay and refetch.
+  const colourSaved = () => {
+    setMutationResult(null);
+    refetchBranding();
+  };
+
   // ---------------------------------------------------------------------------
   // Custom-host field (settings:manage only)
   // ---------------------------------------------------------------------------
@@ -420,6 +428,14 @@ export function BrandingSettings({ tenantOverridable = true, variant = 'tenant' 
             </div>
           ) : (
             <div className="space-y-6 divide-y divide-border">
+              <BrandingMainColour
+                scope="tenant"
+                current={effectiveBranding?.mainColor ?? null}
+                disabled={!canWrite}
+                onSaved={colourSaved}
+                onError={handleError}
+                onSuccess={(message) => addToast(message, 'success')}
+              />
               {ASSET_META.map((meta) => (
                 <div key={meta.key} className="pt-4 first:pt-0">
                   <AssetUploader
@@ -462,6 +478,14 @@ export function BrandingSettings({ tenantOverridable = true, variant = 'tenant' 
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-6 divide-y divide-border">
+              <BrandingMainColour
+                scope="global"
+                current={effectiveBranding?.mainColor ?? null}
+                disabled={false}
+                onSaved={colourSaved}
+                onError={handleError}
+                onSuccess={(message) => addToast(message, 'success')}
+              />
               {ASSET_META.map((meta) => (
                 <div key={meta.key} className="pt-4 first:pt-0">
                   <AssetUploader

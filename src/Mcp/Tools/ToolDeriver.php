@@ -49,7 +49,7 @@ final class ToolDeriver
     /** @var array<string, true>|null */
     private static ?array $exposedCache = null;
 
-    /** @var array<string, string>|null name => toolset (WHIT-749) */
+    /** @var array<string, array<string, mixed>>|null name => derived tool (WHIT-749, WHIT-753) */
     private static ?array $toolsetCache = null;
 
     /**
@@ -242,11 +242,26 @@ final class ToolDeriver
      */
     public function toolsetOf(string $toolName): ?string
     {
+        $tool = $this->toolFor($toolName);
+        if ($tool === null) {
+            return null;
+        }
+        $meta = is_array($tool['_meta'] ?? null) ? $tool['_meta'] : [];
+
+        return (string) ($meta[ToolSurface::META_TOOLSET] ?? '');
+    }
+
+    /**
+     * The derived tool object by name, as tools/list publishes it, or null.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function toolFor(string $toolName): ?array
+    {
         if (self::$toolsetCache === null) {
             $map = [];
             foreach ($this->deriveTools() as $tool) {
-                $meta = is_array($tool['_meta'] ?? null) ? $tool['_meta'] : [];
-                $map[(string) $tool['name']] = (string) ($meta[ToolSurface::META_TOOLSET] ?? '');
+                $map[(string) $tool['name']] = $tool;
             }
             self::$toolsetCache = $map;
         }

@@ -1391,7 +1391,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the editor documents visible to the caller, without their blocks */
+        /** List document templates, letters, reports, notes, wiki pages and label sheets visible to the caller, without their blocks */
         get: operations["get_api_v1_document_sources"];
         put?: never;
         /** Create an editor document */

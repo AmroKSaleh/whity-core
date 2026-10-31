@@ -26,10 +26,18 @@ jest.mock('@/lib/api/branding-upload', () => ({
 
 // Mock the typed API client (used by useFetch inside BrandingSettings for GET /api/v1/branding).
 const mockApiGet = jest.fn();
+const mockApiPatch = jest.fn();
 jest.mock('@/lib/api/client', () => ({
   api: {
     GET: (...args: unknown[]) => mockApiGet(...args),
+    PATCH: (...args: unknown[]) => mockApiPatch(...args),
   },
+}));
+
+// The main colour refreshes the server layout after a save (decision 2.8).
+const mockRefresh = jest.fn();
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({ refresh: mockRefresh }),
 }));
 
 // Mock useAuth so the component can read user?.tenant_id without an AuthProvider.
@@ -62,6 +70,8 @@ const BRANDING_NO_ASSETS: Branding = {
   logoWideUrl: null,
   logoSquareUrl: null,
   faviconUrl: null,
+  mainColor: null,
+  theme: null,
 };
 
 const BRANDING_WITH_WIDE: Branding = {
@@ -69,7 +79,11 @@ const BRANDING_WITH_WIDE: Branding = {
   logoWideUrl: '/api/v1/branding/asset/1/logo_wide-abc.png',
   logoSquareUrl: null,
   faviconUrl: null,
+  mainColor: null,
+  theme: null,
 };
+
+const BRANDING_ORANGE: Branding = { ...BRANDING_NO_ASSETS, mainColor: '#B74C05' };
 
 function brandingResponse(branding: Branding = BRANDING_NO_ASSETS) {
   return Promise.resolve({ data: { data: branding }, error: undefined });
@@ -86,6 +100,7 @@ beforeEach(() => {
   mockUploadBrandingAsset.mockResolvedValue(BRANDING_WITH_WIDE);
   mockClearBrandingAsset.mockResolvedValue(BRANDING_NO_ASSETS);
   mockSetBrandingHost.mockResolvedValue(undefined);
+  mockApiPatch.mockResolvedValue({ data: { data: {} }, error: undefined });
   // Default: no permissions (overridden in each test).
   grant();
 });
@@ -247,5 +262,92 @@ describe('BrandingSettings — clear flow', () => {
     await waitFor(() => {
       expect(mockClearBrandingAsset).toHaveBeenCalledWith('tenant', 'logo_wide');
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Main colour (decision 2.8, TplAdminBranding)
+// ---------------------------------------------------------------------------
+
+describe('BrandingSettings — main colour', () => {
+  it('shows the effective colour and saves a picked swatch to the tenant settings', async () => {
+    grant('settings:write');
+    mockApiGet.mockImplementation(() => brandingResponse(BRANDING_ORANGE));
+    render(<BrandingSettings tenantOverridable={true} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('branding-colour-value-tenant')).toHaveTextContent('#b74c05')
+    );
+    expect(screen.getByTestId('branding-colour-swatch-b74c05')).toHaveAttribute('aria-pressed', 'true');
+    // Nothing to save until the colour changes.
+    expect(screen.getByTestId('branding-colour-save-tenant')).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId('branding-colour-swatch-00792f'));
+    fireEvent.click(screen.getByTestId('branding-colour-save-tenant'));
+
+    await waitFor(() =>
+      expect(mockApiPatch).toHaveBeenCalledWith('/api/v1/settings', {
+        body: { settings: { branding_main_color: '#00792f' } },
+      })
+    );
+    await waitFor(() => expect(mockRefresh).toHaveBeenCalled());
+    expect(addToast).toHaveBeenCalledWith('Main colour saved.', 'success');
+  });
+
+  it('takes a custom colour from the picker', async () => {
+    grant('settings:write');
+    render(<BrandingSettings tenantOverridable={true} />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('branding-colour-value-tenant')).toHaveTextContent('Whity Blue (default)')
+    );
+    fireEvent.change(screen.getByTestId('branding-colour-custom-tenant'), { target: { value: '#123ABC' } });
+    expect(screen.getByTestId('branding-colour-value-tenant')).toHaveTextContent('#123abc');
+    fireEvent.click(screen.getByTestId('branding-colour-save-tenant'));
+
+    await waitFor(() =>
+      expect(mockApiPatch).toHaveBeenCalledWith('/api/v1/settings', {
+        body: { settings: { branding_main_color: '#123abc' } },
+      })
+    );
+  });
+
+  it('reset clears the setting, and the global variant writes the global layer', async () => {
+    grant('settings:write', 'settings:manage');
+    mockApiGet.mockImplementation(() => brandingResponse(BRANDING_ORANGE));
+    render(<BrandingSettings variant="global" />);
+
+    await waitFor(() => expect(screen.getByTestId('branding-colour-reset-global')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('branding-colour-reset-global'));
+
+    await waitFor(() =>
+      expect(mockApiPatch).toHaveBeenCalledWith('/api/v1/settings/global', {
+        body: { settings: { branding_main_color: '' } },
+      })
+    );
+  });
+
+  it('shows the server error and does not refresh when the save fails', async () => {
+    grant('settings:write');
+    mockApiPatch.mockResolvedValue({ data: undefined, error: { error: 'branding_main_color must be a #RRGGBB hex colour (e.g. #2B6CD2).' } });
+    render(<BrandingSettings tenantOverridable={true} />);
+
+    await waitFor(() => expect(screen.getByTestId('branding-colour-swatch-c53829')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('branding-colour-swatch-c53829'));
+    fireEvent.click(screen.getByTestId('branding-colour-save-tenant'));
+
+    await waitFor(() =>
+      expect(addToast).toHaveBeenCalledWith('branding_main_color must be a #RRGGBB hex colour (e.g. #2B6CD2).', 'error')
+    );
+    expect(mockRefresh).not.toHaveBeenCalled();
+  });
+
+  it('is read-only without settings:write', async () => {
+    grant();
+    render(<BrandingSettings tenantOverridable={true} />);
+
+    await waitFor(() => expect(screen.getByTestId('branding-main-colour-tenant')).toBeInTheDocument());
+    expect(screen.queryByTestId('branding-colour-save-tenant')).not.toBeInTheDocument();
+    expect(screen.getByTestId('branding-colour-swatch-0961bb')).toBeDisabled();
   });
 });

@@ -87,12 +87,12 @@ final class ToolSurfaceTest extends TestCase
     public function testCoreAlwaysOnPicksAreAlwaysOn(): void
     {
         $meta = $this->metaOf([[
-            'method' => 'GET', 'path' => '/api/me', 'requiredPermission' => null,
-            'schema' => ['summary' => 'Me', 'tags' => ['me'], 'mcp' => true],
-        ]], 'get_api_me');
+            'method' => 'GET', 'path' => '/api/me/inbox', 'requiredPermission' => null,
+            'schema' => ['summary' => 'My inbox', 'tags' => ['inbox'], 'mcp' => true],
+        ]], 'get_api_me_inbox');
 
         self::assertSame('always-on', $meta['dev.whity/visibility']);
-        self::assertSame('core.me', $meta['dev.whity/toolset']);
+        self::assertSame('core.inbox', $meta['dev.whity/toolset']);
     }
 
     public function testACoreRouteMayNameACoreSubToolsetButNotAnUnknownOne(): void
@@ -178,7 +178,8 @@ final class ToolSurfaceTest extends TestCase
             $tools[$tool['name']] = $tool;
         }
 
-        self::assertCount(5, CoreToolsets::ALWAYS_ON);
+        // Four derived operations; init_session (WHIT-794) is the fifth.
+        self::assertCount(4, CoreToolsets::ALWAYS_ON);
         foreach (CoreToolsets::ALWAYS_ON as $name) {
             self::assertArrayHasKey($name, $tools, "always-on {$name} is not a core operation");
             self::assertTrue($deriver->isExposed($name), "always-on {$name} is not exposed");
