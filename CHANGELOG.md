@@ -6,6 +6,10 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+### Added
+
+- **A workspace can set its own main colour, and the app takes its look from it (decision 2.8).** A new tenant setting, `branding_main_color` (`#RRGGBB`), is turned into the full set of brand tokens for light and dark mode on the server, using the same maths as the design system's `Whity.tenantTheme()`: the label on the colour is white or near-black, whichever reaches 4.5:1, and a colour neither label can read on is darkened until white does. `GET /api/v1/branding` now returns `mainColor` and `theme` (`light` and `dark` token maps), and the web app applies them before any plugin's colour overrides, which still win. With no main colour set, nothing changes: Whity Blue stays. Document themes will use it as the default print colour.
+
 ### Fixed
 
 - **Printed documents now carry the tenant logo in the letterhead.** The editor's page view showed the logo, but the PDF from Whity Render printed the name alone (stage 6, decision 6.2: logo, address and tax number at the start side). The wide logo is used, else the square one. A logo Whity Render can't draw, or one over its 512 KiB image limit, is left out and the name prints alone, so the render never fails because of it.

@@ -7901,7 +7901,21 @@ final class CoreApiSchemas
                 'logoWideUrl' => ['type' => 'string', 'nullable' => true],
                 'logoSquareUrl' => ['type' => 'string', 'nullable' => true],
                 'faviconUrl' => ['type' => 'string', 'nullable' => true],
-            ], ['siteName', 'logoWideUrl', 'logoSquareUrl', 'faviconUrl']),
+                // The workspace main colour (decision 2.8) as #rrggbb, darkened if no
+                // label could read on it (2.8a); null until a workspace sets one.
+                'mainColor' => ['type' => 'string', 'nullable' => true, 'description' => 'The workspace main colour as #rrggbb, or null for Whity Blue.'],
+                // The design-token values derived from it, per colour mode.
+                'theme' => [
+                    'type' => 'object',
+                    'nullable' => true,
+                    'description' => 'Token values derived from the main colour (decision 2.8), keyed by token name without the leading dashes; null when no main colour is set.',
+                    'properties' => [
+                        'light' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
+                        'dark' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']],
+                    ],
+                    'required' => ['light', 'dark'],
+                ],
+            ], ['siteName', 'logoWideUrl', 'logoSquareUrl', 'faviconUrl', 'mainColor', 'theme']),
             // GET /api/branding — the standard data envelope around Branding.
             'BrandingResponse' => self::dataEnvelope(SchemaBuilder::ref('Branding')),
             // PUT /api/tenants/{id}/branding-host request body.
