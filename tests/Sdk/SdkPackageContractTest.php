@@ -242,9 +242,12 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.55.0',
+            '1.56.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.55 ADDS TEMPLATE SLOTS: plugin.json gains documents.slots, the named places a workspace '
+            'SDK 1.56 ADDS DOCUMENTS FOR CODE PLUGINS: PluginDocumentsInterface declares template slots and '
+            . 'record types as merge fields, and the host Documents service issues from a slot or a template '
+            . 'as the person in the request, refusing with a stable reason (WHIT-742). Purely additive. '
+            . 'SDK 1.55 ADDS TEMPLATE SLOTS: plugin.json gains documents.slots, the named places a workspace '
             . 'plugin needs a document template, each for one of its record types; a workspace binds a '
             . 'published template to it and issuing names the slot (WHIT-742). Purely additive. '
             . 'SDK 1.54 ADDS MANIFEST TESTS: plugin.json gains tests, examples a record type rules must keep '

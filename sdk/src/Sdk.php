@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.55).
+ * SDK identity (v1.56).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -878,13 +878,22 @@ namespace Whity\Sdk;
  * the slot. Checked by {@see Manifest\DocumentSlotValidator};
  * {@see Manifest\PluginManifest::documentSlots()} reads them (WHIT-742).
  *
+ * Purely additive.) ->
+ * 1.56 (DOCUMENTS FOR CODE PLUGINS: the optional {@see PluginDocumentsInterface}
+ * declares template slots ({@see Documents\TemplateSlot}) and the plugin's
+ * record types as merge fields ({@see Documents\DocumentFieldProvider},
+ * `<plugin name>.<type>`), and says whether it would issue in the background.
+ * The host service {@see Documents\Documents} issues from a slot or a
+ * template for a record, as the person whose request it is, and refuses with
+ * {@see Documents\DocumentNotIssuedException} and a stable reason (WHIT-742).
+ *
  * Purely additive.)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.55.0';
+    public const VERSION = '1.56.0';
 
     /**
      * Static identity only — never instantiated.

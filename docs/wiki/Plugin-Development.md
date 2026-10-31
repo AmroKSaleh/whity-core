@@ -1399,6 +1399,83 @@ there, render inside the request, or have the job enqueue the document's
 
 ---
 
+## Step 12b — Issue from the workspace's templates (SDK 1.56)
+
+Step 12 prints content the plugin lays out itself. Most documents a plugin
+issues (an invoice, a receipt, a certificate) should look like the
+workspace's own: its letterhead, theme and wording, edited by its people in
+the document editor. For those, declare a **template slot** and let each
+workspace bind one of its templates to it.
+
+```php
+use Whity\Sdk\Documents\DocumentFieldProvider;
+use Whity\Sdk\Documents\TemplateSlot;
+use Whity\Sdk\PluginDocumentsInterface;
+
+final class InvoicingPlugin implements PluginInterface, PluginDocumentsInterface
+{
+    public function getTemplateSlots(): array
+    {
+        return [new TemplateSlot('invoice', ['en' => 'Invoice', 'ar' => 'فاتورة'], 'Invoicing.invoice')];
+    }
+
+    /** @return list<DocumentFieldProvider> your record types as merge fields */
+    public function getDocumentFieldProviders(): array
+    {
+        return [new InvoiceFieldProvider(/* ... */)];
+    }
+
+    public function issuesInBackground(): bool
+    {
+        return false;
+    }
+}
+```
+
+- **Slots** are addressed as `<plugin name>.<name>` (`Invoicing.invoice`).
+  Each workspace binds a published, workspace-shared template of the slot's
+  kind and record type with `PUT /api/document-template-slots/{key}`.
+- **Record types** must be `<plugin name>.<type>`. A provider answers for one
+  reader: `values()` returns null for a record that doesn't exist *and* for
+  one the reader can't see, and a field with no value maps to null. A record
+  is referenced as `Invoicing.invoice:4812`.
+- A slot for a record type nobody serves, or a record type outside your name,
+  is dropped at load with a logged reason; the plugin keeps loading.
+
+Then issue through the host's `Documents` service:
+
+```php
+use Whity\Sdk\Documents\DocumentNotIssuedException;
+use Whity\Sdk\Documents\Documents;
+use Whity\Sdk\Documents\IssueRequest;
+use Whity\Sdk\Documents\TemplateRef;
+
+try {
+    $issued = \Whity\app(Documents::class)->issue(new IssueRequest(
+        TemplateRef::slot('Invoicing.invoice'),
+        record: 'Invoicing.invoice:4812',
+        values: ['template.note' => 'Thank you for your order'],
+        originKey: 'order:4812:invoice',
+    ));
+    // $issued->documentId, ->replayed, ->contentUrl
+} catch (DocumentNotIssuedException $e) {
+    // $e->reason: slot_unbound, missing_fields, field_conflict, vetoed, ...
+}
+```
+
+- It acts as **the person whose request it is**, with their permissions, and
+  records them as the issuer. Outside a request (a job, a listener in the
+  relay) it refuses with `no_actor` until the background-issuing allow-list
+  arrives.
+- **`originKey`** makes it safe to retry: the same key returns the first
+  document (`replayed: true`) instead of issuing a second.
+- A value for a field the record filled is refused (`field_conflict`), so
+  merge data can't overwrite an amount or a tax number.
+- `plugins/HelloWorld` declares a `greeting_card` slot for its greetings as a
+  worked example.
+
+---
+
 ## Step 13 — Declare it in `plugin.json` instead (SDK 1.47)
 
 Everything a plugin only *declares* can live in a JSON file instead of PHP methods: its identity and requirements, permissions, roles, `blocks` screens, owned tables, data types and limits. Put `plugin.json` next to an empty class:

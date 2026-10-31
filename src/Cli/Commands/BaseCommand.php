@@ -462,13 +462,12 @@ abstract class BaseCommand implements CliCommand, CommandHelp
             // resolvable when a command files something against it.
             $windowTypeRegistry
         );
-        $pluginLoader->load();
-
         // Issuing documents outside a request (WHIT-742, DOCUMENT-AUTOMATION
         // 3.5): `queue:work` runs workspace automations and plugin jobs, and
-        // `events:relay` runs listeners, that issue documents. Built after the
-        // plugins load, so their field providers and `document.issuing`
-        // listeners are in place, and registered for those jobs to resolve.
+        // `events:relay` runs listeners, that issue documents. The loader fills
+        // these registries with code plugins' slots and record types (SDK
+        // 1.56), and the issuing graph is built on the first issue, after the
+        // plugins and their `document.issuing` listeners are in place.
         // A worker lives for many jobs, so each read of a workspace's plugins
         // starts fresh rather than from the last job's.
         $tenantManifestHost = new \Whity\Core\Plugin\Tenant\TenantManifestHost(
@@ -507,6 +506,16 @@ abstract class BaseCommand implements CliCommand, CommandHelp
                 getenv('STORAGE_ROOT') ?: ($baseDir . '/storage'),
             )
         );
+        \Whity\register_service(
+            \Whity\Sdk\Documents\Documents::class,
+            new \Whity\Core\Document\Issuing\SdkDocuments(
+                static fn (): \Whity\Core\Document\Issuing\TemplateIssuing => \Whity\app(\Whity\Core\Document\Issuing\TemplateIssuing::class),
+                $roleChecker
+            )
+        );
+        $pluginLoader->setDocumentRegistries($templateSlotRegistry, $documentFieldRegistry);
+        $pluginLoader->load();
+
 
         // Register API handlers (copied from public/index.php)
         // WC-203: permission-gated, mirroring public/index.php.
