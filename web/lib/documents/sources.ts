@@ -1,5 +1,6 @@
-import type { Block, DocumentKind, PublishBlocker, WhityDocument } from '@whity-org/ui/editor/contract';
+import type { Block, DocumentKind, PublishBlocker, ResolvedDocumentTheme, WhityDocument } from '@whity-org/ui/editor/contract';
 import type { FieldGroup } from '@whity-org/ui/editor/fields';
+import type { BrandLogos } from '@whity-org/ui/editor/page-view';
 import type { EditorServices, FieldPreview, RecordView, UploadedFile } from '@whity-org/ui/editor/services';
 import type {
   DocumentEditorAdapter,
@@ -45,6 +46,7 @@ export function toDocument(row: Row): WhityDocument {
     ...pageOf(row.page),
     recordType: row.record_type ?? undefined,
     ownFields: row.own_fields?.length ? row.own_fields : undefined,
+    theme: row.theme ? (row.theme as WhityDocument['theme']) : undefined,
     blocks: (row.blocks ?? []) as unknown as Block[],
     // Comments and suggestions have their own endpoints from M5.
     comments: [],
@@ -55,6 +57,24 @@ export function toDocument(row: Row): WhityDocument {
     // The editor shows who edited last; names come with the people lookup in M5.
     updatedBy: { kind: 'person', id: String(row.updated_by ?? ''), name: '' },
   };
+}
+
+/** The row's resolved theme (E.44), as the editor takes it; null when the server sent none. */
+function themeOf(row: Pick<Row, 'resolvedTheme'>): ResolvedDocumentTheme | null {
+  return (row.resolvedTheme as ResolvedDocumentTheme | undefined) ?? null;
+}
+
+/**
+ * The workspace's uploaded logos, for the letterhead the theme picks (E.44).
+ * Branding is public and optional: a failure leaves the initials.
+ */
+async function loadLogos(): Promise<BrandLogos | undefined> {
+  try {
+    const { data } = await api.GET('/api/v1/branding');
+    return data ? { wide: data.data.logoWideUrl, square: data.data.logoSquareUrl } : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function listDocumentSources(kind?: DocumentKind): Promise<Row[]> {
@@ -155,14 +175,17 @@ export const documentSourcesAdapter: DocumentEditorAdapter = {
   loadServices,
 
   async loadTemplate(recordType): Promise<TemplateSetup> {
-    const { data, response } = await api.GET('/api/v1/document-fields', {
-      params: { query: recordType ? { recordType } : {} },
-    });
+    const [{ data, response }, logos] = await Promise.all([
+      api.GET('/api/v1/document-fields', { params: { query: recordType ? { recordType } : {} } }),
+      loadLogos(),
+    ]);
     if (data === undefined) throw new Error(`Failed to load the fields (${response.status})`);
+    // The print colour comes with the document now (resolvedTheme), not with the fields.
     return {
       fields: data.data.groups as FieldGroup[],
       letterhead: data.data.letterhead,
-      accent: data.data.accent ?? null,
+      letterheadParts: data.data.letterhead_parts,
+      ...(logos ? { logos } : {}),
     };
   },
 
@@ -241,6 +264,7 @@ export const documentSourcesAdapter: DocumentEditorAdapter = {
       blocks: (v.blocks ?? []) as unknown as Block[],
       ...pageOf(v.page as Row['page']),
       ownFields: v.own_fields?.length ? v.own_fields : undefined,
+      resolvedTheme: (v.theme_resolved as ResolvedDocumentTheme | null | undefined) ?? null,
     };
   },
 
@@ -279,7 +303,11 @@ export const documentSourcesAdapter: DocumentEditorAdapter = {
   async load(id: string): Promise<LoadedDocument> {
     const { data, response } = await api.GET('/api/v1/document-sources/{id}', { params: { path: { id: Number(id) } } });
     if (data === undefined) throw new Error(`Failed to load the document (${response.status})`);
-    return { document: toDocument(data.data), version: versionFrom(response, data.data.draft_version) };
+    return {
+      document: toDocument(data.data),
+      version: versionFrom(response, data.data.draft_version),
+      resolvedTheme: themeOf(data.data),
+    };
   },
 
   async save(id, patch, version): Promise<SaveResult> {
@@ -297,6 +325,11 @@ export const documentSourcesAdapter: DocumentEditorAdapter = {
       return { ok: false, conflict: true, currentVersion: versionFrom(response, version) };
     }
     if (data === undefined) throw new Error(`Failed to save the document (${response.status})`);
-    return { ok: true, version: versionFrom(response, data.data.draft_version), updatedAt: data.data.updated_at };
+    return {
+      ok: true,
+      version: versionFrom(response, data.data.draft_version),
+      updatedAt: data.data.updated_at,
+      resolvedTheme: themeOf(data.data),
+    };
   },
 };

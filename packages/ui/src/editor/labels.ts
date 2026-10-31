@@ -227,6 +227,8 @@ export const EDITOR_LABELS = {
   blockerNoPrintHint: "It can’t be printed. Remove it, or keep it for notes.",
   blockerField: "{field} isn’t a field of this record type",
   blockerFieldHint: "Remove it, or pick a field the record has.",
+  blockerTheme: "This document uses a theme the workspace doesn’t have: {ref}",
+  blockerThemeHint: "Choose another theme or restore it.",
   labelGrid: "{columns} × {rows} labels",
   labelStock: "Label stock",
   labelCertificate: "Certificate",

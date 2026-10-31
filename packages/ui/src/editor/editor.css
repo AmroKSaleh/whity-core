@@ -365,6 +365,8 @@
 .wy-pv__lhend { text-align: end; display: grid; gap: 2px; align-content: start; }
 /* The document title: Readex Pro 600 in the tenant's print colour. */
 .wy-pv__title { margin: 0 0 4px; font-family: var(--font-display); font-weight: 600; font-size: var(--doc-text-print-title); line-height: var(--doc-leading-title); color: var(--doc-accent, var(--brand)); }
+/* E.45: a theme with accentUse `title-and-headings` gives H1-H3 the print colour too. */
+.wy-pv__stack[data-accent-use="title-and-headings"] .wy-doc :is(h2, h3, h4) { color: var(--doc-accent, var(--brand)); }
 /* Stage 6 (6.5) and E.33 on paper; at 96 dpi a pt is the same size on screen. */
 .wy-pv .wy-doc { font-size: var(--doc-text-print-body); }
 .wy-pv .wy-doc h2 { font-size: var(--doc-text-print-h1); padding-top: 14px; }
@@ -425,3 +427,10 @@
   color: var(--muted-foreground);
 }
 .wy-previewbar b { color: var(--foreground); font-weight: 500; }
+
+/* ------------------------------------------------------------------
+ * The continuous sheet's title (E.11): the text colour in light mode; in
+ * dark mode the theme's `accentOnDark`, which never prints.
+ * ------------------------------------------------------------------ */
+.wy-sheet__title { color: var(--foreground); }
+.dark .wy-sheet__title { color: var(--doc-accent-on-dark, var(--foreground)); }

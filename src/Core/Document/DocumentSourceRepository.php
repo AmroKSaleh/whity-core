@@ -23,7 +23,7 @@ use Whity\Core\Db\DbBool;
  */
 final class DocumentSourceRepository
 {
-    private const COLUMNS = 'id, tenant_id, kind, title, lang, default_view, full_width, page, record_type, blocks, own_fields,
+    private const COLUMNS = 'id, tenant_id, kind, title, lang, default_view, full_width, page, record_type, blocks, own_fields, theme,
         draft_version, published_version, scope, required_permission, created_by, owner_ou_id, updated_by,
         starter_key, legacy_template_id, created_at, updated_at';
 
@@ -80,16 +80,17 @@ final class DocumentSourceRepository
      * @param array{kind: string, title: string, lang: string, default_view: string, full_width?: bool,
      *              page?: ?array<string, mixed>, record_type?: ?string, blocks: list<array<string, mixed>>,
      *              scope?: string, required_permission?: ?string, created_by: ?int, owner_ou_id?: ?int,
-     *              own_fields?: ?list<array<string, string>>, starter_key?: ?string, legacy_template_id?: ?int} $rec
+     *              own_fields?: ?list<array<string, string>>, starter_key?: ?string, legacy_template_id?: ?int,
+     *              theme?: ?array<string, mixed>} $rec
      * @return int The new row id.
      */
     public function create(int $tenantId, array $rec): int
     {
         $stmt = $this->db->prepare(
             'INSERT INTO document_sources
-                 (tenant_id, kind, title, lang, default_view, full_width, page, record_type, blocks, own_fields, draft_version,
+                 (tenant_id, kind, title, lang, default_view, full_width, page, record_type, blocks, own_fields, theme, draft_version,
                   scope, required_permission, created_by, owner_ou_id, updated_by, starter_key, legacy_template_id, created_at, updated_at)
-             VALUES (:tenant_id, :kind, :title, :lang, :default_view, :full_width, :page, :record_type, :blocks, :own_fields, 1,
+             VALUES (:tenant_id, :kind, :title, :lang, :default_view, :full_width, :page, :record_type, :blocks, :own_fields, :theme, 1,
                   :scope, :required_permission, :created_by, :owner_ou_id, :updated_by, :starter_key, :legacy_template_id, NOW(), NOW())'
         );
         $stmt->execute([
@@ -103,6 +104,7 @@ final class DocumentSourceRepository
             ':record_type'         => $rec['record_type'] ?? null,
             ':blocks'              => $this->encode($rec['blocks']),
             ':own_fields'          => isset($rec['own_fields']) ? $this->encode($rec['own_fields']) : null,
+            ':theme'               => isset($rec['theme']) ? $this->encode($rec['theme']) : null,
             ':scope'               => $rec['scope'] ?? DocumentAccessPolicy::SCOPE_PERSONAL,
             ':required_permission' => $rec['required_permission'] ?? null,
             ':created_by'          => $rec['created_by'],
@@ -121,7 +123,7 @@ final class DocumentSourceRepository
      *
      * @param array{title?: string, lang?: string, default_view?: string, full_width?: bool,
      *              page?: ?array<string, mixed>, blocks?: list<array<string, mixed>>,
-     *              own_fields?: ?list<array<string, string>>} $fields
+     *              own_fields?: ?list<array<string, string>>, theme?: ?array<string, mixed>} $fields
      */
     public function saveDraft(int $id, int $tenantId, int $baseVersion, array $fields, int $updatedBy): ?int
     {
@@ -159,6 +161,11 @@ final class DocumentSourceRepository
         if (array_key_exists('own_fields', $fields)) {
             $sets[] = 'own_fields = :own_fields';
             $params[':own_fields'] = $fields['own_fields'] !== null ? $this->encode($fields['own_fields']) : null;
+        }
+        if (array_key_exists('theme', $fields)) {
+            // The document's theme, `{ ref, overrides }` (editor M4d), saved with the draft.
+            $sets[] = 'theme = :theme';
+            $params[':theme'] = $fields['theme'] !== null ? $this->encode($fields['theme']) : null;
         }
 
         $stmt = $this->db->prepare(
@@ -239,6 +246,7 @@ final class DocumentSourceRepository
     {
         $page = $row['page'] !== null ? json_decode((string) $row['page'], true) : null;
         $ownFields = $row['own_fields'] !== null ? json_decode((string) $row['own_fields'], true) : null;
+        $theme = $row['theme'] !== null ? json_decode((string) $row['theme'], true) : null;
         $out = [
             'id'                  => (int) $row['id'],
             'tenant_id'           => (int) $row['tenant_id'],
@@ -250,6 +258,7 @@ final class DocumentSourceRepository
             'page'                => is_array($page) ? $page : null,
             'record_type'         => $row['record_type'] !== null ? (string) $row['record_type'] : null,
             'own_fields'          => is_array($ownFields) ? array_values($ownFields) : [],
+            'theme'               => is_array($theme) ? $theme : null,
             'draft_version'       => (int) $row['draft_version'],
             'published_version'   => $row['published_version'] !== null ? (int) $row['published_version'] : null,
             'scope'               => (string) $row['scope'],

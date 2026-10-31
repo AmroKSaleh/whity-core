@@ -56,8 +56,57 @@ export interface WhityDocument {
   /** E.9: templates have a draft and a published version. */
   status: 'draft' | 'published';
   publishedVersion?: number;
+  /** E.44: the document's theme and its own overrides; absent or null follows the workspace default. */
+  theme?: DocumentThemeRef | null;
   updatedAt: ISODateTime;
   updatedBy: Actor;
+}
+
+/* ------------------------------------------------------------- Themes */
+
+/** E.44, stage 6 (6.2): a workspace line the letterhead can print under the name. */
+export type LetterheadLine = 'address' | 'taxId' | 'phone' | 'email';
+
+/** A theme's tokens (DOCUMENT-THEMES.md 3.2). Every key is optional in a theme or an override. */
+export interface DocumentThemeTokens {
+  /** The print colour as #rrggbb: the title, and H1-H3 with `title-and-headings` (E.45). */
+  accent?: string;
+  /** The title colour on screen in dark mode (E.11). Never printed. */
+  accentOnDark?: string;
+  accentUse?: 'title' | 'title-and-headings';
+  letterhead?: {
+    logo?: 'wide' | 'square' | 'none';
+    /** In this order, without repeats, at most four. */
+    lines?: LetterheadLine[];
+  };
+}
+
+/** What a document stores: the theme it names and its overrides of the print colour and letterhead. */
+export interface DocumentThemeRef {
+  /** 'whity.standard' | '<plugin>.<key>' | 'tenant.<key>' */
+  ref?: string;
+  overrides?: Pick<DocumentThemeTokens, 'accent' | 'letterhead'>;
+}
+
+/** Every token resolved: what the editor and Whity Render use. */
+export interface ResolvedThemeTokens {
+  accent: string;
+  accentOnDark: string;
+  accentUse: 'title' | 'title-and-headings';
+  letterhead: { logo: 'wide' | 'square' | 'none'; lines: LetterheadLine[] };
+}
+
+/** The server's resolution of a document's theme (`resolvedTheme`). */
+export interface ResolvedDocumentTheme {
+  /** The theme actually used, after falling back past one that isn't available. */
+  ref: string;
+  version: number;
+  hash: string;
+  tokens: ResolvedThemeTokens;
+  /** Where each token came from, by its path. */
+  sources: Record<string, string>;
+  /** What changed on the way, such as a print colour darkened to read on white. */
+  adjustments: { code: string; token: string; from: string; to?: string; message: string }[];
 }
 
 /* ------------------------------------------------------------- Inline */
@@ -354,4 +403,6 @@ export type PublishBlocker =
   | { kind: 'open-suggestions'; count: number }
   | { kind: 'missing-plugin'; plugin: PluginId }             // E.19
   | { kind: 'block-without-print-view'; blockId: BlockId }   // E.18
-  | { kind: 'unknown-field'; path: string };
+  | { kind: 'unknown-field'; path: string }
+  /** E.44: the document names a theme the workspace doesn't have. */
+  | { kind: 'theme-unavailable'; ref: string };

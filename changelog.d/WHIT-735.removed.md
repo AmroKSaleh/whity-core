@@ -1,0 +1,1 @@
+- **The `documents.print_color` setting**, replaced by document themes; the setting routes now refuse it as an unknown key. The open renderer's `theme` no longer takes `ink`, `muted`, `line` or `tint`, only `accent` and `accentUse` (WHIT-735).

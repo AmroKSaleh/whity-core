@@ -1,6 +1,6 @@
 # Document themes: design (grounding pass)
 
-Status: **approved by the owner on 31 Oct 2026** (WHIT-731), fully decided (all nine questions answered in section 12), with these changes: E.44-E.47 are in the register, personal themes and font pairs are out of v1, and the workspace main colour is stored server-side. Sibling: `DOCUMENT-AUTOMATION.md` (WHIT-740), plugins creating and rendering documents from templates. Nothing here is built, and no implementation PR opens until the owner approves this document and the register additions in section 9. Written 31 Oct 2026 against `origin/develop` at `0b3e2d4e` (M4b merged; M4c branch has no commits yet).
+Status: **approved by the owner on 31 Oct 2026** (WHIT-731), fully decided (all nine questions answered in section 12), with these changes: E.44-E.47 are in the register, personal themes and font pairs are out of v1, and the workspace main colour is stored server-side. Sibling: `DOCUMENT-AUTOMATION.md` (WHIT-740), plugins creating and rendering documents from templates. Phase 2 (the model and API) is built in M4d (WHIT-735, WHIT-737, whity-org/whity-core#1471); where M4d defers part of this design, the section says so. Written 31 Oct 2026 against `origin/develop` at `0b3e2d4e` (M4b merged; M4c branch has no commits yet).
 
 A document theme decides how a document looks in the editor's page view, in the continuous sheet and in the PDF Whity Render makes. This document proposes how tenants, people and plugins customise that look, through the API and the plugin SDK, without breaking the decision register.
 
@@ -85,7 +85,7 @@ M4c moves creation, rerender and QR onto sources and deletes the old designer an
 
 | Key | Type | Default | Register | Maps to |
 | --- | --- | --- | --- | --- |
-| `accent` | colour, `#rrggbb` or `oklch()` | the workspace main colour (4.5), else Whity Blue | 6.3, 2.8a, E.45 | `--doc-accent` (the title, and H1-H3 when `accentUse` says so). Must reach 4.5:1 on white; if not, lightness is lowered as in 2.8a and the response says what changed. |
+| `accent` | colour, `#rrggbb` or `oklch()` (M4d accepts `#rrggbb` only; `oklch()` input waits for a PHP parser) | the workspace main colour (4.5), else Whity Blue | 6.3, 2.8a, E.45 | `--doc-accent` (the title, and H1-H3 when `accentUse` says so). Must reach 4.5:1 on white; if not, lightness is lowered as in 2.8a and the response says what changed. |
 | `accentOnDark` | colour | derived from `accent` at L 0.70 (2.8b) | 2.8b, E.11 | Title colour in the continuous sheet in dark mode only. Never printed. |
 | `letterhead.logo` | `wide` · `square` · `none` | `wide` | 6.2 | Which branding asset the letterhead prints at the start side |
 | `letterhead.lines` | `address`, `taxId`, `phone`, `email` (ordered subset, max 4) | `address`, `taxId` | 6.2 | Which tenant lines show under the name |
@@ -186,7 +186,7 @@ All under `/v1`, `{"data": …}` / `{"error": …}`, declared in a new `CoreApiS
 
 | Route | Permission | Notes |
 | --- | --- | --- |
-| `GET /api/document-themes` | `documents:read` | System, enabled plugin and workspace themes. `?scope=`, `?kind=` (themes suited to a kind). Paginated. |
+| `GET /api/document-themes` | `documents:read` | System, enabled plugin and workspace themes. `?scope=`, `?kind=` (themes suited to a kind). Paginated. (M4d: `?scope=` and `?archived=` only, every theme in one page with `meta.total`; `?kind=` and pagination follow when plugin themes make the list long.) |
 | `GET /api/document-themes/schema` | `documents:read` | The token schema with allowed values and their English and Arabic labels, so the UI, plugins and agents build forms from one source |
 | `GET /api/document-themes/{ref}` | `documents:read` | Definition plus `resolved`; `ETag: "<version>"` for stored themes |
 | `POST /api/document-themes` | `documents:themes` | 201 with `ETag: "1"` |

@@ -515,7 +515,8 @@ final class ToolsCallHandler implements MethodHandler
     {
         $pathParamNames = [];
         $substituted = preg_replace_callback(
-            '#\{([a-zA-Z_][a-zA-Z0-9_]*)(?::[^{}]+)?\}#',
+            // A constraint may carry {n} / {n,m} quantifiers (Router::pathToPattern()).
+            '#\{([a-zA-Z_][a-zA-Z0-9_]*)(?::(?:[^{}]|\{\d+(?:,\d*)?\})+)?\}#',
             function (array $matches) use ($arguments, &$pathParamNames): string {
                 $name             = $matches[1];
                 $pathParamNames[] = $name;

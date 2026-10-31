@@ -24,7 +24,7 @@ const {
   isPlainObject,
   asFiniteNumber,
   PAGE_PRESETS,
-  THEME_KEYS,
+  THEME_COLOURS,
   HEX_COLOUR,
 } = require('./document');
 const { renderBlock, mm, FLOW_CSS, escapeHtml, DEFAULT_FONT_STACK } = require('./html');
@@ -100,7 +100,8 @@ function validateLabelsPayload(payload) {
   if (payload.theme !== undefined) {
     if (!isPlainObject(payload.theme)) return '"theme" must be an object of colours';
     for (const [key, value] of Object.entries(payload.theme)) {
-      if (!THEME_KEYS.includes(key)) return `"theme.${key}" is not a theme colour; use ${THEME_KEYS.join(', ')}`;
+      // A label sheet takes only the print colour (E.43, E.44).
+      if (!THEME_COLOURS.includes(key)) return `"theme.${key}" is not a theme colour; use ${THEME_COLOURS.join(', ')}`;
       if (typeof value !== 'string' || !HEX_COLOUR.test(value)) return `"theme.${key}" must be a hex colour such as #032230`;
     }
   }
@@ -173,7 +174,7 @@ function buildLabelsHtml(payload) {
   const cells = cellsOf(sheet, grid);
   const perSheet = cells.length;
   const theme = isPlainObject(payload.theme) ? normaliseTheme(payload.theme) : null;
-  const themeCss = theme ? Object.entries(theme).map(([k, v]) => `  --flow-${k}: ${v};\n`).join('') : '';
+  const themeCss = theme && theme.accent ? `  --flow-accent: ${theme.accent};\n` : '';
 
   const sheets = [];
   for (let start = 0; start < payload.labels.length; start += perSheet) {

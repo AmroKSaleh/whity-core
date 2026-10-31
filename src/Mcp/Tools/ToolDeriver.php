@@ -625,8 +625,9 @@ final class ToolDeriver
     private function sanitizePath(string $path): array
     {
         $parameters = [];
+        // A constraint may carry {n} / {n,m} quantifiers (Router::pathToPattern()).
         $clean = preg_replace_callback(
-            '#\{([a-zA-Z_][a-zA-Z0-9_]*)(?::([^{}]+))?\}#',
+            '#\{([a-zA-Z_][a-zA-Z0-9_]*)(?::((?:[^{}]|\{\d+(?:,\d*)?\})+))?\}#',
             static function (array $matches) use (&$parameters): string {
                 $constraint = $matches[2] ?? '';
                 $type = in_array($constraint, ['\d+', '[0-9]+'], true) ? 'integer' : 'string';

@@ -233,6 +233,8 @@ export function useEditorLabels(): EditorLabels {
     blockerNoPrintHint: t('blockEditor.blockerNoPrintHint', 'It can’t be printed. Remove it, or keep it for notes.'),
     blockerField: t('blockEditor.blockerField', '{field} isn’t a field of this record type'),
     blockerFieldHint: t('blockEditor.blockerFieldHint', 'Remove it, or pick a field the record has.'),
+    blockerTheme: t('blockEditor.blockerTheme', 'This document uses a theme the workspace doesn’t have: {ref}'),
+    blockerThemeHint: t('blockEditor.blockerThemeHint', 'Choose another theme or restore it.'),
     labelGrid: t('blockEditor.labelGrid', '{columns} × {rows} labels'),
     labelStock: t('blockEditor.labelStock', 'Label stock'),
     labelCertificate: t('blockEditor.labelCertificate', 'Certificate'),

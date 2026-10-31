@@ -466,11 +466,15 @@ the issue guessed at is not the one that meets it.
 
 ### Theme, running-head parts, and form blocks
 
-A flowing document can carry a **`theme`** of up to five hex colours, `ink`,
-`muted`, `accent`, `line` and `tint`, written as CSS custom properties. Without
-one the document prints exactly as before: every colour the stylesheet used is
-now a property whose default is the old value. Hex only, because the value is
-written into a stylesheet.
+A flowing document can carry a **`theme`**: the print colour `accent`, a hex
+colour written as a CSS custom property, and `accentUse`, either `title` (the
+default) or `title-and-headings`, which colours headings at levels 2-4 too
+(E.45). The letterhead title always takes the accent. Without a theme the
+document prints exactly as before. Hex only, because the value is written into
+a stylesheet. Since editor M4d (document themes, E.44) the greys and rules
+(`ink`, `muted`, `line`, `tint`) are no longer accepted: they follow the
+register, not the caller. Core sends the theme resolved for the document (or
+frozen when its template was published). A label sheet takes `accent` only.
 
 A **running head or foot slot** (`start`, `center`, `end`) is still a string with
 `{{page}}`-style tokens, or now an object of parts:

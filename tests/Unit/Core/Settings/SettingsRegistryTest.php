@@ -67,7 +67,7 @@ final class SettingsRegistryTest extends TestCase
              'affiliate.clawback_on_refund', 'affiliate.withholding_bp',
              'dunning.retry_schedule_days', 'dunning.lock_after_days',
              'plugins.store_allowed_hosts', 'plugins.store_enabled',
-             'documents.render_enabled', 'documents.print_color', 'documents.render_max_rows',
+             'documents.render_enabled', 'documents.theme', 'documents.theme_by_kind', 'documents.render_max_rows',
              'documents.render_max_pages', 'documents.render_max_template_bytes',
              'documents.flow_max_blocks', 'documents.flow_max_table_rows',
              'documents.flow_max_bytes',
@@ -266,7 +266,9 @@ final class SettingsRegistryTest extends TestCase
         // 34 since editor M4: documents.print_color, because each tenant
         // prints in its own colour.
         // 35 since branding_main_color: each workspace has its own main colour (2.8).
-        self::assertCount(35, SettingsRegistry::tenantTextKeys());
+        // 36 since editor M4d: documents.print_color became the workspace's
+        // default theme, documents.theme, with documents.theme_by_kind beside it.
+        self::assertCount(36, SettingsRegistry::tenantTextKeys());
 
         // The desktop-login TTL is per-tenant overridable (NOT global-only) and a
         // plain numeric string key.
@@ -416,7 +418,8 @@ final class SettingsRegistryTest extends TestCase
         // workspace instead of bouncing with no_membership.
         // 87 since editor M4's documents.print_color (stage 6, --doc-accent).
         // 88 since branding_main_color, the workspace main colour (2.8).
-        self::assertCount(88, $describe);
+        // 89 since editor M4d: print_color out, documents.theme and theme_by_kind in.
+        self::assertCount(89, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

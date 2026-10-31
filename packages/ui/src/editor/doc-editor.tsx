@@ -18,7 +18,7 @@ import { cn } from "../utils"
 import { BlockList } from "./block-list"
 import { SelectionBubble } from "./bubble"
 import { applyItem, filterCatalogue } from "./catalogue"
-import type { Actor, DocumentKind, EditorMode, PublishBlocker, WhityDocument } from "./contract"
+import type { Actor, DocumentKind, EditorMode, PublishBlocker, ResolvedThemeTokens, WhityDocument } from "./contract"
 import { fromEditorContent, toEditorContent } from "./convert"
 import { DocumentBehaviour } from "./behaviour"
 import { documentExtensions } from "./extensions"
@@ -33,7 +33,7 @@ import { EditorServicesProvider, type EditorServices, type FieldPreview } from "
 import { FieldTrigger, filterFields, type FieldDef, type FieldGroup, type FieldTriggerState } from "./fields"
 import { FieldPicker, flatFields } from "./field-picker"
 import { DEFAULT_LABEL_GRID, LabelSetup, LabelSheetView, labelCells, type SheetSize } from "./label-sheet"
-import { PagePagination, PageView, fitZoom, type Letterhead } from "./page-view"
+import { PagePagination, PageView, fitZoom, themeStyle, type Letterhead } from "./page-view"
 import { PublishCheck } from "./publish-check"
 
 export type SaveState =
@@ -85,8 +85,12 @@ export interface DocEditorProps {
   onViewChange?: (view: EditorView) => void
   /** The tenant's letterhead on page 1; `null` for none. */
   letterhead?: Letterhead | null
-  /** The tenant's print colour (`--doc-accent`) for the title and fields. */
-  accent?: string | null
+  /**
+   * The document's resolved theme (E.44): the page view and label sheet use
+   * `accent` (`--doc-accent`), H1-H3 too with `title-and-headings` (E.45); the
+   * continuous sheet's title uses `accentOnDark` in dark mode only (E.11).
+   */
+  theme?: ResolvedThemeTokens | null
   /** The letterhead's end side: the reference ("Ref INV-1042") and the date, as fields. */
   pageFields?: { reference?: FieldDef; date?: FieldDef }
   /** E.12: preview with a record. Read-only while set, unless `editWhilePreviewing`. */
@@ -168,7 +172,7 @@ function DocEditor({
   view: viewProp,
   onViewChange,
   letterhead,
-  accent,
+  theme,
   pageFields,
   preview = null,
   editWhilePreviewing = false,
@@ -700,7 +704,7 @@ function DocEditor({
             )
             if (isLabel) {
               return (
-                <LabelSheetView editor={editor} grid={labelGrid} sheet={sheetSize} zoom={zoomFactor} accent={accent} labels={labels} onOverflow={setLabelOverflow}>
+                <LabelSheetView editor={editor} grid={labelGrid} sheet={sheetSize} zoom={zoomFactor} theme={theme} labels={labels} onOverflow={setLabelOverflow}>
                   {content}
                 </LabelSheetView>
               )
@@ -710,7 +714,7 @@ function DocEditor({
                 editor={editor}
                 title={doc.title}
                 letterhead={letterhead}
-                accent={accent}
+                theme={theme}
                 reference={pageFields?.reference && <>{labels.reference} <LetterheadField field={pageFields.reference} preview={preview} labels={labels} /></>}
                 // @date-display-ignore: a merge field (its chip, or the record's value the server already formatted as text), not a record timestamp.
                 date={pageFields?.date && <LetterheadField field={pageFields.date} preview={preview} labels={labels} />}
@@ -722,9 +726,12 @@ function DocEditor({
                 {content}
               </PageView>
             ) : (
-              <article className="relative mx-auto box-border max-w-[760px] rounded-card border border-border bg-card px-[72px] pt-14 pb-[72px] max-md:px-6">
+              <article
+                className="relative mx-auto box-border max-w-[760px] rounded-card border border-border bg-card px-[72px] pt-14 pb-[72px] max-md:px-6"
+                style={themeStyle(theme)}
+              >
                 <h1
-                  className="m-0 mb-1.5 font-display text-[1.9375rem] leading-[1.15] font-semibold tracking-[-0.01em] text-foreground"
+                  className="wy-sheet__title m-0 mb-1.5 font-display text-[1.9375rem] leading-[1.15] font-semibold tracking-[-0.01em]"
                   dir="auto"
                 >
                   {doc.title || <span className="text-muted-foreground">{labels.untitled}</span>}

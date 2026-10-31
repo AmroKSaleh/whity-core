@@ -746,7 +746,7 @@ final class RequestSchemaContractTest extends TestCase
             $path = $pos === false ? $path . '/v1' : substr($path, 0, $pos) . '/v1' . substr($path, $pos);
         }
 
-        return (string) preg_replace('#\{([a-zA-Z_][a-zA-Z0-9_]*)[^{}]*\}#', '{$1}', $path);
+        return (string) preg_replace('#\{([a-zA-Z_][a-zA-Z0-9_]*)(?:[^{}]|\{\d+(?:,\d*)?\})*\}#', '{$1}', $path);
     }
 
     /**

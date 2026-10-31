@@ -142,7 +142,8 @@ final class SettingsApiRealEngineTest extends TestCase
         // 31 since #billing: eight invoicing keys are tenant-overridable.
         // 34 since editor M4: documents.print_color, each tenant's print colour.
         // 35 since branding_main_color (2.8), each workspace's main colour.
-        self::assertCount(35, $data['registry']);
+        // 36 since editor M4d: documents.theme and documents.theme_by_kind for print_color.
+        self::assertCount(36, $data['registry']);
         self::assertArrayNotHasKey('auth.self_registration_enabled', $data['effective']);
         self::assertSame([], $data['overridden']);
     }
@@ -204,6 +205,31 @@ final class SettingsApiRealEngineTest extends TestCase
                 "SELECT value FROM tenant_settings WHERE tenant_id = 1 AND setting_key = 'site_name'"
             )->fetchColumn()
         );
+    }
+
+    /**
+     * The workspace's default document theme is chosen by whoever manages its
+     * themes (documents:themes, editor M4d), not by every settings writer. The
+     * admin holds it through migration 172 (granted with documents:publish).
+     */
+    public function testTheDefaultDocumentThemeNeedsDocumentsThemesAsWellAsSettingsWrite(): void
+    {
+        TenantContext::setTenantId(self::TENANT_A);
+        $refused = $this->handler->patch(
+            $this->req('PATCH', '/api/settings', ['settings' => ['documents.theme' => 'tenant.house']], self::USER_WRITE_NO_MANAGE)
+        );
+        self::assertSame(403, $refused->getStatusCode());
+        self::assertSame('documents:themes', $this->decode($refused)['details']['required'] ?? null, $refused->getBody());
+
+        $other = $this->handler->patch(
+            $this->req('PATCH', '/api/settings', ['settings' => ['site_name' => 'Example Bakery']], self::USER_WRITE_NO_MANAGE)
+        );
+        self::assertSame(200, $other->getStatusCode(), 'other keys still need only settings:write');
+
+        $allowed = $this->handler->patch(
+            $this->req('PATCH', '/api/settings', ['settings' => ['documents.theme' => 'tenant.house']], self::USER_FULL)
+        );
+        self::assertSame(200, $allowed->getStatusCode(), $allowed->getBody());
     }
 
     public function testPatchSettingsRejectsInvalidTimezoneWith422AndFieldDetail(): void

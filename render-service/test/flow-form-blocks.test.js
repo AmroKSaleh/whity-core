@@ -50,23 +50,36 @@ describe('theme', () => {
     expect(buildFlowHtml(normaliseFlowDocument(doc([{ type: 'paragraph', text: 'x' }])))).toContain('<body>');
   });
 
-  test('sets each colour as a custom property and marks the body themed', () => {
-    const payload = doc([{ type: 'paragraph', text: 'x' }], {
-      theme: { ink: '#032230', muted: '#4b5f69', accent: '#0c95d4', line: '#c9d6dc', tint: '#eef6fb' },
-    });
+  test('sets the print colour as a custom property and marks the body themed', () => {
+    const payload = doc([{ type: 'paragraph', text: 'x' }], { theme: { accent: '#0c95d4' } });
     expect(validateFlowPayload(payload)).toBeNull();
     const style = rootStyle(payload);
-    expect(style).toContain('--flow-ink: #032230');
-    expect(style).toContain('--flow-muted: #4b5f69');
     expect(style).toContain('--flow-accent: #0c95d4');
-    expect(style).toContain('--flow-line: #c9d6dc');
-    expect(style).toContain('--flow-tint: #eef6fb');
+    expect(style).toContain('--flow-title: #0c95d4');
     expect(buildFlowHtml(normaliseFlowDocument(payload))).toContain('<body class="flow-themed">');
   });
 
+  test('accentUse puts the print colour on the headings too (E.45)', () => {
+    const payload = doc([{ type: 'heading', level: 2, text: 'Terms' }], {
+      theme: { accent: '#b74c05', accentUse: 'title-and-headings' },
+    });
+    expect(validateFlowPayload(payload)).toBeNull();
+    expect(buildFlowHtml(normaliseFlowDocument(payload))).toContain('<body class="flow-themed flow-accent-headings">');
+
+    const titleOnly = doc([{ type: 'paragraph', text: 'x' }], { theme: { accent: '#b74c05', accentUse: 'title' } });
+    expect(buildFlowHtml(normaliseFlowDocument(titleOnly))).toContain('<body class="flow-themed">');
+  });
+
+  test('takes only the print colour and where it goes, never the greys and rules', () => {
+    for (const key of ['ink', 'muted', 'line', 'tint']) {
+      expect(validateFlowPayload(doc([{ type: 'paragraph', text: 'x' }], { theme: { [key]: '#032230' } }))).toMatch(new RegExp(`theme\\.${key}`));
+    }
+    expect(validateFlowPayload(doc([{ type: 'paragraph', text: 'x' }], { theme: { accentUse: 'everything' } }))).toMatch(/accentUse/);
+  });
+
   test('refuses anything that is not a hex colour, so nothing reaches the stylesheet unescaped', () => {
-    expect(validateFlowPayload(doc([{ type: 'paragraph', text: 'x' }], { theme: { ink: 'red;}</style><script>' } }))).toMatch(/theme\.ink/);
-    expect(validateFlowPayload(doc([{ type: 'paragraph', text: 'x' }], { theme: { ink: 'blue' } }))).toMatch(/theme\.ink/);
+    expect(validateFlowPayload(doc([{ type: 'paragraph', text: 'x' }], { theme: { accent: 'red;}</style><script>' } }))).toMatch(/theme\.accent/);
+    expect(validateFlowPayload(doc([{ type: 'paragraph', text: 'x' }], { theme: { accent: 'blue' } }))).toMatch(/theme\.accent/);
     expect(validateFlowPayload(doc([{ type: 'paragraph', text: 'x' }], { theme: { glow: '#ffffff' } }))).toMatch(/theme\.glow/);
     expect(validateFlowPayload(doc([{ type: 'paragraph', text: 'x' }], { theme: 'dark' }))).toMatch(/"theme"/);
   });

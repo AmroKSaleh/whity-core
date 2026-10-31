@@ -72,9 +72,10 @@ final class WhityDocumentPrinter
      * @param array{name: string, lines: list<string>, logo?: string|null}|null $letterhead
      * @param string|null $reference The reference field's value, beside "Page x of y".
      * @param string|null $date The date line under the reference.
+     * @param array<string, mixed> $theme The resolved theme's tokens (editor M4d): Whity Render takes its print colour and where it goes.
      * @return array<string, mixed>
      */
-    public function payload(array $doc, ?array $letterhead, ?string $reference, ?string $date, ?string $accent): array
+    public function payload(array $doc, ?array $letterhead, ?string $reference, ?string $date, array $theme = []): array
     {
         $title = $doc['title'];
         $content = [];
@@ -112,8 +113,12 @@ final class WhityDocumentPrinter
                 'end' => $letterhead['name'] ?? '',
             ],
         ];
-        if ($accent !== null && preg_match('/^#[0-9A-Fa-f]{6}$/', $accent) === 1) {
+        $accent = $theme['accent'] ?? null;
+        if (is_string($accent) && preg_match('/^#[0-9A-Fa-f]{6}$/', $accent) === 1) {
             $payload['theme'] = ['accent' => $accent];
+            if (($theme['accentUse'] ?? null) === 'title-and-headings') {
+                $payload['theme']['accentUse'] = 'title-and-headings';
+            }
         }
 
         return $payload;

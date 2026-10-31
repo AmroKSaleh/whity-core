@@ -58,7 +58,7 @@ function adapter(document: WhityDocument): DocumentEditorAdapter {
     loadTemplate: async () => ({
       fields: FIELDS,
       letterhead: { name: "Example Bakery", lines: ["Mecca Street 112, Amman · Tax no. 0123456"] },
-      accent: null,
+      letterheadParts: { address: "Mecca Street 112, Amman", taxId: "Tax no. 0123456", phone: "+962 6 555 0101", email: null },
     }),
     findRecords: async () => [
       { ref: "invoice:31", label: "INV-031 · Example Café" },

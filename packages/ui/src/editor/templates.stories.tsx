@@ -1,10 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import * as React from "react"
 
-import type { Block, FieldRef, PublishBlocker, WhityDocument } from "./contract"
+import type { Block, FieldRef, PublishBlocker, ResolvedThemeTokens, WhityDocument } from "./contract"
 import { DocEditor } from "./doc-editor"
 import type { FieldGroup } from "./fields"
-import type { Letterhead } from "./page-view"
+import { themedLetterhead, type Letterhead } from "./page-view"
 import { SAMPLE_DOCUMENT } from "./sample"
 import type { FieldPreview } from "./services"
 
@@ -132,10 +132,14 @@ function Live({
   initial,
   blockers = [],
   startPreview = false,
+  theme = null,
+  letterhead = LETTERHEAD,
 }: {
   initial: WhityDocument
   blockers?: PublishBlocker[]
   startPreview?: boolean
+  theme?: ResolvedThemeTokens | null
+  letterhead?: Letterhead
 }) {
   const [doc, setDoc] = React.useState(initial)
   const [preview, setPreview] = React.useState<FieldPreview | null>(startPreview ? PREVIEW : null)
@@ -150,7 +154,8 @@ function Live({
         path="Templates · Letters"
         save={{ state: "saved", at: "14:02" }}
         fields={FIELDS}
-        letterhead={LETTERHEAD}
+        letterhead={letterhead}
+        theme={theme}
         pageFields={{ reference: FIELDS[1].items[0], date: FIELDS[3].items[0] }}
         preview={preview}
         onPreview={() => setPreview(PREVIEW)}
@@ -181,9 +186,42 @@ export const PublishBlocked: Story = {
       blockers={[
         { kind: "open-suggestions", count: 2 },
         { kind: "unknown-field", path: "customer.vat" },
+        { kind: "theme-unavailable", ref: "tenant.autumn" },
       ]}
     />
   ),
+}
+
+/**
+ * E.44 and E.45: a workspace theme as the server resolves it, with the print
+ * colour on the title and H1-H3, the phone and address lines in that order,
+ * and no logo (the name alone).
+ */
+const THEME: ResolvedThemeTokens = {
+  accent: "#8A3D12",
+  accentOnDark: "#E7A27A",
+  accentUse: "title-and-headings",
+  letterhead: { logo: "none", lines: ["phone", "address"] },
+}
+
+export const Themed: Story = {
+  render: () => (
+    <Live
+      initial={TEMPLATE}
+      theme={THEME}
+      letterhead={themedLetterhead(
+        LETTERHEAD,
+        THEME,
+        { address: "Mecca Street 112, Amman", taxId: "Tax no. 0123456", phone: "+962 6 555 0101", email: null },
+        { wide: null, square: null }
+      )}
+    />
+  ),
+}
+
+/** E.11: the continuous sheet follows the app theme; in dark mode its title takes `accentOnDark`. */
+export const ThemedContinuous: Story = {
+  render: () => <Live initial={{ ...TEMPLATE, defaultView: "continuous" }} theme={THEME} />,
 }
 
 /** Long enough for the running header, a page break and "Page x of y". */

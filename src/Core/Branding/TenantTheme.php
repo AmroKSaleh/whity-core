@@ -52,6 +52,49 @@ final class TenantTheme
         ];
     }
 
+    /** Whity Blue, `oklch(0.5 0.16 255)` (2.8), as #rrggbb: the colour a workspace without its own keeps. */
+    public static function whityBlue(): string
+    {
+        return self::oklchHex(0.5, 0.16, 255.0);
+    }
+
+    /**
+     * A colour as it prints on white paper (6.3, E.45): it must reach 4.5:1
+     * against white, so text in it stays readable. If it doesn't, its lightness
+     * is lowered until it does, as 2.8a does for the label, and `adjusted` says
+     * so. Used for the document accent (editor M4d).
+     *
+     * @return array{color: string, adjusted: bool}
+     */
+    public static function readableOnWhite(string $hex): array
+    {
+        if (preg_match('/^#[0-9A-Fa-f]{6}$/', $hex) !== 1) {
+            throw new \InvalidArgumentException('The colour must be a #rrggbb hex colour.');
+        }
+        $color = strtolower($hex);
+        if (self::contrast(self::WHITE, $color) >= self::MIN_CONTRAST) {
+            return ['color' => $color, 'adjusted' => false];
+        }
+        [$l, $c, $h] = self::toOklch($color);
+        while ($l > 0.05 && self::contrast(self::WHITE, $color) < self::MIN_CONTRAST) {
+            $l -= 0.01;
+            $color = self::oklchHex($l, $c, $h);
+        }
+
+        return ['color' => $color, 'adjusted' => true];
+    }
+
+    /** The colour on dark (2.8b): its hue at L 0.70, chroma up to 0.15. */
+    public static function onDark(string $hex): string
+    {
+        if (preg_match('/^#[0-9A-Fa-f]{6}$/', $hex) !== 1) {
+            throw new \InvalidArgumentException('The colour must be a #rrggbb hex colour.');
+        }
+        [, $c, $h] = self::toOklch(strtolower($hex));
+
+        return self::oklchHex(0.70, min($c, 0.15), $h);
+    }
+
     /** WCAG contrast ratio between two #rrggbb colours. */
     public static function contrast(string $a, string $b): float
     {

@@ -15,7 +15,10 @@ namespace Whity\Mcp\Tools;
  * Core toolsets merge the OpenAPI tags into areas a person would name. A core
  * route takes its toolset from its first tag through {@see self::TAG_TOOLSET};
  * {@see self::PERMISSION_TOOLSET} wins over the tag where one area's routes are
- * tagged with another's (plugin management sits under `platform-ops`).
+ * tagged with another's (plugin management sits under `platform-ops`). A
+ * route that belongs to a core sub-toolset names it itself, with
+ * `schema['mcp']['toolset']` in CoreApiSchemas: the document theme routes are
+ * tagged `documents` but sit in `core.documents.themes`.
  *
  * A plugin's operations default to the toolset named after the plugin
  * ({@see self::pluginToolsetId()}).
@@ -58,6 +61,12 @@ final class CoreToolsets
             'title'       => 'Documents',
             'titleAr'     => 'المستندات',
             'description' => 'Issued documents, templates and label sheets, collections, circulation routes and reports.',
+        ],
+        // Sub-toolset: its routes name it in CoreApiSchemas::documentThemeRoutes().
+        'core.documents.themes' => [
+            'title'       => 'Document themes',
+            'titleAr'     => 'أنساق المستندات',
+            'description' => "The workspace's document themes: print colour and letterhead, how a theme resolves, and where it is used.",
         ],
         'core.forms' => [
             'title'       => 'Forms',

@@ -29,6 +29,7 @@ const notFound = () => ({ data: undefined, response: new Response(null, { status
 beforeEach(() => {
   GET.mockReset();
   POST.mockReset();
+  PUT.mockReset();
   GET.mockImplementation(async (path: string) =>
     path === '/api/v1/document-embeds'
       ? ok({ record_types: [{ key: 'document', label: 'Issued document' }], chart_sources: [{ key: 'documents-by-month', label: 'Documents issued per month' }] })
@@ -93,21 +94,39 @@ it('uploads a file as multipart and returns it for the block', async () => {
 });
 
 describe('templates (M4)', () => {
-  it('loads the field groups, letterhead and print colour for a record type', async () => {
-    GET.mockResolvedValueOnce(
-      ok({
-        record_types: [{ key: 'document', label: 'Document' }],
-        groups: [{ group: 'Document', items: [{ path: 'document.title', label: 'Document title' }] }],
-        letterhead: { name: 'Example Bakery', lines: ['Mecca Street 112, Amman'] },
-        accent: '#B74C05',
-      })
+  const PARTS = { address: 'Mecca Street 112, Amman', taxId: 'Tax no. 0123456', phone: '+962 6 555 0101', email: null };
+
+  it('loads the field groups, the letterhead lines by name and the logos for a record type', async () => {
+    GET.mockImplementation(async (path: string) =>
+      path === '/api/v1/branding'
+        ? ok({ siteName: 'Example Bakery', logoWideUrl: '/branding/wide.svg', logoSquareUrl: null, faviconUrl: null, mainColor: null, theme: null })
+        : ok({
+            record_types: [{ key: 'document', label: 'Document' }],
+            groups: [{ group: 'Document', items: [{ path: 'document.title', label: 'Document title' }] }],
+            letterhead: { name: 'Example Bakery', lines: ['Mecca Street 112, Amman'] },
+            letterhead_parts: PARTS,
+          })
     );
-    await expect(documentSourcesAdapter.loadTemplate!('document')).resolves.toEqual({
+    const setup = await documentSourcesAdapter.loadTemplate!('document');
+    // The print colour comes with the document now (resolvedTheme), not with the fields.
+    expect(setup).toEqual({
       fields: [{ group: 'Document', items: [{ path: 'document.title', label: 'Document title' }] }],
       letterhead: { name: 'Example Bakery', lines: ['Mecca Street 112, Amman'] },
-      accent: '#B74C05',
+      letterheadParts: PARTS,
+      logos: { wide: '/branding/wide.svg', square: null },
     });
-    expect(GET).toHaveBeenLastCalledWith('/api/v1/document-fields', { params: { query: { recordType: 'document' } } });
+    expect(setup).not.toHaveProperty('accent');
+    expect(GET).toHaveBeenCalledWith('/api/v1/document-fields', { params: { query: { recordType: 'document' } } });
+  });
+
+  it('still loads the template when branding fails: the letterhead shows the initials', async () => {
+    GET.mockImplementation(async (path: string) => {
+      if (path === '/api/v1/branding') throw new Error('offline');
+      return ok({ record_types: [], groups: [], letterhead: { name: 'Example Bakery', lines: [] }, letterhead_parts: PARTS });
+    });
+    const setup = await documentSourcesAdapter.loadTemplate!(null);
+    expect(setup.logos).toBeUndefined();
+    expect(setup.letterheadParts).toEqual(PARTS);
   });
 
   it('names records as type:id, and a hidden preview record is null', async () => {
@@ -126,6 +145,67 @@ describe('templates (M4)', () => {
 
     POST.mockResolvedValueOnce({ data: undefined, response: new Response(null, { status: 409 }) });
     await expect(documentSourcesAdapter.publish!('7', 11)).rejects.toThrow('409');
+  });
+});
+
+describe('document themes (M4d, E.44)', () => {
+  const THEME = {
+    ref: 'tenant.workspace',
+    version: 2,
+    hash: 'abc',
+    tokens: { accent: '#B74C05', accentOnDark: '#F0A070', accentUse: 'title-and-headings', letterhead: { logo: 'square', lines: ['phone', 'address'] } },
+    sources: { accent: 'tenant.workspace' },
+    adjustments: [],
+  };
+  const row = {
+    id: 7,
+    kind: 'template',
+    title: 'Payment reminder',
+    lang: 'en',
+    default_view: 'page',
+    full_width: false,
+    blocks: [],
+    draft_version: 5,
+    published_version: null,
+    theme: { ref: 'tenant.workspace', overrides: { accent: '#B74C05' } },
+    resolvedTheme: THEME,
+    updated_at: '2026-10-31 09:00:00',
+  };
+
+  it('loads the document with its theme choice and the theme it resolves to', async () => {
+    GET.mockResolvedValueOnce({ data: { data: row }, response: new Response(null, { status: 200, headers: { ETag: '"5"' } }) });
+    const loaded = await documentSourcesAdapter.load('7');
+    expect(loaded.resolvedTheme).toEqual(THEME);
+    expect(loaded.document.theme).toEqual({ ref: 'tenant.workspace', overrides: { accent: '#B74C05' } });
+    expect(loaded.version).toBe(5);
+  });
+
+  it('a row without a theme loads with none', async () => {
+    const bare = { ...row, theme: null, resolvedTheme: undefined };
+    GET.mockResolvedValueOnce({ data: { data: bare }, response: new Response(null, { status: 200 }) });
+    const loaded = await documentSourcesAdapter.load('7');
+    expect(loaded.resolvedTheme).toBeNull();
+    expect(loaded.document.theme).toBeUndefined();
+  });
+
+  it('returns the saved row’s theme after a save', async () => {
+    PUT.mockResolvedValueOnce({ data: { data: { ...row, draft_version: 6 } }, response: new Response(null, { status: 200, headers: { ETag: '"6"' } }) });
+    await expect(documentSourcesAdapter.save('7', { title: 'Payment reminder', blocks: [] }, 5)).resolves.toEqual({
+      ok: true,
+      version: 6,
+      updatedAt: row.updated_at,
+      resolvedTheme: THEME,
+    });
+  });
+
+  it('loads a published version with the theme frozen when it was published', async () => {
+    GET.mockResolvedValueOnce(ok({ version: 2, title: 'Payment reminder', blocks: [], theme_resolved: THEME }));
+    await expect(documentSourcesAdapter.loadVersion!('7', 2)).resolves.toMatchObject({ resolvedTheme: THEME });
+  });
+
+  it('passes a theme-unavailable blocker through from the publish check', async () => {
+    GET.mockResolvedValueOnce(ok([{ kind: 'theme-unavailable', ref: 'tenant.autumn' }]));
+    await expect(documentSourcesAdapter.publishCheck!('7')).resolves.toEqual([{ kind: 'theme-unavailable', ref: 'tenant.autumn' }]);
   });
 });
 

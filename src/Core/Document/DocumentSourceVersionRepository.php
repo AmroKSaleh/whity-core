@@ -23,8 +23,13 @@ final class DocumentSourceVersionRepository
      * Publish the draft as it is at `$draftVersion`. Returns the new version's
      * number, or null when the draft has moved on since (someone saved after the
      * check was run), so what was checked is exactly what is published.
+     *
+     * `$themeResolved` is the draft's theme resolved now (editor M4d, E.44): the
+     * version keeps it, and printing the version never resolves again.
+     *
+     * @param array<string, mixed>|null $themeResolved
      */
-    public function publish(int $sourceId, int $tenantId, int $draftVersion, int $publishedBy): ?int
+    public function publish(int $sourceId, int $tenantId, int $draftVersion, int $publishedBy, ?array $themeResolved = null): ?int
     {
         $own = !$this->db->inTransaction();
         if ($own) {
@@ -32,7 +37,7 @@ final class DocumentSourceVersionRepository
         }
         try {
             $stmt = $this->db->prepare(
-                'SELECT title, page, blocks, own_fields FROM document_sources
+                'SELECT title, page, blocks, own_fields, theme FROM document_sources
                  WHERE id = :id AND tenant_id = :tenant_id AND draft_version = :draft_version'
             );
             $stmt->execute([':id' => $sourceId, ':tenant_id' => $tenantId, ':draft_version' => $draftVersion]);
@@ -53,8 +58,8 @@ final class DocumentSourceVersionRepository
             $version = (int) $max->fetchColumn() + 1;
 
             $this->db->prepare(
-                'INSERT INTO document_source_versions (tenant_id, source_id, version, title, page, blocks, own_fields, published_by_profile_id)
-                 VALUES (:tenant_id, :source_id, :version, :title, :page, :blocks, :own_fields, :published_by)'
+                'INSERT INTO document_source_versions (tenant_id, source_id, version, title, page, blocks, own_fields, theme, theme_resolved, published_by_profile_id)
+                 VALUES (:tenant_id, :source_id, :version, :title, :page, :blocks, :own_fields, :theme, :theme_resolved, :published_by)'
             )->execute([
                 ':tenant_id'    => $tenantId,
                 ':source_id'    => $sourceId,
@@ -63,6 +68,8 @@ final class DocumentSourceVersionRepository
                 ':page'         => $draft['page'],
                 ':blocks'       => (string) $draft['blocks'],
                 ':own_fields'   => $draft['own_fields'],
+                ':theme'        => $draft['theme'],
+                ':theme_resolved' => $themeResolved !== null ? json_encode($themeResolved, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE) : null,
                 ':published_by' => $publishedBy,
             ]);
 
@@ -120,12 +127,12 @@ final class DocumentSourceVersionRepository
     /**
      * One published version with its blocks, or null.
      *
-     * @return array{version: int, title: string, page: array<string, mixed>|null, blocks: list<mixed>, own_fields: list<mixed>, published_by: int|null, published_at: string}|null
+     * @return array{version: int, title: string, page: array<string, mixed>|null, blocks: list<mixed>, own_fields: list<mixed>, theme: array<string, mixed>|null, theme_resolved: array<string, mixed>|null, published_by: int|null, published_at: string}|null
      */
     public function find(int $sourceId, int $tenantId, int $version): ?array
     {
         $stmt = $this->db->prepare(
-            'SELECT version, title, page, blocks, own_fields, published_by_profile_id, published_at FROM document_source_versions
+            'SELECT version, title, page, blocks, own_fields, theme, theme_resolved, published_by_profile_id, published_at FROM document_source_versions
              WHERE source_id = :source_id AND tenant_id = :tenant_id AND version = :version'
         );
         $stmt->execute([':source_id' => $sourceId, ':tenant_id' => $tenantId, ':version' => $version]);
@@ -137,6 +144,8 @@ final class DocumentSourceVersionRepository
         $page = $row['page'] !== null ? json_decode((string) $row['page'], true) : null;
         $blocks = json_decode((string) $row['blocks'], true);
         $ownFields = $row['own_fields'] !== null ? json_decode((string) $row['own_fields'], true) : null;
+        $theme = $row['theme'] !== null ? json_decode((string) $row['theme'], true) : null;
+        $resolved = $row['theme_resolved'] !== null ? json_decode((string) $row['theme_resolved'], true) : null;
 
         return [
             'version'      => (int) $row['version'],
@@ -144,6 +153,8 @@ final class DocumentSourceVersionRepository
             'page'         => is_array($page) ? $page : null,
             'blocks'       => is_array($blocks) ? array_values($blocks) : [],
             'own_fields'   => is_array($ownFields) ? array_values($ownFields) : [],
+            'theme'        => is_array($theme) ? $theme : null,
+            'theme_resolved' => is_array($resolved) ? $resolved : null,
             'published_by' => $row['published_by_profile_id'] !== null ? (int) $row['published_by_profile_id'] : null,
             'published_at' => (string) $row['published_at'],
         ];

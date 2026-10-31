@@ -1661,6 +1661,155 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/document-themes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the document themes the workspace can use
+         * @description Whity's standard theme and the workspace's own themes (plugin themes come later). Each says which workspace defaults point at it in default_for: `workspace` and document kinds.
+         */
+        get: operations["get_api_v1_document_themes"];
+        put?: never;
+        /**
+         * Create a workspace document theme
+         * @description It extends Whity's standard theme and is addressed as `tenant.<key>`. Answers 201 with ETag "1", the theme's version.
+         */
+        post: operations["post_api_v1_document_themes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/document-themes/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve the theme a document would print with
+         * @description For a live preview. Reads only. The ref (else the workspace default for the kind, else the workspace default, else Whity's standard theme) with the overrides on top, and what was adjusted on the way, such as a print colour darkened to read on white.
+         */
+        post: operations["post_api_v1_document_themes_resolve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/document-themes/schema": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Describe the values a document theme can set
+         * @description The closed token set with each token's type, allowed values, whether a document may override it, and English and Arabic labels, so forms are built from one source.
+         */
+        get: operations["get_api_v1_document_themes_schema"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/document-themes/{ref}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one document theme with how it resolves
+         * @description Its definition and, in resolved, the values it prints with in this workspace. A workspace theme answers with ETag "<version>"; send it as If-Match to change the theme.
+         */
+        get: operations["get_api_v1_document_themes_ref"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a workspace document theme nobody uses
+         * @description Only a theme no draft names, no published version printed with and no workspace default points at. Otherwise the answer is 409 with where it is used in details.usage; archive it instead.
+         */
+        delete: operations["delete_api_v1_document_themes_ref"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a workspace document theme
+         * @description Send If-Match with the theme's version (its ETag): without it the answer is 428, and when someone changed the theme in between it is 409 with the current version in details.version. Only the fields sent change; tokens replaces the whole token set. Published templates keep the theme they were published with until a person publishes them again. Whity's standard theme can't be changed.
+         */
+        patch: operations["patch_api_v1_document_themes_ref"];
+        trace?: never;
+    };
+    "/api/v1/document-themes/{ref}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive a workspace document theme
+         * @description It leaves the list but keeps working where it is already used. A document that names an archived theme still resolves it. Restore it with POST …/restore. Archiving a theme that is still in use is allowed with a warning: the response then carries `warning` and `usage`.
+         */
+        post: operations["post_api_v1_document_themes_ref_archive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/document-themes/{ref}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore an archived workspace document theme */
+        post: operations["post_api_v1_document_themes_ref_restore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/document-themes/{ref}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Show where a document theme is used
+         * @description The drafts that name it, the published versions printed with it, and the workspace defaults that point at it.
+         */
+        get: operations["get_api_v1_document_themes_ref_usage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/document-verifications/{token}": {
         parameters: {
             query?: never;
@@ -6206,8 +6355,17 @@ export interface components {
                     name: string;
                     lines: string[];
                 };
-                /** @description The tenant print colour as #RRGGBB, or null for the brand colour */
-                accent?: string | null;
+                /** @description Every letterhead line by its theme name, so the editor shows the lines the document's theme lists. The print colour comes with the document (resolvedTheme). */
+                letterhead_parts: {
+                    /** @description The workspace address on one line, or null when none is set */
+                    address: string | null;
+                    /** @description The workspace tax number, or null when none is set */
+                    taxId: string | null;
+                    /** @description The workspace phone number, or null when none is set */
+                    phone: string | null;
+                    /** @description The workspace email address, or null when none is set */
+                    email: string | null;
+                };
             };
         };
         DocumentListResponse: {
@@ -6245,11 +6403,13 @@ export interface components {
         };
         DocumentPublishBlocker: {
             /** @enum {string} */
-            kind: "open-suggestions" | "missing-plugin" | "block-without-print-view" | "unknown-field";
+            kind: "open-suggestions" | "missing-plugin" | "block-without-print-view" | "unknown-field" | "theme-unavailable";
             count?: number;
             plugin?: string;
             blockId?: string;
             path?: string;
+            /** @description With theme-unavailable: the theme the document names that the workspace doesn't have */
+            ref?: string;
         };
         DocumentPublishCheckResponse: {
             data: components["schemas"]["DocumentPublishBlocker"][];
@@ -6402,6 +6562,9 @@ export interface components {
             starter_key?: string | null;
             /** @description The old Document designer template this was converted from (migration 165), or null */
             legacy_template_id?: number | null;
+            /** @description The document's own theme choice: a ref and overrides of the print colour and letterhead. Null follows the workspace defaults. */
+            theme?: components["schemas"]["DocumentThemeRef"] | null;
+            resolvedTheme?: components["schemas"]["ResolvedDocumentTheme"];
             created_at: string;
             updated_at: string;
         };
@@ -6485,6 +6648,26 @@ export interface components {
             }[];
             /** @description A template's own fields, for values no record type provides (a CSV column on a label sheet): a list of {key, label, sample?}, at most 50. The editor inserts each as the field `template.<key>`. */
             own_fields?: components["schemas"]["DocumentOwnField"][] | null;
+            /** @description The document's theme (E.44): { ref?, overrides? }, or null to follow the workspace defaults. */
+            theme?: {
+                /** @description The theme, such as whity.standard or tenant.<key>; null or left out follows the workspace defaults. A ref the workspace doesn't have still saves, and blocks publishing. */
+                ref?: string | null;
+                /** @description This document's own print colour and letterhead, over its theme. Only accent and letterhead. */
+                overrides?: {
+                    /** @description The print colour as #rrggbb: the document title, and headings with accentUse `title-and-headings`. Defaults to the workspace main colour. */
+                    accent?: string;
+                    /** @description The letterhead: which logo, and which workspace lines print under the name. */
+                    letterhead?: {
+                        /**
+                         * @description Which logo the letterhead shows: `wide`, `square` or `none`.
+                         * @enum {string}
+                         */
+                        logo?: "wide" | "square" | "none";
+                        /** @description The workspace lines printed under the name, in this order, without repeats: up to four of `address`, `taxId`, `phone`, `email`. */
+                        lines?: ("address" | "taxId" | "phone" | "email")[];
+                    };
+                } | null;
+            } | null;
         };
         DocumentSourceFileResponse: {
             data: {
@@ -6542,6 +6725,10 @@ export interface components {
                     [key: string]: unknown;
                 }[];
                 own_fields: components["schemas"]["DocumentOwnField"][];
+                /** @description The document's own theme choice when it was published, or null. */
+                theme?: components["schemas"]["DocumentThemeRef"] | null;
+                /** @description The theme frozen when this version was published, which printing it uses; null for versions published before themes. */
+                theme_resolved?: components["schemas"]["ResolvedDocumentTheme"] | null;
                 published_by?: number | null;
                 published_at: string;
             };
@@ -6554,6 +6741,233 @@ export interface components {
             key: string;
             description: string;
             provenance?: string | null;
+        };
+        DocumentTheme: {
+            /** @description How documents name it: whity.standard or tenant.<key> */
+            ref: string;
+            /**
+             * @description `system` for Whity's standard theme, `tenant` for the workspace's own
+             * @enum {string}
+             */
+            scope: "system" | "tenant";
+            key: string;
+            /** @description The English name */
+            name: string;
+            /** @description The Arabic name */
+            name_ar: string;
+            /** @description The theme it builds on: whity.standard, or null for Whity's standard theme itself */
+            extends: string | null;
+            tokens: components["schemas"]["DocumentThemeTokens"];
+            /** @description Goes up with every change; 0 for Whity's standard theme. The ETag and If-Match value. */
+            version: number;
+            archived: boolean;
+            archived_at?: string | null;
+            /** @description The workspace defaults that point at it: `workspace` and document kinds such as `label` */
+            default_for: string[];
+            created_by?: number | null;
+            updated_by?: number | null;
+            created_at?: string;
+            updated_at?: string;
+            resolved?: components["schemas"]["ResolvedDocumentTheme"];
+        };
+        DocumentThemeAdjustment: {
+            /**
+             * @description `theme_missing`: a ref the workspace doesn't have, so the next default was used; `base_missing`: the theme's base isn't available; `accent_darkened`: the print colour was darkened to read on white
+             * @enum {string}
+             */
+            code: "theme_missing" | "base_missing" | "accent_darkened";
+            /** @description What was adjusted: `ref`, `extends` or `accent` */
+            token: string;
+            /** @description The value asked for */
+            from: string;
+            /** @description The value used instead, when there is one */
+            to?: string;
+            /** @description What happened, in English */
+            message: string;
+        };
+        DocumentThemeArchiveResponse: {
+            data: components["schemas"]["DocumentTheme"];
+            /** @description Present when the theme is still in use: what uses it keeps its look. */
+            warning?: string;
+            usage?: components["schemas"]["DocumentThemeUsage"];
+        };
+        DocumentThemeInput: {
+            /** @description The key: 1 to 40 lower-case letters, digits and underscores. The theme is then tenant.<key>. It can't be changed later. */
+            key: string;
+            /** @description The English name, at most 120 characters. */
+            name: string;
+            /** @description The Arabic name, at most 120 characters. */
+            name_ar: string;
+            /** @description The theme it builds on. Only whity.standard for now (the default). */
+            extends?: string | null;
+            /** @description The values it sets over the theme it extends. Leave a token out to keep the base's. */
+            tokens?: {
+                /** @description The print colour as #rrggbb: the document title, and headings with accentUse `title-and-headings`. Defaults to the workspace main colour. */
+                accent?: string;
+                /** @description The title colour on screen in dark mode, as #rrggbb. Never printed. Derived from accent when not set. */
+                accentOnDark?: string;
+                /**
+                 * @description Where the print colour is used: `title` only, or `title-and-headings` (H1 to H3 too).
+                 * @enum {string}
+                 */
+                accentUse?: "title" | "title-and-headings";
+                /** @description The letterhead: which logo, and which workspace lines print under the name. */
+                letterhead?: {
+                    /**
+                     * @description Which logo the letterhead shows: `wide`, `square` or `none`.
+                     * @enum {string}
+                     */
+                    logo?: "wide" | "square" | "none";
+                    /** @description The workspace lines printed under the name, in this order, without repeats: up to four of `address`, `taxId`, `phone`, `email`. */
+                    lines?: ("address" | "taxId" | "phone" | "email")[];
+                };
+            };
+        };
+        DocumentThemeListResponse: {
+            data: components["schemas"]["DocumentTheme"][];
+            meta: {
+                total: number;
+            };
+        };
+        DocumentThemeOverrides: {
+            /** @description The print colour as #rrggbb: the document title, and headings with accentUse `title-and-headings`. Defaults to the workspace main colour. */
+            accent?: string;
+            /** @description The letterhead: which logo, and which workspace lines print under the name. */
+            letterhead?: {
+                /**
+                 * @description Which logo the letterhead shows: `wide`, `square` or `none`.
+                 * @enum {string}
+                 */
+                logo?: "wide" | "square" | "none";
+                /** @description The workspace lines printed under the name, in this order, without repeats: up to four of `address`, `taxId`, `phone`, `email`. */
+                lines?: ("address" | "taxId" | "phone" | "email")[];
+            };
+        };
+        DocumentThemePatch: {
+            /** @description The English name, at most 120 characters. */
+            name?: string;
+            /** @description The Arabic name, at most 120 characters. */
+            name_ar?: string;
+            /** @description The theme it builds on. Only whity.standard for now. */
+            extends?: string | null;
+            /** @description The values it sets, replacing the whole token set. Leave a token out to use the base's. */
+            tokens?: {
+                /** @description The print colour as #rrggbb: the document title, and headings with accentUse `title-and-headings`. Defaults to the workspace main colour. */
+                accent?: string;
+                /** @description The title colour on screen in dark mode, as #rrggbb. Never printed. Derived from accent when not set. */
+                accentOnDark?: string;
+                /**
+                 * @description Where the print colour is used: `title` only, or `title-and-headings` (H1 to H3 too).
+                 * @enum {string}
+                 */
+                accentUse?: "title" | "title-and-headings";
+                /** @description The letterhead: which logo, and which workspace lines print under the name. */
+                letterhead?: {
+                    /**
+                     * @description Which logo the letterhead shows: `wide`, `square` or `none`.
+                     * @enum {string}
+                     */
+                    logo?: "wide" | "square" | "none";
+                    /** @description The workspace lines printed under the name, in this order, without repeats: up to four of `address`, `taxId`, `phone`, `email`. */
+                    lines?: ("address" | "taxId" | "phone" | "email")[];
+                };
+            };
+        };
+        DocumentThemeRef: {
+            /** @description The theme: whity.standard or tenant.<key> */
+            ref?: string;
+            overrides?: components["schemas"]["DocumentThemeOverrides"];
+        };
+        DocumentThemeResolveRequest: {
+            /** @description The theme to resolve, such as whity.standard or tenant.<key>. Left out, the workspace default (for the kind, when one is sent). */
+            ref?: string | null;
+            /** @description A document's print colour and letterhead overrides to apply on top. Only accent and letterhead. */
+            overrides?: {
+                /** @description The print colour as #rrggbb: the document title, and headings with accentUse `title-and-headings`. Defaults to the workspace main colour. */
+                accent?: string;
+                /** @description The letterhead: which logo, and which workspace lines print under the name. */
+                letterhead?: {
+                    /**
+                     * @description Which logo the letterhead shows: `wide`, `square` or `none`.
+                     * @enum {string}
+                     */
+                    logo?: "wide" | "square" | "none";
+                    /** @description The workspace lines printed under the name, in this order, without repeats: up to four of `address`, `taxId`, `phone`, `email`. */
+                    lines?: ("address" | "taxId" | "phone" | "email")[];
+                };
+            } | null;
+            /**
+             * @description The document kind, for the workspace default by kind: `template`, `letter`, `report`, `note`, `wiki` or `label`.
+             * @enum {string}
+             */
+            kind?: "template" | "letter" | "report" | "note" | "wiki" | "label";
+        };
+        DocumentThemeResponse: {
+            data: components["schemas"]["DocumentTheme"];
+        };
+        DocumentThemeSchema: {
+            tokens: {
+                /** @description The token path: `accent`, `accentOnDark`, `accentUse`, `letterhead.logo` or `letterhead.lines` */
+                key: string;
+                /** @enum {string} */
+                type: "color" | "enum" | "list";
+                /** @description Whether a document may override it */
+                overridable: boolean;
+                label: string;
+                labelAr: string;
+                description?: string;
+                descriptionAr?: string;
+                /** @description For a list: how many values it takes at most */
+                max?: number;
+                values?: {
+                    value: string;
+                    label: string;
+                    labelAr: string;
+                }[];
+            }[];
+        };
+        DocumentThemeSchemaResponse: {
+            data: components["schemas"]["DocumentThemeSchema"];
+        };
+        DocumentThemeTokens: {
+            /** @description The print colour as #rrggbb: the document title, and headings with accentUse `title-and-headings`. Defaults to the workspace main colour. */
+            accent?: string;
+            /** @description The title colour on screen in dark mode, as #rrggbb. Never printed. Derived from accent when not set. */
+            accentOnDark?: string;
+            /**
+             * @description Where the print colour is used: `title` only, or `title-and-headings` (H1 to H3 too).
+             * @enum {string}
+             */
+            accentUse?: "title" | "title-and-headings";
+            /** @description The letterhead: which logo, and which workspace lines print under the name. */
+            letterhead?: {
+                /**
+                 * @description Which logo the letterhead shows: `wide`, `square` or `none`.
+                 * @enum {string}
+                 */
+                logo?: "wide" | "square" | "none";
+                /** @description The workspace lines printed under the name, in this order, without repeats: up to four of `address`, `taxId`, `phone`, `email`. */
+                lines?: ("address" | "taxId" | "phone" | "email")[];
+            };
+        };
+        DocumentThemeUsage: {
+            /** @description Documents whose draft names the theme */
+            drafts: {
+                id: number;
+                title: string;
+                kind: string;
+            }[];
+            /** @description Templates whose current published version printed with the theme */
+            published: {
+                id: number;
+                title: string;
+                version: number;
+            }[];
+            /** @description The workspace defaults that point at it: `workspace` and document kinds */
+            defaults: string[];
+        };
+        DocumentThemeUsageResponse: {
+            data: components["schemas"]["DocumentThemeUsage"];
         };
         DocumentTrailEvent: {
             id: number;
@@ -8255,6 +8669,45 @@ export interface components {
         };
         RelationshipTypeListResponse: {
             data: components["schemas"]["RelationshipType"][];
+        };
+        ResolvedDocumentTheme: {
+            /** @description The theme actually used, after falling back past any that isn't available */
+            ref: string;
+            /** @description That theme's version; 0 for Whity's standard theme */
+            version: number;
+            /** @description A hash of the ref, version and tokens; unchanged while the theme is */
+            hash: string;
+            /** @description Every token, resolved */
+            tokens: {
+                /** @description The print colour as #rrggbb: the document title, and headings with accentUse `title-and-headings`. Defaults to the workspace main colour. */
+                accent: string;
+                /** @description The title colour on screen in dark mode, as #rrggbb. Never printed. Derived from accent when not set. */
+                accentOnDark: string;
+                /**
+                 * @description Where the print colour is used: `title` only, or `title-and-headings` (H1 to H3 too).
+                 * @enum {string}
+                 */
+                accentUse: "title" | "title-and-headings";
+                /** @description The letterhead: which logo, and which workspace lines print under the name. */
+                letterhead: {
+                    /**
+                     * @description Which logo the letterhead shows: `wide`, `square` or `none`.
+                     * @enum {string}
+                     */
+                    logo: "wide" | "square" | "none";
+                    /** @description The workspace lines printed under the name, in this order, without repeats: up to four of `address`, `taxId`, `phone`, `email`. */
+                    lines: ("address" | "taxId" | "phone" | "email")[];
+                };
+            };
+            /** @description Where each token came from, by its path (`accent`, `letterhead.lines`…): a theme ref, `document` for an override, or `branding.main_color` */
+            sources: {
+                [key: string]: string;
+            };
+            /** @description What was changed on the way, such as a print colour darkened to reach 4.5:1 on white */
+            adjustments: components["schemas"]["DocumentThemeAdjustment"][];
+        };
+        ResolvedDocumentThemeResponse: {
+            data: components["schemas"]["ResolvedDocumentTheme"];
         };
         ResourceRoleGrant: {
             id: number;
@@ -17985,6 +18438,890 @@ export interface operations {
                 };
             };
             /** @description Document or version not found, or not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_document_themes: {
+        parameters: {
+            query?: {
+                /** @description Only themes of this scope: `system` (Whity's standard theme) or `tenant` (the workspace's own). Anything else is a 422. Without it, both. */
+                scope?: string;
+                /** @description Send `1` or `true` to list the workspace's archived themes instead of its active ones. */
+                archived?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The themes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentThemeListResponse"];
+                };
+            };
+            /** @description Tenant context is required */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Unknown scope */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_document_themes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentThemeInput"];
+            };
+        };
+        responses: {
+            /** @description The created theme; its ETag is its version */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentThemeResponse"];
+                };
+            };
+            /** @description Tenant context is required */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A theme with this key already exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation failed, or the system tenant, which has no workspace themes */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_document_themes_resolve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentThemeResolveRequest"];
+            };
+        };
+        responses: {
+            /** @description The resolved theme */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResolvedDocumentThemeResponse"];
+                };
+            };
+            /** @description Tenant context is required */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid ref, overrides or kind */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_document_themes_schema: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The token schema */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentThemeSchemaResponse"];
+                };
+            };
+            /** @description Tenant context is required */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_document_themes_ref: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The theme */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentThemeResponse"];
+                };
+            };
+            /** @description Tenant context is required */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Theme not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    delete_api_v1_document_themes_ref: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Theme deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Tenant context is required */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Theme not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The theme is in use, or it is Whity's standard theme */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The system tenant has no workspace themes */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patch_api_v1_document_themes_ref: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentThemePatch"];
+            };
+        };
+        responses: {
+            /** @description The changed theme; its ETag is the new version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentThemeResponse"];
+                };
+            };
+            /** @description Tenant context is required */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Theme not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The theme changed since this edit was made, or it is Whity's standard theme */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation failed, nothing to change, or the system tenant */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description If-Match with the theme's version is required */
+            428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_document_themes_ref_archive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The archived theme, with a warning and its usage when it is still in use */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentThemeArchiveResponse"];
+                };
+            };
+            /** @description Tenant context is required */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Theme not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Whity's standard theme can't be archived */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The system tenant has no workspace themes */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_document_themes_ref_restore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The restored theme */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentThemeResponse"];
+                };
+            };
+            /** @description Tenant context is required */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Theme not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Whity's standard theme can't be archived or restored */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The system tenant has no workspace themes */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_document_themes_ref_usage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ref: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Where the theme is used */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentThemeUsageResponse"];
+                };
+            };
+            /** @description Tenant context is required */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Theme not found */
             404: {
                 headers: {
                     [name: string]: unknown;

@@ -330,6 +330,7 @@ final class DemoOrganisationSeeder
                     CorePermissions::DOCUMENTS_READ,
                     CorePermissions::DOCUMENTS_WRITE,
                     CorePermissions::DOCUMENTS_PUBLISH,
+                    CorePermissions::DOCUMENTS_THEMES,
                     CorePermissions::DOCUMENTS_RENDER,
                     CorePermissions::DOCUMENTS_ISSUE,
                     CorePermissions::DOCUMENTS_ROUTE,

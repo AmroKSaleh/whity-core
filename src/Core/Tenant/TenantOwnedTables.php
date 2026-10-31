@@ -177,6 +177,8 @@ final class TenantOwnedTables
         // 161). Bound to their document; read only through it.
         'document_source_files' => '161_create_document_source_files.php',
         'document_source_versions' => '162_create_document_source_versions.php',
+        // Editor M4d: the workspace's own document themes (migration 170, E.44).
+        'document_themes' => '170_create_document_themes.php',
         // Whity Builder (WHIT-760): a workspace's own plugins as published
         // manifest versions, the live pointer, and the permission slugs they
         // declare (migration 164).

@@ -23,6 +23,7 @@ use Whity\Core\Document\Qr\DocumentQrService;
 use Whity\Core\Document\Render\DocumentRenderRejectedException;
 use Whity\Core\Document\Render\FlowDocumentRenderer;
 use Whity\Core\Document\Render\RenderServiceUnavailableException;
+use Whity\Core\Document\Theme\DocumentThemeRepository;
 use Whity\Core\Entitlement\MeterService;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\ScopedPermissionSet;
@@ -81,8 +82,10 @@ final class DocumentPublishingApiHandler
         ?LetterheadLogo $logo = null,
         ?DocumentQrService $qr = null,
         ?DocumentIssuing $issuing = null,
+        // The workspace's document themes (editor M4d).
+        ?DocumentThemeRepository $themes = null,
     ) {
-        $this->print = new SourceDocumentPrinter($fields, $embeds, $settings, $files, $printLabels, $logo);
+        $this->print = new SourceDocumentPrinter($fields, $embeds, $settings, $files, $printLabels, $logo, $themes);
         $this->issuing = $issuing ?? ($issuer !== null
             ? new DocumentIssuing($this->print, $versions, $issuer, $settings, $renderer, $qr, $meters)
             : null);
@@ -101,8 +104,11 @@ final class DocumentPublishingApiHandler
         return Response::json(['data' => [
             'record_types' => $this->fields->recordTypes(),
             'groups' => $this->fields->groups($tenantId, $type),
+            // The name and default lines, and every line by its theme name, so
+            // the editor shows the lines the document's theme lists. The print
+            // colour comes with the document (resolvedTheme, editor M4d).
             'letterhead' => $this->print->letterhead($tenantId),
-            'accent' => $this->print->accent($tenantId),
+            'letterhead_parts' => $this->print->letterheadParts($tenantId)['parts'],
         ]]);
     }
 
@@ -168,7 +174,11 @@ final class DocumentPublishingApiHandler
             return Response::error('The template has something that blocks publishing', 409, ['blockers' => $blockers]);
         }
 
-        $version = $this->versions->publish((int) $row['id'], $tenantId, $base, $callerId);
+        // The version keeps the theme it is published with (E.44): printing it
+        // never resolves again, so a theme changed later reaches it only when
+        // a person publishes it again.
+        $theme = $this->print->theme($tenantId, $row['theme'] ?? null, (string) $row['kind']);
+        $version = $this->versions->publish((int) $row['id'], $tenantId, $base, $callerId, $theme);
         if ($version === null) {
             return Response::error('The document changed since it was checked', 409);
         }
@@ -338,12 +348,18 @@ final class DocumentPublishingApiHandler
             return Response::error('Required fields have no value for this record', 422, ['missing' => $missing]);
         }
 
+        // A draft previews with the theme as it resolves now; a published
+        // version prints with the one frozen when it was published.
+        $theme = $version !== null
+            ? $this->print->versionTheme($tenantId, $version, (string) $row['kind'])
+            : $this->print->theme($tenantId, $row['theme'] ?? null, (string) $row['kind']);
         $payload = $this->print->payload(
             $printer,
             $tenantId,
             ['title' => (string) $doc['title'], 'lang' => (string) $row['lang'], 'page' => $doc['page'], 'blocks' => $doc['blocks']],
             $resolved['label'],
             $values,
+            $theme,
         );
 
         $metered = false;
@@ -405,6 +421,7 @@ final class DocumentPublishingApiHandler
         $body = JsonBody::parsed($request);
         if (($body['draft'] ?? false) === true) {
             $doc = ['page' => $row['page'], 'blocks' => $row['blocks'], 'own_fields' => $row['own_fields'] ?? []];
+            $theme = $this->print->theme($tenantId, $row['theme'] ?? null, (string) $row['kind']);
         } else {
             $published = $row['published_version'] !== null
                 ? $this->versions->find((int) $row['id'], $tenantId, (int) $row['published_version'])
@@ -413,6 +430,7 @@ final class DocumentPublishingApiHandler
                 return Response::error('This label sheet has no published version yet', 409);
             }
             $doc = ['page' => $published['page'], 'blocks' => $published['blocks'], 'own_fields' => $published['own_fields']];
+            $theme = $this->print->versionTheme($tenantId, $published, (string) $row['kind']);
         }
         $page = is_array($doc['page']) ? $doc['page'] : [];
         $grid = is_array($page['labels'] ?? null) ? $page['labels'] : null;
@@ -488,8 +506,8 @@ final class DocumentPublishingApiHandler
             'direction' => $row['lang'] === 'ar' ? 'rtl' : 'ltr',
             'title' => (string) $row['title'],
         ];
-        $accent = $this->print->accent($tenantId);
-        if ($accent !== null) {
+        $accent = $theme['tokens']['accent'] ?? null;
+        if (is_string($accent) && $accent !== '') {
             $payload['theme'] = ['accent' => $accent];
         }
 
@@ -529,11 +547,23 @@ final class DocumentPublishingApiHandler
     private function blockers(int $tenantId, array $row): array
     {
         $type = $row['record_type'] !== null ? (string) $row['record_type'] : null;
-
-        return DocumentPublishCheck::blockers(
+        $blockers = DocumentPublishCheck::blockers(
             is_array($row['blocks'] ?? null) ? $row['blocks'] : [],
             $this->fields->paths($tenantId, $type) + self::ownPaths($row['own_fields'] ?? []),
         );
+
+        // A theme the document names that the workspace doesn't have (deleted,
+        // or a plugin's that is off) would publish in another look than the
+        // one the author chose, so it blocks like an unknown field (E.44).
+        $ref = is_array($row['theme'] ?? null) ? ($row['theme']['ref'] ?? null) : null;
+        if (is_string($ref) && $ref !== '') {
+            $theme = $this->print->theme($tenantId, $row['theme'], (string) $row['kind']);
+            if ($theme['ref'] !== $ref) {
+                $blockers[] = ['kind' => 'theme-unavailable', 'ref' => $ref];
+            }
+        }
+
+        return $blockers;
     }
 
     /**

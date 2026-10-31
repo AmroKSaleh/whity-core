@@ -69,6 +69,8 @@
         "blockEditor.blockerSuggestion": "1 open suggestion",
         "blockEditor.blockerSuggestions": "{n} open suggestions",
         "blockEditor.blockerSuggestionsHint": "Accept or reject them first.",
+        "blockEditor.blockerTheme": "This document uses a theme the workspace doesn’t have: {ref}",
+        "blockEditor.blockerThemeHint": "Choose another theme or restore it.",
         "blockEditor.bold": "Bold",
         "blockEditor.calloutImportant": "Important",
         "blockEditor.calloutNote": "Note",

@@ -504,20 +504,20 @@ function renderBlock(block, direction) {
 function buildFlowHtml(doc) {
   const fontStack = doc.fontFamily || DEFAULT_FONT_STACK;
   const body = doc.content.map((block) => renderBlock(block, doc.direction)).join('\n');
-  // The theme: validated hex colours only (document.js), written as the custom
-  // properties flow.css reads. Absent keys leave the stylesheet's defaults,
-  // which are the colours this mode always printed in.
-  const theme = doc.theme
-    ? Object.entries(doc.theme)
-        .map(([key, value]) => `  --flow-${key}: ${value};\n`)
-        .join('') +
-      // Table and answer-line rules follow the theme's line colour only when
-      // it names one; a theme that sets just an accent keeps the darker grid.
-      (doc.theme.line ? `  --flow-grid: ${doc.theme.line};\n` : '') +
-      // The letterhead title takes the print colour when there is one (6.3);
-      // without it the title stays ink rather than the transparent accent.
-      (doc.theme.accent ? `  --flow-title: ${doc.theme.accent};\n` : '')
+  // The theme: the validated print colour (document.js), written as the
+  // custom property flow.css reads. Without one, the stylesheet's defaults
+  // are the colours this mode always printed in.
+  const theme = doc.theme && doc.theme.accent
+    ? `  --flow-accent: ${doc.theme.accent};\n` +
+      // The letterhead title takes the print colour (6.3); without it the
+      // title stays ink rather than the transparent accent.
+      `  --flow-title: ${doc.theme.accent};\n`
     : '';
+  // E.45: a theme may put the print colour on the headings as well.
+  const bodyClasses = [
+    doc.theme ? 'flow-themed' : '',
+    doc.theme && doc.theme.accentUse === 'title-and-headings' ? 'flow-accent-headings' : '',
+  ].filter(Boolean).join(' ');
 
   // Everything the browser-side paginator needs: geometry, the running
   // header/footer templates, the front-matter spec, and the cross-reference
@@ -553,7 +553,7 @@ ${theme}}
 </style>
 <style>${FLOW_CSS}</style>
 </head>
-<body${doc.theme ? ' class="flow-themed"' : ''}>
+<body${bodyClasses ? ` class="${bodyClasses}"` : ''}>
 <div id="flow-source" aria-hidden="true">
 ${body}
 </div>

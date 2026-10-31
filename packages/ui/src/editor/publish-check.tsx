@@ -26,9 +26,25 @@ const ICON: Record<PublishBlocker["kind"], IconName> = {
   "missing-plugin": "plugin",
   "block-without-print-view": "plugin",
   "unknown-field": "field",
+  "theme-unavailable": "branding",
 }
 
-function blockerText(b: PublishBlocker, labels: EditorLabels, names: { plugin?: (id: string) => string; field?: (path: string) => string }) {
+/**
+ * `fill` for text that holds a value from elsewhere: each `{key}` becomes the
+ * node given, so a theme ref can sit in a `<bdi>` inside an Arabic sentence.
+ */
+function fillNodes(template: string, values: Record<string, React.ReactNode>): React.ReactNode {
+  return template.split(/(\{\w+\})/).map((part, i) => {
+    const m = /^\{(\w+)\}$/.exec(part)
+    return m && m[1] in values ? <React.Fragment key={i}>{values[m[1]]}</React.Fragment> : part
+  })
+}
+
+function blockerText(
+  b: PublishBlocker,
+  labels: EditorLabels,
+  names: { plugin?: (id: string) => string; field?: (path: string) => string }
+): { title: React.ReactNode; hint: string; action?: string } {
   switch (b.kind) {
     case "open-suggestions":
       return {
@@ -42,6 +58,9 @@ function blockerText(b: PublishBlocker, labels: EditorLabels, names: { plugin?: 
       return { title: labels.blockerNoPrint, hint: labels.blockerNoPrintHint, action: labels.show }
     case "unknown-field":
       return { title: fill(labels.blockerField, { field: names.field?.(b.path) ?? b.path }), hint: labels.blockerFieldHint, action: labels.show }
+    case "theme-unavailable":
+      // No way to fix it here until the theme picker (WHIT-736): the hint says what to do.
+      return { title: fillNodes(labels.blockerTheme, { ref: <bdi dir="ltr">{b.ref}</bdi> }), hint: labels.blockerThemeHint }
   }
 }
 
@@ -120,16 +139,18 @@ function PublishCheck({
                     <span className="font-medium">{t.title}</span>
                     <span className="text-[0.8125rem] text-muted-foreground">{t.hint}</span>
                   </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      onOpenChange(false)
-                      onFix(b)
-                    }}
-                  >
-                    {t.action}
-                  </Button>
+                  {t.action && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        onOpenChange(false)
+                        onFix(b)
+                      }}
+                    >
+                      {t.action}
+                    </Button>
+                  )}
                 </li>
               )
             })}
