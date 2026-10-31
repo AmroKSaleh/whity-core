@@ -39391,13 +39391,43 @@
                     "faviconUrl": {
                         "type": "string",
                         "nullable": true
+                    },
+                    "mainColor": {
+                        "type": "string",
+                        "nullable": true,
+                        "description": "The workspace main colour as #rrggbb, or null for Whity Blue."
+                    },
+                    "theme": {
+                        "type": "object",
+                        "nullable": true,
+                        "description": "Token values derived from the main colour (decision 2.8), keyed by token name without the leading dashes; null when no main colour is set.",
+                        "properties": {
+                            "light": {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "type": "string"
+                                }
+                            },
+                            "dark": {
+                                "type": "object",
+                                "additionalProperties": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "required": [
+                            "light",
+                            "dark"
+                        ]
                     }
                 },
                 "required": [
                     "siteName",
                     "logoWideUrl",
                     "logoSquareUrl",
-                    "faviconUrl"
+                    "faviconUrl",
+                    "mainColor",
+                    "theme"
                 ]
             },
             "BrandingHostRequest": {

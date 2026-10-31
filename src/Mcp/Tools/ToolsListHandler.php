@@ -67,7 +67,7 @@ final class ToolsListHandler implements MethodHandler
                 continue;
             }
             $access = $accessMap[$name] ?? ['requiredRole' => null, 'requiredPermission' => null];
-            if ($this->callerCanUse($access, $principal, $tenantId)) {
+            if (self::inTokenToolsets($tool, $principal) && $this->callerCanUse($access, $principal, $tenantId)) {
                 $tools[] = $tool;
             }
         }
@@ -88,7 +88,7 @@ final class ToolsListHandler implements MethodHandler
             foreach ($this->authoredTools->toolObjects() as $tool) {
                 $name   = (string) ($tool['name'] ?? '');
                 $access = $authoredAccess[$name] ?? ['requiredRole' => null, 'requiredPermission' => null];
-                if ($this->callerCanUse($access, $principal, $tenantId)) {
+                if (self::inTokenToolsets($tool, $principal) && $this->callerCanUse($access, $principal, $tenantId)) {
                     $tools[] = $tool;
                 }
             }
@@ -125,6 +125,23 @@ final class ToolsListHandler implements MethodHandler
         usort($tools, static fn (array $a, array $b): int => $key($a) <=> $key($b));
 
         return $tools;
+    }
+
+    /**
+     * WHIT-749: a token that names toolsets reaches only tools in them. Read
+     * from the tool's own `_meta`, the same value search and tools/call use.
+     *
+     * @param array<string, mixed> $tool
+     */
+    private static function inTokenToolsets(array $tool, ?McpPrincipal $principal): bool
+    {
+        if ($principal === null) {
+            return true;
+        }
+        $meta = is_array($tool['_meta'] ?? null) ? $tool['_meta'] : [];
+        $toolset = $meta[ToolSurface::META_TOOLSET] ?? null;
+
+        return McpScope::of($principal)->allowsToolset(is_string($toolset) ? $toolset : null);
     }
 
     /** @param array<string, mixed> $access */

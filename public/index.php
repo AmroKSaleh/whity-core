@@ -1813,11 +1813,19 @@ $router->register('DELETE', '/api/users/{id:\d+}/memberships/{membershipId:\d+}'
 // per-region verdict and withhold the data behind a region the caller may not
 // see; without it this handler is its pre-#910 self, and the client fails closed
 // on the missing map rather than assuming everything is editable.
+// A workspace's own plugins (Whity Builder, WHIT-760): published manifests read
+// per request by the fixed entry points below (features, navigation), never
+// registered into this worker at boot. The repository also lets the permission
+// catalogue and role grants hide other workspaces' plugin permissions.
+$tenantPluginRepository = new \Whity\Core\Plugin\Tenant\TenantPluginRepository($db->getPdo());
+$tenantManifestHost = new \Whity\Core\Plugin\Tenant\TenantManifestHost($tenantPluginRepository, $permissionRegistry, $logger);
+
 $rolesHandler = new RolesApiHandler(
     $db->getPdo(),
     $hookManager,
     null,
-    new \Whity\Core\RBAC\RecordSectionResolver($roleChecker)
+    new \Whity\Core\RBAC\RecordSectionResolver($roleChecker),
+    $tenantPluginRepository
 );
 // Roles are gated on PERMISSION SLUGS, not on the `admin` role name (#977).
 //
@@ -1871,7 +1879,7 @@ $router->register('PATCH', '/api/tenants/{id:\d+}', [$tenantsHandler, 'update'],
 // draw the same line.
 $router->register('DELETE', '/api/tenants/{id:\d+}', [$tenantsHandler, 'delete'], null, null, CorePermissions::TENANTS_DELETE);
 
-$permissionsHandler = new PermissionsApiHandler($db->getPdo());
+$permissionsHandler = new PermissionsApiHandler($db->getPdo(), null, $tenantPluginRepository);
 // The permission CATALOGUE, gated on `permissions:read` (#990) — the same slug
 // `GET /api/roles/{id}/permissions` already uses, because they answer two halves
 // of one question: what permissions exist, and which of them a role holds. A
@@ -1986,7 +1994,8 @@ $frontendFeaturesHandler = new FrontendFeaturesApiHandler(
     array_merge(
         \Whity\Core\Form\FormFrontendFeatures::all(),
         \Whity\Core\Convening\ConveningFeatures::all($router)
-    )
+    ),
+    $tenantManifestHost
 );
 $router->register('GET', '/api/frontend/features', [$frontendFeaturesHandler, 'list'], null);
 
@@ -4641,6 +4650,7 @@ $pluginLoader->collectJobs($jobsRegistry);
 // feature gets a menu entry pointing at the dynamic screen route /admin/x/{id}.
 // Features are read at dispatch time, so runtime disable drops the entry.
 \Whity\Core\PluginNavigationBridge::subscribe($hookManager, $pluginLoader);
+\Whity\Core\Plugin\Tenant\TenantPluginNavigation::subscribe($hookManager, $tenantManifestHost);
 
 // Handle requests (persistent worker mode or fallback single-request mode)
 $isWorker = function_exists('frankenphp_handle_request');
@@ -4665,7 +4675,7 @@ if ($isWorker) {
         // are gated behind development/DEBUG. Decision is computed once per
         // iteration and captured by the request closure below.
         $logLifecycle = WorkerRuntime::shouldLogLifecycle($_ENV);
-        $keepRunning = \frankenphp_handle_request(static function () use ($kernel, $hookManager, $pluginLoader, $db, $logLifecycle, $securityHeaders, $errorTracker) {
+        $keepRunning = \frankenphp_handle_request(static function () use ($kernel, $hookManager, $pluginLoader, $db, $logLifecycle, $securityHeaders, $errorTracker, $tenantManifestHost) {
             try {
                 // Dispatch request start hook
                 if ($logLifecycle) {
@@ -4762,6 +4772,8 @@ if ($isWorker) {
                 // stay live. Scope the cache to the request instead; it still
                 // de-duplicates the repeated resolutions within a single one.
                 RoleChecker::clearCache();
+                // WHIT-760: the workspace-plugin reads are per request too.
+                $tenantManifestHost->resetRequest();
                 // DB session hygiene (WC-21/PR #84): after the response is sent,
                 // roll back any dangling transaction and DISCARD ALL session-local
                 // state on the shared worker connection so nothing request-specific
@@ -4878,6 +4890,7 @@ if ($isWorker) {
         // Same reasoning as the worker loop above: the effective-permission
         // cache must not outlive the request that filled it.
         RoleChecker::clearCache();
+        $tenantManifestHost->resetRequest();
     }
 }
 

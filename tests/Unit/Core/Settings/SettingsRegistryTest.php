@@ -21,6 +21,7 @@ final class SettingsRegistryTest extends TestCase
         self::assertSame(
             ['site_name', 'timezone', 'locale', 'support_email',
              'branding_logo_wide', 'branding_logo_square', 'branding_favicon',
+             'branding_main_color',
              'mcp.enabled',
              'auth.self_registration_enabled', 'auth.registration_approval_required',
              'auth.registration_payment_required',
@@ -264,7 +265,8 @@ final class SettingsRegistryTest extends TestCase
         // 33 since #billing: the two dunning keys are tenant-overridable.
         // 34 since editor M4: documents.print_color, because each tenant
         // prints in its own colour.
-        self::assertCount(34, SettingsRegistry::tenantTextKeys());
+        // 35 since branding_main_color: each workspace has its own main colour (2.8).
+        self::assertCount(35, SettingsRegistry::tenantTextKeys());
 
         // The desktop-login TTL is per-tenant overridable (NOT global-only) and a
         // plain numeric string key.
@@ -413,7 +415,8 @@ final class SettingsRegistryTest extends TestCase
         // sign-in through the operator's identity provider create its own
         // workspace instead of bouncing with no_membership.
         // 87 since editor M4's documents.print_color (stage 6, --doc-accent).
-        self::assertCount(87, $describe);
+        // 88 since branding_main_color, the workspace main colour (2.8).
+        self::assertCount(88, $describe);
         self::assertSame(
             ['key' => 'site_name', 'type' => 'string', 'default' => 'Whity'],
             $describe[0]

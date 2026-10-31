@@ -702,6 +702,9 @@ jobs:
       - name: Migration-number collision guard
         run: php scripts/ci-migration-number-collision.php
 
+      - name: Changelog fragment guard
+        run: php scripts/changelog-assemble.php --check
+
   # The English translation catalogue must stay a faithful projection of the
   # t() calls that produce it. A converted screen whose keys were never
   # extracted degrades silently and looks successful: the fallback renders, the

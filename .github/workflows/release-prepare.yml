@@ -132,8 +132,12 @@ jobs:
             inside { print }
           ' CHANGELOG.md | tr -d '[:space:]')
 
-          if [ -z "$body" ]; then
-            echo "::error::CHANGELOG.md's [Unreleased] section is empty. It becomes the release notes for this version — write it, then run this workflow again."
+          # Entries now arrive as fragments in changelog.d/ (WHIT-791) and are
+          # folded in by the next step, so they count as content too.
+          fragments=$(find changelog.d -maxdepth 1 -type f -name '*.md' ! -name 'README.md' 2>/dev/null | wc -l)
+
+          if [ -z "$body" ] && [ "$fragments" -eq 0 ]; then
+            echo "::error::CHANGELOG.md's [Unreleased] section is empty and changelog.d/ has no fragments. They become the release notes for this version — write them, then run this workflow again."
             exit 1
           fi
 
@@ -156,6 +160,12 @@ jobs:
 
       - name: Install Node dependencies
         run: npm ci
+
+      - name: Fold changelog fragments into [Unreleased]
+        # Each PR adds a file under changelog.d/ instead of editing the shared
+        # [Unreleased] section, so parallel PRs stop conflicting (WHIT-791).
+        # This folds them in and deletes them; `git add -A` below commits both.
+        run: php scripts/changelog-assemble.php
 
       - name: Bump CoreVersion and date the CHANGELOG
         run: |

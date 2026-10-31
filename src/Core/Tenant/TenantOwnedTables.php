@@ -177,6 +177,12 @@ final class TenantOwnedTables
         // 161). Bound to their document; read only through it.
         'document_source_files' => '161_create_document_source_files.php',
         'document_source_versions' => '162_create_document_source_versions.php',
+        // Whity Builder (WHIT-760): a workspace's own plugins as published
+        // manifest versions, the live pointer, and the permission slugs they
+        // declare (migration 164).
+        'plugin_manifest_versions' => '164_create_tenant_plugin_manifests.php',
+        'tenant_plugins' => '164_create_tenant_plugin_manifests.php',
+        'tenant_plugin_permissions' => '164_create_tenant_plugin_manifests.php',
 
         // #947 item 1 — issued documents and their stored render output
         // (migration 108). `documents` is the record; `document_artifacts` is

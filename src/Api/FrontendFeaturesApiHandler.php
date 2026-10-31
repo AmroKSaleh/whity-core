@@ -6,6 +6,7 @@ namespace Whity\Api;
 
 use Psr\Log\LoggerInterface;
 use Whity\Auth\RoleChecker;
+use Whity\Core\Plugin\Tenant\TenantManifestHost;
 use Whity\Core\PluginLoader;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\Request;
@@ -124,6 +125,9 @@ use Whity\Sdk\Frontend\Blocks\BlockValidator;
  */
 final class FrontendFeaturesApiHandler
 {
+    /** Workspace plugins (WHIT-760); null where the host isn't wired. */
+    private ?TenantManifestHost $tenantPlugins;
+
     /** #951: the feature declares no resource, so no write route is derivable. */
     private const DENIED_NO_RESOURCE = 'no-resource';
 
@@ -194,6 +198,8 @@ final class FrontendFeaturesApiHandler
      * @param list<array<string, mixed>> $coreFeatures Descriptors contributed by CORE subsystems rather
      *        than by a plugin — see the note below. Defaults to none, so every existing construction of
      *        this handler behaves exactly as before.
+     * @param TenantManifestHost|null $tenantPlugins The workspace's own plugins (WHIT-760), served
+     *        after core's and install-wide plugins' screens, through the same filters.
      */
     public function __construct(
         PluginLoader $pluginLoader,
@@ -201,8 +207,10 @@ final class FrontendFeaturesApiHandler
         Router $router,
         ServerLabels $labels,
         ?LoggerInterface $logger = null,
-        array $coreFeatures = []
+        array $coreFeatures = [],
+        ?TenantManifestHost $tenantPlugins = null
     ) {
+        $this->tenantPlugins = $tenantPlugins;
         $this->pluginLoader = $pluginLoader;
         $this->roleChecker = $roleChecker;
         $this->router = $router;
@@ -236,7 +244,7 @@ final class FrontendFeaturesApiHandler
      *
      * @return list<array<string, mixed>>
      */
-    private function allFeatures(): array
+    private function allFeatures(int $tenantId): array
     {
         $core = $this->coreFeatures;
 
@@ -256,7 +264,23 @@ final class FrontendFeaturesApiHandler
             $core
         );
 
-        return array_merge($core, $this->pluginLoader->getFrontendFeatures());
+        $features = array_merge($core, $this->pluginLoader->getFrontendFeatures());
+
+        // The workspace's own plugins (WHIT-760) come last, so a core or
+        // install-wide screen keeps its id; a workspace screen that reuses one
+        // is dropped rather than shadowing it. They then pass the same
+        // permission filter and block validation as every other screen.
+        if ($this->tenantPlugins !== null) {
+            $taken = array_flip(array_map(static fn (array $f): string => (string) ($f['id'] ?? ''), $features));
+            foreach ($this->tenantPlugins->frontendFeatures($tenantId) as $feature) {
+                if (!isset($taken[$feature['id']])) {
+                    $features[] = $feature;
+                    $taken[$feature['id']] = true;
+                }
+            }
+        }
+
+        return $features;
     }
 
     /**
@@ -300,7 +324,7 @@ final class FrontendFeaturesApiHandler
             $droppedHere = [];
 
             $data = [];
-            foreach ($this->allFeatures() as $feature) {
+            foreach ($this->allFeatures($tenantId) as $feature) {
                 // Defence in depth: a descriptor without a string permission
                 // can never be exposed (the loader already guarantees one).
                 $permission = $feature['requiredPermission'] ?? null;

@@ -50,6 +50,7 @@ final class SettingsRegistryCorePinTest extends TestCase
             'branding_logo_wide',
             'branding_logo_square',
             'branding_favicon',
+            'branding_main_color',
             'mcp.enabled',
             'auth.self_registration_enabled',
             'auth.registration_approval_required',
@@ -216,6 +217,8 @@ final class SettingsRegistryCorePinTest extends TestCase
             'branding_logo_wide' => '',
             'branding_logo_square' => '',
             'branding_favicon' => '',
+            // Empty: Whity Blue until a workspace sets its own main colour (2.8).
+            'branding_main_color' => '',
             'mcp.enabled' => 'false',
             'auth.self_registration_enabled' => 'false',
             'auth.registration_approval_required' => 'true',
@@ -381,6 +384,9 @@ final class SettingsRegistryCorePinTest extends TestCase
             ['locale', 'english', false],
             ['support_email', '', true],
             ['support_email', 'not-an-email', false],
+            ['branding_main_color', '', true],
+            ['branding_main_color', '#B74C05', true],
+            ['branding_main_color', 'b74c05', false],
             ['mcp.enabled', 'true', true],
             ['mcp.enabled', '1', false],
             // #1036. The boolean arm and the enum arm, each with a value the

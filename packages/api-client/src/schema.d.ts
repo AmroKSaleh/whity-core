@@ -5679,6 +5679,17 @@ export interface components {
             logoWideUrl: string | null;
             logoSquareUrl: string | null;
             faviconUrl: string | null;
+            /** @description The workspace main colour as #rrggbb, or null for Whity Blue. */
+            mainColor: string | null;
+            /** @description Token values derived from the main colour (decision 2.8), keyed by token name without the leading dashes; null when no main colour is set. */
+            theme: {
+                light: {
+                    [key: string]: string;
+                };
+                dark: {
+                    [key: string]: string;
+                };
+            } | null;
         };
         BrandingHostRequest: {
             host?: string | null;

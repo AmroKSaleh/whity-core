@@ -30,7 +30,8 @@ final class BrandingService
     /**
      * The effective branding for a tenant. site_name resolves tenant→global→
      * default; each logo/favicon resolves independently; favicon falls back to
-     * the square logo, then null.
+     * the square logo, then null. The main colour (2.8) resolves the same way,
+     * and the light and dark token sets are derived from it (TenantTheme).
      */
     public function effective(int $tenantId): Branding
     {
@@ -40,11 +41,22 @@ final class BrandingService
         $square = $this->urlOrNull($values[SettingsRegistry::BRANDING_LOGO_SQUARE] ?? '');
         $favicon = $this->urlOrNull($values[SettingsRegistry::BRANDING_FAVICON] ?? '');
 
+        $mainColor = null;
+        $theme = null;
+        $color = trim($values[SettingsRegistry::BRANDING_MAIN_COLOR] ?? '');
+        if (preg_match('/^#[0-9A-Fa-f]{6}$/', $color) === 1) {
+            $derived = TenantTheme::derive($color);
+            $mainColor = $derived['color'];
+            $theme = ['light' => $derived['light'], 'dark' => $derived['dark']];
+        }
+
         return new Branding(
             siteName: $values[SettingsRegistry::SITE_NAME] ?? SettingsRegistry::defaultFor(SettingsRegistry::SITE_NAME),
             logoWideUrl: $wide,
             logoSquareUrl: $square,
             faviconUrl: $favicon ?? $square,
+            mainColor: $mainColor,
+            theme: $theme,
         );
     }
 

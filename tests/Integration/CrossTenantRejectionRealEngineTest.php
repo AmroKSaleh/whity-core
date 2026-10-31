@@ -2509,6 +2509,45 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         self::assertNotNull($bCreate, "Tenant B's own override for the same key must be independent of Tenant A's");
     }
 
+    // ==================== workspace plugins (WHIT-760) ====================
+    //
+    // plugin_manifest_versions, tenant_plugins and tenant_plugin_permissions
+    // (migration 164): a workspace's own plugins. Every read and write binds
+    // tenant_id; the one cross-workspace read returns slugs only, to HIDE them.
+
+    public function testWorkspacePluginsAreTenantScoped(): void
+    {
+        $repo = new \Whity\Core\Plugin\Tenant\TenantPluginRepository($this->pdo);
+        $versionA = $repo->publish(self::TENANT_A, 'CakeOrders', '1.0.0', '{"a":1}', str_repeat('a', 64), ['cakeorders:read']);
+        $repo->publish(self::TENANT_B, 'Coffee', '1.0.0', '{"b":1}', str_repeat('b', 64), ['coffee:read']);
+
+        self::assertSame(['CakeOrders'], array_column($repo->active(self::TENANT_A), 'plugin_key'));
+        self::assertSame(['Coffee'], array_column($repo->active(self::TENANT_B), 'plugin_key'));
+        self::assertNull($repo->manifest(self::TENANT_B, $versionA), "Tenant A's manifest must be absent to Tenant B");
+    }
+
+    public function testTenantCannotPointOrSwitchOffForeignWorkspacePlugin(): void
+    {
+        $repo = new \Whity\Core\Plugin\Tenant\TenantPluginRepository($this->pdo);
+        $versionA = $repo->publish(self::TENANT_A, 'CakeOrders', '1.0.0', '{"a":1}', str_repeat('a', 64), ['cakeorders:read']);
+
+        self::assertFalse($repo->point(self::TENANT_B, 'CakeOrders', $versionA), "a foreign version can't be made live");
+        self::assertSame([], $repo->active(self::TENANT_B));
+        self::assertFalse($repo->setEnabled(self::TENANT_B, 'CakeOrders', false), 'a cross-tenant switch-off touches zero rows');
+        self::assertSame(['CakeOrders'], array_column($repo->active(self::TENANT_A), 'plugin_key'), "Tenant A's plugin stays live");
+    }
+
+    public function testForeignWorkspacePluginPermissionsAreOnlyEverHidden(): void
+    {
+        $repo = new \Whity\Core\Plugin\Tenant\TenantPluginRepository($this->pdo);
+        $repo->publish(self::TENANT_A, 'CakeOrders', '1.0.0', '{"a":1}', str_repeat('a', 64), ['cakeorders:read', 'shared:read']);
+        $repo->publish(self::TENANT_B, 'Coffee', '1.0.0', '{"b":1}', str_repeat('b', 64), ['coffee:read', 'shared:read']);
+
+        $hiddenFromB = $repo->permissionsOfOtherTenants(self::TENANT_B);
+        sort($hiddenFromB);
+        self::assertSame(['cakeorders:read'], $hiddenFromB, "a slug B's own plugins also declare is not hidden from B");
+    }
+
     // ==================== invitations (WHIT-417) ====================
     //
     // An invitation belongs to the tenant that issued it and carries that

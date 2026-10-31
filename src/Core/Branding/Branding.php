@@ -17,11 +17,17 @@ final readonly class Branding
         public ?string $logoWideUrl,
         public ?string $logoSquareUrl,
         public ?string $faviconUrl,
+        public ?string $mainColor = null,
+        /** @var array{light: array<string, string>, dark: array<string, string>}|null */
+        public ?array $theme = null,
     ) {
     }
 
     /**
-     * @return array{siteName: string, logoWideUrl: ?string, logoSquareUrl: ?string, faviconUrl: ?string}
+     * The main colour (2.8) and the light and dark token sets derived from it
+     * are null until the workspace sets one; clients then keep Whity Blue.
+     *
+     * @return array{siteName: string, logoWideUrl: ?string, logoSquareUrl: ?string, faviconUrl: ?string, mainColor: ?string, theme: array{light: array<string, string>, dark: array<string, string>}|null}
      */
     public function toArray(): array
     {
@@ -30,6 +36,8 @@ final readonly class Branding
             'logoWideUrl' => $this->logoWideUrl,
             'logoSquareUrl' => $this->logoSquareUrl,
             'faviconUrl' => $this->faviconUrl,
+            'mainColor' => $this->mainColor,
+            'theme' => $this->theme,
         ];
     }
 }
