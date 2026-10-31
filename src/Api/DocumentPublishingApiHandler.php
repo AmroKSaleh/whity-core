@@ -612,11 +612,9 @@ final class DocumentPublishingApiHandler
     /** @return array{0: string, 1: string}|null */
     private static function parseRecord(mixed $value): ?array
     {
-        if (!is_string($value) || preg_match('/^([a-z0-9._-]{1,64}):([A-Za-z0-9._-]{1,64})$/', $value, $m) !== 1) {
-            return null;
-        }
-
-        return [$m[1], $m[2]];
+        // One parser for every route that takes a record (WHIT-742): a
+        // workspace plugin's type keeps its casing, up to 160 characters.
+        return \Whity\Core\Document\Issuing\TemplateIssuing::parseRecord($value);
     }
 
     /** @return array<int|string, mixed> */

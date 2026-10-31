@@ -59,6 +59,34 @@ final class TemplateSlot
         return $slots;
     }
 
+    /**
+     * Why a template can't fill a slot, or null when it fits. Checked when it
+     * is bound and again when a document is issued from the slot, since the
+     * template can change in between.
+     *
+     * @param array<string, mixed> $template a document_sources row
+     * @return array{code: string, message: string}|null
+     */
+    public function misfit(array $template): ?array
+    {
+        $kind = (string) ($template['kind'] ?? '');
+        if (!in_array($kind, $this->kinds, true)) {
+            return ['code' => 'kind_mismatch', 'message' => "This slot takes a " . implode(' or ', $this->kinds) . ", not a {$kind}"];
+        }
+        if (($template['record_type'] ?? null) !== $this->recordType) {
+            return ['code' => 'record_type_mismatch', 'message' => "This slot's documents are for {$this->recordType}; the template is for "
+                . (is_string($template['record_type'] ?? null) ? $template['record_type'] : 'no record')];
+        }
+        if (($template['scope'] ?? null) === 'personal') {
+            return ['code' => 'personal_template', 'message' => 'A personal template can\'t fill a slot; share it with the workspace first'];
+        }
+        if (($template['published_version'] ?? null) === null) {
+            return ['code' => 'unpublished', 'message' => 'The template has no published version yet'];
+        }
+
+        return null;
+    }
+
     /** @return array{key: string, plugin: string, label: string, labelAr: string, recordType: string, kinds: list<string>, starter: string|null} */
     public function toArray(): array
     {
