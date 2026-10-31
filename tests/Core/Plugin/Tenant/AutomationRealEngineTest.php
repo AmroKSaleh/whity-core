@@ -10,6 +10,9 @@ use Tests\Sdk\Manifest\AutomationValidatorTest;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Api\TenantAutomationsApiHandler;
 use Whity\Auth\RoleChecker;
+use Whity\Core\Document\Issuing\ActingAs;
+use Whity\Core\Document\Issuing\DocumentIssueRefused;
+use Whity\Core\Document\Issuing\IssueInput;
 use Whity\Core\Notification\CoreTransports;
 use Whity\Core\Notification\NotificationDispatcher;
 use Whity\Core\Notification\NotificationRepository;
@@ -299,7 +302,7 @@ final class AutomationRealEngineTest extends TestCase
         );
     }
 
-    private function runner(): AutomationRunner
+    private function runner(?\Closure $issueDocument = null): AutomationRunner
     {
         TenantContext::reset();
         TenantContext::setTenantId(self::A);
@@ -314,7 +317,100 @@ final class AutomationRealEngineTest extends TestCase
             $this->writer(),
             $this->roleChecker(),
             new NotificationDispatcher(new NotificationRepository($this->pdo), CoreTransports::make(), $queue),
+            $issueDocument,
         );
+    }
+
+    /**
+     * Republish the plugin with the confirmation issuing a document from its
+     * slot, and return an issuer standing in for TemplateIssuing: it keeps
+     * the origin-key contract (a key it has seen returns that document,
+     * `replayed`) and records each call.
+     *
+     * @param list<array{slot: ?string, record: mixed, values: mixed, originKey: mixed, actor: int}> $calls
+     * @param array<string, int> $issued
+     */
+    private function withDocumentStep(array &$calls, array &$issued, ?DocumentIssueRefused $refuse = null): \Closure
+    {
+        $m = self::manifest();
+        $m['plugin']['version'] = '1.1.0';
+        $m['automations']['confirmation']['steps'] = [['issue_document' => [
+            'slot' => 'order_confirmation',
+            'values' => ['template.note' => ['concat' => ['Pickup ', ['field' => 'pickup_on']]]],
+        ]]];
+        (new TenantManifestPublisher($this->pdo, $this->plugins, new PluginRoleSeeder($this->pdo), []))->publish(self::A, $m, self::MANAGER);
+
+        return static function (ActingAs $actor, IssueInput $input) use (&$calls, &$issued, $refuse): array {
+            $calls[] = ['slot' => $input->slot, 'record' => $input->record, 'values' => $input->values, 'originKey' => $input->originKey, 'actor' => $actor->profileId];
+            if ($refuse !== null) {
+                throw $refuse;
+            }
+            $key = (string) $input->originKey;
+            $replayed = isset($issued[$key]);
+            $issued[$key] ??= 900 + count($issued);
+
+            return ['document' => ['id' => $issued[$key]], 'artifacts' => [], 'render' => ['stored' => true], 'replayed' => $replayed];
+        };
+    }
+
+    public function testConfirmingAnOrderIssuesItsDocumentOnceEvenWhenRetried(): void
+    {
+        $calls = [];
+        $issued = [];
+        $issuer = $this->withDocumentStep($calls, $issued);
+        $this->granted[self::MANAGER][] = 'documents:issue';
+        $order = $this->createOrder();
+        $this->writer()->move(self::A, $this->manifestFor(self::A), 'order', $order, 'confirm', RecordActor::person(self::MANAGER));
+        $run = $this->onlyRun();
+
+        self::assertSame(['status' => 'done'], $this->runner($issuer)->run(self::A, $run['id']));
+        self::assertSame([[
+            'slot' => 'CakeOrders.order_confirmation',
+            'record' => 'CakeOrders.order:' . $order,
+            'values' => ['template.note' => 'Pickup 2026-11-03'],
+            'originKey' => 'automation:' . $run['id'] . ':0',
+            'actor' => self::MANAGER,
+        ]], $calls);
+        self::assertSame(['document_id' => 900, 'replayed' => false, 'rendered' => true], $this->runRow($run['id'])['trace'][0]['outcome']);
+
+        // A worker that died after issuing but before its trace was saved:
+        // the retry issues under the same origin key and gets the same document.
+        $this->pdo->exec("UPDATE plugin_automation_runs SET status = 'running', trace = '[]' WHERE id = {$run['id']}");
+        self::assertSame(['status' => 'done'], $this->runner($issuer)->run(self::A, $run['id']));
+        self::assertCount(1, $issued, 'one document');
+        self::assertTrue($this->runRow($run['id'])['trace'][0]['outcome']['replayed']);
+
+        // A trace that has the step skips it without calling the issuer at all.
+        $this->pdo->exec("UPDATE plugin_automation_runs SET status = 'running' WHERE id = {$run['id']}");
+        $this->runner($issuer)->run(self::A, $run['id']);
+        self::assertCount(2, $calls);
+    }
+
+    public function testAnIssueRefusalFailsTheRunWithItsReason(): void
+    {
+        $calls = [];
+        $issued = [];
+        $issuer = $this->withDocumentStep($calls, $issued, new DocumentIssueRefused('slot_unbound', 'No template is bound to this slot', 409));
+        $this->granted[self::MANAGER][] = 'documents:issue';
+        $order = $this->createOrder();
+        $this->writer()->move(self::A, $this->manifestFor(self::A), 'order', $order, 'confirm', RecordActor::person(self::MANAGER));
+        $run = $this->onlyRun();
+
+        self::assertSame(['status' => 'failed', 'reason' => 'slot_unbound'], $this->runner($issuer)->run(self::A, $run['id']));
+        self::assertSame('No template is bound to this slot', $this->runRow($run['id'])['trace'][0]['outcome']['message']);
+    }
+
+    public function testIssuingNeedsThePersonToHoldDocumentsIssue(): void
+    {
+        $calls = [];
+        $issued = [];
+        $issuer = $this->withDocumentStep($calls, $issued);
+        $order = $this->createOrder();
+        $this->writer()->move(self::A, $this->manifestFor(self::A), 'order', $order, 'confirm', RecordActor::person(self::MANAGER));
+        $run = $this->onlyRun();
+
+        self::assertSame(['status' => 'failed', 'reason' => 'not_permitted'], $this->runner($issuer)->run(self::A, $run['id']));
+        self::assertSame([], $calls, 'the issuer is never called');
     }
 
     private function roleChecker(): RoleChecker

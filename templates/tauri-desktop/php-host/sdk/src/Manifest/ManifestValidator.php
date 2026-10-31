@@ -110,6 +110,7 @@ final class ManifestValidator
                 self::checkLabel($label, $path, $max, $required, $errs);
             },
             $errors,
+            $manifest['documents'] ?? null,
         );
         ManifestTestValidator::check(
             $manifest['tests'] ?? null,

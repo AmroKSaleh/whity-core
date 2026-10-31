@@ -36,6 +36,10 @@ final class AutomationValidatorTest extends TestCase
                 'edit' => 'cakeorders:manage', 'delete' => 'cakeorders:manage',
             ],
         ];
+        $manifest['documents'] = ['slots' => [
+            'order_confirmation' => ['label' => $l('Order confirmation', 'تأكيد الطلب'), 'record' => 'order'],
+            'baking_sheet' => ['label' => $l('Baking sheet', 'ورقة الخبز'), 'record' => 'task'],
+        ]];
         $manifest['automations'] = [
             'confirmation' => [
                 'label' => $l('Tell the bakers', 'إبلاغ الخبازين'),
@@ -67,6 +71,16 @@ final class AutomationValidatorTest extends TestCase
         );
     }
 
+    public function testIssuingADocumentFromTheRecordTypesOwnSlotIsValid(): void
+    {
+        $m = self::step(self::manifest(), ['issue_document' => [
+            'slot' => 'order_confirmation',
+            'values' => ['template.note' => ['concat' => ['Pickup ', ['field' => 'pickup_on']]]],
+        ]]);
+
+        self::assertSame([], ManifestValidator::validate($m)['errors']);
+    }
+
     /** @return iterable<string, array{callable(array<string, mixed>): array<string, mixed>, string}> */
     public static function broken(): iterable
     {
@@ -95,8 +109,20 @@ final class AutomationValidatorTest extends TestCase
             'automations.confirmation.when: refers to "title", which isn\'t a field of this record type',
         ];
         yield 'a step that arrives later is refused by name' => [
-            static fn (array $m): array => self::step($m, ['issue_document' => ['slot' => 'confirmation']]),
-            'automations.confirmation.steps[0].issue_document: this step isn\'t available in this version yet',
+            static fn (array $m): array => self::step($m, ['send_webhook' => ['url' => 'https://example.com']]),
+            'automations.confirmation.steps[0].send_webhook: this step isn\'t available in this version yet',
+        ];
+        yield 'a slot the manifest doesn\'t declare' => [
+            static fn (array $m): array => self::step($m, ['issue_document' => ['slot' => 'invoice']]),
+            'automations.confirmation.steps[0].issue_document.slot: required, a slot under documents.slots',
+        ];
+        yield 'a slot for another record type' => [
+            static fn (array $m): array => self::step($m, ['issue_document' => ['slot' => 'baking_sheet']]),
+            'automations.confirmation.steps[0].issue_document.slot: "baking_sheet" is for task, not order',
+        ];
+        yield 'a value that isn\'t a field path' => [
+            static fn (array $m): array => self::step($m, ['issue_document' => ['slot' => 'order_confirmation', 'values' => ['Note!' => 'x']]]),
+            'automations.confirmation.steps[0].issue_document.values.Note!: a template field path, such as template.note',
         ];
         yield 'unknown step' => [
             static fn (array $m): array => self::step($m, ['run_sql' => ['sql' => 'DROP TABLE x']]),

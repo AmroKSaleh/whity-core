@@ -17,7 +17,8 @@ namespace Whity\Sdk\Manifest;
  *     "steps": [
  *       { "set_fields": { "values": { "confirmed_on": { "today": [] } } } },
  *       { "create_record": { "type": "task", "values": { "title": { "field": "customer" } }, "link": "order" } },
- *       { "notify": { "role": "baker", "message": { "en": "New order for {{pickup_on}}", "ar": "طلب جديد ليوم {{pickup_on}}" } } }
+ *       { "notify": { "role": "baker", "message": { "en": "New order for {{pickup_on}}", "ar": "طلب جديد ليوم {{pickup_on}}" } } },
+ *       { "issue_document": { "slot": "order_confirmation", "values": { "template.note": "Thank you" } } }
  *     ]
  *   }
  * }
@@ -28,22 +29,25 @@ namespace Whity\Sdk\Manifest;
  * `<type>.moved` and `<type>.moved.<state>` (moved INTO that state).
  *
  * STEPS are a closed catalogue. Values are expressions over the triggering
- * record. Steps that need services this host doesn't run yet (documents,
- * webhooks, approvals, waits, other plugins' actions) are named and refused
- * rather than accepted and silently skipped.
+ * record. `issue_document` (SDK 1.57) issues a document from one of the
+ * manifest's own `documents.slots` for the triggering record, with optional
+ * merge values for the template's own fields. Steps that need services this
+ * host doesn't run yet (webhooks, approvals, waits, other plugins' actions)
+ * are named and refused rather than accepted and silently skipped.
  */
 final class AutomationValidator
 {
     /** The steps this SDK runs. */
-    public const STEPS = ['set_fields', 'create_record', 'move', 'notify'];
+    public const STEPS = ['set_fields', 'create_record', 'move', 'notify', 'issue_document'];
 
     /** Steps of the designed catalogue that arrive in a later SDK. */
-    public const LATER_STEPS = ['issue_document', 'send_webhook', 'ask_approval', 'wait', 'call_action'];
+    public const LATER_STEPS = ['send_webhook', 'ask_approval', 'wait', 'call_action'];
 
     public const MAX_AUTOMATIONS = 50;
     public const MAX_STEPS = 20;
 
     private const NAME_PATTERN = '/^[a-z][a-z0-9_]{0,63}$/';
+    private const VALUE_PATH_PATTERN = '/^[a-z][a-z0-9_]{0,63}(\.[a-z][a-z0-9_]{0,63}){0,3}$/';
     private const TRIGGER_PATTERN = '/^([a-z][a-z0-9_]{0,63})\.(created|changed|moved)(?:\.([a-z][a-z0-9_]{0,63}))?$/';
 
     private function __construct()
@@ -56,8 +60,9 @@ final class AutomationValidator
      * @param list<string> $roles Role names this manifest declares.
      * @param callable(mixed, string, int, bool, list<string>&): void $label
      * @param list<string> $errors
+     * @param mixed $documents The manifest's `documents` section (read defensively).
      */
-    public static function check(mixed $automations, mixed $records, array $roles, callable $label, array &$errors): void
+    public static function check(mixed $automations, mixed $records, array $roles, callable $label, array &$errors, mixed $documents = null): void
     {
         if ($automations === null) {
             return;
@@ -70,6 +75,7 @@ final class AutomationValidator
             $errors[] = 'automations: at most ' . self::MAX_AUTOMATIONS;
         }
         $records = is_array($records) ? $records : [];
+        $slots = is_array($documents) && is_array($documents['slots'] ?? null) ? $documents['slots'] : [];
 
         foreach ($automations as $name => $automation) {
             $path = "automations.{$name}";
@@ -100,7 +106,7 @@ final class AutomationValidator
                 $errors[] = "{$path}.steps: at most " . self::MAX_STEPS;
             }
             foreach ($steps as $i => $step) {
-                self::checkStep($step, "{$path}.steps[{$i}]", $type, $decl, $records, $roles, $label, $errors);
+                self::checkStep($step, "{$path}.steps[{$i}]", $type, $decl, $records, $roles, $label, $errors, $slots);
             }
         }
     }
@@ -146,8 +152,9 @@ final class AutomationValidator
      * @param list<string> $roles
      * @param callable(mixed, string, int, bool, list<string>&): void $label
      * @param list<string> $errors
+     * @param array<mixed> $slots The manifest's document slots.
      */
-    private static function checkStep(mixed $step, string $path, ?string $type, ?array $decl, array $records, array $roles, callable $label, array &$errors): void
+    private static function checkStep(mixed $step, string $path, ?string $type, ?array $decl, array $records, array $roles, callable $label, array &$errors, array $slots = []): void
     {
         if (!is_array($step) || array_is_list($step) || count($step) !== 1) {
             $errors[] = "{$path}: a step is an object with one key, the step's name";
@@ -199,6 +206,28 @@ final class AutomationValidator
                 $moves = $decl !== null && is_array($decl['lifecycle']['moves'] ?? null) ? $decl['lifecycle']['moves'] : [];
                 if (!is_string($args['move'] ?? null) || !isset($moves[$args['move']])) {
                     $errors[] = "{$path}.move: required, a move of {$type}";
+                }
+                break;
+
+            case 'issue_document':
+                self::onlyKeys($args, ['slot', 'values'], $path, $errors);
+                $slot = $args['slot'] ?? null;
+                if (!is_string($slot) || !is_array($slots[$slot] ?? null)) {
+                    $errors[] = "{$path}.slot: required, a slot under documents.slots";
+                } elseif (($slots[$slot]['record'] ?? null) !== $type) {
+                    $errors[] = "{$path}.slot: \"{$slot}\" is for " . (is_string($slots[$slot]['record'] ?? null) ? $slots[$slot]['record'] : 'another record type') . ", not {$type}";
+                }
+                $values = $args['values'] ?? [];
+                if (!is_array($values) || array_is_list($values) && $values !== []) {
+                    $errors[] = "{$path}.values: an object of template field path to value";
+                    break;
+                }
+                foreach ($values as $fieldPath => $expression) {
+                    if (preg_match(self::VALUE_PATH_PATTERN, (string) $fieldPath) !== 1) {
+                        $errors[] = "{$path}.values.{$fieldPath}: a template field path, such as template.note";
+                        continue;
+                    }
+                    RecordTypeValidator::checkExpression($expression, "{$path}.values.{$fieldPath}", $fieldNames, $errors);
                 }
                 break;
 
