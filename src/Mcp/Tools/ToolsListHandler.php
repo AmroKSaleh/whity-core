@@ -94,6 +94,36 @@ final class ToolsListHandler implements MethodHandler
             }
         }
 
+        return self::inStableOrder($tools);
+    }
+
+    /**
+     * Always-on operations first, in {@see CoreToolsets::ALWAYS_ON} order, then
+     * everything else by toolset and name (WHIT-747). The order depends only on
+     * the catalogue, never on declaration or plugin-load order, so it is the
+     * same on every worker and stays put while nothing changes: the
+     * deterministic order MCP 2026-07-28 asks for, which keeps clients' caches
+     * and prompt caches valid.
+     *
+     * @param list<array<string, mixed>> $tools
+     * @return list<array<string, mixed>>
+     */
+    private static function inStableOrder(array $tools): array
+    {
+        $rank = array_flip(CoreToolsets::ALWAYS_ON);
+        $key  = static function (array $tool) use ($rank): array {
+            $meta       = is_array($tool['_meta'] ?? null) ? $tool['_meta'] : [];
+            $name       = (string) ($tool['name'] ?? '');
+            $alwaysOn   = ($meta[ToolSurface::META_VISIBILITY] ?? null) === ToolSurface::VISIBILITY_ALWAYS_ON;
+            return [
+                $alwaysOn ? 0 : 1,
+                $alwaysOn ? ($rank[$name] ?? PHP_INT_MAX) : 0,
+                (string) ($meta[ToolSurface::META_TOOLSET] ?? ''),
+                $name,
+            ];
+        };
+        usort($tools, static fn (array $a, array $b): int => $key($a) <=> $key($b));
+
         return $tools;
     }
 
