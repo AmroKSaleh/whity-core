@@ -14,7 +14,7 @@ A document theme decides how a document looks in the editor's page view, in the 
 - **`documents.print_color` moves into the workspace's default theme** and the setting is removed (no-legacy rule).
 - **Plugins** declare themes through a new SDK interface, `PluginDocumentThemesInterface`. The existing `PluginThemeInterface` (app colours over `GET /api/theme`) is unrelated and stays as it is.
 - **Two renderers, one contract** (owner, 31 Oct 2026, Q9). The basic open renderer (`render-service/`, image `ghcr.io/whity-org/render`) stays in whity-core so free self-hosted installs print PDFs, themes included. Whity Render is the paid, hosted upgrade (Arabic shaping polish, JoFotara invoices, batches, higher limits, an SLA) and takes the same payload. Core owns the theme model and sends the resolved theme either way; the font and print-size work (phase 1, WHIT-733) is core work on the open renderer.
-- **Sequencing (owner, 31 Oct 2026):** the letterhead logo is its own small PR now (WHIT-734); the token work (phase 1) can start now; the model and API are **M4d, right after M4c**; the theme SDK goes with M7 and the type options (title face, large print) with M8.
+- **Sequencing (owner, 31 Oct 2026):** the letterhead logo shipped on its own (WHIT-734, #1440, 0.2.20); the token work (phase 1) can start now; the model and API are **M4d, right after M4c**; the theme SDK goes with M7 and the type options (title face, large print) with M8.
 
 ## 1. What exists today
 
@@ -25,7 +25,7 @@ A document theme decides how a document looks in the editor's page view, in the 
 - `document_source_versions` (162) is insert-only and copies `title`, `page` and `blocks` at publish.
 - Concurrency: `ETag: "<draft_version>"`, `If-Match` required on `PUT /draft` only. A missing If-Match is 428, a stale one 409 with the current version (`DocumentSourcesApiHandler.php:205-229`). There is no 412 in the codebase; this design follows the same 428/409 convention.
 - **Starters** are `document_sources` rows with `starter_key` and `scope='system'`, seeded once per tenant (`DocumentSourceStarterSeeder.php`).
-- **The letterhead isn't stored.** A document has the `page.letterhead` switch; the content (seller name or site name, address, tax id) is built per tenant at request time in `DocumentPublishingApiHandler::letterhead()` (lines 540-556). It returns **no logo**, so PDFs have none, against 6.2.
+- **The letterhead isn't stored.** A document has the `page.letterhead` switch; the content (seller name or site name, address, tax id) is built per tenant at request time in `DocumentPublishingApiHandler::letterhead()` (lines 540-556). It returns **no logo**, so PDFs have none, against 6.2. (Fixed since by #1440: `LetterheadLogo` adds the logo for the PDF.)
 
 ### 1.2 Styling that exists
 
@@ -63,7 +63,7 @@ PLAN.md has no theme milestone. Themes touch M4 (print, letterhead), M7 (plugin 
 
 | Phase | What | When | Conflicts |
 | --- | --- | --- | --- |
-| 0 · Letterhead logo | The tenant logo reaches the PDF letterhead (6.2) | Now, its own PR (WHIT-734) | `DocumentPublishingApiHandler::letterhead()`, `WhityDocumentPrinter` |
+| 0 · Letterhead logo | The tenant logo reaches the PDF letterhead (6.2) | **Done**: whity-org/whity-core#1440 (WHIT-734), ships in 0.2.20 | `DocumentPublishingApiHandler::letterhead()`, `WhityDocumentPrinter` |
 | 1 · Document tokens | A `document` group in `base.json` (screen and print scales, E.33 and 6.5); the editor uses it; Whity Render embeds the token fonts and the same values | Now, beside M4c | Low: `base.json`, generator, `editor.css`, `render-service/`. The logo fix touches `DocumentPublishingApiHandler::letterhead()`, so land it after M4c or hand it to M4c. |
 | 2 · Theme model and API (M4d) | Table, resolver, publish freezing, routes, OpenAPI, MCP, permission, `print_color` migration, the workspace main colour, accent on headings (E.45) | Right after M4c (PLAN.md M4d) | `public/index.php`, `CoreApiSchemas.php`, `openapi.json`, `schema.d.ts`, `DocumentPublishingApiHandler.php`, migration numbering (after M4c's) |
 | 3 · UI | Theme picker in document settings; a Document themes screen under workspace settings | After phase 2; designs commissioned first | Needs design cards first (CLAUDE.md: compare with screenshots) |
