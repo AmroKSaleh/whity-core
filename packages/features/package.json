@@ -33,10 +33,10 @@
   },
   "dependencies": {
     "@whity-org/ui": "^0.5.0",
-    "@tabler/icons-react": "^3.49.0"
+    "@tabler/icons-react": "^3.50.0"
   },
   "devDependencies": {
-    "@hookform/resolvers": "^6.0.0",
+    "@hookform/resolvers": "^6.0.1",
     "@types/katex": "^0.16.8",
     "katex": "^0.19.1",
     "radix-ui": "^1.8.1",
