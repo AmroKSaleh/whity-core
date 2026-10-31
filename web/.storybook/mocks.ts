@@ -14,6 +14,8 @@ export const MOCK_BRANDING = {
   logoWideUrl: null,
   logoSquareUrl: null,
   faviconUrl: null,
+  mainColor: "#b74c05",
+  theme: null,
 }
 
 export const MOCK_USER = {

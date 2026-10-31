@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/nextjs-vite"
+import { http, HttpResponse } from "msw"
 
 import { BrandingSettings } from "./branding-settings"
 import { capabilitiesHandler, defaultHandlers } from "../.storybook/mocks"
@@ -7,13 +8,17 @@ const meta = {
   title: "App/BrandingSettings",
   component: BrandingSettings,
   tags: ["autodocs"],
-  parameters: { layout: "padded" },
+  // The main colour refreshes the app router after a save.
+  parameters: { layout: "padded", nextjs: { appDirectory: true } },
 } satisfies Meta<typeof BrandingSettings>
 
 export default meta
 type Story = StoryObj<typeof meta>
 
-const withWrite = [capabilitiesHandler(["settings:write", "settings:manage"]), ...defaultHandlers]
+// Saving the main colour PATCHes the tenant or global settings.
+const saveSettings = http.patch("*/api/v1/settings*", () => HttpResponse.json({ data: {} }))
+
+const withWrite = [capabilitiesHandler(["settings:write", "settings:manage"]), saveSettings, ...defaultHandlers]
 
 // Tenant admin who can override per-tenant branding assets.
 export const TenantOverridable: Story = {

@@ -1,0 +1,1 @@
+- **Main colour on the branding screen (WHIT-789).** Settings → Branding now has the workspace main colour from the TplAdminBranding card: six swatches, a custom picker and a reset back to the default. Saving re-themes the app straight away, light and dark (decision 2.8). The system tenant sets the platform default on the global card.
