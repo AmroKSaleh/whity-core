@@ -246,6 +246,17 @@ final class PluginManifest
         return $out;
     }
 
+    /**
+     * Record types kept in the host's record store (SDK 1.50), as declared.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    public function records(): array
+    {
+        /** @var array<string, array<string, mixed>> */
+        return $this->map('records');
+    }
+
     /** @return array<string, mixed> */
     private function plugin(): array
     {

@@ -32,6 +32,15 @@ final class RouteCatalogueCompletenessTest extends TestCase
      * @var list<string>
      */
     private const KNOWN_UNDOCUMENTED = [
+        // WHIT-761: workspace-plugin record routes. Their shape is each
+        // workspace's own manifest, so they get a per-workspace OpenAPI view
+        // and MCP operations in a follow-up, not entries in core's spec.
+        'GET /api/x/{plugin}/{type}',
+        'POST /api/x/{plugin}/{type}',
+        'GET /api/x/{plugin}/{type}/{id}',
+        'PATCH /api/x/{plugin}/{type}/{id}',
+        'DELETE /api/x/{plugin}/{type}/{id}',
+        'POST /api/x/{plugin}/{type}/{id}/moves/{move}',
         // WC-235: public self-service registration — OpenAPI schema to follow in
         // a dedicated documentation task (mirrors the auth-routes rollout).
         'POST /api/register',

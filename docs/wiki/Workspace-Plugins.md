@@ -17,7 +17,7 @@ Core's fixed entry points ask the host, so nothing is registered into a worker's
 
 - `GET /api/frontend/features` adds the workspace's screens after core's and install-wide plugins' screens. A workspace screen that reuses a taken id is dropped. All screens go through the same permission filter and block validation.
 - The navigation adds a menu item for each of those screens (`TenantPluginNavigation`), and the navigation handler applies each item's permission.
-- Record routes and MCP operations come with the record store (WHIT-761).
+- Record routes serve the plugin's record types (below). MCP operations for them are a follow-up.
 
 ## Publishing
 
@@ -51,10 +51,33 @@ Permission slugs live in one global catalogue, so role grants can reference them
 
 Two workspaces may each have a plugin of the same name. Each one's permissions are filed separately in the worker's permission registry, and grants are per workspace role.
 
+## Records (SDK 1.50, migration 168)
+
+A workspace plugin declares record types under `records` in its manifest: typed fields, an optional lifecycle of states and named moves, and `read`, `create`, `edit` and `delete` permissions, all of them slugs the manifest declares. The records live in one shared table, `plugin_records`, so changing a record type needs no DDL.
+
+| Route (served under `/api/v1`) | Permission |
+| --- | --- |
+| `GET /api/x/{plugin}/{type}?state=&after=&limit=` | `read` |
+| `GET /api/x/{plugin}/{type}/{id}` | `read` |
+| `POST /api/x/{plugin}/{type}` | `create` |
+| `PATCH /api/x/{plugin}/{type}/{id}` | `edit` |
+| `POST /api/x/{plugin}/{type}/{id}/moves/{move}` | the move's own permission |
+| `DELETE /api/x/{plugin}/{type}/{id}` | `delete` |
+
+- `{plugin}` is the plugin's lowercase name, the same one its permissions start with.
+- Every write is checked against the declaration (`RecordValues`). A refusal answers `422` with one issue per field, in the shape block forms already render. Money is minor units, and a link must point at a record of the linked type in the same workspace.
+- A new record starts in the lifecycle's `initial` state. A move is refused with `409` from a state it doesn't list.
+- A caller without `read` gets `404` for the type, and anything another workspace owns is `404` too, so ids can't be probed.
+- Writes are audited as `tenant_record.created`, `.updated`, `.moved` and `.deleted`.
+- Screens' `/api/x/...` paths are served versioned (`/api/v1/x/...`), as installed plugins' blocks are.
+- An installed `ManifestPlugin` refuses `records`; an installed plugin keeps its records in its own `tables` and `dataTypes`.
+
+Not yet: MCP operations, undo, a per-workspace OpenAPI view, filters on fields, record limits as entitlements, the schema-change classifier, trash and restore, and record types as document field providers. Each is a follow-up task.
+
 ## Tables (migration 164)
 
 - `plugin_manifest_versions`: immutable published versions, with hash, publisher, the person acted for, and the approver.
 - `tenant_plugins`: the live version for each plugin, and whether it is switched on.
 - `tenant_plugin_permissions`: the slugs each workspace's plugins declare.
 
-All three are tenant-owned, and every query binds `tenant_id`.
+All three are tenant-owned, and every query binds `tenant_id`. `plugin_records` (migration 168) is tenant-owned too.

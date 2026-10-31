@@ -1999,6 +1999,24 @@ $frontendFeaturesHandler = new FrontendFeaturesApiHandler(
 );
 $router->register('GET', '/api/frontend/features', [$frontendFeaturesHandler, 'list'], null);
 
+// Record routes of workspace plugins (Whity Builder, WHIT-761): one fixed
+// family, registered once. The plugin, its record type and the permission that
+// gates each action are read from the workspace's live manifest per request, so
+// the routes carry no route-level permission; the handler checks the declared
+// one through RoleChecker and answers 404 for anything not this workspace's.
+$tenantRecordsHandler = new \Whity\Api\TenantRecordsApiHandler(
+    $tenantManifestHost,
+    new \Whity\Core\Plugin\Tenant\TenantRecordRepository($db->getPdo()),
+    $roleChecker,
+    $auditLogger
+);
+$router->register('GET', '/api/x/{plugin:[a-z][a-z0-9_]*}/{type:[a-z][a-z0-9_]*}', [$tenantRecordsHandler, 'list'], null);
+$router->register('POST', '/api/x/{plugin:[a-z][a-z0-9_]*}/{type:[a-z][a-z0-9_]*}', [$tenantRecordsHandler, 'create'], null);
+$router->register('GET', '/api/x/{plugin:[a-z][a-z0-9_]*}/{type:[a-z][a-z0-9_]*}/{id:\d+}', [$tenantRecordsHandler, 'get'], null);
+$router->register('PATCH', '/api/x/{plugin:[a-z][a-z0-9_]*}/{type:[a-z][a-z0-9_]*}/{id:\d+}', [$tenantRecordsHandler, 'update'], null);
+$router->register('DELETE', '/api/x/{plugin:[a-z][a-z0-9_]*}/{type:[a-z][a-z0-9_]*}/{id:\d+}', [$tenantRecordsHandler, 'delete'], null);
+$router->register('POST', '/api/x/{plugin:[a-z][a-z0-9_]*}/{type:[a-z][a-z0-9_]*}/{id:\d+}/moves/{move:[a-z][a-z0-9_]*}', [$tenantRecordsHandler, 'move'], null);
+
 // Health monitoring endpoint (WC-4). Registered UNVERSIONED so load-balancer
 // probes that target GET /api/health never break regardless of the API version.
 // No required role/permission (fail-open); listed as a PUBLIC route in

@@ -71,6 +71,15 @@ abstract class ManifestPlugin implements
     public function __construct()
     {
         $this->manifest = PluginManifest::fromFile($this->manifestPath());
+        if ($this->manifest->records() !== []) {
+            // The record store serves workspace plugins (WHIT-761). An
+            // install-wide plugin keeps its records in its own tables, declared
+            // under `tables` and `dataTypes`; accepting `records` here and
+            // serving nothing would be a silent no-op.
+            throw new InvalidManifestException($this->manifestPath(), [
+                'records: only a workspace plugin keeps records in the shared store; an installed plugin declares tables and dataTypes',
+            ]);
+        }
     }
 
     /**

@@ -242,9 +242,13 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.49.0',
+            '1.50.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.49 ADDS THE DOCUMENT EVENTS (document.issuing, which a listener may veto, '
+            'SDK 1.50 ADDS MANIFEST RECORDS: plugin.json gains records, record types a workspace plugin '
+            . 'keeps in the shared record store, with typed fields, an optional lifecycle and declared '
+            . 'read/create/edit/delete permissions; an installed ManifestPlugin refuses them (WHIT-761). '
+            . 'Purely additive. '
+            . 'SDK 1.49 ADDS THE DOCUMENT EVENTS (document.issuing, which a listener may veto, '
             . 'document.issued and document.rendered) and deprecates DocumentRenderer::issue(), '
             . 'which now goes through the one issuing service. Purely additive. '
             . 'SDK 1.48 ADDS MANIFEST EXPRESSIONS: Expression\Expression validates and evaluates the '

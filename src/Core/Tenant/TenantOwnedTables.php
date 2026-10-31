@@ -183,6 +183,7 @@ final class TenantOwnedTables
         'plugin_manifest_versions' => '164_create_tenant_plugin_manifests.php',
         'tenant_plugins' => '164_create_tenant_plugin_manifests.php',
         'tenant_plugin_permissions' => '164_create_tenant_plugin_manifests.php',
+        'plugin_records' => '168_create_plugin_records.php',
 
         // #947 item 1 — issued documents and their stored render output
         // (migration 108). `documents` is the record; `document_artifacts` is
