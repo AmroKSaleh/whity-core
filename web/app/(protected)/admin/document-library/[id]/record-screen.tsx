@@ -76,6 +76,7 @@
  */
 
 import { useCallback, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { IconFileText } from '@tabler/icons-react';
 import {
   RecordPageError,
@@ -704,6 +705,7 @@ export function DocumentRecordScreen({ documentId, onBack }: DocumentRecordScree
   return (
     <RecordPageShell
       testId="document-record"
+      notices={legacyNotice(record, t)}
       fields={fields}
       facts={documentFacts}
       t={t}
@@ -745,6 +747,51 @@ function DirectoryNotice({ kind, t }: { kind: 'people' | 'units'; t: Translate }
             'record.directory.units',
             'Units are shown by number: naming them needs the ous:read permission.'
           )}
+    </p>
+  );
+}
+
+/**
+ * Whether a document was issued from the old canvas Document designer (editor
+ * M4c): it still has `document_template_id`, or it points at its template's
+ * converted copy with no version, because no editor version was ever issued.
+ */
+function issuedFromOldDesigner(record: DocumentRecord): boolean {
+  if (record.document_template_id !== null && record.document_template_id !== undefined) return true;
+  return (
+    record.document_source_id !== null &&
+    record.document_source_id !== undefined &&
+    (record.document_source_version === null || record.document_source_version === undefined)
+  );
+}
+
+/**
+ * The note under the header for a document from the old designer: it can't be
+ * re-rendered, and its converted template is where a new one is issued from.
+ */
+function legacyNotice(record: DocumentRecord, t: Translate) {
+  if (!issuedFromOldDesigner(record)) return undefined;
+  const converted = record.document_source_id ?? null;
+  return (
+    <p
+      className="rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground"
+      data-testid="document-record-legacy"
+    >
+      {t(
+        'record.legacy.body',
+        'Issued from the old Document designer. It can’t be re-rendered; the versions already issued stay available.'
+      )}
+      {converted !== null && (
+        <>
+          {' '}
+          <Link
+            href={`/admin/document-sources/${converted}`}
+            className="font-medium text-primary underline-offset-4 hover:underline"
+          >
+            {t('record.legacy.open', 'Open its converted template')}
+          </Link>
+        </>
+      )}
     </p>
   );
 }

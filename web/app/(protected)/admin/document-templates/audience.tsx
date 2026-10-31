@@ -185,10 +185,9 @@ export function needsPublish(
  * The visibility cell: the tier as a badge, the whole audience sentence as its
  * tooltip.
  *
- * A component rather than a render function inlined in the table, because the
- * usage dialog needs the same badge for the templates it lists and two
- * renderings of "who can see this" that could disagree would defeat the point of
- * having one `describeAudience`.
+ * A component rather than a render function inlined in the table, so every
+ * place that shows "who can see this" renders it the same way, from the one
+ * `describeAudience`.
  *
  * It is also what binds this file's translation domain. The pure functions above
  * take `t` as a parameter so they can be unit-tested without rendering anything,

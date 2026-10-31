@@ -1,72 +1,11 @@
-'use client';
-
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { ScreenTooSmall, useViewportAtLeast } from '@/components/ui/screen-too-small';
-import { Button } from '@whity-org/ui/button';
-import { useTranslation } from '@whity-org/features/i18n';
-import { DocumentDesigner } from '@/components/documents/document-designer';
+import { redirect } from 'next/navigation';
 
 /**
- * Document & Label Designer (WC-doceditor) — a canvas editor for printable
- * labels, docs and sheets. Templates carry placeholders bound to company logos,
- * dynamic text and barcodes/QR codes.
- *
- * Lives in the `(editor)` route group, so it renders FULL-SCREEN: no app
- * sidebar and no page header, because the editor's own top bar (menu bar +
- * toolbar, Google Docs style) is the chrome — and the whole viewport is needed
- * for a millimetre-accurate page flanked by two rails. The URL is unchanged
- * (`/admin/documents`), so the nav entry and every existing link still resolve.
- *
- * Access is gated on the granular documents:read/write/publish/render
- * permissions (see CorePermissions), enforced server-side by
- * DocumentTemplatesApiHandler; the nav entry mirrors documents:read. This page
- * itself does no direct data-fetching (that lives in DocumentDesigner and its
- * supporting hooks), so there is no client-side 403 handling to add here.
+ * The old canvas Document designer lived here. Its templates were converted
+ * into editor templates (editor M4c), which are listed on the Document
+ * templates page and open in the document editor, so an old bookmark or link
+ * lands there.
  */
-
-/**
- * Below this width the three-pane editor cannot be made honest: the rails alone
- * exceed a phone's viewport before the page itself gets any room. Gate rather
- * than degrade — see `ScreenTooSmall`.
- */
-const MIN_EDITOR_WIDTH = 1024;
-
 export default function DocumentsPage() {
-  const router = useRouter();
-  // The `documents` domain, not `admin`: every other string on this screen —
-  // the designer's menus, rails and inspector — already lives there, and this
-  // page mounts nothing else, so a second bundle would be fetched to say one
-  // sentence.
-  const t = useTranslation('documents');
-  const wideEnough = useViewportAtLeast(MIN_EDITOR_WIDTH);
-
-  // `undefined` until measured on the client: render neither branch for that
-  // one paint, so desktop users never flash the gate and phones never mount
-  // (and immediately tear down) the whole editor.
-  if (wideEnough === undefined) {
-    return null;
-  }
-
-  if (!wideEnough) {
-    return (
-      <ScreenTooSmall
-        title={t('editor.tooSmall.title', 'The document editor needs a larger screen')}
-        description={t(
-          'editor.tooSmall.description',
-          'Designing print-accurate labels and documents needs room for the page plus ' +
-            'its layers and properties panels. Open this on a tablet in landscape, ' +
-            'laptop or desktop.'
-        )}
-        minWidth={MIN_EDITOR_WIDTH}
-        action={
-          <Button asChild variant="outline" size="sm" className="mt-2">
-            <Link href="/admin">{t('editor.tooSmall.back', 'Back to dashboard')}</Link>
-          </Button>
-        }
-      />
-    );
-  }
-
-  return <DocumentDesigner onClose={() => router.push('/admin')} />;
+  redirect('/admin/document-templates');
 }

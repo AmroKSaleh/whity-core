@@ -9,9 +9,27 @@ import type { FieldDef } from '@whity-org/ui/editor/fields';
 import type { EditorServices, FieldPreview } from '@whity-org/ui/editor/services';
 import { useTranslation } from '../i18n';
 import { useEditorLabels } from './editor-labels';
+import { IssueBar } from './issue-bar';
 import { PrintLabelsDialog } from './print-labels-dialog';
 import { RecordPicker } from './record-picker';
 import type { DocumentEditorAdapter, RecordChoice, TemplateSetup } from './types';
+
+/**
+ * Issuing mode (editor M4c): the screen opened to issue a document rather than
+ * to author one. On a template it shows the PUBLISHED version, read-only, with
+ * the preview on; on a letter (a copy made by "Edit before issuing") it edits
+ * and autosaves as usual with the preview on, so each edit shows as it will
+ * print. Either way the issuing bar carries the record, the template's own
+ * fields and Issue.
+ */
+export interface IssueOptions {
+  /** The record to issue for (`type:id`), when the person came with one. */
+  record?: string | null;
+  /** The document was issued: go to its record page. */
+  onIssued: (documentId: number) => void;
+  /** "Edit before issuing" made a letter: open it in issuing mode with the same record. */
+  onEditCopy: (copyId: string, record: string | null) => void;
+}
 
 /** The kinds Whity Render prints, which have fields, a published version and a PDF (E.7, E.9). */
 const PRINTED: DocumentKind[] = ['template', 'letter', 'report', 'label'];
@@ -47,6 +65,7 @@ export function DocumentEditorScreen({
   onBack,
   path,
   onCommandPalette,
+  issue,
 }: {
   id: string;
   adapter: DocumentEditorAdapter;
@@ -54,6 +73,8 @@ export function DocumentEditorScreen({
   onBack?: () => void;
   path?: string;
   onCommandPalette?: () => void;
+  /** Open in issuing mode (M4c). */
+  issue?: IssueOptions;
 }) {
   const t = useTranslation('documents');
   const labels = useEditorLabels();
@@ -70,6 +91,15 @@ export function DocumentEditorScreen({
   const [pickerFor, setPickerFor] = React.useState<'preview' | 'pdf' | null>(null);
   const [printingLabels, setPrintingLabels] = React.useState(false);
   const [publishedVersion, setPublishedVersion] = React.useState<number | null>(null);
+  // Issuing mode (M4c).
+  const issuingMode = !!issue;
+  const issueRecord = issue?.record ?? null;
+  const [ownValues, setOwnValues] = React.useState<Record<string, string>>({});
+  const [issuing, setIssuing] = React.useState(false);
+  const [copying, setCopying] = React.useState(false);
+  const [refusal, setRefusal] = React.useState<{ message: string; missing: string[] } | null>(null);
+  const [notPublished, setNotPublished] = React.useState(false);
+  const previewStarted = React.useRef(false);
 
   const version = React.useRef(0);
   const pending = React.useRef<WhityDocument | null>(null);
@@ -82,14 +112,26 @@ export function DocumentEditorScreen({
     let live = true;
     setDoc(null);
     setLoadError(false);
+    setNotPublished(false);
+    previewStarted.current = false;
     adapter
       .load(id)
-      .then((loaded) => {
+      .then(async (loaded) => {
+        let document = loaded.document;
+        // Issuing from a template issues its published version, so that is what shows.
+        if (issuingMode && document.kind === 'template' && adapter.loadVersion) {
+          if (document.publishedVersion == null) {
+            if (live) setNotPublished(true);
+          } else {
+            const content = await adapter.loadVersion(id, document.publishedVersion);
+            document = { ...document, ...content, status: 'published' };
+          }
+        }
         if (!live) return;
         version.current = loaded.version;
         conflictRef.current = false;
         setConflict(false);
-        setDoc(loaded.document);
+        setDoc(document);
         setPublishedVersion(loaded.document.publishedVersion ?? null);
         setSave(undefined);
       })
@@ -97,7 +139,7 @@ export function DocumentEditorScreen({
     return () => {
       live = false;
     };
-  }, [adapter, id, loadCount]);
+  }, [adapter, id, loadCount, issuingMode]);
 
   React.useEffect(() => {
     // A failure leaves the rich blocks without live data; the text still loads and saves.
@@ -179,15 +221,18 @@ export function DocumentEditorScreen({
     return () => window.removeEventListener('beforeunload', beforeUnload);
   }, [flush]);
 
+  // Issuing from a template shows its published version: nothing there is edited or saved.
+  const editCapable = canEdit && !(issuingMode && doc?.kind === 'template');
+
   const onChange = React.useCallback(
     (next: WhityDocument) => {
       setDoc(next);
-      if (!canEdit || conflictRef.current) return;
+      if (!editCapable || conflictRef.current) return;
       pending.current = next;
       clearTimeout(timer.current);
       timer.current = setTimeout(() => void flush(), SAVE_DELAY_MS);
     },
-    [canEdit, flush]
+    [editCapable, flush]
   );
 
   /** Save what's waiting now; publishing and printing need the draft on the server. */
@@ -219,6 +264,75 @@ export function DocumentEditorScreen({
     (query: string): Promise<RecordChoice[]> => (recordType && adapter.findRecords ? adapter.findRecords(recordType, query) : Promise.resolve([])),
     [adapter, recordType]
   );
+
+  // Issuing: the preview is on from the start, with the record the person came
+  // with; a template bound to a record type and opened without one asks for it.
+  React.useEffect(() => {
+    if (!issuingMode || !doc || !printed || previewStarted.current) return;
+    previewStarted.current = true;
+    if (recordType && !issueRecord) setPickerFor('preview');
+    else void showPreview(recordType ? issueRecord : null).catch(() => undefined);
+  }, [issuingMode, doc, printed, recordType, issueRecord, showPreview]);
+
+  const ownFields = React.useMemo(() => doc?.ownFields ?? [], [doc?.ownFields]);
+  const filledValues = React.useMemo(
+    () =>
+      Object.fromEntries(
+        ownFields.map((f) => [f.key, (ownValues[f.key] ?? '').trim()] as const).filter(([, v]) => v !== '')
+      ),
+    [ownFields, ownValues]
+  );
+
+  // The own fields' values join the record's in the preview chips as they are typed.
+  const shownPreview = React.useMemo(() => {
+    if (!issuingMode || !preview) return preview;
+    const own = Object.fromEntries(Object.entries(filledValues).map(([k, v]) => [`template.${k}`, v]));
+    return { ...preview, values: { ...preview.values, ...own } };
+  }, [issuingMode, preview, filledValues]);
+
+  /** A field path from a refusal, in the template's own words. */
+  const fieldName = React.useCallback(
+    (path: string) => {
+      const key = path.startsWith('template.') ? path.slice('template.'.length) : null;
+      const own = key !== null ? ownFields.find((f) => f.key === key) : undefined;
+      if (own) return own.label || own.key;
+      return template?.fields.flatMap((g) => g.items).find((f) => f.path === path)?.label ?? path;
+    },
+    [ownFields, template]
+  );
+
+  const doIssue = React.useCallback(async () => {
+    if (!issue || !adapter.issue || !doc) return;
+    setRefusal(null);
+    setIssuing(true);
+    try {
+      // A letter is issued as it is now: its draft has to be on the server first.
+      if (doc.kind !== 'template') await flushNow();
+      const result = await adapter.issue(id, { record: recordType ? previewRecord : null, values: filledValues });
+      if (result.ok) {
+        issue.onIssued(result.documentId);
+        return;
+      }
+      setRefusal({ message: result.message, missing: result.missing.map(fieldName) });
+    } catch {
+      setRefusal({ message: t('blockEditor.issue.failed', 'The document wasn’t issued. Try again.'), missing: [] });
+    } finally {
+      setIssuing(false);
+    }
+  }, [issue, adapter, doc, id, recordType, previewRecord, filledValues, flushNow, fieldName, t]);
+
+  const editCopy = React.useCallback(async () => {
+    if (!issue || !adapter.copyForIssue) return;
+    setRefusal(null);
+    setCopying(true);
+    try {
+      const copyId = await adapter.copyForIssue(id);
+      issue.onEditCopy(copyId, recordType ? previewRecord : null);
+    } catch {
+      setRefusal({ message: t('blockEditor.issue.copyFailed', 'The copy to edit wasn’t made. Try again.'), missing: [] });
+      setCopying(false);
+    }
+  }, [issue, adapter, id, recordType, previewRecord, t]);
 
   // The letterhead's end side: the record's own required field (its number) and today.
   const pageFields = React.useMemo(() => {
@@ -254,7 +368,8 @@ export function DocumentEditorScreen({
   }
 
   return (
-    <div className="grid h-full grid-rows-[auto_1fr]">
+    // A column, not a grid: an empty first row must take no space whatever classes the host app generates.
+    <div className="flex h-full flex-col">
       {conflict ? (
         <div role="alert" className="flex items-center gap-3 border-b border-border bg-warning-tint px-4 py-2 text-sm">
           <span className="flex-1">
@@ -267,57 +382,86 @@ export function DocumentEditorScreen({
             {t('blockEditor.conflict.reload', 'Load the newer version')}
           </Button>
         </div>
-      ) : (
-        <span />
-      )}
-      <DocEditor
-        key={loadCount}
-        document={doc}
-        onChange={onChange}
-        canEdit={canEdit && !conflict}
-        mode={mode}
-        onModeChange={setMode}
-        back={onBack ? { label: labels.back, onClick: onBack } : undefined}
-        path={path}
-        save={save}
-        onCommandPalette={onCommandPalette}
-        labels={labels}
-        services={services}
-        {...(printed && template
-          ? {
-              fields: template.fields,
-              letterhead: template.letterhead,
-              accent: template.accent,
-              pageFields,
-              preview,
-              onPreview: adapter.preview ? () => (recordType ? setPickerFor('preview') : void showPreview(null)) : undefined,
-              onClosePreview: () => {
-                setPreview(null);
-                setPreviewRecord(null);
-              },
-              // E.43: a label sheet prints labels, one per record or CSV row, not one PDF.
-              onExportPdf:
-                adapter.exportPdf && doc.kind !== 'label'
-                  ? () => (recordType && !previewRecord ? setPickerFor('pdf') : exportPdf(previewRecord))
-                  : undefined,
-              onPrintLabels: adapter.printLabels && doc.kind === 'label' ? () => setPrintingLabels(true) : undefined,
-              publish:
-                adapter.publishCheck && adapter.publish
-                  ? {
-                      publishedVersion,
-                      check: async () => {
-                        await flushNow();
-                        return adapter.publishCheck!(id);
-                      },
-                      publish: async () => {
-                        await flushNow();
-                        setPublishedVersion(await adapter.publish!(id, version.current));
-                      },
-                    }
-                  : undefined,
-            }
-          : {})}
-      />
+      ) : issuingMode && printed && adapter.issue ? (
+        <IssueBar
+          recordType={recordType ? (services?.recordTypes?.find((r) => r.key === recordType)?.label ?? recordType) : null}
+          recordLabel={previewRecord ? (preview?.label ?? null) : null}
+          onChangeRecord={recordType && adapter.findRecords ? () => setPickerFor('preview') : undefined}
+          fields={ownFields}
+          values={ownValues}
+          onValue={(key, value) => {
+            setOwnValues((prev) => ({ ...prev, [key]: value }));
+            setRefusal(null);
+          }}
+          onIssue={() => void doIssue()}
+          issuing={issuing}
+          canIssue={!notPublished && !conflict && (!recordType || !!previewRecord)}
+          onEditCopy={doc.kind === 'template' && adapter.copyForIssue && !notPublished ? () => void editCopy() : undefined}
+          copying={copying}
+          notice={
+            notPublished
+              ? t('blockEditor.issue.notPublished', 'This template hasn’t been published, so no document can be issued from it yet.')
+              : null
+          }
+          refusal={refusal}
+        />
+      ) : null}
+      <div className="min-h-0 flex-1">
+        <DocEditor
+          key={loadCount}
+          document={doc}
+          onChange={onChange}
+          canEdit={editCapable && !conflict}
+          mode={mode}
+          onModeChange={setMode}
+          back={onBack ? { label: labels.back, onClick: onBack } : undefined}
+          path={path}
+          save={save}
+          onCommandPalette={onCommandPalette}
+          labels={labels}
+          services={services}
+          {...(printed && template
+            ? {
+                fields: template.fields,
+                letterhead: template.letterhead,
+                accent: template.accent,
+                pageFields,
+                preview: shownPreview,
+                // Issuing a letter: edit with the record's values showing (M4c).
+                editWhilePreviewing: issuingMode && doc.kind !== 'template',
+                onPreview: adapter.preview ? () => (recordType ? setPickerFor('preview') : void showPreview(null)) : undefined,
+                // While issuing the preview stays on: it is what will be issued.
+                onClosePreview: issuingMode
+                  ? undefined
+                  : () => {
+                      setPreview(null);
+                      setPreviewRecord(null);
+                    },
+                // E.43: a label sheet prints labels, one per record or CSV row, not one PDF.
+                onExportPdf:
+                  adapter.exportPdf && doc.kind !== 'label'
+                    ? () => (recordType && !previewRecord ? setPickerFor('pdf') : exportPdf(previewRecord))
+                    : undefined,
+                onPrintLabels: adapter.printLabels && doc.kind === 'label' ? () => setPrintingLabels(true) : undefined,
+                // Publish is not offered while issuing: Issue is the one main action.
+                publish:
+                  !issuingMode && adapter.publishCheck && adapter.publish
+                    ? {
+                        publishedVersion,
+                        check: async () => {
+                          await flushNow();
+                          return adapter.publishCheck!(id);
+                        },
+                        publish: async () => {
+                          await flushNow();
+                          setPublishedVersion(await adapter.publish!(id, version.current));
+                        },
+                      }
+                    : undefined,
+              }
+            : {})}
+        />
+      </div>
       {printed && template && adapter.printLabels && doc.kind === 'label' && (
         <PrintLabelsDialog
           open={printingLabels}
@@ -342,7 +486,13 @@ export function DocumentEditorScreen({
         <RecordPicker
           open={pickerFor !== null}
           onOpenChange={(open) => !open && setPickerFor(null)}
-          title={pickerFor === 'pdf' ? t('blockEditor.recordPicker.pdfTitle', 'Print with a record') : t('blockEditor.recordPicker.title', 'Preview with a record')}
+          title={
+            pickerFor === 'pdf'
+              ? t('blockEditor.recordPicker.pdfTitle', 'Print with a record')
+              : issuingMode
+                ? t('blockEditor.recordPicker.issueTitle', 'Issue for a record')
+                : t('blockEditor.recordPicker.title', 'Preview with a record')
+          }
           find={findRecords}
           onPick={(choice) => (pickerFor === 'pdf' ? exportPdf(choice.ref) : void showPreview(choice.ref))}
         />

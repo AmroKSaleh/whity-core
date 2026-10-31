@@ -22,8 +22,8 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { describeAudience, needsPublish, scopeLabel } from './audience';
-import { patchRow, type AddToast, type ApiClient, type ResourceKind } from './api';
-import { DOCUMENT_SCOPES, type BlockRow, type BlockUsage, type DocumentScope, type OuOption, type PermissionSource, type TemplateRow } from './types';
+import { patchTemplate, type AddToast, type ApiClient } from './api';
+import { DOCUMENT_SCOPES, type DocumentScope, type OuOption, type PermissionSource, type TemplateRow } from './types';
 
 /** The sentinel a `Select` uses for "no value" — Radix cannot hold an empty string. */
 const NONE = '__none__';
@@ -31,7 +31,7 @@ const NONE = '__none__';
 const CUSTOM = '__custom__';
 
 /**
- * Change WHO CAN SEE a template or block — the publishing decision.
+ * Change WHO CAN SEE a template or label sheet — the publishing decision.
  *
  * This is the screen's reason for existing, so three things are deliberate about
  * its shape.
@@ -54,16 +54,14 @@ const CUSTOM = '__custom__';
  *
  * THE CONSEQUENCE IS SHOWN, NOT IMPLIED. The live audience sentence under the
  * fields is the same `describeAudience()` the table's tooltip uses, so the
- * preview and the resulting row can never describe themselves differently. For a
- * BLOCK the dialog additionally leads with its usage, because narrowing a block's
- * audience is a change to every template that instances it: the pointer keeps
- * resolving for people who still reach the block and stops resolving for
- * everyone else, which is a silent partial break of documents that look fine.
+ * preview and the resulting row can never describe themselves differently.
+ *
+ * Sharing changes who sees the PUBLISHED version; the draft stays its author's
+ * work in progress (E.9).
  */
 export function ScopeDialog({
-  kind,
   row,
-  usage,
+  name,
   ous,
   ousUnavailable,
   permissionNames,
@@ -74,10 +72,9 @@ export function ScopeDialog({
   onClose,
   onSaved,
 }: {
-  kind: ResourceKind;
-  row: TemplateRow | BlockRow;
-  /** Present for blocks only — null for a template, or when the count was unreadable. */
-  usage: BlockUsage | null;
+  row: TemplateRow;
+  /** The row's title as the page shows it ("Untitled" for an empty one). */
+  name: string;
   ous: OuOption[];
   ousUnavailable: boolean;
   permissionNames: string[];
@@ -120,13 +117,10 @@ export function ScopeDialog({
     scope !== row.scope || ouId !== row.owner_ou_id || permission !== row.required_permission;
 
   /**
-   * Whether this row is about to become NARROWER than it is now, which for a
-   * block is the dangerous direction. Judged on the two coarse moves that can
-   * only reduce an audience — dropping out of a shared scope, and adding a
-   * permission tag where there was none. Deliberately NOT a full re-derivation
-   * of reach: that answer depends on the whole OU tree and on who holds what,
-   * neither of which the client knows, and a confident wrong answer is worse
-   * here than a conservative flag.
+   * Whether this row is about to become NARROWER than it is now: dropping out
+   * of a shared scope, or gaining a permission tag where there was none. Not a
+   * full re-derivation of reach, which depends on the whole unit tree and on
+   * who holds what.
    */
   const narrowing =
     (row.scope !== 'personal' && scope === 'personal') ||
@@ -145,9 +139,8 @@ export function ScopeDialog({
     setError(null);
     setSubmitting(true);
     try {
-      const failure = await patchRow(
+      const failure = await patchTemplate(
         apiClient,
-        kind,
         row.id,
         {
           scope,
@@ -161,7 +154,7 @@ export function ScopeDialog({
         return;
       }
       addToast(
-        t('documentTemplates.scopeDialog.saved', 'Visibility updated for {name}', { name: row.name }),
+        t('documentTemplates.scopeDialog.saved', 'Visibility updated for {name}', { name }),
         'success'
       );
       onSaved();
@@ -177,7 +170,7 @@ export function ScopeDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
-            {t('documentTemplates.scopeDialog.title', 'Who can see “{name}”', { name: row.name })}
+            {t('documentTemplates.scopeDialog.title', 'Who can see “{name}”', { name })}
           </DialogTitle>
           <DialogDescription>
             {t(
@@ -186,43 +179,6 @@ export function ScopeDialog({
             )}
           </DialogDescription>
         </DialogHeader>
-
-        {/* For a block, the blast radius comes FIRST — before any control. */}
-        {kind === 'block' && usage !== null && usage.total > 0 && (
-          <Alert variant={narrowing ? 'warning' : 'info'}>
-            <AlertTitle>
-              {/* Counts templates AND the blocks that nest this one (#1186). */}
-              {t('documentTemplates.scopeDialog.usageTitle', 'Used in {count} places', {
-                count: usage.total,
-              })}
-            </AlertTitle>
-            <AlertDescription>
-              {usage.hidden > 0
-                ? t(
-                    'documentTemplates.scopeDialog.usageHidden',
-                    '{visible} you can see, and {hidden} you cannot. Narrowing this block does not delete anything — it stops the pointer resolving for people who no longer reach it, so those documents render without it and look fine.',
-                    { visible: usage.templates.length + (usage.blocks?.length ?? 0), hidden: usage.hidden }
-                  )
-                : t(
-                    'documentTemplates.scopeDialog.usageVisible',
-                    'Narrowing this block does not delete anything — it stops the pointer resolving for people who no longer reach it, so those documents render without it and look fine.'
-                  )}
-            </AlertDescription>
-          </Alert>
-        )}
-        {kind === 'block' && usage === null && (
-          <Alert variant="warning">
-            <AlertTitle>
-              {t('documentTemplates.scopeDialog.usageUnknownTitle', 'Usage could not be read')}
-            </AlertTitle>
-            <AlertDescription>
-              {t(
-                'documentTemplates.scopeDialog.usageUnknownBody',
-                'How many templates use this block is unknown, so how far a visibility change reaches is unknown too. A blank is not a zero.'
-              )}
-            </AlertDescription>
-          </Alert>
-        )}
 
         <div className="space-y-4">
           {/* ── scope ─────────────────────────────────────────────────────── */}

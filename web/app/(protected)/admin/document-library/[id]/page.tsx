@@ -4,13 +4,10 @@
  * The document record ROUTE — `/admin/document-library/[id]` (#993).
  *
  * WHY IT LIVES UNDER `document-library` AND NOT UNDER `documents`.
- * `/admin/documents` is already taken, by the full-screen template DESIGNER in
- * the `(editor)` route group — the nav labels it "Document Designer" and it
- * renders without a sidebar. `/admin/documents/[id]` would technically not
- * collide, and would still be wrong twice over: it would put the record of an
- * ISSUED document under the path of the tool that authors templates, and it
- * would split one `admin/documents` directory across two route groups whose
- * layouts differ. This record belongs to the organizer that lists it — same
+ * `/admin/documents` belongs to the `(editor)` route group — it was the old
+ * template designer and now redirects to the Document templates page (editor
+ * M4c). `/admin/documents/[id]` would split one `admin/documents` directory
+ * across two route groups whose layouts differ. This record belongs to the organizer that lists it — same
  * group, same sidebar, same padded column — so it is that list's child.
  *
  * Thin, like every other route in this app: it owns web's provider seams only —

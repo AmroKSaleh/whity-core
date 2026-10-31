@@ -53,7 +53,37 @@ export interface DocumentEditorAdapter {
    * `filename`. Throws with the server's sentence when refused.
    */
   printLabels?(id: string, source: LabelPrintSource, filename: string): Promise<LabelPrintResult>;
+  /** M4c: what a published version says, to issue from (read-only). */
+  loadVersion?(id: string, version: number): Promise<VersionContent>;
+  /**
+   * M4c "Edit before issuing" (`POST .../drafts`): a personal letter made from the template's
+   * published version, keeping its record type and own fields. Resolves to its id.
+   */
+  copyForIssue?(id: string): Promise<string>;
+  /**
+   * M4c: issues a document from a template's published version, or from a
+   * letter as it is now. A refusal the person can act on (missing fields, no
+   * published version) resolves as a result; anything else throws.
+   */
+  issue?(id: string, request: IssueRequest): Promise<IssueResult>;
 }
+
+/** What one published version holds: what a document issued from it prints. */
+export type VersionContent = Pick<WhityDocument, 'title' | 'blocks'> &
+  Partial<Pick<WhityDocument, 'page' | 'labels' | 'ownFields'>>;
+
+/** What issuing sends: the record, and the values of the template's own fields by key. */
+export interface IssueRequest {
+  /** `type:id`; null when the template has no record type. */
+  record: string | null;
+  /** Own field values by key (`reference`, not `template.reference`); blanks are left out. */
+  values: Record<string, string>;
+}
+
+export type IssueResult =
+  | { ok: true; documentId: number }
+  /** The server refused: its sentence, and the field paths it said have no value. */
+  | { ok: false; message: string; missing: string[] };
 
 /** What a label print did: how many labels, and how many were cut at their edge. */
 export interface LabelPrintResult {

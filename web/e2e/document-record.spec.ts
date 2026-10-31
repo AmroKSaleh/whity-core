@@ -11,14 +11,15 @@ import { test, expect } from './support/fixtures';
  * button rather than the page's own control: a record page that only works via
  * its own affordance is still a modal with a URL bar.
  *
- * SHARED-DB DISCIPLINE, AND WHY NO DOCUMENT IS CREATED HERE. An issued document
- * can only come into existence through `POST /document-templates/{id}/render`
- * with `persist: true`, which needs BOTH the `documents.render_enabled` setting
- * (default off) and the `render` compose service (opt-in, `--profile render`).
- * Worse, there is no `DELETE /api/documents/{id}` — a document is an immutable
- * record on purpose — so a spec that issued one would litter the shared database
- * permanently, every run, forever. That is the one thing `web/README.md`'s
- * shared-DB discipline forbids outright.
+ * SHARED-DB DISCIPLINE, AND WHY NO DOCUMENT IS CREATED HERE. A document is
+ * issued through `POST /api/v1/documents` from a PUBLISHED editor template
+ * (editor M4c), and its PDF only exists when the `documents.render_enabled`
+ * setting (default off) and the `render` compose service (opt-in,
+ * `--profile render`) are both on. Worse, there is no
+ * `DELETE /api/documents/{id}` — a document is an immutable record on purpose —
+ * so a spec that issued one would litter the shared database permanently, every
+ * run, forever. That is the one thing `web/README.md`'s shared-DB discipline
+ * forbids outright.
  *
  * So this file asserts the three things it can assert without writing anything:
  * that the ROUTE is real and rebuilds itself from its address, that the library
@@ -129,13 +130,13 @@ test.describe('the library links into the record', () => {
     });
     const count = await rows.count();
 
-    // An EXPLICIT, reported skip rather than a silent branch. Issuing a document
-    // needs the opt-in render tier (see the file docblock), so a stack without
-    // it legitimately has nothing in the library — and a spec that quietly
+    // An EXPLICIT, reported skip rather than a silent branch. This spec issues
+    // nothing (see the file docblock), so a fresh stack legitimately has
+    // nothing in the library — and a spec that quietly
     // passed on an empty table would be asserting nothing while looking green.
     test.skip(
       count === 0,
-      'no issued documents in this stack: creating one needs documents.render_enabled and the opt-in render service, and a document cannot be deleted afterwards'
+      'no issued documents in this stack, and this spec does not issue one: a document cannot be deleted afterwards'
     );
 
     const first = rows.first();
