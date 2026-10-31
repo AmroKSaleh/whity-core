@@ -9014,7 +9014,7 @@
         "/api/v1/document-sources": {
             "get": {
                 "operationId": "get_api_v1_document_sources",
-                "summary": "List the editor documents visible to the caller, without their blocks",
+                "summary": "List document templates, letters, reports, notes, wiki pages and label sheets visible to the caller, without their blocks",
                 "tags": [
                     "documents"
                 ],

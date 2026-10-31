@@ -81,7 +81,7 @@ final class McpSearchEvalTest extends TestCase
             'form submissions'              => ['my form submissions', 'get_api_me_form_submissions'],
             'list documents'                => ['list documents', 'get_api_documents'],
             'one document'                  => ['get document', 'get_api_documents_id'],
-            'document templates'            => ['document templates', 'get_api_document_templates'],
+            'document templates'            => ['templates and letters', 'get_api_document_sources'],
             'document trail'                => ['document routing trail', 'get_api_documents_id_trail'],
             'meetings'                      => ['list meetings', 'get_api_meetings'],
             'convening bodies'              => ['convening bodies', 'get_api_convening_bodies'],

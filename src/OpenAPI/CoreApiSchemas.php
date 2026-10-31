@@ -11244,7 +11244,7 @@ final class CoreApiSchemas
     {
         return [
             self::permissionRoute('GET', '/api/document-sources', 'documents:read', [
-                'summary' => 'List the editor documents visible to the caller, without their blocks',
+                'summary' => 'List document templates, letters, reports, notes, wiki pages and label sheets visible to the caller, without their blocks',
                 'tags' => ['documents'],
                 'parameters' => [
                     self::queryParam('kind', 'string', 'Only documents of this kind: `template`, `letter`, `report`, `note`, `wiki` or `label`. Anything else is a 422.'),
