@@ -83,6 +83,8 @@ final class CorePermissionDescriptions
         CorePermissions::PLUGINS_UPLOAD               => 'Upload and install a new plugin',
         CorePermissions::PLUGINS_UNINSTALL            => 'Uninstall a plugin (disable, roll back migrations, remove files)',
         CorePermissions::PLUGINS_RELOAD               => 'Reload the plugin registry',
+        CorePermissions::PLUGINS_BUILD                => 'Draft workspace plugins: validate a manifest and see what publishing it would change',
+        CorePermissions::PLUGINS_PUBLISH              => 'Put a version of a workspace plugin live, or roll back to an earlier one',
         CorePermissions::DESKTOP_PLUGINS_READ         => 'Let an enrolled desktop device list and download desktop-plugin release packages',
         CorePermissions::DESKTOP_APP_UPDATES_READ     => 'Let an enrolled desktop device check whether a newer application build exists',
         CorePermissions::DELEGATION_MANAGE            => 'Create and revoke delegations: letting one person act with another\'s authority, for a time',

@@ -2043,6 +2043,30 @@ $router->register('GET', '/api/workspace-plugins/{plugin:[a-z][a-z0-9_]*}/automa
 $router->register('GET', '/api/workspace-plugins/{plugin:[a-z][a-z0-9_]*}/automation-runs/{id:\d+}', [$tenantAutomationsHandler, 'run'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_READ);
 $router->register('PUT', '/api/workspace-plugins/{plugin:[a-z][a-z0-9_]*}/automations', [$tenantAutomationsHandler, 'switch'], null);
 
+// A workspace's own plugins and their versions (WHIT-764): validate a draft,
+// see what publishing it would change, publish, list history, and activate a
+// version (rollback). Drafting is plugins:build; putting a version live is
+// plugins:publish. Install-wide plugin names are reserved.
+$tenantPluginVersionsHandler = new \Whity\Api\TenantPluginVersionsApiHandler(
+    $tenantPluginRepository,
+    new \Whity\Core\Plugin\Tenant\TenantManifestPublisher(
+        $db->getPdo(),
+        $tenantPluginRepository,
+        new PluginRoleSeeder($db->getPdo(), $logger),
+        array_values(array_map(static fn ($plugin): string => $plugin->getName(), $pluginLoader->getPlugins())),
+        $auditLogger
+    ),
+    new \Whity\Core\Plugin\Tenant\ManifestImpact($tenantRecordRepository),
+    $auditLogger
+);
+$router->register('GET', '/api/workspace-plugins', [$tenantPluginVersionsHandler, 'list'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_READ);
+$router->register('POST', '/api/workspace-plugins', [$tenantPluginVersionsHandler, 'publish'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_PUBLISH);
+$router->register('POST', '/api/workspace-plugins/validate', [$tenantPluginVersionsHandler, 'validate'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_BUILD);
+$router->register('POST', '/api/workspace-plugins/impact', [$tenantPluginVersionsHandler, 'impact'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_BUILD);
+$router->register('GET', '/api/workspace-plugins/{plugin:[a-z][a-z0-9_]*}/versions', [$tenantPluginVersionsHandler, 'versions'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_READ);
+$router->register('GET', '/api/workspace-plugins/{plugin:[a-z][a-z0-9_]*}/versions/{id:\d+}', [$tenantPluginVersionsHandler, 'version'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_READ);
+$router->register('POST', '/api/workspace-plugins/{plugin:[a-z][a-z0-9_]*}/versions/{id:\d+}/activate', [$tenantPluginVersionsHandler, 'activate'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_PUBLISH);
+
 // Health monitoring endpoint (WC-4). Registered UNVERSIONED so load-balancer
 // probes that target GET /api/health never break regardless of the API version.
 // No required role/permission (fail-open); listed as a PUBLIC route in

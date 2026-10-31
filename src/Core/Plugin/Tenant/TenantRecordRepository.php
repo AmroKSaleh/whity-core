@@ -91,6 +91,60 @@ final class TenantRecordRepository
     }
 
     /**
+     * How many records each of a plugin's record types holds (WHIT-764).
+     *
+     * @return array<string, int>
+     */
+    public function countByType(int $tenantId, string $pluginKey): array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT record_type, COUNT(*) AS n FROM plugin_records
+              WHERE tenant_id = :tenant_id AND plugin_key = :plugin_key GROUP BY record_type'
+        );
+        $stmt->execute([':tenant_id' => $tenantId, ':plugin_key' => $pluginKey]);
+        $counts = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $counts[(string) $row['record_type']] = (int) $row['n'];
+        }
+
+        return $counts;
+    }
+
+    /**
+     * How many of a type's records are in each state.
+     *
+     * @return array<string, int>
+     */
+    public function countByState(int $tenantId, string $pluginKey, string $type): array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT state, COUNT(*) AS n FROM plugin_records
+              WHERE tenant_id = :tenant_id AND plugin_key = :plugin_key AND record_type = :record_type AND state IS NOT NULL
+              GROUP BY state'
+        );
+        $stmt->execute([':tenant_id' => $tenantId, ':plugin_key' => $pluginKey, ':record_type' => $type]);
+        $counts = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $counts[(string) $row['state']] = (int) $row['n'];
+        }
+
+        return $counts;
+    }
+
+    /** How many of a type's records hold a value in `$field`. */
+    public function countWithValue(int $tenantId, string $pluginKey, string $type, string $field): int
+    {
+        $stmt = $this->db->prepare(
+            'SELECT COUNT(*) FROM plugin_records
+              WHERE tenant_id = :tenant_id AND plugin_key = :plugin_key AND record_type = :record_type
+                AND (data ->> :field) IS NOT NULL'
+        );
+        $stmt->execute([':tenant_id' => $tenantId, ':plugin_key' => $pluginKey, ':record_type' => $type, ':field' => $field]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
      * @param array<string, mixed> $data
      */
     public function create(int $tenantId, string $pluginKey, string $type, ?string $state, array $data, ?int $actor): int
