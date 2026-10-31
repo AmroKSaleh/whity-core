@@ -64,7 +64,7 @@ final class SdkDocuments implements Documents, HostWiredService
                 render: $request->render,
             ));
         } catch (DocumentIssueRefused $e) {
-            throw new DocumentNotIssuedException($e->reason, $e->getMessage(), $e->details);
+            throw new DocumentNotIssuedException($e->reason, $e->clientMessage, $e->details);
         }
 
         $document = DocumentPresenter::document($issued['document'], $issued['artifacts']);
