@@ -98,6 +98,7 @@
     "./tabs": "./src/tabs.tsx",
     "./tag-input": "./src/tag-input.tsx",
     "./tenant-logo": "./src/tenant-logo.tsx",
+    "./tenant-switcher": "./src/tenant-switcher.tsx",
     "./textarea": "./src/textarea.tsx",
     "./theme-mode": "./src/theme-mode.ts",
     "./time-picker": "./src/time-picker.tsx",

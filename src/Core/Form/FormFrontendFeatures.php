@@ -247,8 +247,8 @@ final class FormFrontendFeatures
             'label' => 'Form Builder',
             'i18nKey' => 'forms.builder.nav',
             'icon' => 'forms',
-            'group' => 'records',
-            'order' => 4,
+            'group' => 'documents',
+            'order' => 5,
             'screen' => 'blocks',
             'requiredPermission' => CorePermissions::FORMS_MANAGE,
             'blocks' => [
@@ -901,8 +901,8 @@ final class FormFrontendFeatures
             'label' => 'Forms',
             'i18nKey' => 'forms.catalog.nav',
             'icon' => 'clipboard-list',
-            'group' => 'records',
-            'order' => 5,
+            'group' => 'documents',
+            'order' => 6,
             'screen' => 'blocks',
             'requiredPermission' => CorePermissions::FORMS_READ,
             'blocks' => [
