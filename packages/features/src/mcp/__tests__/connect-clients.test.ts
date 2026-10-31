@@ -189,9 +189,9 @@ describe('tool search (WHIT-707)', () => {
     expect(recommendsToolSearch(mcpClient('windsurf'), 80)).toBe(true)
   })
 
-  it('appends tools=discover only when asked, keeping any existing query', () => {
+  it('appends tools=full only when asked, keeping any existing query', () => {
     expect(mcpEndpoint('https://api.acme.test/mcp')).toBe('https://api.acme.test/mcp')
-    expect(mcpEndpoint('https://api.acme.test/mcp', { toolSearch: true })).toBe('https://api.acme.test/mcp?tools=discover')
-    expect(mcpEndpoint('https://api.acme.test/mcp?x=1', { toolSearch: true })).toBe('https://api.acme.test/mcp?x=1&tools=discover')
+    expect(mcpEndpoint('https://api.acme.test/mcp', { allTools: true })).toBe('https://api.acme.test/mcp?tools=full')
+    expect(mcpEndpoint('https://api.acme.test/mcp?x=1', { allTools: true })).toBe('https://api.acme.test/mcp?x=1&tools=full')
   })
 })

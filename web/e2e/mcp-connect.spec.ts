@@ -65,9 +65,9 @@ test.describe('Connect an AI app', () => {
     const endpoint = new URL(server.url);
     expect(endpoint.pathname).toBe('/mcp');
     expect(server.headers.Authorization).toMatch(/^Bearer \S+$/);
-    // WHIT-707: with this much access the wizard switches tool search on, so the
-    // app is handed `/mcp?tools=discover`. Called exactly as handed out.
-    const toolSearch = endpoint.searchParams.get('tools') === 'discover';
+    // WHIT-754: the wizard hands out the plain `/mcp` (search and call)
+    // unless the user asks for every action. Called exactly as handed out.
+    expect(endpoint.search).toBe('');
 
     const response = await request.post(`${baseURL}${endpoint.pathname}${endpoint.search}`, {
       headers: { Authorization: server.headers.Authorization, 'Content-Type': 'application/json' },
@@ -76,14 +76,11 @@ test.describe('Connect an AI app', () => {
     expect(response.status(), await response.text()).toBe(200);
     const body = (await response.json()) as { result?: { tools: { name: string }[] } };
     expect(Array.isArray(body.result?.tools)).toBe(true);
-    // WHIT-750: `?tools=discover` lists search and call only; the bare URL
-    // lists the always-on tools first, then the same two.
+    // WHIT-750: the bare URL lists init_session and the always-on tools
+    // first, then search and call.
     const names = body.result?.tools.map((tool) => tool.name) ?? [];
-    if (toolSearch) {
-      expect(names).toEqual(['search_operations', 'call_operation']);
-    } else {
-      expect(names.slice(-2)).toEqual(['search_operations', 'call_operation']);
-    }
+    expect(names[0]).toBe('init_session');
+    expect(names.slice(-2)).toEqual(['search_operations', 'call_operation']);
 
     await expect(dialog.getByText('Connected', { exact: true })).toBeVisible({ timeout: 15_000 });
     await dialog.getByRole('button', { name: 'Done' }).click();

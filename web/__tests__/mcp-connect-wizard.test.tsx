@@ -131,32 +131,31 @@ describe('ConnectWizard', () => {
     expect(state.revoked).toEqual(['old-jti']);
   }, 15_000);
 
-  it('turns on tool search when the access is more than the app handles, and the user can turn it off', async () => {
+  it('connects to the plain endpoint, which searches for actions, by default', async () => {
     api(INFO, 50);
     const user = userEvent.setup();
     renderWizard();
 
     await user.click(await screen.findByRole('button', { name: 'Cursor' }));
-    const toolSearch = await screen.findByRole('checkbox', { name: /search for actions/ });
+    expect(await screen.findByRole('checkbox', { name: /every action at once/ })).not.toBeChecked();
     // Cursor is reported to drop tools past 40; this access exposes 50.
-    expect(toolSearch).toBeChecked();
-    expect(screen.getByText('Recommended')).toBeInTheDocument();
+    expect(screen.getByText(/Not recommended: Cursor works best/)).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Create connection' }));
-    expect(await screen.findByText(/"url": "https:\/\/api\.acme\.test\/mcp\?tools=discover"/)).toBeInTheDocument();
+    expect(await screen.findByText(/"url": "https:\/\/api\.acme\.test\/mcp"/)).toBeInTheDocument();
+    expect(screen.queryByText(/tools=/)).not.toBeInTheDocument();
   });
 
-  it('connects to the plain endpoint when tool search is off', async () => {
+  it('loads every action when the user asks for it', async () => {
     api(INFO, 50);
     const user = userEvent.setup();
     renderWizard();
 
     await user.click(await screen.findByRole('button', { name: 'Cursor' }));
-    await user.click(await screen.findByRole('checkbox', { name: /search for actions/ }));
+    await user.click(await screen.findByRole('checkbox', { name: /every action at once/ }));
     await user.click(screen.getByRole('button', { name: 'Create connection' }));
 
-    expect(await screen.findByText(/"url": "https:\/\/api\.acme\.test\/mcp"/)).toBeInTheDocument();
-    expect(screen.queryByText(/tools=discover/)).not.toBeInTheDocument();
+    expect(await screen.findByText(/"url": "https:\/\/api\.acme\.test\/mcp\?tools=full"/)).toBeInTheDocument();
   });
 
   it('offers sign-in-only apps as coming, not as choices', async () => {

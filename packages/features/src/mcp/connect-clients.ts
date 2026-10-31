@@ -98,24 +98,25 @@ export interface McpClientSpec {
 export const MCP_TOOL_BUDGET = 60
 
 /**
- * Whether the connection should use tool search (`?tools=discover`, WHIT-707):
- * three tools that search, describe and call the catalogue, in place of the
- * catalogue itself. True when the tools this access would expose exceed what
- * the app is reported to handle, or the general budget.
+ * Whether this access is too big to load whole into the app: true when the
+ * tools it would expose exceed what the app is reported to handle, or the
+ * general budget. The plain `/mcp` already lists only search and call
+ * (WHIT-748), so this decides whether the wizard warns against `?tools=full`.
  */
 export function recommendsToolSearch(client: McpClientSpec, toolCount: number): boolean {
   return toolCount > Math.min(client.toolLimit ?? MCP_TOOL_BUDGET, MCP_TOOL_BUDGET)
 }
 
 /**
- * The URL an app connects to: the server's MCP endpoint, with tool search
- * switched on when asked. Keeps any query the endpoint already carries.
+ * The URL an app connects to: the server's MCP endpoint, which lists a few
+ * tools and searches for the rest (WHIT-748), or every tool at once when
+ * asked (`?tools=full`). Keeps any query the endpoint already carries.
  */
-export function mcpEndpoint(endpoint: string, options: { toolSearch?: boolean } = {}): string {
-  if (options.toolSearch !== true) return endpoint
+export function mcpEndpoint(endpoint: string, options: { allTools?: boolean } = {}): string {
+  if (options.allTools !== true) return endpoint
   const [base, hash = ''] = endpoint.split('#', 2)
   const separator = base.includes('?') ? '&' : '?'
-  return `${base}${separator}tools=discover${hash !== '' ? `#${hash}` : ''}`
+  return `${base}${separator}tools=full${hash !== '' ? `#${hash}` : ''}`
 }
 
 /**
