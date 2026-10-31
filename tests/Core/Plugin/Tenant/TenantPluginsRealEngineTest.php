@@ -153,8 +153,12 @@ final class TenantPluginsRealEngineTest extends TestCase
         $catalogue = $this->column("SELECT name FROM permissions WHERE name LIKE 'cakeorders:%' ORDER BY name");
         self::assertSame(['cakeorders:manage', 'cakeorders:read'], $catalogue);
 
-        $roles = $this->rows("SELECT name, tenant_id FROM roles WHERE name IN ('baker', 'shop_manager') ORDER BY name");
-        self::assertSame([['name' => 'baker', 'tenant_id' => '1'], ['name' => 'shop_manager', 'tenant_id' => '1']], $roles);
+        // tenant_id is a string on SQLite and an int on PostgreSQL; compare as ints.
+        $roles = array_map(
+            static fn (array $r): array => ['name' => (string) $r['name'], 'tenant_id' => (int) $r['tenant_id']],
+            $this->rows("SELECT name, tenant_id FROM roles WHERE name IN ('baker', 'shop_manager') ORDER BY name"),
+        );
+        self::assertSame([['name' => 'baker', 'tenant_id' => 1], ['name' => 'shop_manager', 'tenant_id' => 1]], $roles);
 
         $grants = $this->column(
             "SELECT p.name FROM role_permissions rp JOIN roles r ON r.id = rp.role_id JOIN permissions p ON p.id = rp.permission_id
