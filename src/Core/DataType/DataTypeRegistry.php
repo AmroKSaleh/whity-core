@@ -195,6 +195,8 @@ class DataTypeRegistry implements HostWiredService
         // host must not resolve by picking one.
         $guards = $this->guards($key, $source, $declaration['blocks_delete'] ?? []);
 
+        $permissions = self::permissions($key, $declaration['permissions'] ?? []);
+
         return new DataTypeDefinition(
             $key,
             $source,
@@ -204,9 +206,44 @@ class DataTypeRegistry implements HostWiredService
             self::labels($declaration['label'] ?? [], $slug),
             self::lifecycle($key, $declaration['lifecycle'] ?? null),
             $guards,
-            self::permissions($key, $declaration['permissions'] ?? []),
-            $this->cascades($key, $source, $declaration['cascade_delete'] ?? [], $table, $guards)
+            $permissions,
+            $this->cascades($key, $source, $declaration['cascade_delete'] ?? [], $table, $guards),
+            self::search($key, $declaration['search'] ?? null, $permissions)
         );
+    }
+
+    /**
+     * The optional `search` opt-in (WHIT-783): `title` (required) and
+     * `subtitle` columns on the declared table, and a `url` path with an `{id}`
+     * placeholder. Refused without a declared `read` permission: a searchable
+     * type nobody gates would be readable by everyone through search.
+     *
+     * @param array<string, string> $permissions
+     * @return array{title: string, subtitle: ?string, url: ?string}|null
+     *
+     * @throws InvalidDataTypeException
+     */
+    private static function search(string $key, mixed $raw, array $permissions): ?array
+    {
+        if ($raw === null) {
+            return null;
+        }
+        if (!is_array($raw)) {
+            throw InvalidDataTypeException::forMalformedDeclaration($key);
+        }
+        if (!isset($permissions[LifecycleAction::READ])) {
+            throw InvalidDataTypeException::forPermission($key, LifecycleAction::READ, 'search needs a declared read permission');
+        }
+        $url = $raw['url'] ?? null;
+        if ($url !== null && (!is_string($url) || preg_match('#^/[A-Za-z0-9/_\-{}]*$#', $url) !== 1 || !str_contains($url, '{id}'))) {
+            throw InvalidDataTypeException::forIdentifier($key, 'search.url', is_string($url) ? $url : '');
+        }
+
+        return [
+            'title'    => self::identifier($key, 'search.title', $raw['title'] ?? null),
+            'subtitle' => isset($raw['subtitle']) ? self::identifier($key, 'search.subtitle', $raw['subtitle']) : null,
+            'url'      => $url,
+        ];
     }
 
     /**

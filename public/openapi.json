@@ -31622,6 +31622,188 @@
                 ]
             }
         },
+        "/api/v1/search": {
+            "get": {
+                "operationId": "get_api_v1_search",
+                "summary": "Search records: documents, forms, people, units and plugin records you can see",
+                "tags": [
+                    "search"
+                ],
+                "description": "One search across every record type the caller may list, filtered exactly as each list is. Arabic spellings are matched loosely (\u0623/\u0625/\u0622/\u0627, \u0629/\u0647, \u0649/\u064a, diacritics and tatweel ignored, Arabic-Indic digits read as Western). Results are grouped by type, newest first, at most `limit` per type.",
+                "parameters": [
+                    {
+                        "name": "q",
+                        "in": "query",
+                        "required": true,
+                        "description": "REQUIRED. Words to look for, at least 2 characters after folding, at most 200",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "types",
+                        "in": "query",
+                        "required": false,
+                        "description": "Comma-separated types to search (document, form, person, ou, or a plugin data-type key). Default: all you may list",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "required": false,
+                        "description": "Most results per type (default 5, max 20)",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Matches grouped by type; a type with no match is left out",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SearchResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "'q' is missing or too long",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/search/types": {
+            "get": {
+                "operationId": "get_api_v1_search_types",
+                "summary": "The record types you can search",
+                "tags": [
+                    "search"
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Each searchable type and its label",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/SearchTypeListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/settings": {
             "get": {
                 "operationId": "get_api_v1_settings",
@@ -40533,6 +40715,28 @@
                         "additionalProperties": {
                             "type": "string"
                         }
+                    },
+                    "search": {
+                        "type": "object",
+                        "nullable": true,
+                        "properties": {
+                            "title": {
+                                "type": "string"
+                            },
+                            "subtitle": {
+                                "type": "string",
+                                "nullable": true
+                            },
+                            "url": {
+                                "type": "string",
+                                "nullable": true
+                            }
+                        },
+                        "required": [
+                            "title",
+                            "subtitle",
+                            "url"
+                        ]
                     }
                 },
                 "required": [
@@ -50834,6 +51038,115 @@
                         "type": "array",
                         "items": {
                             "$ref": "#/components/schemas/RoutingRule"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "SearchGroup": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "$ref": "#/components/schemas/SearchLabel"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/SearchHit"
+                        }
+                    }
+                },
+                "required": [
+                    "type",
+                    "label",
+                    "results"
+                ]
+            },
+            "SearchHit": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string"
+                    },
+                    "id": {
+                        "type": "string"
+                    },
+                    "title": {
+                        "type": "string"
+                    },
+                    "subtitle": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "url": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "type",
+                    "id",
+                    "title",
+                    "subtitle",
+                    "url"
+                ]
+            },
+            "SearchLabel": {
+                "type": "object",
+                "properties": {
+                    "en": {
+                        "type": "string"
+                    },
+                    "ar": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "en",
+                    "ar"
+                ]
+            },
+            "SearchResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/SearchGroup"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "SearchType": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "string"
+                    },
+                    "label": {
+                        "$ref": "#/components/schemas/SearchLabel"
+                    }
+                },
+                "required": [
+                    "type",
+                    "label"
+                ]
+            },
+            "SearchTypeListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/SearchType"
                         }
                     }
                 },

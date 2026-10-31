@@ -80,6 +80,9 @@ final class DataTypeDefinition
      */
     private array $cascades;
 
+    /** @var array{title: string, subtitle: ?string, url: ?string}|null */
+    private ?array $search;
+
     /**
      * Permission slug per action.
      *
@@ -98,6 +101,7 @@ final class DataTypeDefinition
      * @param list<ReferenceGuard>  $guards      Declared reference graph.
      * @param array<string, string> $permissions Action => permission slug.
      * @param list<CascadeEdge>     $cascades    Declared composition graph.
+     * @param array{title: string, subtitle: ?string, url: ?string}|null $search Search opt-in (WHIT-783).
      */
     public function __construct(
         string $key,
@@ -109,7 +113,8 @@ final class DataTypeDefinition
         Lifecycle $lifecycle,
         array $guards,
         array $permissions,
-        array $cascades = []
+        array $cascades = [],
+        ?array $search = null
     ) {
         $this->key = $key;
         $this->source = $source;
@@ -121,6 +126,19 @@ final class DataTypeDefinition
         $this->guards = $guards;
         $this->permissions = $permissions;
         $this->cascades = $cascades;
+        $this->search = $search;
+    }
+
+    /**
+     * How `GET /api/search` finds this type's records, or null when the plugin
+     * did not opt in (WHIT-783). Columns are validated identifiers on the
+     * declared table; `url` is a path with an `{id}` placeholder.
+     *
+     * @return array{title: string, subtitle: ?string, url: ?string}|null
+     */
+    public function search(): ?array
+    {
+        return $this->search;
     }
 
     /**
@@ -288,7 +306,7 @@ final class DataTypeDefinition
      * empty `cascade_delete` says "this type declares no composition", which is
      * a fact worth being able to see.
      *
-     * @return array{key: string, source: string, label: array<string, string>, lifecycle: array<string, mixed>, blocks_delete: list<array{table: string, column: string, label: string, ignore_when: array<string, list<string>>}>, cascade_delete: list<array{table: string, column: string, label: string}>, actions: list<string>, permissions: array<string, string>}
+     * @return array{key: string, source: string, label: array<string, string>, lifecycle: array<string, mixed>, blocks_delete: list<array{table: string, column: string, label: string, ignore_when: array<string, list<string>>}>, cascade_delete: list<array{table: string, column: string, label: string}>, actions: list<string>, permissions: array<string, string>, search: array{title: string, subtitle: ?string, url: ?string}|null}
      */
     public function toArray(): array
     {
@@ -307,6 +325,7 @@ final class DataTypeDefinition
             ),
             'actions' => $this->offeredActions(),
             'permissions' => $this->permissions,
+            'search' => $this->search,
         ];
     }
 }
