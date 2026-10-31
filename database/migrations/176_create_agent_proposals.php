@@ -47,7 +47,7 @@ class CreateAgentProposals
                 undo_window_seconds     INTEGER,
                 status                  VARCHAR(16)  NOT NULL DEFAULT 'waiting',
                 result                  JSONB,
-                decided_by_profile_id   INTEGER,
+                decided_by_profile_id   INTEGER      REFERENCES profiles(id) ON DELETE SET NULL,
                 decided_at              TIMESTAMP,
                 expires_at              TIMESTAMP    NOT NULL,
                 created_at              TIMESTAMP    NOT NULL DEFAULT NOW()
