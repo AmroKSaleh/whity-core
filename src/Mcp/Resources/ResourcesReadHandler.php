@@ -69,7 +69,7 @@ final class ResourcesReadHandler implements MethodHandler
 
         // Route the AI principal into AuditContext so hook-fired audit entries
         // (e.g. a read that triggers a hook) also capture the MCP actor.
-        AuditContext::set($principal->userId, null);
+        AuditContext::setActor($principal->actor());
 
         // 3. Extract path (and query string) from URI by stripping the scheme.
         //    whity-api:///api/v1/things/42  →  /api/v1/things/42

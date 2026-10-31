@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Whity\Core\Events;
 
 use PDO;
+use Whity\Core\Audit\Actor;
+use Whity\Core\Audit\AuditContext;
 use Whity\Core\Support\Ulid;
 
 /**
@@ -64,9 +66,18 @@ final class DomainEventStore
         }
 
         try {
+            // WHIT-753: person, agent for person, or system, as for the audit log.
+            $actorUserId = isset($meta['actor_user_id']) ? (int) $meta['actor_user_id'] : null;
+            $actor       = AuditContext::getActor();
+            if ($actor->profileId !== $actorUserId) {
+                $actor = $actorUserId !== null ? Actor::person($actorUserId) : Actor::system();
+            }
+
             $event = $this->pdo->prepare(
-                "INSERT INTO domain_events (id, tenant_id, event_name, aggregate_type, aggregate_id, actor_user_id, payload, occurred_at, created_at)
-                 VALUES (:id, :tenant_id, :event_name, :aggregate_type, :aggregate_id, :actor_user_id, :payload, :occurred_at, NOW())"
+                "INSERT INTO domain_events (id, tenant_id, event_name, aggregate_type, aggregate_id, actor_user_id,
+                                            actor_kind, agent_principal_id, on_behalf_of_profile_id, payload, occurred_at, created_at)
+                 VALUES (:id, :tenant_id, :event_name, :aggregate_type, :aggregate_id, :actor_user_id,
+                         :actor_kind, :agent_principal_id, :on_behalf_of_profile_id, :payload, :occurred_at, NOW())"
             );
             $event->execute([
                 ':id'             => $id,
@@ -74,7 +85,10 @@ final class DomainEventStore
                 ':event_name'     => $eventName,
                 ':aggregate_type' => $meta['aggregate_type'] ?? null,
                 ':aggregate_id'   => isset($meta['aggregate_id']) ? (string) $meta['aggregate_id'] : null,
-                ':actor_user_id'  => isset($meta['actor_user_id']) ? (int) $meta['actor_user_id'] : null,
+                ':actor_user_id'  => $actorUserId,
+                ':actor_kind'     => $actor->kind,
+                ':agent_principal_id'      => $actor->agentPrincipalId,
+                ':on_behalf_of_profile_id' => $actor->onBehalfOfProfileId,
                 ':payload'        => self::encode($payload),
                 ':occurred_at'    => $occurredAt,
             ]);
