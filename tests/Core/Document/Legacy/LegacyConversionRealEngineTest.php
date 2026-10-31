@@ -18,7 +18,7 @@ use Whity\Database\Database;
 
 /**
  * The old Document designer's templates become editor documents (editor M4b),
- * and migration 164 does it for every tenant before dropping the old tables
+ * and migration 165 does it for every tenant before dropping the old tables
  * (editor M4c). A converted document must be one the editor can publish once a
  * person has checked it: every field it uses is offered, and every block has a
  * print view.
@@ -209,7 +209,7 @@ final class LegacyConversionRealEngineTest extends TestCase
         self::assertStringStartsWith('Converted from the old Document designer.', $labels->note(['shape' => 2], 'en'));
     }
 
-    // ── migration 164 ───────────────────────────────────────────────────────
+    // ── migration 165 ───────────────────────────────────────────────────────
 
     /**
      * The upgrade in one step: every tenant gets the editor's starters, every
@@ -345,7 +345,7 @@ final class LegacyConversionRealEngineTest extends TestCase
 
     // ── helpers ─────────────────────────────────────────────────────────────
 
-    /** The schema as it was before migration 164: the old tables, empty. */
+    /** The schema as it was before migration 165: the old tables, empty. */
     private function restoreOldTables(): void
     {
         IssueDocumentsFromSourcesAndDropDesigner::down($this->db);
@@ -433,7 +433,7 @@ final class LegacyConversionRealEngineTest extends TestCase
 
     /**
      * Dropped on PostgreSQL; on SQLite emptied, since `documents` still names
-     * it in a foreign key SQLite can't drop (see migration 164).
+     * it in a foreign key SQLite can't drop (see migration 165).
      */
     private function assertTemplatesGone(): void
     {

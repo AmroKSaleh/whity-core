@@ -623,7 +623,7 @@ final class DocumentRecordSectionsRealEngineTest extends TestCase
             $this->grant($pdo, $roleId, CorePermissions::DOCUMENTS_READ_ALL);
         }
         $this->grant($pdo, 101, CorePermissions::DOCUMENTS_RENDER);
-        // Issuing and correcting is documents:issue (migration 165 grants it with render).
+        // Issuing and correcting is documents:issue (migration 166 grants it with render).
         $this->grant($pdo, 101, CorePermissions::DOCUMENTS_ISSUE);
 
         $pdo->exec("

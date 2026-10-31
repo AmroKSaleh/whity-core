@@ -659,7 +659,7 @@ class OusApiHandler
             }
 
             // Refuse while documents are still FILED here (migrations 117 and
-            // 160; editor templates since the old designer went, migration 164).
+            // 160; editor templates since the old designer went, migration 165).
             //
             // `document_sources.owner_ou_id` carries ON DELETE SET NULL, the
             // house convention for a nullable OU reference — and here that

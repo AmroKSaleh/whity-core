@@ -513,7 +513,7 @@ final class DocumentsApiHandlerRealEngineTest extends TestCase
     public function testAnOldDesignerDocumentIsRefusedWithItsConvertedTemplate(): void
     {
         $converted = $this->editor->published(self::TENANT, self::OWNER, 'Faculty circular');
-        // Converted by migration 164: the template is known, the version never was.
+        // Converted by migration 165: the template is known, the version never was.
         $documentId = $this->documentRepo->create(self::TENANT, [
             'document_source_id' => $converted,
             'template_name' => 'Faculty circular',

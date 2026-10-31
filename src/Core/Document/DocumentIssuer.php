@@ -232,7 +232,7 @@ final class DocumentIssuer
     ): int {
         return $this->documents->create($tenantId, [
             // The editor template and published version it was issued from
-            // (migration 164); absent for a form or SDK document.
+            // (migration 165); absent for a form or SDK document.
             'document_source_id'      => isset($template['source_id']) ? (int) $template['source_id'] : null,
             'document_source_version' => isset($template['source_version']) ? (int) $template['source_version'] : null,
             'origin_key'              => isset($template['origin_key']) ? (string) $template['origin_key'] : null,

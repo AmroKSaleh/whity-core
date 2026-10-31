@@ -6,7 +6,7 @@ namespace Whity\Core\Document\Legacy;
 
 /**
  * The note a converted template starts with, in the template's own language:
- * the conversion runs in migration 164, with no one signed in, and the person
+ * the conversion runs in migration 165, with no one signed in, and the person
  * who reads the note is whoever edits the template next. Read from the
  * shipped catalogue (database/i18n), since a migration has no language
  * registry.

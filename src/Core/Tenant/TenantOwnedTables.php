@@ -171,7 +171,7 @@ final class TenantOwnedTables
         // stored as the WhityDocument contract's JSON. Visibility columns
         // (scope, required_permission, owner_ou_id) filtered by DocumentAccessPolicy.
         // They replaced the old designer's document_templates and
-        // document_blocks, dropped by migration 164.
+        // document_blocks, dropped by migration 165.
         'document_sources' => '160_create_document_sources.php',
         // Editor M3: images and files placed in those documents (migration
         // 161). Bound to their document; read only through it.
@@ -179,7 +179,7 @@ final class TenantOwnedTables
         'document_source_versions' => '162_create_document_source_versions.php',
         // Whity Builder (WHIT-760): a workspace's own plugins as published
         // manifest versions, the live pointer, and the permission slugs they
-        // declare (migration 164).
+        // declare (migration 165).
         'plugin_manifest_versions' => '164_create_tenant_plugin_manifests.php',
         'tenant_plugins' => '164_create_tenant_plugin_manifests.php',
         'tenant_plugin_permissions' => '164_create_tenant_plugin_manifests.php',

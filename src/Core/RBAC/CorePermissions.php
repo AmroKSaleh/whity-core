@@ -226,7 +226,7 @@ final class CorePermissions
     // Issuing a document (editor M4c, the owner's call on 31 Oct): raising the
     // record, its QR code and its stored PDF, and correcting it. Separate from
     // DOCUMENTS_RENDER, which now only previews a PDF and stores nothing.
-    // Migration 165 grants it to every role that held render.
+    // Migration 166 grants it to every role that held render.
     public const DOCUMENTS_ISSUE = 'documents:issue';
 
     // Issued DOCUMENTS, as opposed to the templates above (#947 item 1,

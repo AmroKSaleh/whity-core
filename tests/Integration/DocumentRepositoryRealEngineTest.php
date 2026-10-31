@@ -18,7 +18,7 @@ use Whity\Core\Document\DocumentSourceVersionRepository;
  * now say which template and which VERSION they were issued from.
  *
  * The old designer's repositories (`document_templates`, `document_blocks`)
- * are gone with their tables (migration 164); what replaced their tests here
+ * are gone with their tables (migration 165); what replaced their tests here
  * is the same two kinds of claim about the new tables — tenant isolation, and
  * that what is written is what is read back, on both engines.
  */

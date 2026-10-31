@@ -3301,7 +3301,7 @@ $router->register('GET',  '/api/documents',                                     
 // ISSUING a document — creating it, correcting it, and changing its QR code —
 // is gated on DOCUMENTS_ISSUE (editor M4c, the owner's call on 31 Oct), apart
 // from DOCUMENTS_RENDER, which now only previews and stores nothing. Migration
-// 165 grants it to every role that held render, so on every existing install
+// 166 grants it to every role that held render, so on every existing install
 // the people who could issue yesterday still can: a gate rather than a lockout.
 //
 // Note this route does NOT require the render TIER to be running — the

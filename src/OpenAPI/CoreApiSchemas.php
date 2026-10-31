@@ -5609,7 +5609,7 @@ final class CoreApiSchemas
                 'owner_ou_id' => self::int(true),
                 'updated_by' => self::int(true),
                 'starter_key' => self::str(true) + ['description' => 'Which of Whity\'s starters this is, or null for anything a person made'],
-                'legacy_template_id' => self::int(true) + ['description' => 'The old Document designer template this was converted from (migration 164), or null'],
+                'legacy_template_id' => self::int(true) + ['description' => 'The old Document designer template this was converted from (migration 165), or null'],
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
             ], ['id', 'tenant_id', 'kind', 'title', 'lang', 'default_view', 'full_width', 'draft_version', 'scope', 'created_at', 'updated_at']),

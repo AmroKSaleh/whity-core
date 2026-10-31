@@ -13,7 +13,7 @@ use Whity\Core\Document\DocumentSourceRepository;
  * each once: the new row remembers the template it came from
  * (`legacy_template_id`), so running again converts only what is new.
  *
- * Run by migration 164 for every tenant, just before it drops the old
+ * Run by migration 165 for every tenant, just before it drops the old
  * designer's tables (editor M4c; the owner's call on 31 Oct). It reads those
  * tables directly, so it needs no code that goes with them. Saved blocks are
  * placed into the templates that use them.

@@ -68,7 +68,7 @@ use Whity\Core\Settings\SettingsService;
  *   | not, both standing in one unit             | than the dean two levels up              |
  *   | Every document issued from one of those    | a record that names the template and the |
  *   | templates' published versions, with the    | version it was issued from, and the      |
- *   | values it printed                          | values it printed (migration 164)        |
+ *   | values it printed                          | values it printed (migration 165)        |
  *   | A starred collection AND a custom one      | that starring IS a collection (migration |
  *   |                                            | 114) rather than a second concept        |
  *   | One document with TWO artifacts            | #986's "version N of M" and its          |
@@ -1617,7 +1617,7 @@ final class DocumentDemoSeeder
             // Issued from the template's PUBLISHED version, as
             // {@see \Whity\Core\Document\Issuing\DocumentIssuing::issue()} does: the
             // version title is the snapshot, the source and version numbers are
-            // the provenance (migration 164), and the one data row is the values
+            // the provenance (migration 165), and the one data row is the values
             // it printed — so a correction made through the product later
             // re-renders this document from the real template.
             $issued = $this->issuer->issue(

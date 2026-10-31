@@ -42001,7 +42001,7 @@
                     "legacy_template_id": {
                         "type": "integer",
                         "nullable": true,
-                        "description": "The old Document designer template this was converted from (migration 164), or null"
+                        "description": "The old Document designer template this was converted from (migration 165), or null"
                     },
                     "created_at": {
                         "type": "string"

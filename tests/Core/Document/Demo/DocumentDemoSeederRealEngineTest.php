@@ -497,7 +497,7 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
 
     /**
      * Every demo document records the template and version it was issued from
-     * and the values it printed (migration 164) — the provenance a correction
+     * and the values it printed (migration 165) — the provenance a correction
      * re-renders from.
      */
     public function testEveryDemoDocumentIsIssuedFromAPublishedDemoTemplateVersion(): void

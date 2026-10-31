@@ -6358,7 +6358,7 @@ export interface components {
             updated_by?: number | null;
             /** @description Which of Whity's starters this is, or null for anything a person made */
             starter_key?: string | null;
-            /** @description The old Document designer template this was converted from (migration 164), or null */
+            /** @description The old Document designer template this was converted from (migration 165), or null */
             legacy_template_id?: number | null;
             created_at: string;
             updated_at: string;

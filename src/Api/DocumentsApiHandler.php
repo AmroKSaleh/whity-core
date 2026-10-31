@@ -122,7 +122,7 @@ use Whity\Storage\StorageException;
  *     every fresh install.
  *
  *  3. THE VALUES ARE PERSISTED, on the row, by migration 118, with the
- *     template's published version (migration 164). They are the only content
+ *     template's published version (migration 165). They are the only content
  *     an unrendered document has, and a correction months later re-renders
  *     that version with those values rather than whatever the record says now.
  *

@@ -133,10 +133,10 @@ final class DocumentRepository
      *
      * `document_source_id` and `document_source_version` are the editor
      * template and published version the document was issued from (migration
-     * 164), which a correction re-renders.
+     * 165), which a correction re-renders.
      *
      * `origin_key` is the caller's own name for what the document is (migration
-     * 166), unique per tenant where set.
+     * 167), unique per tenant where set.
      *
      * @param array{document_source_id?: ?int, document_source_version?: ?int, origin_key?: ?string, template_name: string, title: string,
      *              origin_ou_id?: ?int, created_by?: ?int,

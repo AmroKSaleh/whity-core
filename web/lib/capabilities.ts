@@ -175,7 +175,7 @@ export const DOCUMENTS_RENDER = 'documents:render';
  * Issuing a document (editor M4c): `POST /api/v1/documents`, the correction
  * route, QR mint and revoke, and `persist: true` on the editor's render route.
  * Split from `documents:render`, which now means only preview, PDF export
- * without storing, and label printing. Migration 165 grants it to every role
+ * without storing, and label printing. Migration 166 grants it to every role
  * that held render, so nobody who could issue before loses it.
  */
 export const DOCUMENTS_ISSUE = 'documents:issue';

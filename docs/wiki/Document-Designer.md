@@ -9,7 +9,7 @@ decision register, `handoff/editor/`).
 
 ## What the upgrade does
 
-Migration `164_issue_documents_from_sources_and_drop_designer` runs once, for
+Migration `165_issue_documents_from_sources_and_drop_designer` runs once, for
 every workspace, when you upgrade:
 
 1. Each workspace gets the editor's starters (Letter, Invoice, Exam sheet,
