@@ -75,7 +75,15 @@ final class DiscoveryTools
         private readonly ToolsCallHandler $toolsCall,
         private readonly TokenValidator $tokenValidator,
         private readonly SessionBriefing $briefing = new SessionBriefing(),
+        // WHIT-754: the plugin tools a workspace's admin turned on as
+        // always-on (setting mcp.always_on_plugin_tools), by tenant. Null:
+        // none, which is also every workspace's default (owner decision 5).
+        private readonly ?\Closure $enabledPluginAlwaysOn = null,
     ) {}
+
+    /** The most a bare list may hold, always-on tools included (design §5.6). */
+    public const LIST_MAX_TOOLS = 12;
+    public const LIST_MAX_BYTES = 10240;
 
     /** The tools/list handler for `?tools=discover`: the two tools only. */
     public function listHandler(): MethodHandler
@@ -123,17 +131,44 @@ final class DiscoveryTools
         if ($principal === null) {
             return [];
         }
-        $surface = ToolSurfaceRequest::fromParams($params);
+        $surface  = ToolSurfaceRequest::fromParams($params);
+        $tenantId = TenantContext::getTenantId();
+        $enabled  = $this->enabledPluginAlwaysOn !== null && $tenantId !== null ? ($this->enabledPluginAlwaysOn)($tenantId) : [];
 
-        return array_values(array_filter(
-            $this->toolsList->listFor($principal, TenantContext::getTenantId()),
-            static function (array $tool) use ($surface): bool {
-                $meta = is_array($tool['_meta'] ?? null) ? $tool['_meta'] : [];
-                return ($meta[ToolSurface::META_VISIBILITY] ?? null) === ToolSurface::VISIBILITY_ALWAYS_ON
-                    && CoreToolsets::isAlwaysOn((string) ($tool['name'] ?? ''))
-                    && $surface->selectsTool($tool);
-            },
-        ));
+        $core    = [];
+        $plugins = [];
+        foreach ($this->toolsList->listFor($principal, $tenantId) as $tool) {
+            $meta = is_array($tool['_meta'] ?? null) ? $tool['_meta'] : [];
+            $name = (string) ($tool['name'] ?? '');
+            if (($meta[ToolSurface::META_VISIBILITY] ?? null) !== ToolSurface::VISIBILITY_ALWAYS_ON || !$surface->selectsTool($tool)) {
+                continue;
+            }
+            if (CoreToolsets::isAlwaysOn($name)) {
+                $core[] = $tool;
+            } elseif (in_array($name, $enabled, true)) {
+                // A plugin's always-on tool, listed only once this
+                // workspace's admin turned it on (WHIT-754).
+                $plugins[] = $tool;
+            }
+        }
+
+        // The list budget (design §5.6): core's picks always fit; plugin tools
+        // are added in order until the next one would break it, and the rest
+        // stay reachable through search.
+        $listed = $core;
+        $room   = self::LIST_MAX_TOOLS - 3 - count($core); // init_session, search, call
+        $bytes  = strlen((string) json_encode([self::initDefinition(), ...$core, ...self::definitions()]));
+        foreach ($plugins as $tool) {
+            $size = strlen((string) json_encode($tool));
+            if ($room <= 0 || $bytes + $size > self::LIST_MAX_BYTES) {
+                break;
+            }
+            $listed[] = $tool;
+            $room--;
+            $bytes += $size;
+        }
+
+        return $listed;
     }
 
     /** The tools/call handler for the search-and-call modes. */

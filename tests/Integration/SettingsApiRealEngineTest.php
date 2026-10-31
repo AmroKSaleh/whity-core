@@ -143,7 +143,9 @@ final class SettingsApiRealEngineTest extends TestCase
         // 34 since editor M4: documents.print_color, each tenant's print colour.
         // 35 since branding_main_color (2.8), each workspace's main colour.
         // 36 since editor M4d: documents.theme and documents.theme_by_kind for print_color.
-        self::assertCount(36, $data['registry']);
+        // 37 since WHIT-754: mcp.always_on_plugin_tools, each workspace's plugin
+        // tools turned on as always-on for MCP clients.
+        self::assertCount(37, $data['registry']);
         self::assertArrayNotHasKey('auth.self_registration_enabled', $data['effective']);
         self::assertSame([], $data['overridden']);
     }

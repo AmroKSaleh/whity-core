@@ -52,6 +52,12 @@ final class SettingsRegistry
     // 'false'; an admin sets it per-tenant to enable the MCP endpoint.
     public const MCP_ENABLED = 'mcp.enabled';
 
+    // WHIT-754: the plugin MCP tools this workspace's admin turned on as
+    // always-on (listed directly next to search and call). Comma-separated tool
+    // names; empty by default, so a plugin's request alone lists nothing
+    // (owner decision 5). Edited from the MCP admin page.
+    public const MCP_ALWAYS_ON_PLUGIN_TOOLS = 'mcp.always_on_plugin_tools';
+
     // Instance-governance flags (WC-696206d8). Global/operator-level: control
     // self-service signup for the whole instance. Literal 'true'/'false'.
     //   - self_registration_enabled: is the public POST /api/register open at all?
@@ -903,6 +909,7 @@ final class SettingsRegistry
         self::BRANDING_FAVICON => '',
         self::BRANDING_MAIN_COLOR => '',
         self::MCP_ENABLED => 'false',
+        self::MCP_ALWAYS_ON_PLUGIN_TOOLS => '',
         // Secure-by-default: signup CLOSED, approval REQUIRED when opened.
         self::SELF_REGISTRATION_ENABLED => 'false',
         self::REGISTRATION_APPROVAL_REQUIRED => 'true',
@@ -1335,6 +1342,7 @@ final class SettingsRegistry
             self::SUPPORT_EMAIL => self::validateSupportEmail($value),
             self::BRANDING_MAIN_COLOR => $value === '' ? null : self::validateHexColor($value, self::BRANDING_MAIN_COLOR),
             self::MCP_ENABLED => self::validateMcpEnabled($value),
+            self::MCP_ALWAYS_ON_PLUGIN_TOOLS => self::validateToolNameList($value, self::MCP_ALWAYS_ON_PLUGIN_TOOLS),
             self::SELF_REGISTRATION_ENABLED => self::validateBoolean($value, self::SELF_REGISTRATION_ENABLED),
             self::REGISTRATION_APPROVAL_REQUIRED => self::validateBoolean($value, self::REGISTRATION_APPROVAL_REQUIRED),
             self::REGISTRATION_PAYMENT_REQUIRED => self::validateBoolean($value, self::REGISTRATION_PAYMENT_REQUIRED),
@@ -1771,6 +1779,20 @@ final class SettingsRegistry
             return 'support_email must be a valid email address (or empty).';
         }
 
+        return null;
+    }
+
+    /** Comma-separated MCP tool names, each `[A-Za-z0-9_-]{1,64}`; empty is fine. */
+    private static function validateToolNameList(string $value, string $key): ?string
+    {
+        if (trim($value) === '') {
+            return null;
+        }
+        foreach (explode(',', $value) as $name) {
+            if (preg_match('/^[A-Za-z0-9_-]{1,64}$/', trim($name)) !== 1) {
+                return "{$key} must be a comma-separated list of tool names.";
+            }
+        }
         return null;
     }
 

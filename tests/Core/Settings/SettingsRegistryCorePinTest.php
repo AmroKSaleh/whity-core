@@ -52,6 +52,7 @@ final class SettingsRegistryCorePinTest extends TestCase
             'branding_favicon',
             'branding_main_color',
             'mcp.enabled',
+            'mcp.always_on_plugin_tools',
             'auth.self_registration_enabled',
             'auth.registration_approval_required',
             'auth.registration_payment_required',
@@ -221,6 +222,7 @@ final class SettingsRegistryCorePinTest extends TestCase
             // Empty: Whity Blue until a workspace sets its own main colour (2.8).
             'branding_main_color' => '',
             'mcp.enabled' => 'false',
+            'mcp.always_on_plugin_tools' => '',
             'auth.self_registration_enabled' => 'false',
             'auth.registration_approval_required' => 'true',
             'auth.registration_payment_required' => 'false',
@@ -391,6 +393,9 @@ final class SettingsRegistryCorePinTest extends TestCase
             ['branding_main_color', 'b74c05', false],
             ['mcp.enabled', 'true', true],
             ['mcp.enabled', '1', false],
+            ['mcp.always_on_plugin_tools', '', true],
+            ['mcp.always_on_plugin_tools', 'period_close_status,acme_summary', true],
+            ['mcp.always_on_plugin_tools', 'has.dot', false],
             // #1036. The boolean arm and the enum arm, each with a value the
             // registry must refuse — a key with no validate() arm falls through
             // to "Unknown setting key" and 422s on a key the registry knows,

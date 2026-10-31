@@ -80,13 +80,22 @@ final class McpTokenHandler
             return Response::error(implode('; ', $errors), 422);
         }
 
+        // WHIT-754: an agent credential, for an AI that works unattended for
+        // this person. It acts under their RBAC, narrowed by its per-permission
+        // grant (`grant:` entries), and its Ask-first calls become proposals
+        // they approve. Without `agent`, the token is the person's own client.
+        $agent = ($body['agent'] ?? false) === true;
+        if (!$agent && array_filter($scope, static fn (string $s): bool => str_starts_with($s, AgentScopeGrant::PREFIX)) !== []) {
+            return Response::error('grant: entries apply to agent credentials only; set agent: true', 422);
+        }
+
         $identity = $this->requireProfileIdentity($claims);
         if ($identity === null) {
             return Response::error('Unauthenticated', 401);
         }
         [$profileId, $tenantId] = $identity;
 
-        $token = $this->mcpTokenService->issue($profileId, $tenantId, $name, $scope);
+        $token = $this->mcpTokenService->issue($profileId, $tenantId, $name, $scope, principalKind: $agent ? AgentScopeGrant::AGENT_KIND : 'user');
         ['jti' => $jti, 'exp' => $exp] = $this->extractClaims($token);
 
         return new Response(201, (string) json_encode([
@@ -94,6 +103,7 @@ final class McpTokenHandler
             'token'      => $token,
             'name'       => $name,
             'scope'      => $scope,
+            'agent'      => $agent,
             'expires_at' => date('c', (int) $exp),
         ], JSON_THROW_ON_ERROR), [
             'Content-Type' => 'application/json',
