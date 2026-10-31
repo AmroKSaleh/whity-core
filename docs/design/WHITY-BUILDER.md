@@ -1,10 +1,10 @@
-# Whity-Builder: a paid, no-code plugin builder (vision and design)
+# Whity Builder: a paid, no-code plugin builder (vision and design)
 
-Status: **proposal for owner review** (WHIT-757). Nothing here is built, and no implementation PR opens until the owner approves. Written 31 Oct 2026 against `origin/develop` at `0b3e2d4e`.
+Status: **design approved in principle; the owner answered questions 1-9 on 31 Oct 2026** (section 7). Questions 10 and 11 are open. Nothing here is built, and no implementation PR opens until the owner approves the plan. Written 31 Oct 2026 against `origin/develop` at `0b3e2d4e`.
 
 The owner's ask: "creating plugins and changing how whity works now is technical and hard... i want a future with a paid whity-builder a no-code plugin building tool with mcp to let users and theirs ai customize their company logic on the fly".
 
-This document surveys how plugins are built today (section 1), defines Whity-Builder (section 2), draws the open-core line (section 3), lists what core needs first and how it maps onto work already in flight (section 4), phases the work (section 5), and ends with risks and questions for the owner (sections 6 and 7).
+This document surveys how plugins are built today (section 1), defines Whity Builder (section 2), draws the open-core line (section 3), lists what core needs first and how it maps onto work already in flight (section 4), phases the work (section 5), and ends with risks and questions for the owner (sections 6 and 7).
 
 Sibling designs this one builds on and doesn't repeat:
 
@@ -14,13 +14,13 @@ Sibling designs this one builds on and doesn't repeat:
 ## Summary
 
 - **Today a plugin is a PHP package** dropped into `plugins/` on the server by an operator, loaded once per worker at boot, install-wide, running in-process with full host privileges. Much of what it declares is already data (data types, permissions, UI block trees, events, jobs, entitlements), but the behaviour behind every route and hook is PHP, and nothing changes without a deploy.
-- **Whity-Builder lets a company, or its AI, describe its own logic as data**: record types and fields, forms and views, rules, automations, document templates and themes, roles, and webhooks. The result is a **manifest plugin**: one JSON document, validated by core and run by core.
+- **Whity Builder lets a company, or its AI, describe its own logic as data**: record types and fields, forms and views, rules, automations, document templates and themes, roles, and webhooks. The result is a **manifest plugin**: one JSON document, validated by core and run by core.
 - **One runtime, not two.** Core gains a declarative plugin host that turns a manifest into the same registrations a PHP plugin makes (data types, block screens, permissions, events, jobs, MCP tools). A hand-written plugin can ship the same manifest beside its PHP. A builder plugin exports to a code plugin without changing how it runs.
 - **Live, per tenant, without a deploy.** A published manifest version is data in the tenant's database. Core resolves it per request through fixed entry points (one generic route family, one listener per event, one tool family), so nothing registers late in a worker and nothing needs a restart. Publishing takes effect on the next request; rollback is moving a pointer back.
 - **The AI proposes, a person publishes.** Over MCP an agent can read the tenant's logic, draft a change, see its impact, preview it on real data without side effects and run its tests. Publishing is a proposal a person with the right permission accepts, as everywhere else in Whity.
 - **A no-code plugin can't run code.** No PHP, JavaScript or SQL, no network calls except signed webhooks to allowed hosts, no data outside its own records and what it was granted to read, no permissions outside its namespace, and hard limits on size and runs.
 - **Open-core line.** Core (AGPL, free) holds the manifest format, its validator and the runtime, and keeps running published logic with no builder attached. The paid service (closed, hosted, like Whity ID and Whity Pay) holds the visual builder, AI authoring, drafts and history, tests and previews, the template gallery and export. The paid service checks the subscription; core only mirrors it as an ordinary entitlement that decides whether the builder's MCP toolset is shown.
-- **The biggest decision is WHIT-667.** The scope freeze says no new generic subsystems in core. This design argues the runtime is an extension of the plugin host and SDK, which the freeze names as Whity's job, but the record store (2.3) is new and the owner should decide (question 1).
+- **WHIT-667 allows it.** The owner decided on 31 Oct 2026 that the declarative host (P1-P7), the record store included, is an extension of the plugin host and SDK, which the freeze names as Whity's job, and not a new generic subsystem.
 
 ## 1. How plugins are built today
 
@@ -99,9 +99,9 @@ This is why a no-code plugin must not be code: data the host interprets is the o
 6. **No safe tier:** because plugins are fully trusted code, only trusted authors may write them, so a customer can never be allowed to.
 7. **No automations, webhooks or rules engine** to declare behaviour with; every "when this, do that" is a PHP hook.
 
-## 2. What Whity-Builder is
+## 2. What Whity Builder is
 
-Whity-Builder is where a company shapes Whity to how it works, without a developer: what it keeps track of, the forms people fill in, the screens they work from, the rules that stop mistakes, what happens automatically, the documents that go out, who may do what, and what other systems hear about it. The user can do this by hand in a visual builder, or by telling their AI what they want and approving what it proposes.
+Whity Builder is where a company shapes Whity to how it works, without a developer: what it keeps track of, the forms people fill in, the screens they work from, the rules that stop mistakes, what happens automatically, the documents that go out, who may do what, and what other systems hear about it. The user can do this by hand in a visual builder, or by telling their AI what they want and approving what it proposes.
 
 Example (Example Bakery takes custom cake orders):
 
@@ -178,7 +178,7 @@ Rules for the format:
 - **Data, not code.** Every value is a literal, a reference (`field`, `$record`, `$actor`, `$now`), or an expression in the closed vocabulary of 2.4. No string is ever evaluated as code.
 - **Everything has an English and an Arabic label**, as the register requires for visible strings.
 - **References are checked at validation**: a view's `source` names a record type in this manifest; a slot names a starter the manifest ships; a role names a permission set it declares. A manifest that fails validation can't be published; it never half-loads.
-- **The same file a developer writes.** A code plugin may ship `plugin.json` next to its PHP, and the loader treats the declarative parts identically. M7's block registry and plugin manifest (E.17-E.20) should be this manifest, not a second format (question 8).
+- **The same file a developer writes.** A code plugin may ship `plugin.json` next to its PHP, and the loader treats the declarative parts identically. **Decided** (owner, 31 Oct 2026): M7's plugin manifest and block registry (E.17-E.20) are this manifest, not a second format, and code plugins are encouraged to declare their data types, screens and permissions in `plugin.json` (the plugin docs and the HelloWorld example say so once P1 lands).
 
 ### 2.3 One runtime: the declarative plugin host
 
@@ -215,7 +215,7 @@ Why fixed entry points rather than registering each tenant's plugin into the rou
 | Speed | Fine for thousands to low millions of rows per type with declared indexes; reports read through the same store | Native speed |
 | Export | "Store-backed" export keeps it; "table-backed" export generates migrations and a copy job | Direct |
 
-Option A keeps live changes safe and keeps the runtime small. It is new core storage, which is why WHIT-667 needs an answer (question 1).
+Option A keeps live changes safe and keeps the runtime small. **Decided: option A** (owner, 31 Oct 2026), and it counts as part of the plugin host under WHIT-667.
 
 **Schema changes.** Every publish is diffed against the active version and classified:
 
@@ -229,7 +229,7 @@ Rules, computed fields, conditions and visibility share one expression language.
 
 - **Evaluated identically in PHP and TypeScript** (forms check rules as people type), from one conformance fixture set, like the block contract's renderer rules.
 - **Bounded**: a size cap, a depth cap and an evaluation budget per call; a rule that hits a cap is a validation error at publish, never a runtime surprise.
-- **Ours, in the SDK** (MIT), not a dependency, so there is no licensing or supply-chain review and the operator set is what we say it is (question 6).
+- **Ours, in the SDK** (MIT), not a dependency, so there is no licensing or supply-chain review and the operator set is what we say it is. **Decided** (owner, 31 Oct 2026): our own evaluator, no new dependencies.
 - **AI-friendly**: a model writes JSON reliably, every expression has a readable English rendering for the person approving it ("deposit is at least 30% of price"), and a diff is a tree diff.
 
 ### 2.5 Automations
@@ -268,7 +268,7 @@ The loop is the same in the visual builder and over MCP:
 6. **Publish.** A person with `plugins:publish` for this plugin accepts it. Core records the new version, moves the pointer, and it is live on the next request.
 7. **Roll back** at any time: a proposal to move the pointer to an earlier version, with the impact shown the same way.
 
-The agent never publishes or rolls back by itself, matching the rule that agents only suggest. The person can also build in the UI with the same steps; the UI is a client of the same API. Whether a workspace may let an agent publish to the preview channel or a sandbox without asking is question 4; live publishing always needs a person.
+The agent never publishes or rolls back by itself, matching the rule that agents only suggest. The person can also build in the UI with the same steps; the UI is a client of the same API. **Decided** (owner, 31 Oct 2026): a workspace may let agents run previews and tests freely (`builder_preview`, `builder_run_tests` and the read tools can be Allowed). Publishing anywhere, including to a sandbox, is always a proposal a person approves, at least until a sandbox tenant exists.
 
 **Which MCP endpoint.** In the vocabulary of `MCP-TOOL-SURFACE.md` (WHIT-746), as the owner decided it on 31 Oct 2026 (its section 9). The bare `/mcp` lists about five always-on, read-only core tools plus `search_operations` and `call_operation(operationId, arguments)`; everything else is found by search, which filters by RBAC, entitlement and the token's toolsets.
 
@@ -321,7 +321,7 @@ Export turns a builder plugin into a repository a developer owns, with no change
 - **Two modes.** *Store-backed* keeps records in `plugin_records`, so nothing moves. *Table-backed* also generates migrations for real tables and a copy job, for plugins that outgrow the store.
 - **Where it goes after.** An exported plugin is a code plugin: install-wide, on disk, deployed by an operator. Moving a tenant's live plugin to it is a deliberate step (install, migrate, switch off the tenant manifest), not automatic.
 - **Hybrid from then on.** A developer can override any part in PHP (a hook callback, a custom route, a custom block) while the rest stays declarative, because the adapter and the PHP class are the same plugin.
-- **Always available.** Export is how a customer leaves with their logic. It stays available when a subscription lapses (question 3).
+- **Always available.** Export is how a customer leaves with their logic. It stays available when a subscription lapses (decided, 31 Oct 2026).
 
 ### 2.10 Who uses it
 
@@ -333,7 +333,7 @@ The first market is MENA SMEs, starting in Jordan. Everything the builder produc
 
 ## 3. Open-core boundary
 
-| | **Whity core (AGPL, free)** | **Whity-Builder (closed, paid, hosted)** |
+| | **Whity core (AGPL, free)** | **Whity Builder (closed, paid, hosted)** |
 | --- | --- | --- |
 | Format | Manifest JSON Schema, published with the SDK (MIT) | — |
 | Validation | Validator, reference checks, limits | Live validation in the editor (calls core) |
@@ -345,14 +345,14 @@ The first market is MENA SMEs, starting in Jordan. Everything the builder produc
 | Distribution | Install a manifest by API or by file | Template gallery, install across workspaces, export to a code plugin |
 | Hosting | Runs in the customer's Whity | builder.whity.dev |
 
-Whity-Builder is one of the closed, paid services that plug into the free core natively. Each is optional configuration, never a hard dependency:
+Whity Builder is one of the closed, paid services that plug into the free core natively. Each is optional configuration, never a hard dependency:
 
 | Paid service | What it is | Core's open, standard side |
 | --- | --- | --- |
 | **Whity ID** | OIDC and identity, rebuilt from Nuqta | OAuth resource server (ADR 0015) |
 | **Whity Pay** | Payments and subscriptions | Payment-webhook consumer, entitlements |
 | **Whity Render** | PDF and document output | `DocumentIssuing` and the render protocol (WHIT-740, WHIT-741) |
-| **Whity-Builder** | No-code plugin building with AI | Manifest format, validator and runtime (this document) |
+| **Whity Builder** | No-code plugin building with AI | Manifest format, validator and runtime (this document) |
 
 First-party apps such as Front Office (leads, quotes, JoFotara-compliant invoices) sit beside them. The builder uses the others rather than repeating them: Whity ID for signing in and connecting to a workspace, Whity Pay for its subscription, Whity Render behind the issue-document step. A builder plugin can link to Front Office records through actions and events Front Office publishes, but it doesn't issue tax invoices itself; e-invoicing stays with Front Office.
 
@@ -367,6 +367,25 @@ Principles:
   - Core reflects the subscription as an ordinary entitlement (proposed `whity-builder.access`), set by core's existing open side: the payment-webhook consumer when Whity Pay reports the subscription, or an operator. It only decides whether search shows the `whity-builder` toolset (`requiresEntitlement`). Removing it hides tools; it unlocks nothing, because the service still refuses an unpaid workspace.
   - Core enforces only what it always enforces: the token, its scope, the principal's permissions, and the runtime limits as entitlements with free defaults, which the hosted Whity cloud can raise by plan through the existing `EntitlementService`.
 - **No hostage logic.** When a subscription ends, published plugins keep running, versions and rollback stay in core, and export stays available. Only editing in the builder stops.
+
+### 3.1 Metering
+
+The owner chose all four meters, each switchable per plan. They live in the builder service, because that's where the subscription is and what is being sold; core meters only its own runtime limits.
+
+| Meter | Unit | Counted by | Source of truth |
+| --- | --- | --- | --- |
+| Workspace | a connected workspace per billing period | builder service, at connection | builder's connection records |
+| Published plugin | a plugin with an active version in a workspace, per period | builder service, from core's versions API (WHIT-764) | core's `plugin_manifest_versions` |
+| AI usage | model usage of the built-in assistant and AI-authored drafts, in tokens or credits | builder service, per call | builder's usage ledger |
+| Seat | a person who builds (holds `plugins:build`) in a connected workspace, per period | builder service, from core's permission data over the connection | core RBAC |
+
+Rules:
+
+- **Per plan, each meter is off, included up to a quantity, or billed per unit.** The plan only says which; `[plan name]` and `[price]` stay open. Whity Pay holds plans, prices and invoices and receives usage as metered line items; the builder sends usage records, it doesn't price them.
+- **Usage is read, never guessed.** Published plugins and seats are counted from core's own data over the workspace connection at the end of each period, so the bill matches what the workspace can see.
+- **Meters stop building, never running.** Going over an included quantity can block new drafts or publishes, or bill the overage, as the plan says. It never switches off a published plugin (decision 3).
+- **Bring your own AI isn't metered as AI usage.** A customer's own agent calling the `whity-builder` toolset costs us no model usage, so only the built-in assistant counts. It still counts toward published plugins and seats.
+- **Self-hosted workspaces** (decision 5) are metered the same way over their paid connection.
 
 ## 4. Core prerequisites and how they map onto work in flight
 
@@ -409,7 +428,7 @@ Phases A and B are the minimum that delivers the owner's sentence: users and the
 
 ## 6. Risks
 
-- **Scope.** Phase A is several engineer-months of core work on a framework with one maintainer, under a freeze meant to stop exactly this growth. Mitigation: each prerequisite is useful to code plugins first (P1, P2, P4 reduce boilerplate in Elmak-style plugins), and nothing in phase A starts before the owner answers question 1.
+- **Scope.** Phase A is several engineer-months of core work on a framework with one maintainer, under a freeze meant to stop exactly this growth. Mitigation: each prerequisite is useful to code plugins first (P1, P2, P4 reduce boilerplate in Elmak-style plugins), and the owner has ruled (WHIT-667, 31 Oct 2026) that it extends the plugin host, so it is in scope.
 - **Two ways to do everything.** If manifest plugins grow features PHP plugins lack, or the other way round, the "one runtime" promise breaks. Mitigation: every manifest feature is a declaration a PHP plugin can make too, and the conformance kit runs both.
 - **Performance of the record store.** JSON rows with declared indexes are slower than tables. Mitigation: indexes are declared and enforced, limits are entitlements, and table-backed export exists for the plugins that outgrow it.
 - **Per-tenant MCP and OpenAPI.** Tools and the OpenAPI document are derived once per worker today. Tenant plugins make both per tenant. Mitigation: designed with the MCP tool-surface session (P3); the published `openapi.json` stays core-only.
@@ -417,16 +436,21 @@ Phases A and B are the minimum that delivers the owner's sentence: users and the
 - **Automation storms.** Mitigation: depth guard, caps, quotas, traces, and a per-plugin off switch.
 - **Lock-in perception.** Mitigation: core runs everything, export is always available, a lapsed subscription changes nothing at runtime.
 
-## 7. Questions for the owner
+## 7. Owner's answers (31 Oct 2026) and open questions
 
-1. **WHIT-667.** Is the declarative host (P1-P7) an extension of the plugin host and SDK, which the freeze names as Whity's job, or a new generic subsystem that waits for the checkpoint? The record store (P4) is the part most like new storage.
-2. **Storage.** Record store (A, recommended) or real tables per tenant (B)?
-3. **Lapsed subscriptions.** Agree that published plugins keep running and export stays available when the builder isn't paid for?
-4. **Agent autonomy.** Agents never publish live. May a workspace let an agent run previews and tests without asking each time (recommended: yes), or publish to a sandbox without asking (recommended: no until a sandbox tenant exists)?
-5. **Self-hosted customers.** May a self-hosted Whity connect to the hosted builder (recommended: yes, as a paid connection), or is the builder only for the Whity cloud?
-6. **Expressions.** Our own JSON-tree evaluator in the SDK (recommended), JSON Logic's libraries (new dependencies to approve), or CEL?
-7. **Name, repository and host.** `whity-org/whity-builder` (private) at builder.whity.dev? The other services are now written without a hyphen (Whity ID, Whity Pay, Whity Render); should this be **Whity Builder** too? The doc keeps "Whity-Builder" until the owner says.
-8. **One manifest.** Should M7's plugin manifest and block registry be this manifest, and should code plugins be encouraged to declare their data types, screens and permissions in `plugin.json`?
-9. **Pricing dimensions.** Per workspace, per published plugin, per AI usage, or per seat: `[plan name]` and `[price]` stay open; this only decides what the builder meters.
+| # | Question | Answer |
+| --- | --- | --- |
+| 1 | WHIT-667: is the declarative host a new generic subsystem? | **No, allowed.** P1-P7, the record store included, extend the plugin host and SDK. Recorded on WHIT-667. |
+| 2 | Storage | **Shared record store** (option A, 2.3). |
+| 3 | Lapsed subscriptions | Published plugins keep running and export stays open; only building and editing stop. |
+| 4 | Agent autonomy | Agents may run previews and tests freely if the workspace allows. Publishing, including to a sandbox, is always a proposal a person approves until a sandbox tenant exists. |
+| 5 | Self-hosted customers | **Yes**, as a paid connection to the hosted builder. |
+| 6 | Expressions | Our own JSON-tree evaluator in the SDK, no new dependencies. |
+| 7 | Name, repository, host | **Whity Builder** (no hyphen, like Whity ID, Whity Pay and Whity Render). Private repo `whity-org/whity-builder`, at builder.whity.dev. |
+| 8 | One manifest | Yes: M7's plugin manifest and block registry are this manifest; code plugins are encouraged to use `plugin.json`. |
+| 9 | Pricing meters | **All four**: per workspace, per published plugin, per AI usage, per seat, each switchable per plan (3.1). `[plan name]` and `[price]` stay open. |
+
+Still open:
+
 10. **How the `whity-builder` toolset reaches core's MCP catalogue.** Proposed: a small closed connector plugin (ADR 0014 exception) that contributes the toolset and forwards calls to the hosted service, installed when a workspace connects the builder. The alternative is a generic "remote toolset" mechanism in core, which is new core surface.
-11. **Agent defaults for builder plugins.** Confirm the default undo windows per kind of write (2.6). Modes come from the scope grant and per-action ceilings, as the MCP design decided; publishing and rollback stay always Ask first.
+11. **Default undo windows** for builder writes (2.6): proposed 30 minutes for record changes, none for sent webhooks and issued documents.
