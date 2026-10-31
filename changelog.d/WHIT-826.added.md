@@ -1,0 +1,1 @@
+- A list of design asks for the brand team (docs/design/DESIGN-ASKS.md): the settings area, the user menu, the approvals history and edit flow, the Whity Builder impact plan on a proposal, and issuing an agent credential.
