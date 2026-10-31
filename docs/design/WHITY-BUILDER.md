@@ -276,7 +276,7 @@ The agent never publishes or rolls back by itself, matching the rule that agents
 - **Core's manifest-version routes** (validate, diff, preview, test, publish, activate; P7) derive into a core toolset (proposed `core.plugins`, split from `core.platform`), `discoverable`, with `agentPolicy: propose` on publish and activate. Any MCP client can use them; this is the free, open side.
 - **The `builder_*` tools** are served by the builder service's own MCP endpoint, not by core. They add drafts, history, change operations and plain-language impact on top of core's routes, and appear only when the builder's subscription check passes. A person's everyday agent doesn't see them unless that endpoint is connected.
 
-Tool names keep to `[A-Za-z0-9_-]{1,64}`, as that design requires.
+Tool names keep to `[A-Za-z0-9_-]{1,64}`, as that design requires. That design (commit 554c9f26) also treats the tool catalogue as per tenant: budgets are evaluated for the caller's tenant, the catalogue signature includes a hash of that tenant's manifest-plugin tools so a publish notifies only that tenant's clients, and a manifest plugin's split endpoint `/mcp/<pluginKey>` exists only for its own tenant (404 elsewhere).
 
 ### 2.7 Versions, drafts, preview and tests
 
