@@ -41,23 +41,9 @@ final class RouteCatalogueCompletenessTest extends TestCase
         'PATCH /api/x/{plugin}/{type}/{id}',
         'DELETE /api/x/{plugin}/{type}/{id}',
         'POST /api/x/{plugin}/{type}/{id}/moves/{move}',
-        // WHIT-763: a workspace plugin's automation run traces and its
-        // automations switch. Schemas follow with the builder API (WHIT-764),
-        // and traces reach MCP with WHIT-792.
-        'GET /api/workspace-plugins/{plugin}/automation-runs',
-        'GET /api/workspace-plugins/{plugin}/automation-runs/{id}',
-        'PUT /api/workspace-plugins/{plugin}/automations',
-        // WHIT-764: a workspace's own plugins and their versions. Schemas,
-        // and the MCP tools derived from them, follow with the next slice
-        // (preview, tests and agent proposals).
-        'GET /api/workspace-plugins',
-        'POST /api/workspace-plugins',
-        'POST /api/workspace-plugins/validate',
-        'POST /api/workspace-plugins/impact',
-        'POST /api/workspace-plugins/test',
-        'GET /api/workspace-plugins/{plugin}/versions',
-        'GET /api/workspace-plugins/{plugin}/versions/{id}',
-        'POST /api/workspace-plugins/{plugin}/versions/{id}/activate',
+        // WHIT-764: the workspace plugin routes are declared in
+        // CoreApiSchemas::workspacePluginRoutes(); the record routes above wait
+        // for WHIT-792 (records over MCP, per workspace).
         // WC-235: public self-service registration — OpenAPI schema to follow in
         // a dedicated documentation task (mirrors the auth-routes rollout).
         'POST /api/register',

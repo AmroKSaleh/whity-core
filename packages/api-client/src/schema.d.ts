@@ -5789,10 +5789,218 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspace-plugins": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the workspace's own plugins
+         * @description Plugins this workspace published (not those installed for every workspace), with the live version and whether the plugin and its automations are switched on.
+         */
+        get: operations["get_api_v1_workspace_plugins"];
+        put?: never;
+        /**
+         * Publish a version of a workspace plugin
+         * @description Runs its tests, then compares it with the live version; a destructive change needs confirmDestructive. Makes it live for the whole workspace on the next request.
+         */
+        post: operations["post_api_v1_workspace_plugins"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace-plugins/impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * See what publishing a manifest would change
+         * @description Compares it with the live version and counts the records each change touches: safe, data (records need attention) or destructive (values stop being served). Publishes nothing.
+         */
+        post: operations["post_api_v1_workspace_plugins_impact"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace-plugins/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a manifest's own tests
+         * @description Runs the examples under tests against the real record store in a transaction that is always rolled back, so nothing stays. Each failure says why and what the write gave.
+         */
+        post: operations["post_api_v1_workspace_plugins_test"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace-plugins/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate a workspace plugin manifest
+         * @description Checks a plugin.json as a whole and against what a workspace plugin may declare. Publishes nothing. Answers ok with every error by path.
+         */
+        post: operations["post_api_v1_workspace_plugins_validate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace-plugins/{plugin}/automation-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a workspace plugin's automation runs
+         * @description Newest first, each with its trigger, status, reason and trace. Only runs whose record types the caller can read are listed: traces carry record values.
+         */
+        get: operations["get_api_v1_workspace_plugins_plugin_automation_runs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace-plugins/{plugin}/automation-runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one automation run with its trace
+         * @description What triggered it, who it acted for, how far it got and why it stopped. Needs read access to the record types its trace shows.
+         */
+        get: operations["get_api_v1_workspace_plugins_plugin_automation_runs_id"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace-plugins/{plugin}/automations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Switch a workspace plugin's automations on or off
+         * @description The plugin keeps serving its screens and records either way. Switching on needs plugins:enable and off plugins:disable, checked by the handler. Queued runs stop while off.
+         */
+        put: operations["put_api_v1_workspace_plugins_plugin_automations"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace-plugins/{plugin}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a workspace plugin's versions
+         * @description Every published version, newest first, with who published it and which one is live. Versions are never deleted.
+         */
+        get: operations["get_api_v1_workspace_plugins_plugin_versions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace-plugins/{plugin}/versions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get one version of a workspace plugin
+         * @description The version with its full manifest.
+         */
+        get: operations["get_api_v1_workspace_plugins_plugin_versions_id"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspace-plugins/{plugin}/versions/{id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Make a version of a workspace plugin live (roll back)
+         * @description Checks the version as if it were being published, compares it with the live one, and makes it live. A destructive change needs confirmDestructive.
+         */
+        post: operations["post_api_v1_workspace_plugins_plugin_versions_id_activate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ActivateWorkspacePluginRequest: {
+            /** @description Go ahead although the change is destructive (existing values stop being served). Nothing is deleted, so a rollback serves them again. */
+            confirmDestructive?: boolean;
+        };
         ActivationCodeIssueRequest: {
             licensed_device_id?: number | null;
             max_redemptions?: number;
@@ -5972,6 +6180,64 @@ export interface components {
         AuditLogListResponse: {
             data: components["schemas"]["AuditLogEntry"][];
             pagination: components["schemas"]["Pagination"];
+        };
+        AutomationRun: {
+            id: number;
+            plugin: string;
+            automation: string;
+            /** @description What triggered it, such as order.moved.confirmed */
+            event: string;
+            record_type: string;
+            record_id: number;
+            /** @description How many automation hops produced the event; 1 when a person caused it */
+            depth: number;
+            /** @description The person it acts for */
+            actor_profile_id?: number | null;
+            /** @description The first run of its chain, when another run started it */
+            root_run_id?: number | null;
+            automation_hash?: string;
+            /** @enum {string} */
+            status: "queued" | "running" | "done" | "failed" | "stopped";
+            /** @description Why it failed or was stopped, such as depth_limit or automations_off */
+            reason?: string | null;
+            trace: components["schemas"]["AutomationRunStep"][];
+            created_at: string;
+            finished_at?: string | null;
+        };
+        AutomationRunListResponse: {
+            data: components["schemas"]["AutomationRun"][];
+        };
+        AutomationRunResponse: {
+            data: components["schemas"]["AutomationRun"];
+        };
+        AutomationRunStep: {
+            /** @description Its position in the automation's steps */
+            step: number;
+            /** @description set_fields, create_record, move or notify */
+            kind: string;
+            /** @enum {string} */
+            status: "done" | "failed";
+            /** @description Why it failed, such as not_permitted or issues */
+            reason?: string;
+            /** @description The values it worked with */
+            input?: {
+                [key: string]: unknown;
+            };
+            /** @description What it did, such as the record it created or the people notified */
+            outcome?: {
+                [key: string]: unknown;
+            } | null;
+            at: string;
+        };
+        AutomationsSwitchRequest: {
+            /** @description true to switch the plugin's automations on, false to switch them off */
+            enabled: boolean;
+        };
+        AutomationsSwitchResponse: {
+            data: {
+                plugin: string;
+                automationsEnabled: boolean;
+            };
         };
         BillingAccessResponse: {
             data: {
@@ -7897,6 +8163,75 @@ export interface components {
         LogoutResponse: {
             status: string;
         };
+        ManifestImpact: {
+            plugin: string;
+            /** @description The live version, or null for a new plugin */
+            from: string | null;
+            to: string;
+            /**
+             * @description The worst change
+             * @enum {string}
+             */
+            level: "safe" | "data" | "destructive";
+            changes: components["schemas"]["ManifestImpactChange"][];
+        };
+        ManifestImpactChange: {
+            /**
+             * @description What it does to existing data
+             * @enum {string}
+             */
+            effect: "safe" | "data" | "destructive";
+            /** @description The kind of change, such as field_removed or automation_added */
+            change: string;
+            /** @description Where in the manifest, such as records.order.fields.paid */
+            path: string;
+            /** @description How many existing records it touches, when it counts them */
+            records?: number;
+            message: string;
+            messageAr: string;
+        };
+        ManifestImpactResponse: {
+            data: components["schemas"]["ManifestImpact"];
+        };
+        ManifestTestResult: {
+            /** @description Its position in tests */
+            test: number;
+            label: {
+                /** @description English */
+                en: string;
+                /** @description Arabic */
+                ar: string;
+            };
+            passed: boolean;
+            /**
+             * @description Why it failed
+             * @enum {string}
+             */
+            reason?: "refused" | "not_refused" | "issues_differ" | "field_differs" | "state_differs" | "error";
+            /** @description What the write gave: refused, and the issues, or the fields and state (field names the one that differed) */
+            got?: {
+                [key: string]: unknown;
+            };
+        };
+        ManifestTestResults: {
+            passed: number;
+            failed: number;
+            results: components["schemas"]["ManifestTestResult"][];
+        };
+        ManifestTestResultsResponse: {
+            data: components["schemas"]["ManifestTestResults"];
+        };
+        ManifestValidationResponse: {
+            data: {
+                ok: boolean;
+                /** @description Each names its path, such as records.order.fields.price.currency */
+                errors: string[];
+                /** @description The plugin's name, when valid */
+                plugin?: string;
+                /** @description The version, when valid */
+                version?: string;
+            };
+        };
         MarkAllReadResponse: {
             marked: number;
         };
@@ -8773,6 +9108,27 @@ export interface components {
             meta?: {
                 routed: boolean;
                 ignored_keys: string[];
+            };
+        };
+        PublishWorkspacePluginRequest: {
+            /** @description The plugin.json object (format whity.plugin/1). See sdk/resources/plugin-manifest.schema.json. */
+            manifest: {
+                [key: string]: unknown;
+            };
+            /** @description What changed, kept with the version */
+            notes?: string;
+            /** @description Go ahead although the change is destructive (existing values stop being served). Nothing is deleted, so a rollback serves them again. */
+            confirmDestructive?: boolean;
+        };
+        PublishedWorkspacePluginResponse: {
+            data: {
+                version_id: number;
+                plugin: string;
+                version: string;
+                /** @description SHA-256 of the manifest as stored */
+                hash: string;
+                impact: components["schemas"]["ManifestImpact"];
+                tests?: components["schemas"]["ManifestTestResults"];
             };
         };
         PurchasablePlan: {
@@ -9962,6 +10318,53 @@ export interface components {
                 received: number;
                 settled: number;
             };
+        };
+        WorkspacePlugin: {
+            /** @description The name in lower case, used in routes */
+            slug: string;
+            /** @description The plugin's name */
+            plugin: string;
+            /** @description The live version's id */
+            version_id: number;
+            /** @description The live version */
+            version: string;
+            /** @description Whether the plugin is switched on */
+            enabled: boolean;
+            /** @description Whether its automations are switched on */
+            automations_enabled: boolean;
+            updated_at?: string;
+        };
+        WorkspacePluginListResponse: {
+            data: components["schemas"]["WorkspacePlugin"][];
+        };
+        WorkspacePluginManifestRequest: {
+            /** @description The plugin.json object (format whity.plugin/1). See sdk/resources/plugin-manifest.schema.json. */
+            manifest: {
+                [key: string]: unknown;
+            };
+        };
+        WorkspacePluginVersion: {
+            id: number;
+            version: string;
+            hash: string;
+            notes?: string | null;
+            published_by?: number | null;
+            /** @description The person an agent published it for */
+            acting_for?: number | null;
+            /** @description The person who approved an agent's proposal */
+            approved_by?: number | null;
+            published_at: string;
+            live?: boolean;
+            /** @description The manifest, on the single-version route only */
+            manifest?: {
+                [key: string]: unknown;
+            };
+        };
+        WorkspacePluginVersionListResponse: {
+            data: components["schemas"]["WorkspacePluginVersion"][];
+        };
+        WorkspacePluginVersionResponse: {
+            data: components["schemas"]["WorkspacePluginVersion"];
         };
     };
     responses: never;
@@ -42084,6 +42487,900 @@ export interface operations {
                 };
             };
             /** @description Invalid user id, or the user has no email address */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_workspace_plugins: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The workspace's plugins */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePluginListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_workspace_plugins: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PublishWorkspacePluginRequest"];
+            };
+        };
+        responses: {
+            /** @description The published version, with its plan and test results */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishedWorkspacePluginResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Destructive and not confirmed; details.impact is the plan */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Invalid (details.errors) or its tests failed (details.tests) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_workspace_plugins_impact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspacePluginManifestRequest"];
+            };
+        };
+        responses: {
+            /** @description The plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManifestImpactResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The manifest isn't valid; details.errors lists why */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_workspace_plugins_test: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspacePluginManifestRequest"];
+            };
+        };
+        responses: {
+            /** @description The results */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManifestTestResultsResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The manifest isn't valid; details.errors lists why */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_workspace_plugins_validate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspacePluginManifestRequest"];
+            };
+        };
+        responses: {
+            /** @description Whether it is valid, and every error */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManifestValidationResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No manifest was sent */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_workspace_plugins_plugin_automation_runs: {
+        parameters: {
+            query?: {
+                /** @description Only runs older than this run id, for the next page. */
+                before?: number;
+                /** @description How many runs, 1 to 100 (50 if left out). */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The workspace plugin's slug: its name in lower case, as its permissions start with. */
+                plugin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The runs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutomationRunListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not one of this workspace's live plugins */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_workspace_plugins_plugin_automation_runs_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace plugin's slug: its name in lower case, as its permissions start with. */
+                plugin: string;
+                /** @description The run's id. */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutomationRunResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found, or not readable by the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    put_api_v1_workspace_plugins_plugin_automations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace plugin's slug: its name in lower case, as its permissions start with. */
+                plugin: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutomationsSwitchRequest"];
+            };
+        };
+        responses: {
+            /** @description The switch as it now stands */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutomationsSwitchResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not one of this workspace's live plugins */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description enabled must be true or false */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_workspace_plugins_plugin_versions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace plugin's slug: its name in lower case, as its permissions start with. */
+                plugin: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The versions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePluginVersionListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not one of this workspace's plugins */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_workspace_plugins_plugin_versions_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace plugin's slug: its name in lower case, as its permissions start with. */
+                plugin: string;
+                /** @description The version's id. */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The version */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspacePluginVersionResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not one of this workspace's versions */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_workspace_plugins_plugin_versions_id_activate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The workspace plugin's slug: its name in lower case, as its permissions start with. */
+                plugin: string;
+                /** @description The version to make live. */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActivateWorkspacePluginRequest"];
+            };
+        };
+        responses: {
+            /** @description The version now live, with its plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublishedWorkspacePluginResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not one of this workspace's versions */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Destructive and not confirmed; details.impact is the plan */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The version no longer passes the checks; details.errors lists why */
             422: {
                 headers: {
                     [name: string]: unknown;
