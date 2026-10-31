@@ -41,6 +41,12 @@ Merge fields (the `field` node, chips, `{{` and Field ▾), preview with a recor
 
 Done when: EditorPageView, EditorInline (fields) and TplDocDesigner match; a template publishes only when the check is clear; a published template prints through Whity Render with field values.
 
+## M4d · Document themes
+
+Right after M4c (owner, 31 Oct 2026). The model in `DOCUMENT-THEMES.md` (E.44, E.45): the `document_themes` table, the resolver (Whity standard, plugin, workspace, document overrides), freezing the resolved theme at publish, the `/api/document-themes` routes with the new `documents:themes` permission, `documents.print_color` moved into the workspace theme, and the workspace main colour (2.8) stored server-side as the default accent. The theme picker and Document themes screen follow once their designs exist.
+
+Done when: the editor's page view and a published template's PDF use the same resolved theme; changing a theme reaches a published template only at its next publish; no personal themes exist.
+
 ## M5 · Comments and suggestions
 
 Modes (E.10), suggestion marks and block suggestions, the margin rail and the drawer under 1024px (E.6), comment threads with @mentions and resolve, accept and reject with logging (E.29), comment highlights on screen only (E.39).
@@ -55,13 +61,13 @@ Done when: EditorAgents matches; no code path lets an agent change a document wi
 
 ## M7 · Plugin and saved blocks
 
-The block registry and plugin manifest, native rendering for verified and first-party plugins and the sandboxed frame for others, print views, the plugin-off placeholder (E.17–E.20). Saved blocks: save from a multi-block selection, synced or copy, sharing, per-document parts, detach, the library, and the next-publish rule (E.21–E.24, E.38).
+The block registry and plugin manifest, native rendering for verified and first-party plugins and the sandboxed frame for others, print views, the plugin-off placeholder (E.17–E.20). Plugin document themes (`PluginDocumentThemesInterface`, `DOCUMENT-THEMES.md` 7) ship in the same SDK release. Saved blocks: save from a multi-block selection, synced or copy, sharing, per-document parts, detach, the library, and the next-publish rule (E.21–E.24, E.38).
 
 Done when: EditorCustomBlocks matches; a sandboxed block can't reach the page outside its frame; a disabled plugin keeps its data and blocks publishing.
 
 ## M8 · Arabic, type and accessibility
 
-Arabic labels throughout, the mirrored shell, per-block direction, Readex Pro Arabic titles (E.35), the screen and print type scales (E.33), full width (E.34), keyboard access to every action, screen reader names, reduced motion.
+Arabic labels throughout, the mirrored shell, per-block direction, Readex Pro Arabic titles (E.35), the screen and print type scales (E.33), the theme type options title face and large print (E.46, E.47), full width (E.34), keyboard access to every action, screen reader names, reduced motion.
 
 Done when: EditorArabic and EditorType match; an axe check passes on the editor; every toolbar and menu action works from the keyboard.
 

@@ -5,13 +5,16 @@ declare(strict_types=1);
 namespace Whity\Mcp;
 
 use Whity\Core\Router;
+use Whity\Mcp\Tools\ToolSurface;
 
 /**
  * Which routes the MCP server offers to agents at all (ADR-0006 §4, WHIT-695).
  *
  * A route is exposed — derived into a tool, listed as a resource, readable
  * through resources/read — when an access gate guards it (a requiredPermission
- * or a requiredRole), or when its schema opts in with `'mcp' => true`.
+ * or a requiredRole), or when its schema opts in with `'mcp' => true` (or
+ * `'mcp' => ['expose' => true]`). `'mcp' => ['expose' => false]` or
+ * `['visibility' => 'off']` keeps even a gated route off (WHIT-747).
  *
  * Everything else stays off the agent surface. The ungated routes are the
  * session and credential machinery (login, refresh, 2FA, password, emails,
@@ -38,6 +41,13 @@ final class McpExposure
      */
     public static function exposes(array $route, array $gatedRouterRoutes = [], ?Router $router = null): bool
     {
+        $options = ToolSurface::routeOptions(is_array($route['schema'] ?? null) ? $route['schema'] : []);
+        // WHIT-747: an explicit opt-out wins over the gate. For routes a model
+        // can't use well (bulk imports, binary uploads), however they are gated.
+        if ($options['expose'] === false || $options['visibility'] === ToolSurface::VISIBILITY_OFF) {
+            return false;
+        }
+
         if (self::gated($route)) {
             return true;
         }
@@ -53,8 +63,7 @@ final class McpExposure
             }
         }
 
-        $schema = $route['schema'] ?? null;
-        return is_array($schema) && ($schema['mcp'] ?? false) === true;
+        return $options['expose'] === true;
     }
 
     /**
