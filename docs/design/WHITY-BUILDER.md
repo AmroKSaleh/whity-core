@@ -332,6 +332,16 @@ Export turns a builder plugin into a repository a developer owns, with no change
 | Distribution | Install a manifest by API or by file | Template gallery, install across workspaces, export to a code plugin |
 | Hosting | Runs in the customer's Whity | builder.whity.dev |
 
+Whity-Builder is one of three paid services, each optional configuration that plugs into the free core, never a hard dependency:
+
+| Paid service | What it is | Core's open, standard side |
+| --- | --- | --- |
+| **Whity-Auth** | OIDC and identity, rebuilt from Nuqta | OAuth resource server (ADR 0015) |
+| **Whity-Pay** | Payments and subscriptions | Payment-webhook consumer, entitlements |
+| **Whity-Builder** | No-code plugin building with AI | Manifest format, validator and runtime (this document) |
+
+The builder uses the other two rather than repeating them: Whity-Auth for signing in and connecting to a workspace, Whity-Pay for its subscription.
+
 Principles:
 
 - **Core runs logic with no builder attached.** Anything published keeps working if the builder is disconnected, down or no longer paid for. The builder is never a hard dependency, the same rule as Whity-Auth and Whity-Pay.
