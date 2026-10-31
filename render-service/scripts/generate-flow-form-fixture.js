@@ -107,7 +107,8 @@ function build(direction) {
     direction,
     title: w.sub,
     page: { preset: 'a4', margin: { topMm: 34, rightMm: 16, bottomMm: 20, leftMm: 16 } },
-    theme: { ink: '#032230', muted: '#4b5f69', accent: '#0c95d4', line: '#c9d6dc', tint: '#eef6fb' },
+    // A document theme sets only the print colour and where it goes (E.44, E.45).
+    theme: { accent: '#0c95d4', accentUse: 'title-and-headings' },
     header: {
       start: { image: { src: PNG, alt: '', heightMm: 12 }, text: w.uni, subtext: w.sub },
       end: { badge: { label: w.form, value: 'A' } },

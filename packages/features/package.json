@@ -11,13 +11,12 @@
     "./record": "./src/record/index.ts",
     "./datetime": "./src/datetime/index.ts",
     "./roles": "./src/roles/index.ts",
-    "./document-designer": "./src/document-designer/index.ts",
-    "./document-designer/print-document": "./src/document-designer/print-document.tsx",
     "./users": "./src/users/index.ts",
     "./sync": "./src/sync/index.ts",
     "./i18n": "./src/i18n/index.ts",
     "./mcp": "./src/mcp/index.ts",
-    "./document-editor": "./src/document-editor/index.ts"
+    "./document-editor": "./src/document-editor/index.ts",
+    "./expressions": "./src/expressions/index.ts"
   },
   "files": [
     "src"
@@ -33,10 +32,10 @@
   },
   "dependencies": {
     "@whity-org/ui": "^0.5.0",
-    "@tabler/icons-react": "^3.49.0"
+    "@tabler/icons-react": "^3.50.0"
   },
   "devDependencies": {
-    "@hookform/resolvers": "^6.0.0",
+    "@hookform/resolvers": "^6.0.1",
     "@types/katex": "^0.16.8",
     "katex": "^0.19.1",
     "radix-ui": "^1.8.1",

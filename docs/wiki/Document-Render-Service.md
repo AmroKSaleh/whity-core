@@ -1,13 +1,17 @@
 # Document Render Service (`whity_render`)
 
-The server-side PDF tier for the document/label designer: a Node + headless
-Chromium container that loads **the designer's own React renderer** and returns
-PDF bytes at exact millimetre size, **and** a flowing mode that paginates a
-content tree into as many pages as it takes (see [Two render modes](#two-render-modes)).
-The first exists so an exported design is the
-same artefact the author saw on screen, rather than the output of a second,
-hand-rolled renderer that drifts from the canvas — see
-[ADR 0012](../adr/0012-document-render-microservice.md).
+The server-side PDF tier for the document editor: a Node + headless Chromium
+container that prints the editor's **documents** — a content tree paginated
+into as many pages as it takes — and its **label sheets** (see
+[Render modes](#render-modes)). See
+[ADR 0012](../adr/0012-document-render-microservice.md) for why it is a
+separate service.
+
+> **Editor M4c removed the fixed-canvas mode.** `POST /render`, which loaded
+> the old document designer's own React bundle (the "harness") to print a
+> canvas of millimetre-positioned elements, went with that designer. The route
+> now answers `404`, and the image no longer bundles any `web/` or `packages/`
+> source.
 
 Related: [Document & Label Designer](Document-Designer.md) (the designer
 itself) · [Feature Flags](Feature-Flags.md) (`documents.render_enabled`) ·
@@ -31,19 +35,17 @@ one gated job.
 
 ### Why it has to be published, not built by operators
 
-`render-service/Dockerfile` takes the **repository root** as its build context.
-It bundles `web/components/documents`, `web/lib/documents`,
-`packages/ui/src` and `packages/features/src` in **from source**, so the PDF
-comes out of the same code the designer draws with. That is ADR 0012's whole
-premise, and it is also why the image cannot be assembled downstream:
-`render-service/` ships in the **app** image, that web source ships only in the
-**web** image, and neither published artefact contains both.
+`render-service/Dockerfile` takes the **repository root** as its build context:
+besides `render-service/` itself it reads `src/Core/CoreVersion.php`, so the
+image can say which core release it belongs to. A render tier built by hand
+from some other checkout does not fail — it keeps printing with that
+checkout's flow renderer, and nothing outside the box notices. Publishing it
+from the same gated job as the app and web images is what keeps the three
+paired.
 
-Before this image existed, running the render tier meant hand-assembling a
-build context out of two images and repeating it on every core bump. The
-failure mode when that goes wrong is not an error — it is a render tier that
-keeps working while producing exports that no longer match the preview, which
-is precisely the drift ADR 0012 exists to prevent.
+(Until editor M4c the image also bundled the old designer's `web/` and
+`packages/` source from the repository, which no published artefact carried —
+the original reason, #947, this image had to be published at all.)
 
 ### Version pairing — and how to check it
 
@@ -91,7 +93,7 @@ The render tier is **opt-in at two independent levels**, and both must be on:
    `cron`/`queue`/`scheduler`. A deployment that never exports PDFs should not
    carry a Chromium container.
 2. **Setting** — `documents.render_enabled` (default `false`). With the
-   container running but the setting off, `POST /api/document-templates/{id}/render`
+   container running but the setting off, `POST /api/document-sources/{id}/render`
    returns a clean `503` and never contacts the service.
 
 ```bash
@@ -113,10 +115,8 @@ docker compose --profile render up -d --build
 | `RENDER_SERVICE_URL` | app | `http://render:8130` | In-network base URL of the render container. |
 | `RENDER_SHARED_SECRET` | app **and** render | — | Must match on both sides and be **≥ 32 chars**, or every render is refused (`401`). |
 | `RENDER_TIMEOUT_SECONDS` | app | `30` | HTTP timeout for one render call. Large batches need this raised — see below. |
-| `RENDER_PDF_TIMEOUT_MS` | render | `30000` | How long `page.pdf()` may take. **The first ceiling a large batch hits.** |
-| `RENDER_READY_TIMEOUT_MS` / `RENDER_NAV_TIMEOUT_MS` | render | `20000` | Waiting for the harness to signal ready / to load. |
-| `RENDER_RATE_LIMIT_MAX` / `_WINDOW_MS` | render | `30` / `60000` | Per-window cap on `POST /render`. |
-| `RENDER_HARD_MAX_ROWS` / `_UNITS` / `_TEMPLATE_BYTES` | render | `2000` / `5000` / 10 MiB | Defence-in-depth ceilings inside the service; the operator-facing limits are the settings below. |
+| `RENDER_FLOW_PDF_TIMEOUT_MS` / `RENDER_FLOW_READY_TIMEOUT_MS` / `RENDER_FLOW_NAV_TIMEOUT_MS` | render | `180000` / `180000` / `30000` | `page.pdf()`, pagination, and loading the generated page — see [Flowing-mode configuration](#flowing-mode-configuration). |
+| `RENDER_RATE_LIMIT_MAX` / `_WINDOW_MS` | render | `30` / `60000` | Per-window cap, shared by `POST /render/flow` and `POST /render/labels` (one Chromium). |
 | `RENDER_PROBE_TIMEOUT_MS` | render | `60000` | Per-step ceiling on the boot-time capability probe. Raise it only if `/health` reports `capabilities.status: "error"` with a launch timeout. |
 | `RENDER_FLOW_REQUIRE_CAPABILITIES` | render | `true` | Whether a **required** capability-probe failure refuses `POST /render/flow` with a `503`. The escape hatch, not a normal setting — see below. |
 | `RENDER_FLOW_CAPABILITY_WAIT_MS` | render | `RENDER_PROBE_TIMEOUT_MS` | How long a flow request waits for a probe that has not landed yet before rendering ungated. |
@@ -129,15 +129,18 @@ docker compose --profile render up -d --build
 memory is not where you would look for it, and the thing that actually stops a
 large export is not memory at all.
 
-A render's page count is `dataRows × template.pages` — one batch row of a
-three-page template is three pages, and 500 rows of it is 1500.
+A flowing document's page count is decided by the renderer, so size from the
+largest document you expect to print, not from a row count.
 
 ### Measured
 
-Numbers below are from the published image on a Docker Desktop host (12.7 GB
-available to the VM), rendering an A4 template carrying text, a KaTeX
-expression and a Code128 barcode on each of three pages. Peak is the
-container's own cgroup usage, sampled at 200 ms through the render.
+Numbers below were measured on the published image on a Docker Desktop host
+(12.7 GB available to the VM) through the **fixed-canvas mode, since removed in
+editor M4c**, rendering an A4 template carrying text, a KaTeX expression and a Code128
+barcode on each of three pages. Peak is the container's own cgroup usage,
+sampled at 200 ms through the render. They have not been re-measured for the
+flowing mode; the browser baseline (the first two rows) is the same Chromium
+and still applies.
 
 | Job | Pages | Peak container memory | Wall time | Outcome |
 |---|---:|---:|---:|---|
@@ -145,7 +148,7 @@ container's own cgroup usage, sampled at 200 ms through the render.
 | 1 row | 3 | 246 MB | < 2 s | ok |
 | 100 rows | 300 | 487 MB | 6 s | ok |
 | 300 rows | 900 | 713 MB | 28 s | ok |
-| **500 rows** (the `render_max_rows` default) | 1500 | 813 MB | 78 s | **fails on stock settings** — see below |
+| 500 rows | 1500 | 813 MB | 78 s | cut off by the 30 s timeouts of the time |
 
 Two things to take from that, and the second is the one that bites first:
 
@@ -153,25 +156,24 @@ Two things to take from that, and the second is the one that bites first:
 32 MB to ~246 MB is Chromium launching on the first render — and it stays, by
 design, because relaunching per request would be far too slow for the bursty
 batch export this tier exists for. Growth beyond that is well under 1 MB per
-page for a template this simple. **A content-heavy page costs much more** —
+page for content this simple. **A content-heavy page costs much more** —
 embedded images in particular are not free the way text and a barcode are — so
-treat the marginal figure as a floor, measure your own worst template, and size
+treat the marginal figure as a floor, measure your own worst document, and size
 from that rather than from this table.
 
-**A 500-row job fails on stock settings, and not for want of memory.** It
-finishes in 78 seconds and never approaches 1 GB, but *three separate
-30-second timeouts* sit below it:
+**A large job stops at a timeout, not at memory.** The render-side ceilings for
+a flowing document are generous, but the app gives up after 30 seconds unless
+told otherwise:
 
 | Timeout | Default | Where |
 |---|---|---|
-| `RENDER_PDF_TIMEOUT_MS` | `30000` | render service — puppeteer's `page.pdf()` |
-| `RENDER_READY_TIMEOUT_MS` | `20000` | render service — waiting for the harness to signal ready |
+| `RENDER_FLOW_PDF_TIMEOUT_MS` | `180000` | render service — puppeteer's `page.pdf()` |
+| `RENDER_FLOW_READY_TIMEOUT_MS` | `180000` | render service — the in-page paginator finishing |
 | `RENDER_TIMEOUT_SECONDS` | `30` | **app side** — the HTTP call to the render service |
 
-So `documents.render_max_rows = 500` and `documents.render_max_pages = 2000`
-are not reachable out of the box: the render is cut off long before the
-settings consider the request large. Raising the limits without raising all
-three timeouts changes nothing.
+So a document that takes longer than 30 seconds to paginate and print is cut
+off by the app long before the render service would give up. Raise
+`RENDER_TIMEOUT_SECONDS` first.
 
 ### The failure says nothing about its cause
 
@@ -183,7 +185,7 @@ timeout — the caller sees exactly one thing:
 ```
 
 which is also what it sees when the render tier is switched off, misconfigured,
-or not deployed at all (`DocumentRenderApiHandler` normalises every render-side
+or not deployed at all (the document handlers normalise every render-side
 failure to that response deliberately, so nothing about the internal service
 leaks). Nothing in it, and nothing in the app's log, distinguishes the cases.
 Diagnose from the render side:
@@ -246,10 +248,10 @@ curl -s http://localhost:8130/health
 
 # 2. It can actually render (the check that matters — a healthy container that
 #    cannot render is the failure mode this tier has).
-curl -fsS -X POST http://localhost:8130/render \
+curl -fsS -X POST http://localhost:8130/render/flow \
   -H 'Content-Type: application/json' \
   -H "X-Render-Secret: ${RENDER_SHARED_SECRET}" \
-  -d '{"template":{"version":2,"page":{"widthMm":100,"heightMm":60,"marginMm":2,"background":"#ffffff"},"placeholders":[],"pages":[{"id":"p1","elements":[{"id":"t1","type":"text","x":2,"y":2,"w":96,"h":12,"rotation":0,"z":1,"text":"مرحبا","style":{"fontSize":18,"fontWeight":"normal","fontStyle":"normal","align":"center","vAlign":"middle","color":"#000000","direction":"rtl"}}]}]},"dataRows":[{}]}' \
+  -d '{"direction":"rtl","page":{"preset":"a4","margin":{"topMm":20,"rightMm":20,"bottomMm":20,"leftMm":20}},"content":[{"type":"heading","level":1,"text":"مرحبا"},{"type":"math","tex":"E = mc^2"},{"type":"barcode","symbology":"code128","value":"WHITY-1"}]}' \
   -o /tmp/render-check.pdf
 head -c 5 /tmp/render-check.pdf   # %PDF-
 ```
@@ -259,31 +261,26 @@ are baked into this image, and a build that lost them still renders — as tofu.
 
 The release pipeline runs the same shape of check against the published image
 (`smoke` job in `.github/workflows/release.yml`), and every PR that touches
-`render-service/`, `web/components/documents`, `web/lib/documents` or
-`packages/{ui,features}/src` runs it against a locally built one
-(`render-service` job in `.github/workflows/automated-tests.yml`).
+`render-service/` runs it against a locally built one (`render-service` job in
+`.github/workflows/automated-tests.yml`).
 
 ---
 
-## Two render modes
+## Render modes
 
-The service has two endpoints, and they take genuinely different documents.
+The service has two render endpoints:
 
-| | `POST /render` — **fixed canvas** | `POST /render/flow` — **flowing** |
+| | `POST /render/flow` — **flowing document** | `POST /render/labels` — **label sheet** |
 |---|---|---|
-| Input | a designer **template**: pages of absolutely-placed, millimetre-positioned elements | a **content tree**: headings, paragraphs, tables, figures, no positions at all |
-| Page count | known before rendering — one per template page, times the data rows | **not knowable** before rendering; the renderer decides |
-| Margins | none (`margin: 0`); the design owns the whole sheet | configurable, real, and the running header/footer are drawn in them |
-| Renderer | the designer's own React bundle (`dist/harness/`), for pixel parity with the on-screen preview | plain server-generated HTML plus a paginator that runs in the page |
-| Who uses it | the document designer, and verification-code stamping composing into it | anything that assembles content and needs a document out of it |
+| Input | a **content tree**: headings, paragraphs, tables, figures, form blocks, no positions at all | one label (a short list of blocks) per record or CSV row, plus the sheet and grid |
+| Page count | **not knowable** before rendering; the renderer decides (`X-Render-Page-Count`) | one page per full sheet of labels |
+| Margins | configurable, real, and the running header/footer are drawn in them | the grid is centred on the sheet |
+| Renderer | plain server-generated HTML plus a paginator that runs in the page | the same HTML building blocks, no paginator |
 
-They share exactly one thing: the Chromium instance. Not the harness, not the
-stylesheet, not the readiness signal, not the page geometry. That separation is
-deliberate — the fixed-canvas mode's output is expected to be unchanged
-forever, and the cheapest way to guarantee that is for the flowing mode to have
-no way to reach it. `test/fixed-canvas-geometry.test.js` pins the fixed mode's
-`@page` rule and `page.pdf()` options so a future change to either is a test
-failure rather than a surprise in someone's certificate.
+Both share the one Chromium instance (`src/renderer.js`), the shared secret and
+the rate limiter. The old fixed-canvas `POST /render`, which printed the
+removed document designer's canvas through that designer's own React bundle,
+was removed in editor M4c and now answers `404`.
 
 ### Why the flowing mode paginates itself
 
@@ -469,11 +466,15 @@ the issue guessed at is not the one that meets it.
 
 ### Theme, running-head parts, and form blocks
 
-A flowing document can carry a **`theme`** of up to five hex colours, `ink`,
-`muted`, `accent`, `line` and `tint`, written as CSS custom properties. Without
-one the document prints exactly as before: every colour the stylesheet used is
-now a property whose default is the old value. Hex only, because the value is
-written into a stylesheet.
+A flowing document can carry a **`theme`**: the print colour `accent`, a hex
+colour written as a CSS custom property, and `accentUse`, either `title` (the
+default) or `title-and-headings`, which colours headings at levels 2-4 too
+(E.45). The letterhead title always takes the accent. Without a theme the
+document prints exactly as before. Hex only, because the value is written into
+a stylesheet. Since editor M4d (document themes, E.44) the greys and rules
+(`ink`, `muted`, `line`, `tint`) are no longer accepted: they follow the
+register, not the caller. Core sends the theme resolved for the document (or
+frozen when its template was published). A label sheet takes `accent` only.
 
 A **running head or foot slot** (`start`, `center`, `end`) is still a string with
 `{{page}}`-style tokens, or now an object of parts:
@@ -510,7 +511,7 @@ all of them; CI renders it in both directions.
 
 | Variable | Default | Notes |
 |---|---|---|
-| `RENDER_FLOW_READY_TIMEOUT_MS` | `180000` | How long pagination may take. It scales with the document, not the request; the fixed mode's 20 s was sized for one designed page. |
+| `RENDER_FLOW_READY_TIMEOUT_MS` | `180000` | How long pagination may take. It scales with the document, not the request. |
 | `RENDER_FLOW_PDF_TIMEOUT_MS` | `180000` | How long `page.pdf()` may take for a flowing document. |
 | `RENDER_FLOW_NAV_TIMEOUT_MS` | `30000` | Loading the generated page. |
 | `RENDER_FLOW_MAX_BLOCKS` | `20000` | Hard ceiling on content blocks. |
@@ -654,9 +655,9 @@ curl -s http://localhost:8130/health | jq '.capabilities | {status, ms, required
 Only `degraded` refuses anything, and it refuses only the **flowing** mode —
 the one whose correctness rests on how this browser fragments content, and
 whose own paginator already refuses rather than emit page numbers it cannot
-vouch for. `POST /render` (fixed canvas) is deliberately **not** gated: #1134's
-constraint was not to touch that path, and its failure mode — a PDF at the
-wrong physical size — is visible in the first document anyone opens.
+vouch for. `POST /render/labels` is **not** gated: a label sheet has no
+paginator, so a browser that fragments content differently cannot number it
+wrongly.
 
 Set `RENDER_FLOW_REQUIRE_CAPABILITIES=false` to lift the gate while keeping the
 report. That escape hatch exists because a gate with no way round it is itself
@@ -714,11 +715,10 @@ mode uses them, so they stay measured by hand and recorded in the table above.
 
 - [ADR 0012 — Document render as a dedicated microservice](../adr/0012-document-render-microservice.md)
 - `render-service/Dockerfile`, `render-service/Dockerfile.dockerignore`
-- `render-service/scripts/build-harness.js` (what gets bundled and why)
 - `render-service/src/flow/` (the flowing mode: payload, HTML, bidi, paginator)
 - `render-service/scripts/generate-flow-fixture.js`, `verify-flow-pdf.js`, `check-flow-rtl-geometry.js`
 - `render-service/scripts/write-build-info.js` (how the image identifies itself)
 - `render-service/scripts/write-browser-info.js`, `render-service/src/browser-info.js` (which browser it was built around)
 - `render-service/src/capability-probe.js` (the boot-time probe, and which probes are fatal)
-- `src/Api/DocumentRenderApiHandler.php`, `src/Core/Document/Render/RenderServiceClient.php`
+- `src/Api/DocumentPublishingApiHandler.php`, `src/Core/Document/SourceDocumentIssuer.php`, `src/Core/Document/Render/RenderServiceClient.php`
 - `src/Core/Settings/SettingsRegistry.php` (`documents.render_*`)

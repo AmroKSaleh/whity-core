@@ -1,10 +1,11 @@
 'use strict';
 
 /**
- * `whity_render` HTTP server (ADR 0012 / WC-docdesigner Track 2).
+ * `whity_render` HTTP server (ADR 0012).
  *
- * A minimal INTERNAL API — never exposed publicly, called only by whity-core's
- * DocumentRenderApiHandler over the compose network:
+ * A minimal INTERNAL API — never exposed publicly, called only by whity-core
+ * over the compose network. It prints the document editor's documents and
+ * label sheets:
  *
  *   GET  /health  — liveness probe (no auth; no secrets in the response). Also
  *                   reports this image's IDENTITY (core_version + commit, from
@@ -15,14 +16,15 @@
  *                   probe's verdict (#1134), which is the other half of the
  *                   same question: the Dockerfile installs Chromium unpinned,
  *                   so the browser can move without this repository moving.
- *   POST /render  — {template, dataRows?, sheet?, blocks?} -> raw PDF bytes.
- *                   Requires the `X-Render-Secret` header to match
- *                   RENDER_SHARED_SECRET (>= 32 chars) exactly.
+ *   POST /render/flow   — a flowing document (a content tree) -> raw PDF
+ *                         bytes, paginated in the browser (src/flow/).
+ *   POST /render/labels — a label sheet (records or CSV rows) -> raw PDF bytes.
  *
- * The harness bundle (built by scripts/build-harness.js into dist/harness/)
- * is served statically at /_harness/ so Puppeteer can navigate to it over
- * plain HTTP on localhost — no secrets live there, it is just the bundled
- * renderer UI.
+ * Both POST routes require the `X-Render-Secret` header to match
+ * RENDER_SHARED_SECRET (>= 32 chars) exactly, and share one rate limiter.
+ *
+ * The old fixed-canvas designer route (`POST /render`, with its bundled React
+ * harness) was removed together with that designer in editor M4c.
  */
 
 const crypto = require('node:crypto');
@@ -31,9 +33,9 @@ const path = require('node:path');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 
-const { renderToPdf, shutdown } = require('./renderer');
-const { validatePayload } = require('./limits');
-const { renderFlowToPdf } = require('./flow/render');
+const { shutdown } = require('./renderer');
+const { renderFlowToPdf, renderHtmlToPdf } = require('./flow/render');
+const { validateLabelsPayload, buildLabelsHtml } = require('./flow/labels');
 const { validateFlowPayload } = require('./flow/document');
 const { readRecordedBrowser, versionFromUserAgent, versionsAgree } = require('./browser-info');
 const {
@@ -46,7 +48,6 @@ const {
 
 const PORT = Number(process.env.PORT || 8130);
 const SHARED_SECRET = process.env.RENDER_SHARED_SECRET || '';
-const HARNESS_DIR = path.join(__dirname, '..', 'dist', 'harness');
 
 /**
  * Whether a REQUIRED capability-probe failure refuses flow renders (#1134).
@@ -63,7 +64,7 @@ const HARNESS_DIR = path.join(__dirname, '..', 'dist', 'harness');
  */
 const FLOW_REQUIRES_CAPABILITIES = process.env.RENDER_FLOW_REQUIRE_CAPABILITIES !== 'false';
 
-// Rate limiting for POST /render: each call drives a full headless-Chromium
+// Rate limiting for the POST /render/* routes: each call drives a full headless-Chromium
 // page load, so even a trusted-but-misbehaving caller (a retry storm, a bug
 // in the core PHP client) can exhaust CPU/memory with unbounded concurrent
 // renders. A single-process in-memory store (express-rate-limit's default) is
@@ -82,12 +83,12 @@ const renderRateLimiter = rateLimit({
 
 if (SHARED_SECRET.length < 32) {
   // Not fatal — /health must still work so `docker compose` healthchecks and
-  // manual troubleshooting are possible — but /render refuses every request
-  // until this is fixed (see requireSharedSecret below).
+  // manual troubleshooting are possible — but every render route refuses
+  // every request until this is fixed (see isAuthorized below).
   // eslint-disable-next-line no-console
   console.warn(
     '[whity_render] RENDER_SHARED_SECRET is unset or shorter than 32 chars; ' +
-      'every POST /render will be refused until it is configured.'
+      'every POST /render/* will be refused until it is configured.'
   );
 }
 
@@ -226,8 +227,6 @@ app.get('/health', (_req, res) => {
   });
 });
 
-app.use('/_harness', express.static(HARNESS_DIR));
-
 /** Constant-time shared-secret check (timing-attack-resistant). */
 function isAuthorized(req) {
   if (SHARED_SECRET.length < 32) {
@@ -242,43 +241,11 @@ function isAuthorized(req) {
   return crypto.timingSafeEqual(a, b);
 }
 
-app.post('/render', renderRateLimiter, async (req, res) => {
-  if (!isAuthorized(req)) {
-    res.status(401).json({ error: 'Unauthorized' });
-    return;
-  }
-
-  const validationError = validatePayload(req.body);
-  if (validationError) {
-    res.status(422).json({ error: validationError });
-    return;
-  }
-
-  try {
-    const harnessUrl = `http://127.0.0.1:${PORT}/_harness/index.html`;
-    const pdf = await renderToPdf(req.body, { harnessUrl });
-    res.status(200);
-    res.set('Content-Type', 'application/pdf');
-    res.send(pdf);
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.error('[whity_render] render failed:', err && err.stack ? err.stack : err);
-    res.status(500).json({ error: 'Render failed' });
-  }
-});
-
 /**
  * The FLOWING render mode (#1072, first half).
  *
- * A separate route, not a flag on `/render`, because the two take genuinely
- * different bodies: `/render` takes a designer TEMPLATE of positioned
- * elements and prints one page per template page; this takes a CONTENT TREE
- * with no positions and decides for itself how many pages it becomes. A mode
- * flag on one endpoint would mean one validator answering for two payload
- * shapes and one handler branching on it — and the branch that mattered would
- * be the one nobody exercised, because `documents.render_enabled` defaults to
- * false. Separate routes keep `/render`'s request path byte-for-byte what it
- * was.
+ * Takes a CONTENT TREE with no positions and decides for itself how many
+ * pages it becomes.
  *
  * Answers the PDF bytes, plus the pagination facts in response headers: how
  * many pages the document turned out to be, and how many of those are
@@ -286,10 +253,10 @@ app.post('/render', renderRateLimiter, async (req, res) => {
  * the definition of a flowing document — and both are needed to check that
  * what came back is what was asked for.
  *
- * Shares `renderRateLimiter` with `POST /render` rather than getting its own,
- * because the resource being protected is the same one: a single Chromium
- * instance. Two independent windows would let a caller drive twice the
- * concurrent renders by alternating endpoints.
+ * Shares `renderRateLimiter` with `POST /render/labels` rather than getting
+ * its own, because the resource being protected is the same one: a single
+ * Chromium instance. Two independent windows would let a caller drive twice
+ * the concurrent renders by alternating endpoints.
  */
 app.post('/render/flow', renderRateLimiter, async (req, res) => {
   if (!isAuthorized(req)) {
@@ -306,7 +273,7 @@ app.post('/render/flow', renderRateLimiter, async (req, res) => {
   // The boot probe is awaited HERE and nowhere else (#1134). The flowing mode
   // is the one caller whose correctness depends on how this browser fragments
   // content, so it is the one that waits for the answer; `/health` reports
-  // `pending` meanwhile and `POST /render` never waits at all.
+  // `pending` meanwhile and `POST /render/labels` never waits at all.
   //
   // The wait is BOUNDED. An unbounded one would turn a probe that hangs into
   // renders that hang, which is the outage this change is not allowed to
@@ -356,6 +323,36 @@ app.post('/render/flow', renderRateLimiter, async (req, res) => {
     }
     // eslint-disable-next-line no-console
     console.error('[whity_render] flow render failed:', err && err.stack ? err.stack : err);
+    res.status(500).json({ error: 'Render failed' });
+  }
+});
+
+/**
+ * POST /render/labels — a label sheet (E.43): one label per record or CSV
+ * row, as many sheets as it takes. No paginator; each sheet is one page.
+ * X-Render-Labels-Clipped says how many labels were cut at their edge.
+ * Same auth and rate limiter as the other routes (one Chromium).
+ */
+app.post('/render/labels', renderRateLimiter, async (req, res) => {
+  if (!isAuthorized(req)) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  const validationError = validateLabelsPayload(req.body);
+  if (validationError) {
+    res.status(422).json({ error: validationError });
+    return;
+  }
+  try {
+    const { pdf, pagination } = await renderHtmlToPdf(buildLabelsHtml(req.body));
+    res.status(200);
+    res.set('Content-Type', 'application/pdf');
+    res.set('X-Render-Page-Count', String(pagination.pageCount));
+    res.set('X-Render-Labels-Clipped', String(pagination.clipped ?? 0));
+    res.send(pdf);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[whity_render] labels render failed:', err && err.stack ? err.stack : err);
     res.status(500).json({ error: 'Render failed' });
   }
 });
@@ -467,7 +464,7 @@ function logCapabilityReport(report) {
         report.required_failures.map((line) => `[whity_render]   - ${line}`).join('\n') +
         '\n[whity_render] POST /render/flow is refused with 503' +
         (FLOW_REQUIRES_CAPABILITIES ? '' : ' — EXCEPT that the gate is disabled by RENDER_FLOW_REQUIRE_CAPABILITIES=false') +
-        '.\n[whity_render] The fixed-canvas POST /render is NOT gated; check its output by hand.\n' +
+        '.\n[whity_render] POST /render/labels is NOT gated; check its output by hand.\n' +
         '[whity_render] ' + '='.repeat(70)
     );
   }

@@ -165,6 +165,8 @@ function serve(options: {
   trail?: unknown[];
   recipients?: unknown[];
   directoryStatus?: number;
+  /** Extra fields on the record itself (what it was issued from, M4c). */
+  record?: Record<string, unknown>;
 }) {
   const {
     sections = ALL_EDITABLE,
@@ -172,6 +174,7 @@ function serve(options: {
     trail = [TRAIL_EVENT],
     recipients = [OPEN_RECIPIENT],
     directoryStatus = 200,
+    record = {},
   } = options;
 
   rawApiClient.mockImplementation((url: string) => {
@@ -215,6 +218,7 @@ function serve(options: {
     // win — `/api/v1/documents/5` is a prefix of every one of them.
     if (url.startsWith('/api/v1/documents/5')) {
       const body = documentBody(sections);
+      Object.assign(body.data, record);
       if (noSections) {
         delete (body.data as { sections?: unknown }).sections;
       }
@@ -301,6 +305,43 @@ describe('the record is built from the URL alone', () => {
 // ---------------------------------------------------------------------------
 // The server decides which regions exist
 // ---------------------------------------------------------------------------
+
+describe('a document issued from the old Document designer (editor M4c)', () => {
+  it('says it can’t be re-rendered and links to its converted template', async () => {
+    params = { id: '5' };
+    serve({ record: { document_source_id: 12, document_source_version: null } });
+
+    render(<DocumentRecordPage />);
+
+    const note = await screen.findByTestId('document-record-legacy');
+    expect(note).toHaveTextContent('Issued from the old Document designer');
+    expect(note).toHaveTextContent('can’t be re-rendered');
+    expect(screen.getByRole('link', { name: 'Open its converted template' })).toHaveAttribute(
+      'href',
+      '/admin/document-sources/12'
+    );
+  });
+
+  it('says so without a link when only the old template id is known', async () => {
+    params = { id: '5' };
+    serve({ record: { document_template_id: 3, document_source_id: null } });
+
+    render(<DocumentRecordPage />);
+
+    expect(await screen.findByTestId('document-record-legacy')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Open its converted template' })).not.toBeInTheDocument();
+  });
+
+  it('adds nothing for a document issued from an editor template', async () => {
+    params = { id: '5' };
+    serve({ record: { document_source_id: 12, document_source_version: 4, document_template_id: null } });
+
+    render(<DocumentRecordPage />);
+
+    expect(await screen.findByTestId('document-record')).toBeInTheDocument();
+    expect(screen.queryByTestId('document-record-legacy')).not.toBeInTheDocument();
+  });
+});
 
 describe('per-region verdicts (#975) decide what is on the page', () => {
   it('renders all three regions when the server reports all three', async () => {

@@ -17,6 +17,7 @@ use Throwable;
 use Whity\Mcp\JsonRpc\McpException;
 use Whity\Mcp\JsonRpc\MethodHandler;
 use Whity\Core\Request;
+use Whity\Mcp\Auth\AgentScopeGrant;
 use Whity\Mcp\Auth\McpScope;
 
 /**
@@ -248,7 +249,8 @@ final class ToolsCallHandler implements MethodHandler
         // Route the AI principal into AuditContext so that any hook-fired audit
         // entries (e.g. user.created by a mutation tool) also capture the MCP
         // actor rather than null.
-        AuditContext::set($principal->userId, null);
+        // WHIT-753: the actor is the principal's: the person, or an agent for them.
+        AuditContext::setActor($principal->actor());
 
         // 3. Resolve tool name → route declaration, or a hand-authored tool.
         //
@@ -268,6 +270,8 @@ final class ToolsCallHandler implements MethodHandler
             $authored = $this->authoredTools?->get($toolName);
             if ($authored !== null) {
                 try {
+                    $this->assertInTokenToolsets($principal, $this->authoredTools?->toolsetOf($toolName));
+                    $this->assertAgentMayRun($principal, $this->authoredTool($toolName), $authored);
                     return $this->executeAuthored($toolName, $arguments, $authored, $principal);
                 } finally {
                     $this->auditLogger?->record('mcp.tools.call', [
@@ -276,6 +280,8 @@ final class ToolsCallHandler implements MethodHandler
                         'target_type'   => 'tool',
                         'metadata'      => [
                             'tool'   => $toolName,
+                            // ADR-0006 §6: which kind of principal called.
+                            'principal_kind' => $principal->principalKind,
                             // Named so an authored tool is distinguishable in
                             // the trail: it ran plugin code directly rather
                             // than dispatching through the router, so "which
@@ -293,6 +299,8 @@ final class ToolsCallHandler implements MethodHandler
         // From here the tool is known — audit the invocation regardless of
         // outcome (RBAC denial, handler error, or success).
         try {
+            $this->assertInTokenToolsets($principal, $this->toolDeriver->toolsetOf($toolName));
+            $this->assertAgentMayRun($principal, $this->toolDeriver->toolFor($toolName) ?? [], $this->toolDeriver->buildAccessMap()[$toolName] ?? []);
             return $this->executeResolved($toolName, $arguments, $declaration, $principal);
         } finally {
             $this->auditLogger?->record('mcp.tools.call', [
@@ -302,7 +310,7 @@ final class ToolsCallHandler implements MethodHandler
                 // Pre-strip at the call site (defense-in-depth). AuditLogger
                 // also sanitizes metadata before the INSERT, but future
                 // AuditLoggerInterface implementations may not.
-                'metadata'     => ['tool' => $toolName, 'args' => $this->redactArgs($arguments)],
+                'metadata'     => ['tool' => $toolName, 'principal_kind' => $principal->principalKind, 'args' => $this->redactArgs($arguments)],
             ]);
         }
     }
@@ -329,6 +337,66 @@ final class ToolsCallHandler implements MethodHandler
             $clean[$key] = is_array($value) ? $this->redactArgs($value) : $value;
         }
         return $clean;
+    }
+
+    /**
+     * WHIT-753: what an agent's scope grant lets it do with this tool. Off is
+     * refused. Ask first would store a proposal for the granting person to
+     * approve; until agent proposals exist (WHIT-784) it is refused too, and
+     * no agent credential is issued in the meantime (owner decision 12), so
+     * this only ever answers a credential that should not exist yet.
+     *
+     * @param array<string, mixed> $tool
+     * @param array<string, mixed> $access
+     * @throws McpException
+     */
+    private function assertAgentMayRun(McpPrincipal $principal, array $tool, array $access): void
+    {
+        if (!AgentScopeGrant::appliesTo($principal)) {
+            return;
+        }
+        $mode = ToolsListHandler::agentModeFor($tool, $access, $principal);
+        if ($mode === AgentScopeGrant::OFF) {
+            throw new McpException(ErrorCode::FORBIDDEN, 'This agent is not granted this operation.');
+        }
+        if ($mode === AgentScopeGrant::ASK) {
+            throw new McpException(ErrorCode::FORBIDDEN, 'This operation needs a person to approve it, and approvals are not available yet.');
+        }
+    }
+
+    /**
+     * The tool object of an authored tool, as tools/list publishes it.
+     *
+     * @return array<string, mixed>
+     */
+    private function authoredTool(string $name): array
+    {
+        foreach ($this->authoredTools?->toolObjects() ?? [] as $tool) {
+            if (($tool['name'] ?? null) === $name) {
+                return $tool;
+            }
+        }
+        return [];
+    }
+
+    /**
+     * WHIT-749: a token that names toolsets may only CALL tools in them, not
+     * just list them (owner decision 3). Refused as forbidden rather than
+     * answered "unknown": the tool exists and the caller may well hold its
+     * permission; it is this token that can't reach it, and saying which
+     * toolsets it can reach tells the person what to change.
+     *
+     * @throws McpException
+     */
+    private function assertInTokenToolsets(McpPrincipal $principal, ?string $toolset): void
+    {
+        $scope = McpScope::of($principal);
+        if (!$scope->allowsToolset($toolset)) {
+            throw new McpException(
+                ErrorCode::FORBIDDEN,
+                'This token can only use the toolsets: ' . implode(', ', $scope->toolsetEntries()),
+            );
+        }
     }
 
     /**
@@ -447,7 +515,8 @@ final class ToolsCallHandler implements MethodHandler
     {
         $pathParamNames = [];
         $substituted = preg_replace_callback(
-            '#\{([a-zA-Z_][a-zA-Z0-9_]*)(?::[^{}]+)?\}#',
+            // A constraint may carry {n} / {n,m} quantifiers (Router::pathToPattern()).
+            '#\{([a-zA-Z_][a-zA-Z0-9_]*)(?::(?:[^{}]|\{\d+(?:,\d*)?\})+)?\}#',
             function (array $matches) use ($arguments, &$pathParamNames): string {
                 $name             = $matches[1];
                 $pathParamNames[] = $name;

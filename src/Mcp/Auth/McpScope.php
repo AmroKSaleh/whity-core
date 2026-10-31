@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Whity\Mcp\Auth;
 
+use Whity\Mcp\Tools\CoreToolsets;
+use Whity\Mcp\Tools\ToolSurface;
+
 /**
  * What an MCP token's `scope` grants (WHIT-695, ADR-0006 §3).
  *
@@ -31,6 +34,12 @@ namespace Whity\Mcp\Auth;
  * The `tools:`, `resources:` and `prompts:` prefixes are reserved for
  * capabilities ({@see self::FAMILY_PREFIXES}): anything under them is read
  * as the capability, never as a permission.
+ *
+ * A third kind (WHIT-749, docs/design/MCP-TOOL-SURFACE.md §5.4): a TOOLSET,
+ * `toolset:<id>` or `toolset:<prefix>.*`. When a token names any, it reaches
+ * only tools in those toolsets, in tools/list, in search and in tools/call. A
+ * token naming none keeps every toolset. Like permissions, toolsets narrow and
+ * never widen, and the `toolset:` prefix is reserved.
  */
 final class McpScope
 {
@@ -67,6 +76,8 @@ final class McpScope
         'resources:' => self::RESOURCES_READ,
         'prompts:'   => self::PROMPTS_READ,
     ];
+
+    public const TOOLSET_PREFIX = 'toolset:';
 
     /** @var list<string> */
     private readonly array $scope;
@@ -121,6 +132,52 @@ final class McpScope
     }
 
     /**
+     * Whether the token's toolset narrowing lets it reach a tool in $toolset
+     * (WHIT-749). A tool with no toolset is out of reach for a narrowed token.
+     */
+    public function allowsToolset(?string $toolset): bool
+    {
+        $narrowing = $this->toolsetEntries();
+        if ($narrowing === []) {
+            return true;
+        }
+        if ($toolset === null || $toolset === '') {
+            return false;
+        }
+
+        foreach ($narrowing as $entry) {
+            if ($entry === $toolset) {
+                return true;
+            }
+            // `acme.*` is acme itself and everything under it.
+            if (str_ends_with($entry, '.*')) {
+                $root = substr($entry, 0, -2);
+                if ($toolset === $root || str_starts_with($toolset, $root . '.')) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The toolsets the token is narrowed to, as written (`core.forms`,
+     * `acme.*`); empty when it names none.
+     *
+     * @return list<string>
+     */
+    public function toolsetEntries(): array
+    {
+        $out = [];
+        foreach ($this->scope as $entry) {
+            if (str_starts_with($entry, self::TOOLSET_PREFIX)) {
+                $out[] = substr($entry, strlen(self::TOOLSET_PREFIX));
+            }
+        }
+        return $out;
+    }
+
+    /**
      * Problems with a scope requested at issuance, as messages; empty when it
      * is acceptable. It must name at least one capability, and every other
      * entry must be a known permission or a `resource:*` matching one.
@@ -135,6 +192,18 @@ final class McpScope
         $errors     = [];
         if (array_intersect($normalized->scope, self::CAPABILITIES) === []) {
             $errors[] = 'scope must include at least one of: ' . implode(', ', self::CAPABILITIES);
+        }
+
+        // WHIT-753: an agent's per-permission grant (`grant:<permission>=<mode>`).
+        foreach (AgentScopeGrant::issuanceErrors($normalized->scope, $knownPermissions) as $error) {
+            $errors[] = $error;
+        }
+
+        foreach ($normalized->toolsetEntries() as $toolset) {
+            $error = self::toolsetError($toolset);
+            if ($error !== null) {
+                $errors[] = $error;
+            }
         }
 
         foreach ($normalized->permissionEntries() as $entry) {
@@ -152,6 +221,31 @@ final class McpScope
         return $errors;
     }
 
+    /**
+     * Why a requested toolset entry is refused, or null. Core toolsets must be
+     * ones core defines; a plugin's can only be checked for shape, because a
+     * token may be issued before the plugin is installed.
+     */
+    private static function toolsetError(string $toolset): ?string
+    {
+        $id = str_ends_with($toolset, '.*') ? substr($toolset, 0, -2) : $toolset;
+        if (!ToolSurface::isToolsetId($id)) {
+            return "malformed toolset: toolset:{$toolset}";
+        }
+        if ($id === 'core') {
+            return null;
+        }
+        if (str_starts_with($id, 'core.')) {
+            foreach (array_keys(CoreToolsets::TOOLSETS) as $core) {
+                if (ToolSurface::isWithin($id, $core)) {
+                    return null;
+                }
+            }
+            return "unknown toolset: toolset:{$toolset}";
+        }
+        return null;
+    }
+
     private static function canonical(string $entry): string
     {
         foreach (self::FAMILY_PREFIXES as $prefix => $capability) {
@@ -165,6 +259,10 @@ final class McpScope
     /** @return list<string> */
     private function permissionEntries(): array
     {
-        return array_values(array_diff($this->scope, self::CAPABILITIES));
+        return array_values(array_filter(
+            array_diff($this->scope, self::CAPABILITIES),
+            static fn (string $entry): bool => !str_starts_with($entry, self::TOOLSET_PREFIX)
+                && !str_starts_with($entry, AgentScopeGrant::PREFIX),
+        ));
     }
 }

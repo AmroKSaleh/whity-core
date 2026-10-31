@@ -7,9 +7,8 @@ namespace Whity\Core\Tenant;
 use PDO;
 use Psr\Log\LoggerInterface;
 use RuntimeException;
-use Whity\Core\Document\DocumentBlockRepository;
-use Whity\Core\Document\DocumentStarterSeeder;
-use Whity\Core\Document\DocumentTemplateRepository;
+use Whity\Core\Document\DocumentSourceRepository;
+use Whity\Core\Document\DocumentSourceStarterSeeder;
 use Whity\Core\Hooks\HookManager;
 
 /**
@@ -105,16 +104,12 @@ final class TenantProvisioner
     public static function coreSteps(PDO $db, ?LoggerInterface $logger = null): array
     {
         return [
-            // A tenant is never handed an empty designer: four starter templates
-            // and the company header/footer blocks (WC-515 REMAINING #3). Needs
-            // two repositories over this PDO and nothing else — no storage
-            // driver, no settings service — which is why it is cheap enough to
-            // be composed here and to run in the CLI seed path.
-            new DocumentStarterSeeder(
-                new DocumentTemplateRepository($db),
-                new DocumentBlockRepository($db),
-                $logger,
-            ),
+            // A tenant is never handed an empty editor: the document editor's
+            // starters (editor M4b). Needs one repository over this PDO and
+            // nothing else — no storage driver, no settings service — which is
+            // why it is cheap enough to be composed here and to run in the CLI
+            // seed path.
+            new DocumentSourceStarterSeeder(new DocumentSourceRepository($db), $logger),
         ];
     }
 

@@ -291,7 +291,7 @@ final class DemoOrganisationSeeder
      * difference — which is the entire audience.
      *
      * These grants cannot flatten what the fixture discriminates on, and that is
-     * checked rather than asserted here: no designer row is gated on a
+     * checked rather than asserted here: no demo template is gated on a
      * permission every demo role holds
      * ({@see \Tests\Core\Document\Demo\DocumentDemoSeederRealEngineTest}).
      *
@@ -330,7 +330,9 @@ final class DemoOrganisationSeeder
                     CorePermissions::DOCUMENTS_READ,
                     CorePermissions::DOCUMENTS_WRITE,
                     CorePermissions::DOCUMENTS_PUBLISH,
+                    CorePermissions::DOCUMENTS_THEMES,
                     CorePermissions::DOCUMENTS_RENDER,
+                    CorePermissions::DOCUMENTS_ISSUE,
                     CorePermissions::DOCUMENTS_ROUTE,
                 ],
             ],
@@ -340,6 +342,7 @@ final class DemoOrganisationSeeder
                     CorePermissions::DOCUMENTS_READ,
                     CorePermissions::DOCUMENTS_WRITE,
                     CorePermissions::DOCUMENTS_RENDER,
+                    CorePermissions::DOCUMENTS_ISSUE,
                     CorePermissions::DOCUMENTS_ROUTE,
                 ],
             ],
@@ -357,6 +360,7 @@ final class DemoOrganisationSeeder
                 'permissions' => [
                     CorePermissions::DOCUMENTS_READ,
                     CorePermissions::DOCUMENTS_RENDER,
+                    CorePermissions::DOCUMENTS_ISSUE,
                 ],
             ],
             self::ROLE_REGISTRY_OFFICER => [
@@ -365,6 +369,7 @@ final class DemoOrganisationSeeder
                     CorePermissions::DOCUMENTS_READ,
                     CorePermissions::DOCUMENTS_WRITE,
                     CorePermissions::DOCUMENTS_RENDER,
+                    CorePermissions::DOCUMENTS_ISSUE,
                     CorePermissions::DOCUMENTS_ROUTE,
                 ],
             ],

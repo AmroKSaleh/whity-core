@@ -13,7 +13,8 @@ import { useTranslation } from '@whity-org/features/i18n';
 import { useDateDisplay } from '@whity-org/features/datetime';
 import { useRouter } from 'next/navigation';
 import { useCapabilities } from '@/hooks/useCapabilities';
-import { DOCUMENTS_RENDER, DOCUMENTS_ROUTE } from '@/lib/capabilities';
+import { DOCUMENTS_ISSUE } from '@/lib/capabilities';
+import { issueHref } from '@/lib/documents/issue';
 import {
   CreateDocumentDialog,
   type CreatableTemplate,
@@ -224,50 +225,49 @@ export default function DocumentLibraryPage() {
   }, [apiClient]);
 
   /**
-   * The templates the caller may raise a document from.
+   * The published editor templates the caller may issue a document from.
    *
-   * SERVER-FILTERED, and this screen deliberately does not filter again. The
+   * SERVER-FILTERED, and this screen deliberately does not filter again: the
    * list route applies `DocumentAccessPolicy` row by row, so a template gated
    * behind a permission tag or filed at a unit the caller has no standing in is
-   * ABSENT from the payload — which is also why a second, client-side copy of
-   * that rule would be a liability rather than defence in depth: it could only
-   * ever be wrong in one direction, and it would be the visible one.
+   * absent from the payload. Only the published-version filter is applied here,
+   * because a document is issued from the published version and a template
+   * that has none cannot issue one (the create route answers 409).
    *
-   * A partial walk is treated as a FAILURE rather than presented as the whole
-   * library, for the reason the unit list below already gives: a picker missing
-   * templates silently tells somebody they cannot raise the document they came
-   * to raise.
+   * Record type names come from the embeds catalogue, best effort: when it
+   * cannot be read the picker shows the type's key.
    */
   const templates = useFetch<CreatableTemplate[]>(async () => {
-    const result = await fetchAllPages<{
-      id: number;
-      name: string;
-      data?: { placeholders?: unknown };
-    }>(apiClient, '/api/v1/document-templates');
-    if (!result.complete) {
+    const [response, catalogue] = await Promise.all([
+      apiClient('/api/v1/document-sources?kind=template'),
+      apiClient('/api/v1/document-embeds').catch(() => null),
+    ]);
+    if (!response.ok) {
       throw new Error(t('organizer.error.templates', 'Failed to load the full template list'));
     }
-    return result.items.map((row) => ({
-      id: row.id,
-      name: row.name,
-      // `data` is verbatim client JSON, so it is narrowed here rather than
-      // trusted. A template whose placeholders are unreadable offers no fields
-      // instead of crashing the picker — it can still be raised from.
-      placeholders: Array.isArray(row.data?.placeholders)
-        ? row.data.placeholders.flatMap((p) => {
-            if (typeof p !== 'object' || p === null) return [];
-            const candidate = p as { key?: unknown; label?: unknown; sample?: unknown };
-            if (typeof candidate.key !== 'string' || candidate.key === '') return [];
-            return [
-              {
-                key: candidate.key,
-                label: typeof candidate.label === 'string' ? candidate.label : candidate.key,
-                sample: typeof candidate.sample === 'string' ? candidate.sample : '',
-              },
-            ];
-          })
-        : [],
-    }));
+    const body = (await response.json()) as {
+      data?: {
+        id: number;
+        title?: string;
+        record_type?: string | null;
+        published_version?: number | null;
+      }[];
+    };
+    const typeNames = new Map<string, string>();
+    if (catalogue?.ok) {
+      const parsed = (await catalogue.json().catch(() => null)) as {
+        data?: { record_types?: { key: string; label: string }[] };
+      } | null;
+      for (const type of parsed?.data?.record_types ?? []) typeNames.set(type.key, type.label);
+    }
+    return (body.data ?? [])
+      .filter((row) => row.published_version !== null && row.published_version !== undefined)
+      .map((row) => ({
+        id: row.id,
+        title: row.title || t('organizer.untitledTemplate', 'Untitled template'),
+        recordType: row.record_type || null,
+        recordTypeLabel: row.record_type ? (typeNames.get(row.record_type) ?? null) : null,
+      }));
   }, [apiClient]);
 
   const ous = useFetch<OuOption[]>(async () => {
@@ -634,15 +634,11 @@ export default function DocumentLibraryPage() {
           'Every folder here is a query over what documents record — nothing stores where a document lives. Collections are your own.'
         )}
         action={
-          // Gated on `documents:render`, which is the capability the create
-          // route itself requires — migration 113 already settled that a role
-          // holding it "is precisely a role that can bring a document into
-          // existence", and no new slug was minted for this. Hidden rather than
-          // disabled: a person who may not raise documents has nothing to act
-          // on here, which is the case #951 leaves to hiding (a DISABLED control
-          // with a reason is for a capability the viewer could obtain — an
-          // anchor they lack, a switch an operator can flip).
-          hasCapability(DOCUMENTS_RENDER) ? (
+          // Gated on `documents:issue`, the capability the create route
+          // requires (editor M4c split it from render). Hidden rather than
+          // disabled: a person who may not issue documents has nothing to act
+          // on here (#951).
+          hasCapability(DOCUMENTS_ISSUE) ? (
             <Button onClick={() => setCreatingDocument(true)}>
               <IconFilePlus className="me-2 size-4" aria-hidden />
               {t('organizer.new', 'New document')}
@@ -657,15 +653,9 @@ export default function DocumentLibraryPage() {
         templates={templates.data ?? []}
         templatesLoading={templates.loading}
         templatesError={templates.error}
-        canRoute={hasCapability(DOCUMENTS_ROUTE)}
-        onSend={(documentId) => router.push(`/admin/document-routing/${documentId}`)}
-        onCreated={() => {
-          // The listing is refetched immediately, not on close: the document is
-          // real the moment the server answered, and a browser that still shows
-          // the old page while the dialog reports success is a browser the
-          // author has to be told to reload.
-          refetchDocuments();
-        }}
+        // Issuing happens in the editor (M4c): the published version, previewed
+        // with the record, with the template's own fields and Issue.
+        onChoose={(template) => router.push(issueHref(template.id))}
       />
 
       {views.error && (

@@ -125,6 +125,19 @@ final class McpProtocol
             if ($method === 'tools/call') {
                 $result = self::withStructuredContent($result, self::isModern($version));
             }
+        } elseif ($method === 'tools/list' && is_array($result['tools'] ?? null)) {
+            // A tool's `_meta` (toolset, visibility, agent policy; WHIT-747) is a
+            // 2025-06-18 field. Left out for the oldest version, whose schema
+            // has no place for it.
+            $result['tools'] = array_map(
+                static function (mixed $tool): mixed {
+                    if (is_array($tool)) {
+                        unset($tool['_meta']);
+                    }
+                    return $tool;
+                },
+                $result['tools'],
+            );
         }
 
         if (self::isModern($version)) {

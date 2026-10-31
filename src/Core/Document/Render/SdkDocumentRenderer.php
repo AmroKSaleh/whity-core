@@ -6,14 +6,18 @@ namespace Whity\Core\Document\Render;
 
 use Whity\Core\Audit\AuditContext;
 use Whity\Core\Container\HostWiredService;
+use Whity\Core\Document\DocumentArtifactRepository;
 use Whity\Core\Document\DocumentIssuer;
 use Whity\Core\Document\DocumentPresenter;
 use Whity\Core\Document\Qr\DocumentQrPolicy;
 use Whity\Core\Document\Qr\DocumentQrService;
 use Whity\Core\Document\Qr\DocumentQrStamp;
+use Whity\Core\Document\Issuing\DocumentIssuing;
+use Whity\Core\Document\Issuing\DocumentOriginKeyConflictException;
 use Whity\Core\Settings\SettingsRegistry;
 use Whity\Core\Settings\SettingsService;
 use Whity\Core\Tenant\TenantContext;
+use Whity\Sdk\Hooks\HookVetoException;
 use Whity\Sdk\Render\DocumentRenderer as SdkRenderer;
 use Whity\Sdk\Render\FlowDocument;
 use Whity\Sdk\Render\IssuedDocument;
@@ -92,6 +96,14 @@ final class SdkDocumentRenderer implements SdkRenderer, HostWiredService
          * state, not a degraded one.
          */
         private readonly ?DocumentQrService $qr = null,
+        /**
+         * The one issuing service (DOCUMENT-AUTOMATION.md phase A): the record
+         * is raised through it, so a plugin's document gets the same
+         * `document.issuing` veto and `document.issued` / `document.rendered`
+         * events as every other. Null raises directly (older wiring, tests).
+         */
+        private readonly ?DocumentIssuing $issuing = null,
+        private readonly ?DocumentArtifactRepository $artifacts = null,
     ) {
     }
 
@@ -150,7 +162,7 @@ final class SdkDocumentRenderer implements SdkRenderer, HostWiredService
      * same id; the document's identity, which is what routing and verification
      * key off, is already real.
      */
-    public function issue(FlowDocument $document, string $title): IssuedDocument
+    public function issue(FlowDocument $document, string $title, ?string $originKey = null): IssuedDocument
     {
         $tenantId = $this->requireTenant();
         // Built BEFORE the persist check so a malformed document is reported as
@@ -180,14 +192,21 @@ final class SdkDocumentRenderer implements SdkRenderer, HostWiredService
 
         // Step 2.
         try {
-            $record = $this->issuer->raise(
-                $tenantId,
-                $actorId,
-                // No template: see the class note. The shape is the normalised
-                // template row DocumentIssuer reads, with both fields absent.
-                ['id' => null, 'name' => ''],
-                $recordTitle,
-            );
+            if ($this->issuing !== null) {
+                $raised = $this->issuing->raiseBuilt($tenantId, $actorId, $recordTitle, $originKey);
+                if ($raised['replayed']) {
+                    // The origin key already names this document: nothing new is issued.
+                    return $this->issuedAlready($tenantId, $raised['document']);
+                }
+                $record = $raised['document'];
+            } else {
+                // No template: see the class note.
+                $record = $this->issuer->raise($tenantId, $actorId, ['name' => '', 'origin_key' => $originKey], $recordTitle);
+            }
+        } catch (HookVetoException $e) {
+            throw RenderRejectedException::because($e->reason());
+        } catch (DocumentOriginKeyConflictException $e) {
+            throw RenderRejectedException::because('This origin key already names a document issued from a template');
         } catch (\Throwable $e) {
             error_log('[SdkDocumentRenderer] raising a document failed: ' . $e->getMessage());
 
@@ -215,6 +234,7 @@ final class SdkDocumentRenderer implements SdkRenderer, HostWiredService
 
         try {
             $artifact = $this->issuer->appendArtifact($tenantId, $actorId, $record, $rendered->bytes);
+            $this->issuing?->storedBuilt($tenantId, $documentId, $artifact);
         } catch (StorageException $e) {
             error_log('[SdkDocumentRenderer] storing document ' . $documentId . ' failed: ' . $e->getMessage());
 
@@ -232,6 +252,26 @@ final class SdkDocumentRenderer implements SdkRenderer, HostWiredService
             $rendered->frontMatterPages,
             (int) ($artifact['byte_size'] ?? strlen($rendered->bytes)),
             DocumentPresenter::documentContentUrl($documentId),
+        );
+    }
+
+    /**
+     * The document an origin key already named, as the SDK reports an issue.
+     *
+     * @param array<string, mixed> $document The `documents` row.
+     */
+    private function issuedAlready(int $tenantId, array $document): IssuedDocument
+    {
+        $artifacts = $this->artifacts?->listForDocument((int) $document['id'], $tenantId) ?? [];
+        $latest = $artifacts[0] ?? null;
+
+        return IssuedDocument::of(
+            (int) $document['id'],
+            (string) $document['title'],
+            0,
+            0,
+            $latest !== null ? (int) $latest['byte_size'] : 0,
+            $latest !== null ? DocumentPresenter::documentContentUrl((int) $document['id']) : null,
         );
     }
 

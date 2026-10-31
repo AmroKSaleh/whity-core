@@ -44,6 +44,11 @@ export interface WhityDocument {
   labels?: LabelGrid;
   /** For templates: the record type its fields come from, e.g. "invoice". */
   recordType?: string;
+  /**
+   * A template's own fields, for values no record type provides (a CSV column
+   * on a label sheet). Each is the field `template.<key>`; with a record it prints blank.
+   */
+  ownFields?: OwnField[];
   blocks: Block[];
   comments: CommentThread[];
   /** Open suggestions; their text and blocks carry `insertion`/`deletion` marks or a `suggestion` attr with the same id. */
@@ -51,8 +56,57 @@ export interface WhityDocument {
   /** E.9: templates have a draft and a published version. */
   status: 'draft' | 'published';
   publishedVersion?: number;
+  /** E.44: the document's theme and its own overrides; absent or null follows the workspace default. */
+  theme?: DocumentThemeRef | null;
   updatedAt: ISODateTime;
   updatedBy: Actor;
+}
+
+/* ------------------------------------------------------------- Themes */
+
+/** E.44, stage 6 (6.2): a workspace line the letterhead can print under the name. */
+export type LetterheadLine = 'address' | 'taxId' | 'phone' | 'email';
+
+/** A theme's tokens (DOCUMENT-THEMES.md 3.2). Every key is optional in a theme or an override. */
+export interface DocumentThemeTokens {
+  /** The print colour as #rrggbb: the title, and H1-H3 with `title-and-headings` (E.45). */
+  accent?: string;
+  /** The title colour on screen in dark mode (E.11). Never printed. */
+  accentOnDark?: string;
+  accentUse?: 'title' | 'title-and-headings';
+  letterhead?: {
+    logo?: 'wide' | 'square' | 'none';
+    /** In this order, without repeats, at most four. */
+    lines?: LetterheadLine[];
+  };
+}
+
+/** What a document stores: the theme it names and its overrides of the print colour and letterhead. */
+export interface DocumentThemeRef {
+  /** 'whity.standard' | '<plugin>.<key>' | 'tenant.<key>' */
+  ref?: string;
+  overrides?: Pick<DocumentThemeTokens, 'accent' | 'letterhead'>;
+}
+
+/** Every token resolved: what the editor and Whity Render use. */
+export interface ResolvedThemeTokens {
+  accent: string;
+  accentOnDark: string;
+  accentUse: 'title' | 'title-and-headings';
+  letterhead: { logo: 'wide' | 'square' | 'none'; lines: LetterheadLine[] };
+}
+
+/** The server's resolution of a document's theme (`resolvedTheme`). */
+export interface ResolvedDocumentTheme {
+  /** The theme actually used, after falling back past one that isn't available. */
+  ref: string;
+  version: number;
+  hash: string;
+  tokens: ResolvedThemeTokens;
+  /** Where each token came from, by its path. */
+  sources: Record<string, string>;
+  /** What changed on the way, such as a print colour darkened to read on white. */
+  adjustments: { code: string; token: string; from: string; to?: string; message: string }[];
 }
 
 /* ------------------------------------------------------------- Inline */
@@ -167,17 +221,31 @@ export interface QrBlock extends BlockBase {
 /** E.42: a display formula in TeX, rendered with KaTeX on screen and in print. */
 export interface MathBlock extends BlockBase { type: 'math'; tex: string }
 
+/** A field a template declares itself: `key` is lowercase letters, digits and _. */
+export interface OwnField {
+  key: string;
+  label: string;
+  sample?: string;
+}
+
 /** E.43: the grid of a label sheet. A certificate is a one-label sheet (columns 1, rows 1). */
 export interface LabelGrid {
   columns: number;
   rows: number;
   size: { widthMm: number; heightMm: number };
+  /** Between columns, and between rows unless `gapYMm` is set. */
   gapMm: number;
+  /** Between rows, when stock differs from its column gap (Avery L7160: 2.5 and 0). */
+  gapYMm?: number;
 }
-/** E.43: what Print fills the labels from: one label per record, or per row of an uploaded CSV. */
+/**
+ * E.43: what Print fills the labels from: one label per record, or per row of a CSV.
+ * The CSV travels with the print request and is never stored: a mailing list is
+ * personal data, and documents' file store holds only PDFs and images.
+ */
 export type LabelPrintSource =
   | { kind: 'records'; records: RecordRef[] }
-  | { kind: 'csv'; fileId: string; columns: Record<string, string> /* CSV column -> field path */ };
+  | { kind: 'csv'; file: File; columns: Record<string, string> /* CSV column -> field path */ };
 
 /** E.21: a saved block in a document. Synced ones point at the library; copies are ordinary blocks. */
 export interface SavedBlockRef extends BlockBase {
@@ -335,4 +403,6 @@ export type PublishBlocker =
   | { kind: 'open-suggestions'; count: number }
   | { kind: 'missing-plugin'; plugin: PluginId }             // E.19
   | { kind: 'block-without-print-view'; blockId: BlockId }   // E.18
-  | { kind: 'unknown-field'; path: string };
+  | { kind: 'unknown-field'; path: string }
+  /** E.44: the document names a theme the workspace doesn't have. */
+  | { kind: 'theme-unavailable'; ref: string };

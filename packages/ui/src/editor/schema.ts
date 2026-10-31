@@ -1,5 +1,7 @@
 import { Mark, Node, mergeAttributes } from "@tiptap/core"
 
+import { richSchemaExtensions } from "./schema-rich"
+
 /**
  * The ProseMirror schema for the WhityDocument contract (contract.ts,
  * handoff/editor/README.md). Every block node carries a stable `id` (BlockId)
@@ -165,7 +167,7 @@ export const HardBreak = Node.create({
   },
 })
 
-/** E.26: a merge field, one character for the caret. The chip and the picker come in M4. */
+/** E.26: a merge field, one character for the caret; node-views.tsx draws the chip. */
 export const Field = Node.create({
   name: "field",
   group: "inline",
@@ -181,7 +183,7 @@ export const Field = Node.create({
   parseHTML: () => [{ tag: "span[data-field]" }],
   renderHTML: ({ node }) => [
     "span",
-    { "data-field": node.attrs.path, title: node.attrs.path, class: "wy-field" },
+    { "data-field": node.attrs.path, title: node.attrs.path, class: "wy-mf" },
     node.attrs.label || node.attrs.path,
   ],
 })
@@ -291,6 +293,7 @@ export const schemaExtensions = [
   CheckItem,
   Divider,
   UnknownBlock,
+  ...richSchemaExtensions,
   HardBreak,
   Field,
   MathInline,

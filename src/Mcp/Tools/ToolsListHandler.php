@@ -9,6 +9,7 @@ use Whity\Auth\TokenValidator;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Mcp\Auth\McpPrincipal;
 use Whity\Mcp\JsonRpc\MethodHandler;
+use Whity\Mcp\Auth\AgentScopeGrant;
 use Whity\Mcp\Auth\McpScope;
 
 /**
@@ -42,7 +43,15 @@ final class ToolsListHandler implements MethodHandler
             ? $this->tokenValidator->validateBearerForMcp($bearerToken)
             : null;
 
-        return ['tools' => $this->listFor($principal, TenantContext::getTenantId())];
+        // WHIT-748: `?toolsets=` narrows what is shown. Presentation only;
+        // the token's own toolsets (applied in listFor) are what restrict.
+        $surface = ToolSurfaceRequest::fromParams($params);
+        $tools   = array_values(array_filter(
+            $this->listFor($principal, TenantContext::getTenantId()),
+            static fn (array $tool): bool => $surface->selectsTool($tool),
+        ));
+
+        return ['tools' => $tools];
     }
 
     /**
@@ -67,8 +76,11 @@ final class ToolsListHandler implements MethodHandler
                 continue;
             }
             $access = $accessMap[$name] ?? ['requiredRole' => null, 'requiredPermission' => null];
-            if ($this->callerCanUse($access, $principal, $tenantId)) {
-                $tools[] = $tool;
+            if (self::inTokenToolsets($tool, $principal) && $this->callerCanUse($access, $principal, $tenantId)) {
+                $tool = self::withAgentMode($tool, $access, $principal);
+                if ($tool !== null) {
+                    $tools[] = $tool;
+                }
             }
         }
 
@@ -88,13 +100,116 @@ final class ToolsListHandler implements MethodHandler
             foreach ($this->authoredTools->toolObjects() as $tool) {
                 $name   = (string) ($tool['name'] ?? '');
                 $access = $authoredAccess[$name] ?? ['requiredRole' => null, 'requiredPermission' => null];
-                if ($this->callerCanUse($access, $principal, $tenantId)) {
-                    $tools[] = $tool;
+                if (self::inTokenToolsets($tool, $principal) && $this->callerCanUse($access, $principal, $tenantId)) {
+                    $tool = self::withAgentMode($tool, $access, $principal);
+                    if ($tool !== null) {
+                        $tools[] = $tool;
+                    }
                 }
             }
         }
 
+        return self::inStableOrder($tools);
+    }
+
+    /**
+     * Always-on operations first, in {@see CoreToolsets::ALWAYS_ON} order, then
+     * everything else by toolset and name (WHIT-747). The order depends only on
+     * the catalogue, never on declaration or plugin-load order, so it is the
+     * same on every worker and stays put while nothing changes: the
+     * deterministic order MCP 2026-07-28 asks for, which keeps clients' caches
+     * and prompt caches valid.
+     *
+     * @param list<array<string, mixed>> $tools
+     * @return list<array<string, mixed>>
+     */
+    private static function inStableOrder(array $tools): array
+    {
+        $rank = array_flip(CoreToolsets::ALWAYS_ON);
+        $key  = static function (array $tool) use ($rank): array {
+            $meta       = is_array($tool['_meta'] ?? null) ? $tool['_meta'] : [];
+            $name       = (string) ($tool['name'] ?? '');
+            $alwaysOn   = ($meta[ToolSurface::META_VISIBILITY] ?? null) === ToolSurface::VISIBILITY_ALWAYS_ON;
+            return [
+                $alwaysOn ? 0 : 1,
+                $alwaysOn ? ($rank[$name] ?? PHP_INT_MAX) : 0,
+                (string) ($meta[ToolSurface::META_TOOLSET] ?? ''),
+                $name,
+            ];
+        };
+        usort($tools, static fn (array $a, array $b): int => $key($a) <=> $key($b));
+
         return $tools;
+    }
+
+    /**
+     * WHIT-753: for an agent, what its grant lets it do with the tool, as
+     * `_meta` `dev.whity/agentMode` (`allow` or `ask`), so search can say ahead
+     * of time what will need a person's approval. A tool the grant turns Off is
+     * left out, like any tool the caller can't use. Other callers: unchanged.
+     *
+     * @param array<string, mixed> $tool
+     * @param array<string, mixed> $access
+     * @return array<string, mixed>|null
+     */
+    private static function withAgentMode(array $tool, array $access, ?McpPrincipal $principal): ?array
+    {
+        if ($principal === null || !AgentScopeGrant::appliesTo($principal)) {
+            return $tool;
+        }
+        $mode = self::agentModeFor($tool, $access, $principal);
+        if ($mode === AgentScopeGrant::OFF) {
+            return null;
+        }
+        $meta = is_array($tool['_meta'] ?? null) ? $tool['_meta'] : [];
+        $meta[self::META_AGENT_MODE] = $mode;
+        $tool['_meta'] = $meta;
+
+        return $tool;
+    }
+
+    public const META_AGENT_MODE = 'dev.whity/agentMode';
+
+    /**
+     * The agent's effective mode for a tool: its grant for the tool's
+     * permission, lowered by the tool's agent policy and by having no undo.
+     * Shared with tools/call so the list and the call cannot disagree.
+     *
+     * @param array<string, mixed> $tool
+     * @param array<string, mixed> $access
+     */
+    public static function agentModeFor(array $tool, array $access, McpPrincipal $principal): string
+    {
+        $annotations = is_array($tool['annotations'] ?? null) ? $tool['annotations'] : [];
+        $meta        = is_array($tool['_meta'] ?? null) ? $tool['_meta'] : [];
+        $permission  = is_string($access['requiredPermission'] ?? null) ? $access['requiredPermission'] : null;
+        $policy      = is_string($meta[ToolSurface::META_AGENT_POLICY] ?? null) ? $meta[ToolSurface::META_AGENT_POLICY] : ToolSurface::AGENT_ALLOW;
+
+        // No operation declares an undo yet (WHIT-784 adds them), so every
+        // write is Ask first for agents for now (owner decision 11).
+        return AgentScopeGrant::of($principal)->effectiveMode(
+            $permission,
+            ($annotations['readOnlyHint'] ?? false) === true,
+            $policy,
+            false,
+        );
+    }
+
+    /**
+     * WHIT-749: a token that names toolsets reaches only tools in them. Read
+     * from the tool's own `_meta`, the same value search and tools/call use.
+     *
+     * @param array<string, mixed> $tool
+     */
+    private static function inTokenToolsets(array $tool, ?McpPrincipal $principal): bool
+    {
+        if ($principal === null) {
+            return true;
+        }
+        $meta = is_array($tool['_meta'] ?? null) ? $tool['_meta'] : [];
+        $toolset = $meta[ToolSurface::META_TOOLSET] ?? null;
+
+        return McpScope::of($principal)->allowsToolset(is_string($toolset) ? $toolset : null);
     }
 
     /** @param array<string, mixed> $access */

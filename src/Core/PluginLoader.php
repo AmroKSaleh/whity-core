@@ -44,6 +44,7 @@ use Psr\Log\LoggerInterface;
 use Composer\Semver\Semver;
 use Whity\Sdk\Frontend\Blocks\BlockValidator;
 use Whity\Sdk\Hooks\HookVetoException;
+use Whity\Sdk\Manifest\ManifestPlugin;
 use Whity\Sdk\Http\Request;
 use Whity\Sdk\Http\Response;
 use Whity\Mcp\Prompts\Prompt;
@@ -804,9 +805,13 @@ class PluginLoader
                 // workers would never converge on the disabled state. Single-file
                 // disables rename `Foo.php` -> `Foo.php.disabled` (also caught
                 // here, and the vanished `.php` already perturbs the signature).
+                // WHIT-758: and a manifest plugin's `plugin.json`, which holds
+                // its declarations; editing it must reload the plugin just as
+                // editing its class would.
                 $isPhp = $fileInfo->getExtension() === 'php';
                 $isDisableSignal = str_ends_with($fileInfo->getFilename(), self::DIR_DISABLED_SENTINEL);
-                if ($isPhp || $isDisableSignal) {
+                $isManifest = $fileInfo->getFilename() === ManifestPlugin::FILE_NAME;
+                if ($isPhp || $isDisableSignal || $isManifest) {
                     $path = str_replace('\\', '/', (string) $fileInfo->getRealPath());
                     $fingerprint[$path] = $fileInfo->getMTime() . ':' . $fileInfo->getSize();
                 }

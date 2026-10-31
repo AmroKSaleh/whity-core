@@ -274,7 +274,7 @@ final class InstallFromStoreApiHandler
         // Master switch FIRST (WC-feature-flags-audit): checked before the
         // allowlist itself, and before anything else in this method, so a
         // disabled instance never even evaluates the allowlist — mirrors
-        // DocumentRenderApiHandler's flag-first pattern.
+        // the document render routes' flag-first pattern.
         if (!$this->storeEnabled()) {
             return [null, Response::error(
                 'Installing from a store is disabled on this instance.',

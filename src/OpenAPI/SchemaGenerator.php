@@ -306,11 +306,12 @@ class SchemaGenerator
     }
 
     /**
-     * `/api/things/{id:\d+}` → `/api/things/{id}`.
+     * `/api/things/{id:\d+}` → `/api/things/{id}`. A constraint may carry
+     * `{n}` / `{n,m}` quantifiers, as Router::pathToPattern() accepts.
      */
     private static function stripRouteConstraints(string $path): string
     {
-        return (string) preg_replace('#\{([a-zA-Z_][a-zA-Z0-9_]*)[^{}]*\}#', '{$1}', $path);
+        return (string) preg_replace('#\{([a-zA-Z_][a-zA-Z0-9_]*)(?:[^{}]|\{\d+(?:,\d*)?\})*\}#', '{$1}', $path);
     }
 
     /**
@@ -488,8 +489,9 @@ class SchemaGenerator
     private function sanitizePath(string $path): array
     {
         $parameters = [];
+        // A constraint may carry {n} / {n,m} quantifiers (Router::pathToPattern()).
         $clean = preg_replace_callback(
-            '#\{([a-zA-Z_][a-zA-Z0-9_]*)(?::([^{}]+))?\}#',
+            '#\{([a-zA-Z_][a-zA-Z0-9_]*)(?::((?:[^{}]|\{\d+(?:,\d*)?\})+))?\}#',
             static function (array $matches) use (&$parameters): string {
                 $constraint = $matches[2] ?? '';
                 $type = in_array($constraint, ['\d+', '[0-9]+'], true) ? 'integer' : 'string';

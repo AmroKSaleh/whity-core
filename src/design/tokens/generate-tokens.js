@@ -185,6 +185,29 @@ function validateBase(base) {
     }
   }
 
+  // Document type scales (E.33, 6.5): sizes in rem, px or pt, never below the
+  // 11px floor (3.5a), and every line height a plain number.
+  const doc = base.document;
+  if (!doc || typeof doc.fontSize !== 'object' || typeof doc.lineHeight !== 'object') {
+    throw new TokenValidationError('base.json: "document" must contain "fontSize" and "lineHeight" objects.');
+  }
+  for (const [name, value] of Object.entries(doc.fontSize)) {
+    const px = cssLengthToPx(value);
+    if (px === null) {
+      throw new TokenValidationError(`base.json: document.fontSize.${name} must be a rem, px or pt length.`);
+    }
+    if (px < 11) {
+      throw new TokenValidationError(
+        `base.json: document.fontSize.${name} is ${value} (${px.toFixed(2)}px); nothing may be below 11px (decision 3.5a).`
+      );
+    }
+  }
+  for (const [name, value] of Object.entries(doc.lineHeight)) {
+    if (typeof value !== 'number' || !(value > 0)) {
+      throw new TokenValidationError(`base.json: document.lineHeight.${name} must be a positive number.`);
+    }
+  }
+
   if (!base.borderRadius || typeof base.borderRadius.base !== 'string') {
     throw new TokenValidationError('base.json: borderRadius.base must be a string (e.g. "0.625rem").');
   }
@@ -277,6 +300,14 @@ function toCamelCase(str) {
   return str.replace(/-([a-z0-9])/g, (_, c) => c.toUpperCase());
 }
 
+/** A rem, px or pt length in CSS pixels (1rem = 16px, 1pt = 4/3px), or null. */
+function cssLengthToPx(value) {
+  const m = /^(\d+(?:\.\d+)?)(rem|px|pt)$/.exec(typeof value === 'string' ? value : '');
+  if (!m) return null;
+  const n = Number(m[1]);
+  return m[2] === 'rem' ? n * 16 : m[2] === 'pt' ? (n * 4) / 3 : n;
+}
+
 function remToPx(rem) {
   const n = parseFloat(rem);
   return Number.isNaN(n) ? 0 : n * 16;
@@ -305,6 +336,7 @@ function generateTokensJson(base) {
     plane: base.plane,
     size: base.size,
     motion: base.motion,
+    document: { fontSize: base.document.fontSize, lineHeight: base.document.lineHeight },
   };
   return JSON.stringify(output, null, 2) + '\n';
 }
@@ -502,6 +534,12 @@ function pushScalarProperties(lines, base) {
   for (const [name, value] of Object.entries(base.motion)) lines.push(`  --${name}: ${value};`);
 }
 
+/** The document type scales (E.33, 6.5) as --doc-text-* and --doc-leading-*. */
+function pushDocumentProperties(lines, base) {
+  for (const [name, value] of Object.entries(base.document.fontSize)) lines.push(`  --doc-text-${name}: ${value};`);
+  for (const [name, value] of Object.entries(base.document.lineHeight)) lines.push(`  --doc-leading-${name}: ${value};`);
+}
+
 function pushShadowProperties(lines, base, mode) {
   for (const [name, value] of Object.entries(base.shadow[mode])) lines.push(`  --${name}: ${value};`);
 }
@@ -549,6 +587,7 @@ function generateTokensPackageCss(base) {
   }
   pushShadowProperties(lines, base, 'light');
   pushScalarProperties(lines, base);
+  pushDocumentProperties(lines, base);
   for (const [name, def] of Object.entries(typo.fontSize)) {
     lines.push(`  --text-${name}: ${def.rem};`);
   }
@@ -569,6 +608,8 @@ function generateTokensPackageCss(base) {
   }
   pushShadowProperties(lines, base, 'dark');
   lines.push('}');
+  lines.push('');
+  pushLightScope(lines, base);
   lines.push('');
   lines.push(REDUCED_MOTION_CSS);
   lines.push('');
@@ -676,6 +717,19 @@ function generateBaseCss() {
  * @theme inline declarations. The static (hand-authored) parts of
  * globals.css live outside the sentinel markers.
  */
+/**
+ * `.light` puts the light colours back on one element inside a dark page, for
+ * what stays light like paper: the editor's A4 page view (decision E.11).
+ */
+function pushLightScope(lines, base) {
+  lines.push('.light {');
+  for (const [key, value] of Object.entries(base.colors.light)) {
+    lines.push(`  --${key}: ${value};`);
+  }
+  pushShadowProperties(lines, base, 'light');
+  lines.push('}');
+}
+
 function generateCssRegion(base) {
   const typo = base.typography;
   const lines = [];
@@ -691,6 +745,7 @@ function generateCssRegion(base) {
   }
   pushShadowProperties(lines, base, 'light');
   pushScalarProperties(lines, base);
+  pushDocumentProperties(lines, base);
   // Typography custom properties (shared across modes).
   for (const [name, def] of Object.entries(typo.fontSize)) {
     lines.push(`  --text-${name}: ${def.rem};`);
@@ -713,6 +768,8 @@ function generateCssRegion(base) {
   }
   pushShadowProperties(lines, base, 'dark');
   lines.push('}');
+  lines.push('');
+  pushLightScope(lines, base);
   lines.push('');
   lines.push(REDUCED_MOTION_CSS);
 
@@ -887,6 +944,7 @@ module.exports = {
   oklchToCssHex,
   toCamelCase,
   remToPx,
+  cssLengthToPx,
   generateTokensJson,
   generateThemeJson,
   generateDart,

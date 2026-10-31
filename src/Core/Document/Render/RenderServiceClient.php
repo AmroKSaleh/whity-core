@@ -21,7 +21,7 @@ namespace Whity\Core\Document\Render;
  * Every failure mode — connection refused (service/profile not running),
  * DNS failure, timeout, non-200 status, or a 200 body that does not look like
  * a PDF — is normalised to {@see RenderServiceUnavailableException}. The
- * caller (DocumentRenderApiHandler) catches this and returns a generic 503;
+ * caller (the document renderers) catches this and returns a generic 503;
  * the real reason is logged here (server-side only) via error_log, never
  * leaked to the client (WC-186).
  */
@@ -55,18 +55,6 @@ final class RenderServiceClient implements RenderServiceClientInterface
     }
 
     /**
-     * POST the render payload to `whity_render` and return the raw PDF bytes.
-     *
-     * @param array<string, mixed> $payload {template, dataRows, sheet, blocks}
-     * @throws RenderServiceUnavailableException On any transport failure, a
-     *         non-200 response, or a 200 body that is not a PDF.
-     */
-    public function render(array $payload): string
-    {
-        return $this->postForPdf('/render', $payload)[0];
-    }
-
-    /**
      * The flowing mode: POST to `/render/flow` and return the bytes together
      * with the page counts the service reports in its response headers.
      *
@@ -82,6 +70,25 @@ final class RenderServiceClient implements RenderServiceClientInterface
             $pdf,
             self::headerInt($lines, 'x-render-page-count'),
             self::headerInt($lines, 'x-render-front-matter-pages'),
+        );
+    }
+
+    /**
+     * Label sheets (E.43): POST to `/render/labels`; the sheet count and how
+     * many labels were cut at their edge come back as headers.
+     *
+     * @param array<string, mixed> $payload {sheet, grid, labels, ...}
+     * @throws RenderServiceUnavailableException
+     */
+    public function renderLabels(array $payload): RenderedDocument
+    {
+        [$pdf, $lines] = $this->postForPdf('/render/labels', $payload);
+
+        return new RenderedDocument(
+            $pdf,
+            self::headerInt($lines, 'x-render-page-count'),
+            0,
+            self::headerInt($lines, 'x-render-labels-clipped'),
         );
     }
 

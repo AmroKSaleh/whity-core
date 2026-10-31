@@ -4,15 +4,11 @@
  * Turns a normalised flow document (see ./document.js) into the ONE HTML page
  * headless Chromium is handed (#1072, first half).
  *
- * Deliberately plain, server-generated HTML rather than a React bundle: the
- * fixed-canvas mode's harness (harness/entry.tsx + scripts/build-harness.js)
- * exists to keep exported output pixel-identical to the on-screen designer
- * preview, because that mode renders a design someone drew. A flowing
- * document has no on-screen designer to be identical to, so bundling it
- * through the same pipeline would buy nothing and would put a second consumer
- * on the harness build — the single most fragile part of this service. This
- * mode therefore shares no code path, no bundle and no CSS with the
- * fixed-canvas one; the only thing they share is the Chromium instance.
+ * Deliberately plain, server-generated HTML rather than a React bundle: a
+ * flowing document has no on-screen canvas to be pixel-identical to, so a
+ * bundled renderer would buy nothing and would make the image depend on a
+ * front-end build. (The old fixed-canvas designer's React harness, which did
+ * exist for that reason, was removed in editor M4c.)
  *
  * Two things in here are load-bearing and easy to get quietly wrong:
  *
@@ -45,19 +41,21 @@ const PAGINATE_JS = fs.readFileSync(path.join(ASSET_DIR, 'paginate.js'), 'utf8')
  * apply an identical rule. See src/flow/bidi.js. */
 const BIDI_JS = fs.readFileSync(require.resolve('../flow/bidi.js'), 'utf8');
 
-/** The default stack. Noto Naskh/Sans Arabic are baked into the image
- * (Dockerfile: fonts-noto-core), so Arabic shapes rather than printing tofu. */
+/** The default stack: Noto Sans, with Noto Sans Arabic for Arabic (3.2, 3.3),
+ * both in the image (Dockerfile: fonts-noto-core), so Arabic shapes rather
+ * than printing tofu. Noto Sans has no Arabic glyphs, so Arabic text falls
+ * through to Noto Sans Arabic while Latin stays in Noto Sans. */
 const DEFAULT_FONT_STACK =
-  "'Noto Naskh Arabic', 'Noto Sans Arabic', 'DejaVu Sans', 'Liberation Sans', Arial, sans-serif";
+  "'Noto Sans', 'Noto Sans Arabic', 'DejaVu Sans', 'Liberation Sans', Arial, sans-serif";
 
 const { escapeHtml, isolateForeignRuns } = require('./bidi');
-const { QR_SIZE_MM, MAX_FIELD_BOXES, MAX_ANSWER_LINES } = require('./document');
+const { QR_SIZE_MM, MAX_FIELD_BOXES, MAX_ANSWER_LINES, BARCODE_SYMBOLOGIES } = require('./document');
 
-/* Already a dependency of this service for the fixed-canvas mode's barcode
- * element; the flowing mode draws its verification code with the same encoder
- * so two modes of one product cannot print two different barcodes for one
- * token. */
+/* The one barcode encoder in this service: the verification code and every
+ * barcode block are drawn with it, so one product cannot print two different
+ * barcodes for one token. */
 const bwipjs = require('bwip-js');
+const katex = require('katex');
 
 /**
  * Escape a JSON string for embedding inside a <script> block. `</` is the
@@ -102,6 +100,10 @@ function inlineContent(block, direction) {
 
   let out = '';
   for (const run of runs) {
+    if (run.break === true) {
+      out += '<br>';
+      continue;
+    }
     let piece = isolateForeignRuns(run.text, direction);
     if (run.italic) piece = `<em>${piece}</em>`;
     if (run.bold) piece = `<strong>${piece}</strong>`;
@@ -276,6 +278,36 @@ function renderQr(block, direction) {
   );
 }
 
+/** E.40: a barcode, ink only, with its value under it when asked. */
+function renderBarcode(block, direction) {
+  let svg = '';
+  try {
+    svg = bwipjs.toSVG({ bcid: BARCODE_SYMBOLOGIES[block.symbology], text: block.value, scale: 2, height: 12, includetext: false });
+  } catch (err) {
+    // A value the symbology can't encode (an EAN-13 with letters) prints as
+    // its text, which still reads, rather than failing the whole document.
+    // eslint-disable-next-line no-console
+    console.error('[whity_render] barcode could not be encoded:', err && err.message ? err.message : err);
+  }
+  const text = block.showText !== false || !svg ? `<div class="flow-barcode-text">${isolateForeignRuns(block.value, direction)}</div>` : '';
+  return `${unitOpen(block, 'barcode')}${svg ? `<div class="flow-barcode-code">${svg}</div>` : ''}${text}</div>`;
+}
+
+/**
+ * E.42: a formula. KaTeX writes MathML, which Chromium lays out itself, so
+ * the PDF needs no KaTeX fonts or stylesheet. A formula that doesn't parse
+ * prints as its source.
+ */
+function renderMath(block) {
+  let math = '';
+  try {
+    math = katex.renderToString(block.tex, { output: 'mathml', displayMode: true, throwOnError: true, trust: false });
+  } catch {
+    math = `<code>${escapeHtml(block.tex)}</code>`;
+  }
+  return `${unitOpen(block, 'math')}${math}</div>`;
+}
+
 /* ---------------------------------------------------------------- forms
  *
  * The blocks a printed form needs. Each is one paginator unit (its
@@ -395,6 +427,22 @@ function renderDivider(block, direction) {
   return `${unitOpen(block, 'divider')}${text}</div>`;
 }
 
+/** The first page's letterhead: start side, then end side (logical, so it mirrors in Arabic). */
+function renderLetterhead(block, direction) {
+  const side = (part, cls) => {
+    if (!part) return `<div class="${cls}"></div>`;
+    const image = part.image
+      ? `<img class="flow-letterhead-logo" src="${escapeHtml(part.image.src)}" alt="${escapeHtml(part.image.alt || '')}"` +
+        `${part.image.heightMm ? ` style="height:${Number(part.image.heightMm)}mm"` : ''}>`
+      : '';
+    const name = part.name ? `<div class="flow-letterhead-name">${isolateForeignRuns(part.name, direction)}</div>` : '';
+    const title = part.title ? `<div class="flow-letterhead-title">${isolateForeignRuns(part.title, direction)}</div>` : '';
+    const lines = (part.lines || []).map((l) => `<div class="flow-letterhead-line">${isolateForeignRuns(l, direction)}</div>`).join('');
+    return `<div class="${cls}">${image}${name}${title}${lines}</div>`;
+  };
+  return `${unitOpen(block, 'letterhead')}${side(block.start, 'flow-letterhead-start')}${side(block.end, 'flow-letterhead-end')}</div>`;
+}
+
 function renderBlock(block, direction) {
   switch (block.type) {
     case 'heading': {
@@ -432,6 +480,12 @@ function renderBlock(block, direction) {
       return renderQuestion(block, direction);
     case 'divider':
       return renderDivider(block, direction);
+    case 'letterhead':
+      return renderLetterhead(block, direction);
+    case 'barcode':
+      return renderBarcode(block, direction);
+    case 'math':
+      return renderMath(block);
     case 'pageBreak':
       return '<div class="flow-page-break" data-flow-unit="pageBreak"></div>';
     case 'spacer':
@@ -450,17 +504,20 @@ function renderBlock(block, direction) {
 function buildFlowHtml(doc) {
   const fontStack = doc.fontFamily || DEFAULT_FONT_STACK;
   const body = doc.content.map((block) => renderBlock(block, doc.direction)).join('\n');
-  // The theme: validated hex colours only (document.js), written as the custom
-  // properties flow.css reads. Absent keys leave the stylesheet's defaults,
-  // which are the colours this mode always printed in.
-  const theme = doc.theme
-    ? Object.entries(doc.theme)
-        .map(([key, value]) => `  --flow-${key}: ${value};\n`)
-        .join('') +
-      // Table and answer-line rules follow the theme's line colour only when
-      // it names one; a theme that sets just an accent keeps the darker grid.
-      (doc.theme.line ? `  --flow-grid: ${doc.theme.line};\n` : '')
+  // The theme: the validated print colour (document.js), written as the
+  // custom property flow.css reads. Without one, the stylesheet's defaults
+  // are the colours this mode always printed in.
+  const theme = doc.theme && doc.theme.accent
+    ? `  --flow-accent: ${doc.theme.accent};\n` +
+      // The letterhead title takes the print colour (6.3); without it the
+      // title stays ink rather than the transparent accent.
+      `  --flow-title: ${doc.theme.accent};\n`
     : '';
+  // E.45: a theme may put the print colour on the headings as well.
+  const bodyClasses = [
+    doc.theme ? 'flow-themed' : '',
+    doc.theme && doc.theme.accentUse === 'title-and-headings' ? 'flow-accent-headings' : '',
+  ].filter(Boolean).join(' ');
 
   // Everything the browser-side paginator needs: geometry, the running
   // header/footer templates, the front-matter spec, and the cross-reference
@@ -496,7 +553,7 @@ ${theme}}
 </style>
 <style>${FLOW_CSS}</style>
 </head>
-<body${doc.theme ? ' class="flow-themed"' : ''}>
+<body${bodyClasses ? ` class="${bodyClasses}"` : ''}>
 <div id="flow-source" aria-hidden="true">
 ${body}
 </div>
@@ -508,4 +565,4 @@ ${body}
 </html>`;
 }
 
-module.exports = { buildFlowHtml, isolateForeignRuns, escapeHtml, DEFAULT_FONT_STACK };
+module.exports = { buildFlowHtml, renderBlock, mm, FLOW_CSS, isolateForeignRuns, escapeHtml, DEFAULT_FONT_STACK };

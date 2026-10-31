@@ -36,7 +36,6 @@ jest.mock('../src/renderer', () => ({
       close: async () => {},
     }),
   })),
-  renderToPdf: jest.fn(),
   shutdown: jest.fn(),
 }));
 

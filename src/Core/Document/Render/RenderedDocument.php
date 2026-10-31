@@ -30,6 +30,8 @@ final class RenderedDocument
         public readonly string $bytes,
         public readonly int $pageCount,
         public readonly int $frontMatterPages = 0,
+        /** Label sheets (E.43): how many labels were cut at their edge. */
+        public readonly int $labelsClipped = 0,
     ) {
     }
 }

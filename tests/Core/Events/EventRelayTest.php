@@ -66,6 +66,9 @@ final class EventRelayTest extends TestCase
                 aggregate_type TEXT,
                 aggregate_id TEXT,
                 actor_user_id INTEGER,
+                actor_kind TEXT,
+                agent_principal_id TEXT,
+                on_behalf_of_profile_id INTEGER,
                 payload TEXT NOT NULL,
                 occurred_at TEXT NOT NULL
             )'

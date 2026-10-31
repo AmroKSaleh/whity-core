@@ -1,9 +1,11 @@
 import type { AnyExtension } from "@tiptap/core"
-import { Placeholder, UndoRedo } from "@tiptap/extensions"
+import { Gapcursor, Placeholder, UndoRedo } from "@tiptap/extensions"
 
 import { BlockIds } from "./block-ids"
 import { DocumentBehaviour } from "./behaviour"
+import { richNodeViews } from "./node-views"
 import { CheckItem, schemaExtensions } from "./schema"
+import { TableKeys } from "./table-keys"
 
 /** The checklist box: a real checkbox button, outside the editable text. */
 const CheckItemWithBox = CheckItem.extend({
@@ -61,7 +63,13 @@ export interface DocumentExtensionOptions {
 /** Everything the document editor runs on, in one list. */
 export function documentExtensions({ placeholder }: DocumentExtensionOptions = {}): AnyExtension[] {
   return [
-    ...schemaExtensions.map((ext) => (ext.name === "checkItem" ? CheckItemWithBox : ext)),
+    ...schemaExtensions.map((ext) => {
+      if (ext.name === "checkItem") return CheckItemWithBox
+      // M3 blocks get their editor views (node-views.tsx).
+      return richNodeViews.find((view) => view.name === ext.name) ?? ext
+    }),
+    Gapcursor,
+    TableKeys,
     BlockIds,
     DocumentBehaviour,
     UndoRedo.configure({ depth: 200 }),

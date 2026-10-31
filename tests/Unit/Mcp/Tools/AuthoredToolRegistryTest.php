@@ -198,7 +198,23 @@ final class AuthoredToolRegistryTest extends TestCase
 
         $object = $registry->toolObjects()[0];
 
-        self::assertSame(['name', 'description', 'inputSchema'], array_keys($object));
+        self::assertSame(['name', 'description', 'inputSchema', '_meta'], array_keys($object));
+    }
+
+    /**
+     * WHIT-747: an authored tool lands in its plugin's own toolset, reached
+     * through search, with agents left to the scope grant.
+     */
+    public function testToolObjectsCarryThePluginToolsetInMeta(): void
+    {
+        $registry = new AuthoredToolRegistry();
+        $registry->register(self::descriptor(), 'Plugins\PeriodClose\PeriodClosePlugin');
+
+        self::assertSame([
+            'dev.whity/toolset'     => 'period-close',
+            'dev.whity/visibility'  => 'discoverable',
+            'dev.whity/agentPolicy' => 'allow',
+        ], $registry->toolObjects()[0]['_meta']);
     }
 
     public function testTheAccessMapMatchesTheShapeTheDeriverProduces(): void

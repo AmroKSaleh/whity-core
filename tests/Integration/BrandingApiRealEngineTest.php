@@ -68,7 +68,7 @@ final class BrandingApiRealEngineTest extends TestCase
         self::assertSame(200, $res->getStatusCode());
         $body = json_decode($res->getBody(), true);
         self::assertSame('Acme', $body['data']['siteName']);
-        self::assertSame(['siteName', 'logoWideUrl', 'logoSquareUrl', 'faviconUrl'], array_keys($body['data']));
+        self::assertSame(['siteName', 'logoWideUrl', 'logoSquareUrl', 'faviconUrl', 'mainColor', 'theme'], array_keys($body['data']));
         self::assertStringNotContainsString('secret@acme.com', $res->getBody());
     }
 

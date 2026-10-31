@@ -10,6 +10,7 @@ use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\i18n\SchemaLabels;
 use Whity\Core\i18n\ServerLabels;
+use Whity\Core\Settings\SettingsRegistry;
 use Whity\Core\Settings\SettingsService;
 use Whity\Core\Settings\SettingsValidationException;
 use Whity\Core\Tenant\TenantContext;
@@ -108,6 +109,18 @@ final class SettingsApiHandler
     private ServerLabels $labels;
 
     private const LABEL_KEY_PREFIX = 'settings.tab.';
+
+    /**
+     * Keys a tenant write needs a further permission for, besides
+     * settings:write. The default document themes are chosen by whoever
+     * manages the workspace's themes (DOCUMENT-THEMES.md 5, editor M4d).
+     *
+     * @var array<string, string>
+     */
+    private const KEY_PERMISSIONS = [
+        SettingsRegistry::DOCUMENTS_THEME => CorePermissions::DOCUMENTS_THEMES,
+        SettingsRegistry::DOCUMENTS_THEME_BY_KIND => CorePermissions::DOCUMENTS_THEMES,
+    ];
 
     /**
      * The catalogue key for a tab.
@@ -281,7 +294,18 @@ final class SettingsApiHandler
         if ($context instanceof Response) {
             return $context;
         }
-        ['tenantId' => $tenantId] = $context;
+        ['tenantId' => $tenantId, 'userId' => $userId] = $context;
+
+        // Some keys belong to a capability of their own as well as
+        // settings:write: the workspace's default document themes are set by
+        // whoever manages its themes (documents:themes, editor M4d).
+        $settings = JsonBody::parsed($request)['settings'] ?? null;
+        foreach (is_array($settings) ? array_keys($settings) : [] as $key) {
+            $required = self::KEY_PERMISSIONS[$key] ?? null;
+            if ($required !== null && !$this->roleChecker->hasPermissionForProfile($userId, $required, $tenantId)) {
+                return Response::error('Insufficient permissions', 403, ['required' => $required, 'setting' => $key]);
+            }
+        }
 
         return $this->applyWrites(
             $request,

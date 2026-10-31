@@ -1,5 +1,15 @@
-import type { Block, DocumentKind, WhityDocument } from '@whity-org/ui/editor/contract';
-import type { DocumentEditorAdapter, LoadedDocument, SaveResult } from '@whity-org/features/document-editor';
+import type { Block, DocumentKind, PublishBlocker, ResolvedDocumentTheme, WhityDocument } from '@whity-org/ui/editor/contract';
+import type { FieldGroup } from '@whity-org/ui/editor/fields';
+import type { BrandLogos } from '@whity-org/ui/editor/page-view';
+import type { EditorServices, FieldPreview, RecordView, UploadedFile } from '@whity-org/ui/editor/services';
+import type {
+  DocumentEditorAdapter,
+  IssueResult,
+  LoadedDocument,
+  SaveResult,
+  TemplateSetup,
+  VersionContent,
+} from '@whity-org/features/document-editor';
 import { api } from '@/lib/api/client';
 import type { components } from '@/lib/api/schema';
 
@@ -18,6 +28,13 @@ function versionFrom(response: Response, fallback: number): number {
   return m ? Number(m[1]) : fallback;
 }
 
+/** The server keeps a label sheet's grid inside `page` (E.43); the editor has it beside. */
+function pageOf(page: Row['page']): Pick<WhityDocument, 'page' | 'labels'> {
+  if (!page) return { page: undefined, labels: undefined };
+  const { labels, ...rest } = page as Record<string, unknown>;
+  return { page: rest as WhityDocument['page'], labels: (labels ?? undefined) as WhityDocument['labels'] };
+}
+
 export function toDocument(row: Row): WhityDocument {
   return {
     id: String(row.id),
@@ -26,7 +43,10 @@ export function toDocument(row: Row): WhityDocument {
     lang: row.lang === 'ar' ? 'ar' : 'en',
     defaultView: row.default_view === 'page' ? 'page' : 'continuous',
     fullWidth: row.full_width,
+    ...pageOf(row.page),
     recordType: row.record_type ?? undefined,
+    ownFields: row.own_fields?.length ? row.own_fields : undefined,
+    theme: row.theme ? (row.theme as WhityDocument['theme']) : undefined,
     blocks: (row.blocks ?? []) as unknown as Block[],
     // Comments and suggestions have their own endpoints from M5.
     comments: [],
@@ -37,6 +57,24 @@ export function toDocument(row: Row): WhityDocument {
     // The editor shows who edited last; names come with the people lookup in M5.
     updatedBy: { kind: 'person', id: String(row.updated_by ?? ''), name: '' },
   };
+}
+
+/** The row's resolved theme (E.44), as the editor takes it; null when the server sent none. */
+function themeOf(row: Pick<Row, 'resolvedTheme'>): ResolvedDocumentTheme | null {
+  return (row.resolvedTheme as ResolvedDocumentTheme | undefined) ?? null;
+}
+
+/**
+ * The workspace's uploaded logos, for the letterhead the theme picks (E.44).
+ * Branding is public and optional: a failure leaves the initials.
+ */
+async function loadLogos(): Promise<BrandLogos | undefined> {
+  try {
+    const { data } = await api.GET('/api/v1/branding');
+    return data ? { wide: data.data.logoWideUrl, square: data.data.logoSquareUrl } : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function listDocumentSources(kind?: DocumentKind): Promise<Row[]> {
@@ -51,23 +89,247 @@ export async function createDocumentSource(kind: DocumentKind, title: string): P
   return data.data;
 }
 
+type FileResponse = components['schemas']['DocumentSourceFileResponse'];
+/** `POST /document-sources/{id}/drafts` (M4c), typed by hand until the client is regenerated. */
+type DraftsPost = (url: string, options: { body: { title?: string } }) => Promise<{ data?: { data: Row }; response: Response }>;
+type RecordResponse = components['schemas']['DocumentEmbedRecordResponse']['data'];
+
+/**
+ * The upload is multipart, which the typed client cannot express for a body
+ * (openapi-typescript types it as `{ file: string }`), so `api.POST` is recast
+ * for this one path, as branding-upload.ts and plugin-upload.ts do.
+ */
+type MultipartPost = (url: string, options: { body: FormData }) => Promise<{ data?: FileResponse; response: Response }>;
+
+function toRecordView(row: RecordResponse): RecordView {
+  return {
+    typeLabel: row.type_label,
+    title: row.title,
+    subtitle: row.subtitle ?? undefined,
+    amount: row.amount ?? undefined,
+    status: row.status ?? undefined,
+    href: row.href ?? undefined,
+  };
+}
+
+/**
+ * Live data for one document's rich blocks (editor M3). Every call is the
+ * reader's own: a record or chart they may not see comes back as null, which
+ * the block shows as hidden rather than as an error.
+ */
+async function loadServices(id: string): Promise<EditorServices> {
+  const { data } = await api.GET('/api/v1/document-embeds');
+  const fileUrl = (fileId: string) => `/api/v1/document-sources/${Number(id)}/files/${encodeURIComponent(fileId)}/content`;
+
+  return {
+    recordTypes: data?.data.record_types ?? [],
+    chartSources: data?.data.chart_sources ?? [],
+    fileUrl,
+    async resolveRecord(ref) {
+      const { data: record, response } = await api.GET('/api/v1/document-embeds/records/{type}/{id}', {
+        params: { path: { type: ref.type, id: ref.id } },
+      });
+      if (response.status === 404) return null;
+      if (record === undefined) throw new Error(`Failed to load the record (${response.status})`);
+      return toRecordView(record.data);
+    },
+    async loadChart(source) {
+      // The block's params travel as the query string; the spec has no fixed list of them.
+      const query = new URLSearchParams(source.params ?? {}).toString();
+      const { data: chart, response } = await api.GET('/api/v1/document-embeds/charts/{key}', {
+        params: { path: { key: source.query } },
+        querySerializer: () => query,
+      });
+      if (response.status === 404) return null;
+      if (chart === undefined) throw new Error(`Failed to load the chart (${response.status})`);
+      return { points: chart.data.points, valueLabel: chart.data.value_label, subtitle: chart.data.subtitle };
+    },
+    async uploadFile(file): Promise<UploadedFile> {
+      const body = new FormData();
+      body.append('file', file);
+      const post = api.POST as unknown as MultipartPost;
+      const { data: up, response } = await post(`/api/v1/document-sources/${Number(id)}/files`, { body });
+      if (up === undefined) throw new Error(`Failed to upload the file (${response.status})`);
+      return {
+        fileId: String(up.data.id),
+        url: up.data.url,
+        name: up.data.filename ?? file.name,
+        size: up.data.byte_size,
+        mime: up.data.content_type,
+      };
+    },
+  };
+}
+
+/** Saves the PDF the server returns under the template's name. */
+function download(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${filename || 'document'}.pdf`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export const documentSourcesAdapter: DocumentEditorAdapter = {
+  loadServices,
+
+  async loadTemplate(recordType): Promise<TemplateSetup> {
+    const [{ data, response }, logos] = await Promise.all([
+      api.GET('/api/v1/document-fields', { params: { query: recordType ? { recordType } : {} } }),
+      loadLogos(),
+    ]);
+    if (data === undefined) throw new Error(`Failed to load the fields (${response.status})`);
+    // The print colour comes with the document now (resolvedTheme), not with the fields.
+    return {
+      fields: data.data.groups as FieldGroup[],
+      letterhead: data.data.letterhead,
+      letterheadParts: data.data.letterhead_parts,
+      ...(logos ? { logos } : {}),
+    };
+  },
+
+  async findRecords(recordType, query) {
+    const { data, response } = await api.GET('/api/v1/document-fields/records', {
+      params: { query: { recordType, ...(query ? { q: query } : {}) } },
+    });
+    if (data === undefined) throw new Error(`Failed to find records (${response.status})`);
+    return data.data.map((r) => ({ ref: `${recordType}:${r.id}`, label: r.label }));
+  },
+
+  async preview(id, record): Promise<FieldPreview | null> {
+    const { data, response } = await api.GET('/api/v1/document-sources/{id}/preview', {
+      params: { path: { id: Number(id) }, query: record ? { record } : {} },
+    });
+    if (response.status === 404) return null;
+    if (data === undefined) throw new Error(`Failed to preview (${response.status})`);
+    return { label: data.data.label, values: data.data.values };
+  },
+
+  async publishCheck(id): Promise<PublishBlocker[]> {
+    const { data, response } = await api.GET('/api/v1/document-sources/{id}/publish-check', { params: { path: { id: Number(id) } } });
+    if (data === undefined) throw new Error(`Failed to check the template (${response.status})`);
+    return data.data as PublishBlocker[];
+  },
+
+  async publish(id, version): Promise<number> {
+    const { data, response } = await api.POST('/api/v1/document-sources/{id}/publish', {
+      params: { path: { id: Number(id) } },
+      headers: { 'If-Match': `"${version}"` },
+    });
+    if (data === undefined) throw new Error(`Failed to publish (${response.status})`);
+    return data.data.published_version;
+  },
+
+  async exportPdf(id, record, filename) {
+    const { data, response } = await api.POST('/api/v1/document-sources/{id}/render', {
+      params: { path: { id: Number(id) } },
+      body: record ? { record } : {},
+      parseAs: 'blob',
+    });
+    if (data === undefined) throw new Error(`Failed to print (${response.status})`);
+    download(data as Blob, filename);
+  },
+
+  async printLabels(id, source, filename) {
+    // The CSV goes as text with this print and is never stored (E.43).
+    const body =
+      source.kind === 'records'
+        ? { records: source.records.map((r) => `${r.type}:${r.id}`) }
+        : { csv: await source.file.text(), columns: source.columns };
+    const { data, error, response } = await api.POST('/api/v1/document-sources/{id}/print-labels', {
+      params: { path: { id: Number(id) } },
+      body,
+      parseAs: 'blob',
+    });
+    if (data === undefined) {
+      const message = (error as { error?: unknown } | undefined)?.error;
+      throw new Error(typeof message === 'string' ? message : `Failed to print the labels (${response.status})`);
+    }
+    download(data as Blob, filename);
+    return {
+      count: Number(response.headers.get('X-Labels-Count') ?? 0),
+      clipped: Number(response.headers.get('X-Labels-Clipped') ?? 0),
+    };
+  },
+
+  async loadVersion(id, version): Promise<VersionContent> {
+    const { data, response } = await api.GET('/api/v1/document-sources/{id}/versions/{version}', {
+      params: { path: { id: Number(id), version } },
+    });
+    if (data === undefined) throw new Error(`Failed to load the published version (${response.status})`);
+    const v = data.data;
+    return {
+      title: v.title,
+      blocks: (v.blocks ?? []) as unknown as Block[],
+      ...pageOf(v.page as Row['page']),
+      ownFields: v.own_fields?.length ? v.own_fields : undefined,
+      resolvedTheme: (v.theme_resolved as ResolvedDocumentTheme | null | undefined) ?? null,
+    };
+  },
+
+  async copyForIssue(id): Promise<string> {
+    // "Edit before issuing": a personal letter made from the template's
+    // published version. Recast until the regenerated client carries the route.
+    const post = api.POST as unknown as DraftsPost;
+    const { data, response } = await post(`/api/v1/document-sources/${Number(id)}/drafts`, { body: {} });
+    if (data === undefined) throw new Error(`Failed to make a draft to edit (${response.status})`);
+    return String(data.data.id);
+  },
+
+  async issue(id, request): Promise<IssueResult> {
+    const values = Object.fromEntries(Object.entries(request.values).map(([key, value]) => [`template.${key}`, value]));
+    const { data, error, response } = await api.POST('/api/v1/documents', {
+      body: {
+        document_source_id: Number(id),
+        ...(request.record ? { record: request.record } : {}),
+        ...(Object.keys(values).length ? { values } : {}),
+      },
+    });
+    if (data !== undefined) return { ok: true, documentId: data.data.id };
+    // A refusal the person can act on comes back in the server's words (E.27).
+    const body = error as { error?: unknown; details?: { missing?: unknown } } | undefined;
+    if (response.status === 422 || response.status === 409) {
+      const missing = Array.isArray(body?.details?.missing) ? body.details.missing.filter((m): m is string => typeof m === 'string') : [];
+      return {
+        ok: false,
+        message: typeof body?.error === 'string' ? body.error : `The document wasn't issued (${response.status})`,
+        missing,
+      };
+    }
+    throw new Error(typeof body?.error === 'string' ? body.error : `Failed to issue the document (${response.status})`);
+  },
+
   async load(id: string): Promise<LoadedDocument> {
     const { data, response } = await api.GET('/api/v1/document-sources/{id}', { params: { path: { id: Number(id) } } });
     if (data === undefined) throw new Error(`Failed to load the document (${response.status})`);
-    return { document: toDocument(data.data), version: versionFrom(response, data.data.draft_version) };
+    return {
+      document: toDocument(data.data),
+      version: versionFrom(response, data.data.draft_version),
+      resolvedTheme: themeOf(data.data),
+    };
   },
 
   async save(id, patch, version): Promise<SaveResult> {
     const { data, response } = await api.PUT('/api/v1/document-sources/{id}/draft', {
       params: { path: { id: Number(id) } },
       headers: { 'If-Match': `"${version}"` },
-      body: { title: patch.title, blocks: patch.blocks as unknown as Row['blocks'] },
+      body: {
+        title: patch.title,
+        blocks: patch.blocks as unknown as Row['blocks'],
+        ...(patch.page || patch.labels ? { page: { ...patch.page, ...(patch.labels ? { labels: patch.labels } : {}) } as Row['page'] } : {}),
+        ...(patch.ownFields ? { own_fields: patch.ownFields } : {}),
+      },
     });
     if (response.status === 409) {
       return { ok: false, conflict: true, currentVersion: versionFrom(response, version) };
     }
     if (data === undefined) throw new Error(`Failed to save the document (${response.status})`);
-    return { ok: true, version: versionFrom(response, data.data.draft_version), updatedAt: data.data.updated_at };
+    return {
+      ok: true,
+      version: versionFrom(response, data.data.draft_version),
+      updatedAt: data.data.updated_at,
+      resolvedTheme: themeOf(data.data),
+    };
   },
 };

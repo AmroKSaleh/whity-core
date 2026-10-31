@@ -204,7 +204,8 @@ final class ResourceDeriver
      */
     private function cleanPathConstraints(string $path): string
     {
-        return (string) preg_replace('#\{([a-zA-Z_][a-zA-Z0-9_]*)[^{}]*\}#', '{$1}', $path);
+        // A constraint may carry {n} / {n,m} quantifiers (Router::pathToPattern()).
+        return (string) preg_replace('#\{([a-zA-Z_][a-zA-Z0-9_]*)(?:[^{}]|\{\d+(?:,\d*)?\})*\}#', '{$1}', $path);
     }
 
     private function hasPathParams(string $path): bool

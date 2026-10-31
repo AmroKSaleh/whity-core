@@ -7,12 +7,12 @@ namespace Whity\Core\Document\Demo;
 use PDO;
 use RuntimeException;
 use Whity\Core\Document\DocumentAccessPolicy;
-use Whity\Core\Document\DocumentBlockRepository;
 use Whity\Core\Document\DocumentCollectionRepository;
 use Whity\Core\Document\DocumentIssuer;
 use Whity\Core\Document\DocumentRepository;
-use Whity\Core\Document\DocumentStarterSeeder;
-use Whity\Core\Document\DocumentTemplateRepository;
+use Whity\Core\Document\DocumentSourceRepository;
+use Whity\Core\Document\DocumentSourceStarterSeeder;
+use Whity\Core\Document\DocumentSourceVersionRepository;
 use Whity\Core\Document\Organizer\DocumentCriteria;
 use Whity\Core\Document\Qr\DocumentQrService;
 use Whity\Core\Document\Qr\DocumentQrTokenRepository;
@@ -60,16 +60,15 @@ use Whity\Core\Settings\SettingsService;
  *   |                                            | a linear document cannot exhibit it      |
  *   | One document raised in a department and    | "passed through my unit" as distinct     |
  *   | forwarded through the faculty              | from "raised by my unit"                 |
- *   | Templates and blocks placed at three       | #1004: two holders of ONE role, standing |
- *   | different units, two permission-tagged     | in different units, seeing different     |
- *   |                                            | sets — and the permission gate on top    |
+ *   | Editor templates placed at three different | #1004: two holders of ONE role, standing |
+ *   | units, two permission-tagged, each         | in different units, seeing different     |
+ *   | published once                             | sets — and the permission gate on top    |
  *   | A template gated on a capability the       | that a technician sees less than the     |
  *   | secretary holds and the technician does    | SECRETARY BESIDE HER, not merely less    |
  *   | not, both standing in one unit             | than the dean two levels up              |
- *   | Block POINTERS across three units, one of  | that a block is a REFERENCE and not a    |
- *   | them from a template a department          | copy: a usage count above zero, and the  |
- *   | secretary cannot see                       | "N templates, M you cannot see"          |
- *   |                                            | disclosure with a real M in it           |
+ *   | Every document issued from one of those    | a record that names the template and the |
+ *   | templates' published versions, with the    | version it was issued from, and the      |
+ *   | values it printed                          | values it printed (migration 165)        |
  *   | A starred collection AND a custom one      | that starring IS a collection (migration |
  *   |                                            | 114) rather than a second concept        |
  *   | One document with TWO artifacts            | #986's "version N of M" and its          |
@@ -156,32 +155,30 @@ use Whity\Core\Settings\SettingsService;
  *  1. THE ORGANISATION — units, roles, permission grants, profiles,
  *     memberships. There is no service; see {@see DemoOrganisationSeeder}, which
  *     also records why direct SQL is defensible there and would not be here.
- *  2. THE ARTIFACT BYTES. {@see \Whity\Core\Document\Render\DocumentRenderer}
+ *  2. THE ARTIFACT BYTES. {@see \Whity\Core\Document\Render\FlowDocumentRenderer}
  *     needs the opt-in `whity_render` container; see {@see DemoPdf}. The
- *     persistence half is real, the payload is local.
- * (There used to be a third: RESOLVING A ROW BY ITS `starter_key`.
- * `starterKeysForTenant()` returns keys without ids and the rows came back with
- * no key on them, so this class could not ask the repository "which row is
- * starter X" and worked around it with a lookup by NAME. #1013 put `starter_key`
- * back on the row, which is what makes the block POINTERS below possible at all —
- * a pointer needs the id of the block it points at.)
+ *     persistence half is real, the payload is local. The record still says
+ *     which template version it came from and which values it printed, so a
+ *     correction made through the product re-renders it from the real template.
  *
  * IDEMPOTENT, AND RESUMABLE
  * -------------------------
- * `seed` is run repeatedly against dev databases. Templates and blocks are
- * keyed by `starter_key` and inserted only when absent — the mechanism
- * {@see DocumentStarterSeeder} already uses, and for its reason: a name is
- * user-renameable and therefore cannot be an identity. Documents are keyed by
- * TITLE, which for this table is safe in a way it would not be for most:
- * {@see DocumentRepository} has no update path at all, so a document's title is
- * fixed at issue.
+ * `seed` is run repeatedly against dev databases. Templates are keyed by
+ * `starter_key` (with a `demo.` prefix) and inserted only when absent — the
+ * mechanism {@see DocumentSourceStarterSeeder} already uses, and for its reason:
+ * a title is user-renameable and therefore cannot be an identity. Documents are
+ * keyed by TITLE, which for this table is safe in a way it would not be for
+ * most: {@see DocumentRepository} has no update path at all, so a document's
+ * title is fixed at issue.
  *
  * Insert-when-absent means NEVER UPDATE, and that has one consequence worth
  * saying out loud: a database seeded before a change to this file keeps the rows
- * it already has. A demo seeded before #1024 therefore keeps templates with no
- * `blockInstance` in them — re-running `seed` will not add the pointers, exactly
- * as re-running it has never re-written a template somebody edited. A demo that
- * has to show the new thing is seeded into a fresh database.
+ * it already has. A demo seeded before the old designer was removed (editor M4c)
+ * keeps its documents, and they keep pointing at no editor template —
+ * re-running `seed` adds the editor templates but does not re-issue documents
+ * whose titles already exist, exactly as re-running it has never re-written a
+ * template somebody edited. A demo that has to show the new thing is seeded into
+ * a fresh database.
  *
  * Each document and its whole routing history are written inside ONE
  * transaction, so the title check is a complete answer: either the document and
@@ -193,7 +190,7 @@ use Whity\Core\Settings\SettingsService;
  *
  * NOT SWALLOWED
  * -------------
- * Unlike {@see DocumentStarterSeeder::seedForTenant()}, which logs and swallows
+ * Unlike {@see DocumentSourceStarterSeeder::seedForTenant()}, which logs and swallows
  * because it hangs off a tenant-creation request that must not fail with it,
  * this throws. A half-seeded demo is worse than an unseeded one: the operator
  * would be looking at folders that are empty for a reason nobody told them
@@ -224,14 +221,21 @@ use Whity\Core\Settings\SettingsService;
 final class DocumentDemoSeeder
 {
     // ── template identities (stable `starter_key`s, never the display names) ──
-    private const TPL_FACULTY_CIRCULAR = 'demo-faculty-circular';
-    private const TPL_CIVIL_WORKS_ORDER = 'demo-civil-works-order';
-    private const TPL_MECHANICAL_REPORT = 'demo-mechanical-test-report';
-    private const TPL_CIVIL_CONTRACT = 'demo-civil-contract-restricted';
-    private const TPL_CIVIL_REQUISITION = 'demo-civil-requisition-drafters-only';
+    // The `demo.` prefix keeps them apart from the editor's own `editor.*`
+    // starters, which share the column.
+    private const TPL_FACULTY_CIRCULAR = 'demo.faculty-circular';
+    private const TPL_CIVIL_WORKS_ORDER = 'demo.civil-works-order';
+    private const TPL_MECHANICAL_REPORT = 'demo.mechanical-test-report';
+    private const TPL_CIVIL_CONTRACT = 'demo.civil-contract-restricted';
+    private const TPL_CIVIL_REQUISITION = 'demo.civil-requisition-drafters-only';
 
-    private const BLOCK_FACULTY_LETTERHEAD = 'demo-faculty-letterhead';
-    private const BLOCK_CIVIL_SAFETY = 'demo-civil-safety-notice';
+    /**
+     * The two passages more than one template carries — once saved blocks in
+     * the old designer, now written into each template that uses them (the
+     * editor has no shared blocks; editor M4c).
+     */
+    private const PASSAGE_FACULTY_LETTERHEAD = 'faculty-letterhead';
+    private const PASSAGE_CIVIL_SAFETY = 'civil-safety-notice';
 
     /** The one custom collection, beside the well-known `starred` one. */
     private const COLLECTION_BUDGET_FILE = 'Demo budget file 2026';
@@ -266,9 +270,9 @@ final class DocumentDemoSeeder
     public function __construct(
         private readonly PDO $db,
         private readonly DemoOrganisationSeeder $organisation,
-        private readonly DocumentStarterSeeder $starters,
-        private readonly DocumentTemplateRepository $templates,
-        private readonly DocumentBlockRepository $blocks,
+        private readonly DocumentSourceStarterSeeder $starters,
+        private readonly DocumentSourceRepository $sources,
+        private readonly DocumentSourceVersionRepository $versions,
         private readonly DocumentRepository $documents,
         private readonly DocumentIssuer $issuer,
         private readonly DocumentRouter $router,
@@ -298,32 +302,27 @@ final class DocumentDemoSeeder
     {
         $org = $this->organisation->seed($tenantId);
 
-        // The shipped starters first, so the designer has its normal contents
-        // underneath the demo's placed rows. They are UNPLACED
-        // (`owner_ou_id` null), which is what makes the contrast legible: both
-        // secretaries see all four starters and different placed sets, so the
+        // The editor's shipped starters first, so the template list has its
+        // normal contents underneath the demo's placed rows. They are UNPLACED
+        // system rows, which is what makes the contrast legible: both
+        // secretaries see every starter and different placed sets, so the
         // difference is visibly about placement rather than about one of them
         // seeing nothing.
         //
-        // Called even though `Seeder::seed()` now provisions starters itself
+        // Called even though `Seeder::seed()` provisions starters itself
         // (#1012): this seeder is also driven directly by its own tests and by
         // anyone seeding the demo into a tenant that came from somewhere else,
         // and it is idempotent, so the cheap call is better than the assumption.
-        // It used to be here because the starters reached NO tenant this way —
-        // the tenant-creation hook never fired for the default tenant — which is
-        // the bug that has since been fixed at its source.
-        $this->starters->seedForTenant($tenantId, $tenantName);
+        $this->starters->seedForTenant($tenantId);
 
-        // BLOCKS BEFORE TEMPLATES, because a template body now carries POINTERS
-        // at them (#1024) and a pointer needs the id it points at.
-        $blockIds = $this->seedBlocks($org);
-        $templateIds = $this->seedTemplates($org, $blockIds);
-        // ROUTE templates before documents, for the same reason blocks come
-        // before page templates: four of the documents below have their routes
-        // APPLIED from one of these designs (#1056), and applying a design needs
-        // the id it is being applied from.
+        // TEMPLATES BEFORE DOCUMENTS: every document is issued from one of
+        // their published versions, and needs its id and version number.
+        $templates = $this->seedTemplates($org);
+        // ROUTE templates before documents, for the same reason: four of the
+        // documents below have their routes APPLIED from one of these designs
+        // (#1056), and applying a design needs the id it is being applied from.
         $routeTemplateIds = $this->seedRouteTemplates($org);
-        $documentIds = $this->seedDocuments($org, $templateIds, $routeTemplateIds);
+        $documentIds = $this->seedDocuments($org, $templates, $routeTemplateIds);
         $collectionLines = $this->seedCollections($org, $documentIds);
         $qrLines = $this->seedQrCodes($org, $documentIds);
 
@@ -338,11 +337,9 @@ final class DocumentDemoSeeder
                     DemoOrganisationSeeder::PASSWORD_ENV_VAR,
                 ),
                 sprintf(
-                    'Designer: the shipped starter set (unplaced, so everyone sees it) + %d templates '
-                    . 'and %d blocks placed at specific units, %d of the templates permission-tagged, '
-                    . '%d block references placed across them.',
-                    count($templateIds),
-                    count($blockIds),
+                    'Templates: the editor\'s starter set (shared, so everyone sees it) + %d templates '
+                    . 'placed at specific units and published, %d of them permission-tagged.',
+                    count($templates),
                     // Counted, never typed. A literal here was already one
                     // template out of date the moment a second tagged row was
                     // added, and it would have gone out of date SILENTLY —
@@ -352,13 +349,12 @@ final class DocumentDemoSeeder
                         self::templateDeclarations(),
                         static fn (array $spec): bool => $spec['permission'] !== null,
                     )),
-                    // Counted from the same declaration for the same reason.
-                    array_sum(array_map(
-                        static fn (array $spec): int => count($spec['blocks']),
-                        self::templateDeclarations(),
-                    )),
                 ),
-                sprintf('Documents: %d, each with a route the engine issued and resolved.', count($documentIds)),
+                sprintf(
+                    'Documents: %d, each issued from a published template version and with a route '
+                    . 'the engine issued and resolved.',
+                    count($documentIds),
+                ),
                 sprintf(
                     'Route designs: %d, drawn through the editor\'s own validator; %d of the documents '
                     . 'above carry `template_id` provenance from one of them (#1056).',
@@ -376,10 +372,10 @@ final class DocumentDemoSeeder
         );
     }
 
-    // ── templates and blocks, placed (#1004 / migration 117) ─────────────────
+    // ── editor templates, placed (#1004 / migration 117) and published ───────
 
     /**
-     * Five templates at three different units.
+     * Five editor templates at three different units, each published once.
      *
      * The set is built so that reach ALONE separates the two secretaries and so
      * that the permission gate is separately visible:
@@ -410,16 +406,10 @@ final class DocumentDemoSeeder
      * faculty from seeing contract templates". With only the publish-tagged
      * contract, the fixture did not show that, and it was measured rather than
      * assumed: `civil-technician@` and `civil-secretary@` saw EXACTLY the same
-     * five templates and three blocks. Both stand in Civil Engineering, so reach
-     * cannot separate them; the only tag in the set was `documents:publish`,
-     * which NEITHER holds, so the gate could not either. Two people in one
-     * office, one of whom is meant to see less, whose screens were identical.
-     *
-     * "A technician sees fewer templates" was therefore true only against the
-     * DEAN — two levels up, in another unit, holding four more permissions —
-     * where a difference proves nothing in particular because everything about
-     * them differs. The comparison a customer makes is between the two people
-     * sitting next to each other, and it is the comparison this row restores.
+     * templates. Both stand in Civil Engineering, so reach cannot separate them;
+     * the only tag in the set was `documents:publish`, which NEITHER holds, so
+     * the gate could not either. Two people in one office, one of whom is meant
+     * to see less, whose screens were identical.
      *
      * `documents:write` is the tag, chosen because it is the one capability the
      * demo secretary holds and the demo technician does not
@@ -428,60 +418,105 @@ final class DocumentDemoSeeder
      * right rule in prose: a template you draft FROM belongs to the people who
      * draft.
      *
-     * Authored by the head of the department it is filed in, unlike the contract
-     * above: the head holds `documents:write`, so this row IS visible to its own
-     * author, and the contract's deliberately awkward authorship stays the one
-     * place that case is made rather than becoming the pattern.
+     * PUBLISHED, BECAUSE A DOCUMENT IS ISSUED FROM A VERSION (E.9). A draft can
+     * be edited under a document's feet; a published version cannot, and it is
+     * the version number a document records. Published through
+     * {@see DocumentSourceVersionRepository::publish()} — the same copy the
+     * editor's Publish button makes — once, when the row is created. A demo
+     * template somebody has since edited and republished is left as it is.
      *
-     * @param array<string, int> $blockIds starter_key => block id, from seedBlocks()
-     * @return array<string, int> starter_key => template id
+     * Created and published in one transaction, so a run that fails between
+     * the two cannot leave a draft-only row behind; a row that has somehow never
+     * been published (an older run, a hand-made copy) is published at its current
+     * draft, because without a version no document can be issued from it.
+     *
+     * @return array<string, array{source_id: int, version: int, title: string, values: array<string, string>}>
+     *         starter_key => the published version the demo's documents are issued from
      */
-    private function seedTemplates(DemoOrganisation $org, array $blockIds): array
+    private function seedTemplates(DemoOrganisation $org): array
     {
         $tenantId = $org->tenantId;
-        $declared = self::templateDeclarations();
 
-        // Resolved by KEY, in one read, now that a row carries its `starter_key`
-        // (#1013). This used to be a key-presence check plus a second lookup by
-        // NAME, because the repository could not hand back the id belonging to a
-        // key — the exact gap #1013 reports, and the reason this class carried a
-        // find-by-name helper it did not want.
-        $existing = self::idsByStarterKey($this->templates->listForTenant($tenantId));
-
-        $ids = [];
-        foreach ($declared as $starterKey => $spec) {
-            if (isset($existing[$starterKey])) {
-                $ids[$starterKey] = $existing[$starterKey];
-                continue;
+        // By KEY, in one read. Rows without a key are anything a user made, and
+        // `editor.*` keys are the shipped starters; neither is a demo row.
+        $existing = [];
+        foreach ($this->sources->listForTenant($tenantId) as $row) {
+            if (is_string($row['starter_key'] ?? null) && $row['starter_key'] !== '') {
+                $existing[$row['starter_key']] = $row;
             }
-
-            $ids[$starterKey] = $this->templates->create($tenantId, [
-                'name' => $spec['name'],
-                'data' => self::templateBody(
-                    $spec['name'],
-                    $spec['heading'],
-                    $spec['lines'],
-                    array_map(
-                        static fn (string $key): int => $blockIds[$key]
-                            ?? throw new RuntimeException('Demo template declares an unknown block key: ' . $key),
-                        $spec['blocks'],
-                    ),
-                ),
-                // `tenant` rather than `system`: a system-scoped row skips the
-                // `required_permission` gate entirely
-                // ({@see DocumentAccessPolicy::canView()}), which would make BOTH
-                // tagged templates in {@see templateDeclarations()} visible to
-                // everybody and quietly delete half of what this fixture is for.
-                'scope' => DocumentAccessPolicy::SCOPE_TENANT,
-                'required_permission' => $spec['permission'],
-                'is_system' => false,
-                'starter_key' => $starterKey,
-                'created_by' => $org->person($spec['author']),
-                'owner_ou_id' => $org->ou($spec['ou']),
-            ]);
         }
 
-        return $ids;
+        $out = [];
+        foreach (self::templateDeclarations() as $starterKey => $spec) {
+            $author = $org->person($spec['author']);
+
+            $ownTransaction = !$this->db->inTransaction();
+            if ($ownTransaction) {
+                $this->db->beginTransaction();
+            }
+            try {
+                $row = $existing[$starterKey] ?? null;
+                if ($row === null) {
+                    $sourceId = $this->sources->create($tenantId, [
+                        'kind'                => 'template',
+                        'title'               => $spec['name'],
+                        'lang'                => 'en',
+                        'default_view'        => 'page',
+                        'page'                => ['size' => 'A4', 'marginMm' => 16, 'letterhead' => false],
+                        'blocks'              => self::templateBlocks($spec),
+                        'own_fields'          => $spec['own_fields'],
+                        // `tenant` rather than `system`: a system-scoped row
+                        // skips the `required_permission` gate entirely
+                        // ({@see DocumentAccessPolicy::canView()}), which would
+                        // make BOTH tagged templates in
+                        // {@see templateDeclarations()} visible to everybody and
+                        // quietly delete half of what this fixture is for.
+                        'scope'               => DocumentAccessPolicy::SCOPE_TENANT,
+                        'required_permission' => $spec['permission'],
+                        'created_by'          => $author,
+                        'owner_ou_id'         => $org->ou($spec['ou']),
+                        'starter_key'         => $starterKey,
+                    ]);
+                    $draftVersion = 1;
+                    $published = null;
+                } else {
+                    $sourceId = (int) $row['id'];
+                    $draftVersion = (int) $row['draft_version'];
+                    $published = $row['published_version'] !== null ? (int) $row['published_version'] : null;
+                }
+
+                if ($published === null) {
+                    $published = $this->versions->publish($sourceId, $tenantId, $draftVersion, $author)
+                        ?? throw new RuntimeException("Demo template '{$starterKey}' could not be published.");
+                }
+
+                if ($ownTransaction) {
+                    $this->db->commit();
+                }
+            } catch (\Throwable $e) {
+                if ($ownTransaction && $this->db->inTransaction()) {
+                    $this->db->rollBack();
+                }
+                throw $e;
+            }
+
+            $version = $this->versions->find($sourceId, $tenantId, $published)
+                ?? throw new RuntimeException("Demo template '{$starterKey}' version {$published} could not be read back.");
+
+            $values = [];
+            foreach ($spec['own_fields'] as $field) {
+                $values['template.' . $field['key']] = $field['sample'];
+            }
+
+            $out[$starterKey] = [
+                'source_id' => $sourceId,
+                'version'   => $published,
+                'title'     => $version['title'],
+                'values'    => $values,
+            ];
+        }
+
+        return $out;
     }
 
     /**
@@ -494,7 +529,13 @@ final class DocumentDemoSeeder
      * `author` values are {@see DemoOrganisationSeeder} KEYS, resolved against a
      * {@see DemoOrganisation} at write time, so nothing here needs a database.
      *
-     * @return array<string, array{name: string, ou: string, author: string, permission: ?string, heading: string, lines: list<string>, blocks: list<string>}>
+     * A `lines` entry is plain text, or `[prefix, own field key]` for a line that
+     * prints one of the template's own fields after its label. The samples are
+     * the values every demo document is issued with.
+     *
+     * @return array<string, array{name: string, ou: string, author: string, permission: ?string, heading: string,
+     *                             own_fields: list<array{key: string, label: string, sample: string}>,
+     *                             lines: list<string|array{0: string, 1: string}>, passages: list<string>}>
      */
     private static function templateDeclarations(): array
     {
@@ -505,8 +546,12 @@ final class DocumentDemoSeeder
                 'author' => DemoOrganisationSeeder::DEAN,
                 'permission' => null,
                 'heading' => 'FACULTY CIRCULAR',
-                'lines' => ['Ref: {{reference}}', 'Date: {{date}}', 'To: all departments'],
-                'blocks' => [self::BLOCK_FACULTY_LETTERHEAD],
+                'own_fields' => [
+                    ['key' => 'reference', 'label' => 'Reference', 'sample' => 'DEMO-0001'],
+                    ['key' => 'date', 'label' => 'Date', 'sample' => '2026-01-15'],
+                ],
+                'lines' => [['Ref: ', 'reference'], ['Date: ', 'date'], 'To: all departments'],
+                'passages' => [self::PASSAGE_FACULTY_LETTERHEAD],
             ],
             self::TPL_CIVIL_WORKS_ORDER => [
                 'name' => 'Demo civil works order',
@@ -514,10 +559,13 @@ final class DocumentDemoSeeder
                 'author' => DemoOrganisationSeeder::CIVIL_HEAD,
                 'permission' => null,
                 'heading' => 'WORKS ORDER',
-                'lines' => ['Order: {{order_no}}', 'Site: {{site}}', 'Requested by: {{requester}}'],
-                // The only template that instances BOTH blocks, and the only one
-                // the civil secretary can see among the safety notice's users.
-                'blocks' => [self::BLOCK_FACULTY_LETTERHEAD, self::BLOCK_CIVIL_SAFETY],
+                'own_fields' => [
+                    ['key' => 'order_no', 'label' => 'Order number', 'sample' => 'WO-5567'],
+                    ['key' => 'site', 'label' => 'Site', 'sample' => 'Rainbow Street 21, Amman'],
+                    ['key' => 'requester', 'label' => 'Requested by', 'sample' => 'Example Bakery'],
+                ],
+                'lines' => [['Order: ', 'order_no'], ['Site: ', 'site'], ['Requested by: ', 'requester']],
+                'passages' => [self::PASSAGE_FACULTY_LETTERHEAD, self::PASSAGE_CIVIL_SAFETY],
             ],
             self::TPL_MECHANICAL_REPORT => [
                 'name' => 'Demo mechanical test report',
@@ -525,11 +573,13 @@ final class DocumentDemoSeeder
                 'author' => DemoOrganisationSeeder::MECHANICAL_HEAD,
                 'permission' => null,
                 'heading' => 'TEST REPORT',
-                'lines' => ['Specimen: {{specimen}}', 'Rig: {{rig}}', 'Operator: {{operator}}'],
-                // The reference OUT OF REACH — see the blockDeclarations()
-                // docblock. This is the row that makes the civil secretary's
-                // "2 templates - 1 you cannot see" a real number.
-                'blocks' => [self::BLOCK_FACULTY_LETTERHEAD, self::BLOCK_CIVIL_SAFETY],
+                'own_fields' => [
+                    ['key' => 'specimen', 'label' => 'Specimen', 'sample' => 'SP-0042'],
+                    ['key' => 'rig', 'label' => 'Rig', 'sample' => 'Tensile rig 2'],
+                    ['key' => 'operator', 'label' => 'Operator', 'sample' => 'Lina Haddad'],
+                ],
+                'lines' => [['Specimen: ', 'specimen'], ['Rig: ', 'rig'], ['Operator: ', 'operator']],
+                'passages' => [self::PASSAGE_FACULTY_LETTERHEAD, self::PASSAGE_CIVIL_SAFETY],
             ],
             self::TPL_CIVIL_CONTRACT => [
                 'name' => 'Demo civil contract (publish-tagged)',
@@ -544,12 +594,12 @@ final class DocumentDemoSeeder
                 'author' => DemoOrganisationSeeder::DEAN,
                 'permission' => CorePermissions::DOCUMENTS_PUBLISH,
                 'heading' => 'CONTRACT',
-                'lines' => ['Contract: {{contract_no}}', 'Counterparty: {{counterparty}}'],
-                // No pointers, deliberately: a fixture in which EVERY template
-                // instances something cannot show a management screen's
-                // "used by nothing" state, and that state is the one that makes
-                // a delete safe.
-                'blocks' => [],
+                'own_fields' => [
+                    ['key' => 'contract_no', 'label' => 'Contract number', 'sample' => 'CT-2026-07'],
+                    ['key' => 'counterparty', 'label' => 'Counterparty', 'sample' => 'Example Clinic'],
+                ],
+                'lines' => [['Contract: ', 'contract_no'], ['Counterparty: ', 'counterparty']],
+                'passages' => [],
             ],
             self::TPL_CIVIL_REQUISITION => [
                 'name' => 'Demo civil purchase requisition (drafters only)',
@@ -560,140 +610,19 @@ final class DocumentDemoSeeder
                 // and the civil technician beside her does not.
                 'permission' => CorePermissions::DOCUMENTS_WRITE,
                 'heading' => 'PURCHASE REQUISITION',
-                'lines' => [
-                    'Requisition: {{requisition_no}}',
-                    'Department: {{department}}',
-                    'Estimated cost: {{amount}}',
+                'own_fields' => [
+                    ['key' => 'requisition_no', 'label' => 'Requisition number', 'sample' => 'REQ-1042'],
+                    ['key' => 'department', 'label' => 'Department', 'sample' => 'Civil Engineering'],
+                    ['key' => 'amount', 'label' => 'Estimated cost', 'sample' => '1,250.00'],
                 ],
-                'blocks' => [],
+                'lines' => [
+                    ['Requisition: ', 'requisition_no'],
+                    ['Department: ', 'department'],
+                    ['Estimated cost: ', 'amount'],
+                ],
+                'passages' => [],
             ],
         ];
-    }
-
-    /**
-     * Two blocks, placed like the templates, and INSTANCED by them (#1024).
-     *
-     * Blocks get the same placement treatment as templates because migration 117
-     * gave both tables the column and {@see DocumentAccessPolicy} is applied to
-     * both — so a demo that placed only templates would leave half of #1004
-     * unverifiable by eye.
-     *
-     * @return array<string, int> starter_key => block id
-     */
-    private function seedBlocks(DemoOrganisation $org): array
-    {
-        $tenantId = $org->tenantId;
-        $declared = self::blockDeclarations();
-
-        // By KEY, in one read (#1013) — same change, same reason, as
-        // {@see self::seedTemplates()}. Here it is load-bearing rather than
-        // tidier: the templates seeded straight after this need these IDS to
-        // point at, and before `starter_key` came back on a row there was no
-        // supported way to get them.
-        $existing = self::idsByStarterKey($this->blocks->listForTenant($tenantId));
-
-        $ids = [];
-        foreach ($declared as $starterKey => $spec) {
-            if (isset($existing[$starterKey])) {
-                $ids[$starterKey] = $existing[$starterKey];
-                continue;
-            }
-
-            $ids[$starterKey] = $this->blocks->create($tenantId, [
-                'name' => $spec['name'],
-                // A block's `data` is a bare LIST of elements, not a template
-                // body — see DocumentStarterSeeder, which passes its
-                // `elements` straight through.
-                'data' => [self::textElement(1, 0, 0, 180, 10, $spec['text'], 14, 'bold')],
-                'scope' => DocumentAccessPolicy::SCOPE_TENANT,
-                'is_system' => false,
-                'starter_key' => $starterKey,
-                'created_by' => $org->person($spec['author']),
-                'owner_ou_id' => $org->ou($spec['ou']),
-            ]);
-        }
-
-        return $ids;
-    }
-
-    /**
-     * The two blocks as data, and WHO INSTANCES THEM — which is the half of this
-     * fixture #1024 was filed about.
-     *
-     * The dataset used to place blocks and put a `blockInstance` in NOTHING: zero
-     * pointers across every seeded template. So "what uses this block?" answered
-     * 0 on every persona, the delete guard rendered its empty state, and the
-     * "N templates, M you cannot see" disclosure showed a zero. Worse than
-     * incomplete: blocks are POINTERS, not copies — an edit propagates to every
-     * instance, which is the most important and most surprising thing about the
-     * feature — and a demo with no instances quietly teaches the opposite, to
-     * exactly the people looking at it to find out how the feature behaves.
-     *
-     * WHAT THE PLACEMENTS ARE CHOSEN TO SHOW
-     * --------------------------------------
-     *  - SHARED USAGE. The letterhead is instanced by templates at all THREE
-     *    units, so a count is greater than one and an edit has somewhere to
-     *    propagate to. One template ({@see self::TPL_CIVIL_CONTRACT}) instances
-     *    nothing, so the used-by-nothing state is present too.
-     *  - CROSS-UNIT INVISIBILITY. The civil site-safety notice is instanced by
-     *    the civil works order AND by the mechanical test report. The civil
-     *    secretary can see the block (it is filed in her department) and exactly
-     *    one of its two users, so `GET /api/document-blocks/{id}/usage` answers
-     *    her `total=2 hidden=1` and her row reads "2 templates, 1 you cannot
-     *    see". That is the case that stops somebody editing a block believing
-     *    they can see everything it affects, and without it the disclosure only
-     *    ever renders a zero.
-     *
-     * A MECHANICAL TEMPLATE POINTING AT A CIVIL BLOCK IS THE POINT, NOT A SLIP.
-     * Placement governs who can FIND a block in their library; it does not
-     * govern who has already pointed at one, and nothing about an existing
-     * pointer re-checks it. The state is reachable through the product exactly as
-     * seeded — the dean reaches both units and can place it — and if the fixture
-     * refused to contain it, the one number the disclosure exists to produce
-     * would be unreachable in the demo.
-     *
-     * @return array<string, array{name: string, ou: string, author: string, text: string}>
-     */
-    private static function blockDeclarations(): array
-    {
-        return [
-            self::BLOCK_FACULTY_LETTERHEAD => [
-                'name' => 'Demo faculty letterhead',
-                'ou' => DemoOrganisationSeeder::OU_FACULTY,
-                'author' => DemoOrganisationSeeder::DEAN,
-                'text' => '{{company_name}} — Faculty of Engineering',
-            ],
-            self::BLOCK_CIVIL_SAFETY => [
-                'name' => 'Demo civil site-safety notice',
-                'ou' => DemoOrganisationSeeder::OU_DEPT_CIVIL,
-                'author' => DemoOrganisationSeeder::CIVIL_HEAD,
-                'text' => 'Hard hats and hi-vis required beyond this point.',
-            ],
-        ];
-    }
-
-    /**
-     * starter_key => id over rows a designer repository returned.
-     *
-     * One place, because both seeders above need it and because the thing it
-     * relies on — `starter_key` surviving the designer repositories' row mapping
-     * — is new (#1013). Rows without a key are anything a user made; they are not
-     * demo rows and are skipped.
-     *
-     * @param list<array<string, mixed>> $rows
-     * @return array<string, int>
-     */
-    private static function idsByStarterKey(array $rows): array
-    {
-        $out = [];
-        foreach ($rows as $row) {
-            $key = $row['starter_key'] ?? null;
-            if (is_string($key) && $key !== '') {
-                $out[$key] = (int) $row['id'];
-            }
-        }
-
-        return $out;
     }
 
     // ── route designs (#1027 / #1031 / #1056) ─────────────────────────
@@ -934,15 +863,15 @@ final class DocumentDemoSeeder
     /**
      * Issue every declared document, in order.
      *
-     * @param array<string, int> $templateIds
+     * @param array<string, array{source_id: int, version: int, title: string, values: array<string, string>}> $templates
      * @param array<string, int> $routeTemplateIds
      * @return array<string, int> title => document id
      */
-    private function seedDocuments(DemoOrganisation $org, array $templateIds, array $routeTemplateIds): array
+    private function seedDocuments(DemoOrganisation $org, array $templates, array $routeTemplateIds): array
     {
         $ids = [];
         foreach (self::documentDeclarations($org) as $spec) {
-            $ids[$spec['title']] = $this->seedOneDocument($org, $templateIds, $routeTemplateIds, $spec);
+            $ids[$spec['title']] = $this->seedOneDocument($org, $templates, $routeTemplateIds, $spec);
         }
 
         return $ids;
@@ -1642,7 +1571,7 @@ final class DocumentDemoSeeder
      * Issue one document, its artifacts, its route and its acts — all inside one
      * transaction, so the title check that guards it is a complete answer.
      *
-     * @param array<string, int> $templateIds
+     * @param array<string, array{source_id: int, version: int, title: string, values: array<string, string>}> $templates
      * @param array<string, int> $routeTemplateIds
      * @param array{
      *     title: string, template: string, raiser: string, route: ?string,
@@ -1656,7 +1585,7 @@ final class DocumentDemoSeeder
      */
     private function seedOneDocument(
         DemoOrganisation $org,
-        array $templateIds,
+        array $templates,
         array $routeTemplateIds,
         array $spec,
     ): int {
@@ -1667,13 +1596,8 @@ final class DocumentDemoSeeder
             return $existing;
         }
 
-        if (!isset($templateIds[$spec['template']])) {
-            throw new RuntimeException("Demo document '{$spec['title']}' names an unseeded template.");
-        }
-        $template = $this->templates->findById($templateIds[$spec['template']], $tenantId);
-        if ($template === null) {
-            throw new RuntimeException("Demo template '{$spec['template']}' could not be read back.");
-        }
+        $template = $templates[$spec['template']]
+            ?? throw new RuntimeException("Demo document '{$spec['title']}' names an unseeded template.");
 
         $raiser = $org->person($spec['raiser']);
 
@@ -1689,12 +1613,26 @@ final class DocumentDemoSeeder
             // checksum. Choosing an origin unit here instead would let a
             // document's origin and its own issue event's `from_ou_id` disagree
             // — for the same person, in the same fixture.
+            //
+            // Issued from the template's PUBLISHED version, as
+            // {@see \Whity\Core\Document\Issuing\DocumentIssuing::issue()} does: the
+            // version title is the snapshot, the source and version numbers are
+            // the provenance (migration 165), and the one data row is the values
+            // it printed — so a correction made through the product later
+            // re-renders this document from the real template.
             $issued = $this->issuer->issue(
                 $tenantId,
                 $raiser,
-                $template,
+                [
+                    'name'           => $template['title'],
+                    'source_id'      => $template['source_id'],
+                    'source_version' => $template['version'],
+                ],
                 $spec['title'],
                 DemoPdf::page($spec['title'], $spec['captions']),
+                'application/pdf',
+                'pdf',
+                [$template['values']],
             );
             $document = $issued['document'];
 
@@ -2025,7 +1963,7 @@ final class DocumentDemoSeeder
      * whether a per-tenant row exists at all, not what it says — so an operator
      * who looked at the demo and deliberately switched the feature back OFF keeps
      * their answer on the next run. That is the same "insert when absent, never
-     * update" discipline the templates, blocks and documents follow, applied to
+     * update" discipline the templates and documents follow, applied to
      * the one thing here that is a setting rather than a row.
      *
      * `qr_public_detail` IS SET TOO, AND THAT IS A JUDGEMENT WORTH SEEING. Left
@@ -2163,133 +2101,65 @@ final class DocumentDemoSeeder
         return null;
     }
 
-    // ── template/block bodies ────────────────────────────────────────────────
+    // ── template bodies ──────────────────────────────────────────────────────
 
     /**
-     * A minimal but REAL DocTemplate body (`version: 2`), in the shape
-     * {@see DocumentStarterSeeder} produces and the designer consumes.
+     * A template's blocks, in the WhityDocument contract's shape
+     * (`docs/design/handoff/editor/whity-document.ts`): the letterhead line if it
+     * has one, the heading, one paragraph per line, then the safety notice.
      *
-     * Not borrowed from that class, whose builders are private — and deliberately
-     * not made public there. Those helpers describe the SHIPPED starter set,
-     * which is a product decision; a demo fixture reusing them would couple two
-     * things that are free to change independently, and the first divergence
-     * would land in whichever of them was not being edited.
+     * Not borrowed from {@see DocumentSourceStarterSeeder}, whose builders are
+     * private — and deliberately not made public there. Those helpers describe
+     * the SHIPPED starter set, which is a product decision; a demo fixture reusing
+     * them would couple two things that are free to change independently.
      *
-     * @param list<string> $lines
-     * @param list<int>    $blockIds Blocks this template INSTANCES, in order.
-     * @return array<string, mixed>
+     * @param array{heading: string, own_fields: list<array{key: string, label: string, sample: string}>,
+     *              lines: list<string|array{0: string, 1: string}>, passages: list<string>} $spec
+     * @return list<array<string, mixed>>
      */
-    private static function templateBody(string $name, string $heading, array $lines, array $blockIds = []): array
+    private static function templateBlocks(array $spec): array
     {
-        $elements = [self::textElement(1, 15, 15, 180, 12, $heading, 20, 'bold')];
+        $labels = [];
+        foreach ($spec['own_fields'] as $field) {
+            $labels[$field['key']] = $field['label'];
+        }
+        $field = static function (string $key) use ($labels): array {
+            return [
+                'type' => 'field',
+                'path' => 'template.' . $key,
+                'label' => $labels[$key] ?? throw new RuntimeException('Demo template line names an undeclared field: ' . $key),
+            ];
+        };
 
-        $y = 35.0;
-        $z = 1;
-        foreach ($lines as $line) {
-            $z++;
-            $elements[] = self::textElement($z, 15, $y, 180, 6, $line, 11, 'normal');
-            $y += 8.0;
+        $n = 0;
+        $id = static function () use (&$n): string {
+            return 'demo-b' . (++$n);
+        };
+
+        $blocks = [];
+        if (in_array(self::PASSAGE_FACULTY_LETTERHEAD, $spec['passages'], true)) {
+            $blocks[] = ['id' => $id(), 'type' => 'paragraph', 'content' => [
+                ['type' => 'field', 'path' => 'company.name', 'label' => 'Company name', 'marks' => [['type' => 'bold']]],
+                ['type' => 'text', 'text' => ' — Faculty of Engineering', 'marks' => [['type' => 'bold']]],
+            ]];
         }
 
-        // The pointers, stacked under the body. Laid out plainly and not
-        // designed: nothing in the demo RENDERS a template body (artifact bytes
-        // come from {@see DemoPdf}, which needs no browser), so what these
-        // elements are for is being real, well-formed references that the usage
-        // count, the delete guard and the disclosure can all see.
-        $y += 4.0;
-        foreach ($blockIds as $blockId) {
-            $z++;
-            $elements[] = self::blockInstanceElement($z, 15, $y, 180, 12, $blockId);
-            $y += 14.0;
+        $blocks[] = ['id' => $id(), 'type' => 'heading', 'level' => 1, 'content' => [
+            ['type' => 'text', 'text' => $spec['heading']],
+        ]];
+
+        foreach ($spec['lines'] as $line) {
+            $blocks[] = ['id' => $id(), 'type' => 'paragraph', 'content' => is_string($line)
+                ? [['type' => 'text', 'text' => $line]]
+                : [['type' => 'text', 'text' => $line[0]], $field($line[1])]];
         }
 
-        return [
-            'version' => 2,
-            'name' => $name,
-            'page' => ['widthMm' => 210, 'heightMm' => 297, 'marginMm' => 10, 'background' => '#ffffff'],
-            'placeholders' => [
-                ['key' => 'reference', 'label' => 'Reference', 'sample' => 'DEMO-0001'],
-                ['key' => 'date', 'label' => 'Date', 'sample' => '2026-01-15'],
-            ],
-            'pages' => [['id' => 'p1', 'elements' => $elements]],
-        ];
-    }
+        if (in_array(self::PASSAGE_CIVIL_SAFETY, $spec['passages'], true)) {
+            $blocks[] = ['id' => $id(), 'type' => 'callout', 'kind' => 'important', 'content' => [
+                ['type' => 'text', 'text' => 'Hard hats and hi-vis required beyond this point.'],
+            ]];
+        }
 
-    /**
-     * One `blockInstance` element: a POINTER at a block, never a copy of it.
-     *
-     * The shape is the client's ({@see web/lib/documents/types.ts}) and matches
-     * what both readers of it expect — PHP's
-     * {@see DocumentTemplateRepository::referencingTemplates()} and its
-     * TypeScript twin `collectBlockIds` in `@whity-org/ui/documents/blocks`.
-     * `blockId` is a STRING there, and both scanners compare it as one, so it is
-     * written as one here rather than as the integer the id actually is; an
-     * integer would be silently invisible to the count this fixture exists to
-     * make non-zero.
-     *
-     * @return array<string, mixed>
-     */
-    private static function blockInstanceElement(
-        int $z,
-        float $x,
-        float $y,
-        float $w,
-        float $h,
-        int $blockId,
-    ): array {
-        return [
-            'id' => 'demo-block-instance-' . $z,
-            'type' => 'blockInstance',
-            'x' => $x,
-            'y' => $y,
-            'w' => $w,
-            'h' => $h,
-            'rotation' => 0,
-            'z' => $z,
-            'blockId' => (string) $blockId,
-        ];
-    }
-
-    /**
-     * One `text` element, carrying the full style object the designer expects —
-     * a partial style is not a smaller element, it is an element the client has
-     * to guess the rest of.
-     *
-     * @return array<string, mixed>
-     */
-    private static function textElement(
-        int $z,
-        float $x,
-        float $y,
-        float $w,
-        float $h,
-        string $text,
-        float $fontSize,
-        string $fontWeight,
-    ): array {
-        return [
-            'id' => 'demo-text-' . $z,
-            'type' => 'text',
-            'x' => $x,
-            'y' => $y,
-            'w' => $w,
-            'h' => $h,
-            'rotation' => 0,
-            'z' => $z,
-            'text' => $text,
-            'style' => [
-                'fontSize' => $fontSize,
-                'fontWeight' => $fontWeight,
-                'fontStyle' => 'normal',
-                'align' => 'left',
-                'vAlign' => 'top',
-                'color' => '#111111',
-                // 'auto', not 'ltr': the demo has to survive an Arabic tenant,
-                // and a hardcoded direction is the thing that breaks there.
-                'direction' => 'auto',
-                'lineHeight' => 1.2,
-                'letterSpacing' => 0,
-            ],
-        ];
+        return $blocks;
     }
 }

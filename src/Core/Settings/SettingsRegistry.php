@@ -6,6 +6,7 @@ namespace Whity\Core\Settings;
 
 use DateTimeZone;
 use Whity\Core\Document\Routing\RouteQuorum;
+use Whity\Core\Document\Theme\DocumentThemeRef;
 use Whity\Core\Identity\InvitationService;
 
 /**
@@ -41,6 +42,11 @@ final class SettingsRegistry
     public const BRANDING_LOGO_WIDE = 'branding_logo_wide';
     public const BRANDING_LOGO_SQUARE = 'branding_logo_square';
     public const BRANDING_FAVICON = 'branding_favicon';
+
+    // The workspace's one main colour (decision 2.8): a #RRGGBB hex, or empty
+    // for Whity Blue. Branding derives the light and dark token sets from it
+    // (TenantTheme). Tenant-overridable: each workspace is its own brand.
+    public const BRANDING_MAIN_COLOR = 'branding_main_color';
 
     // MCP feature flag (WC-149b2fc9). Value is the literal string 'true' or
     // 'false'; an admin sets it per-tenant to enable the MCP endpoint.
@@ -343,6 +349,16 @@ final class SettingsRegistry
     // never attempts the internal HTTP call) when off.
     public const DOCUMENTS_RENDER_ENABLED = 'documents.render_enabled';
 
+    // The workspace's default document theme (editor M4d, E.44): a theme ref,
+    // `whity.standard` or `tenant.<key>`. A document that names no theme of its
+    // own uses the default for its kind (DOCUMENTS_THEME_BY_KIND), then this.
+    // Replaces documents.print_color, which migration 173 moved into the
+    // workspace theme. Tenant-overridable; written with documents:themes.
+    public const DOCUMENTS_THEME = 'documents.theme';
+    // Per-kind defaults over DOCUMENTS_THEME: a JSON object of document kind
+    // => theme ref, e.g. {"label":"tenant.labels"}. Empty for none.
+    public const DOCUMENTS_THEME_BY_KIND = 'documents.theme_by_kind';
+
     // Render batch limits (ADR 0012): per-tenant-overridable ceilings so an
     // operator can tune them without a code deploy, "no hardcoded values" per
     // convention. Resolution is tenant override -> global default -> this
@@ -480,11 +496,10 @@ final class SettingsRegistry
     // and the trail, the inbox and every folder are unaffected, because none of
     // them is derived from a notification.
     public const DOCUMENTS_ROUTING_NOTIFICATION_CHANNELS = 'documents.routing_notification_channels';
-    // The master switch for QR verification codes on documents (#1036), scope 1
-    // of three — the tenant setting, the per-template flag inside
-    // `document_templates.data`, and where the element sits on the page. They
-    // compose in {@see \Whity\Core\Document\Qr\DocumentQrPolicy}, which is also
-    // where the reasoning for the polarity of each one lives.
+    // The switch for QR verification codes on documents (#1036). Since the old
+    // designer went (editor M4c) it is the only one: the code is automatic and
+    // printed at the end of every document issued while it is on. See
+    // {@see \Whity\Core\Document\Qr\DocumentQrPolicy}.
     //
     // TENANT-OVERRIDABLE, unlike DOCUMENTS_RENDER_ENABLED above, and the
     // difference is real rather than a preference: the render switch asks
@@ -886,6 +901,7 @@ final class SettingsRegistry
         self::BRANDING_LOGO_WIDE => '',
         self::BRANDING_LOGO_SQUARE => '',
         self::BRANDING_FAVICON => '',
+        self::BRANDING_MAIN_COLOR => '',
         self::MCP_ENABLED => 'false',
         // Secure-by-default: signup CLOSED, approval REQUIRED when opened.
         self::SELF_REGISTRATION_ENABLED => 'false',
@@ -981,6 +997,8 @@ final class SettingsRegistry
         // container) — opt-in, not opt-out. A sovereign deploy that never runs
         // the `render` compose profile stays disabled here regardless.
         self::DOCUMENTS_RENDER_ENABLED => 'false',
+        self::DOCUMENTS_THEME => 'whity.standard',
+        self::DOCUMENTS_THEME_BY_KIND => '',
         self::DOCUMENTS_RENDER_MAX_ROWS => '500',
         self::DOCUMENTS_RENDER_MAX_PAGES => '2000',
         // 2 MiB.
@@ -1315,6 +1333,7 @@ final class SettingsRegistry
             self::TIMEZONE => self::validateTimezone($value),
             self::LOCALE => self::validateLocale($value),
             self::SUPPORT_EMAIL => self::validateSupportEmail($value),
+            self::BRANDING_MAIN_COLOR => $value === '' ? null : self::validateHexColor($value, self::BRANDING_MAIN_COLOR),
             self::MCP_ENABLED => self::validateMcpEnabled($value),
             self::SELF_REGISTRATION_ENABLED => self::validateBoolean($value, self::SELF_REGISTRATION_ENABLED),
             self::REGISTRATION_APPROVAL_REQUIRED => self::validateBoolean($value, self::REGISTRATION_APPROVAL_REQUIRED),
@@ -1360,6 +1379,8 @@ final class SettingsRegistry
             self::LICENSING_BILLING_BASIS => self::validateEnum($key, $value),
             self::SEATS_COUNT_INVITED => self::validateBoolean($value, self::SEATS_COUNT_INVITED),
             self::MAIL_BRAND_COLOR => self::validateHexColor($value),
+            self::DOCUMENTS_THEME => DocumentThemeRef::isValid($value) ? null : self::DOCUMENTS_THEME . ' must be a theme ref such as whity.standard or tenant.<key>.',
+            self::DOCUMENTS_THEME_BY_KIND => $value === '' ? null : DocumentThemeRef::validateByKind($value),
             self::MAIL_SMTP_HOST,
             self::MAIL_SMTP_USERNAME,
             self::MAIL_FROM_NAME,
@@ -1426,10 +1447,10 @@ final class SettingsRegistry
     /**
      * Validate a #RRGGBB hex colour.
      */
-    private static function validateHexColor(string $value): ?string
+    private static function validateHexColor(string $value, string $key = self::MAIL_BRAND_COLOR): ?string
     {
         if (preg_match('/^#[0-9A-Fa-f]{6}$/', $value) !== 1) {
-            return 'mail.brand_color must be a #RRGGBB hex colour (e.g. #2B6CD2).';
+            return "{$key} must be a #RRGGBB hex colour (e.g. #2B6CD2).";
         }
 
         return null;

@@ -14,13 +14,13 @@
 #      vendor baked in), the frontend (`ghcr.io/<repo>/web`, web/Dockerfile
 #      `runtime` stage — the built Next app) and the document render tier
 #      (`ghcr.io/<repo>/render`, render-service/Dockerfile `runtime` stage —
-#      headless Chromium plus the designer's own renderer bundled from source).
-#      A deployment is not the product without the first two, so they ship
-#      together or not at all. The render tier is optional to RUN (a compose
-#      profile most deployments never start) but not optional to PUBLISH: its
-#      build context spans the app repo AND the web source, so it is the one
-#      image nobody downstream of this workflow can assemble from what we
-#      publish — see the `image` job and docs/wiki/Document-Render-Service.md.
+#      headless Chromium printing the document editor's documents and label
+#      sheets). A deployment is not the product without the first two, so they
+#      ship together or not at all. The render tier is optional to RUN (a
+#      compose profile most deployments never start) but not optional to
+#      PUBLISH: it is only correct against the core release it was built from
+#      (it bakes in that release's CoreVersion) — see the `image` job and
+#      docs/wiki/Document-Render-Service.md.
 #   3. release — create the GitHub Release with auto-generated notes (the
 #      source archives GitHub attaches are the deploy artifact for
 #      checkout-based hosts; the GHCR images serve container-based ones).
@@ -353,16 +353,13 @@ jobs:
     # beside that.
     #
     # The render tier belongs HERE specifically, and not in an operator's own
-    # build, because of its build context (#947). render-service/Dockerfile takes
-    # the REPOSITORY ROOT: it bundles web/components/documents, web/lib/documents
-    # and packages/{ui,features}/src in from source so an exported PDF comes out
-    # of the same renderer the designer draws with (ADR 0012's entire premise).
-    # But render-service/ ships in the app image and that web source ships only
-    # in the web image, so NEITHER published artifact can build it. Until this
-    # leg existed, running the render tier meant hand-assembling a context from
-    # both images and redoing it on every core bump — and a miss there does not
-    # fail, it silently exports PDFs that no longer match the preview, which is
-    # the precise failure ADR 0012 exists to prevent. The tag is the pairing:
+    # build (#947). render-service/Dockerfile takes the REPOSITORY ROOT (it
+    # reads src/Core/CoreVersion.php to bake in its identity), and a render
+    # tier left a release behind does not fail — it keeps printing with an
+    # older release's flow renderer, which nothing outside the box would
+    # notice. (Until editor M4c it also bundled the old designer's web/ and
+    # packages/ source, which no published artifact carried.) The tag is the
+    # pairing:
     # `render:vX.Y.Z` is built from the same commit as `app:vX.Y.Z`, and the
     # image reports the version it was built from on /health (asserted in
     # `smoke`) so a mismatched pair is visible from outside the box.
@@ -473,9 +470,9 @@ jobs:
     # #947: the render tier gets the strongest check of the three, because
     # "starts up" says the least about it. Its failure mode is not a crash — it
     # is a container that answers /health perfectly while producing a blank or
-    # unshaped page, because the harness bundle did not build, Chromium is
-    # missing, or the Arabic fonts are not in the image. So it is proven by
-    # POSTing a real template and asserting the PDF that comes back: correct
+    # unshaped page, because Chromium is missing, the flow renderer's assets
+    # did not ship, or the Arabic fonts are not in the image. So it is proven by
+    # POSTing a real document and asserting the PDF that comes back: correct
     # magic bytes, several distinct embedded font subsets (text was actually
     # shaped, not left blank), and a plausible size. A render image that builds
     # but cannot render is worse than no render image at all — it would pass a
@@ -835,35 +832,23 @@ jobs:
         run: |
           cat > "${RUNNER_TEMP}/render-payload.json" <<'PAYLOAD'
           {
-            "template": {
-              "version": 2,
-              "page": { "widthMm": 100, "heightMm": 60, "marginMm": 2, "background": "#ffffff" },
-              "placeholders": [],
-              "pages": [
-                {
-                  "id": "p1",
-                  "elements": [
-                    { "id": "t1", "type": "text", "x": 2, "y": 2, "w": 96, "h": 12, "rotation": 0, "z": 1,
-                      "text": "مرحبا بالعالم",
-                      "style": { "fontSize": 18, "fontWeight": "normal", "fontStyle": "normal", "align": "center", "vAlign": "middle", "color": "#000000", "direction": "rtl" } },
-                    { "id": "m1", "type": "math", "x": 2, "y": 16, "w": 60, "h": 14, "rotation": 0, "z": 2,
-                      "expression": "E = mc^2", "block": false },
-                    { "id": "b1", "type": "barcode", "x": 2, "y": 32, "w": 60, "h": 20, "rotation": 0, "z": 3,
-                      "symbology": "code128", "value": "WHITY-RELEASE-SMOKE", "showText": true }
-                  ]
-                }
-              ]
-            },
-            "dataRows": [{}]
+            "direction": "rtl",
+            "page": { "preset": "a4", "margin": { "topMm": 20, "rightMm": 20, "bottomMm": 20, "leftMm": 20 } },
+            "content": [
+              { "type": "heading", "level": 1, "text": "مرحبا بالعالم" },
+              { "type": "paragraph", "text": "مخبز المثال - Example Bakery" },
+              { "type": "math", "tex": "E = mc^2" },
+              { "type": "barcode", "symbology": "code128", "value": "WHITY-RELEASE-SMOKE", "showText": true }
+            ]
           }
           PAYLOAD
 
-          curl -fsS --max-time 120 -X POST http://localhost:8130/render \
+          curl -fsS --max-time 120 -X POST http://localhost:8130/render/flow \
             -H 'Content-Type: application/json' \
             -H 'X-Render-Secret: ci_smoke_render_shared_secret_32ch' \
             --data @"${RUNNER_TEMP}/render-payload.json" \
             -o "${RUNNER_TEMP}/render-output.pdf" || {
-              echo "::error::POST /render failed against the published render image."
+              echo "::error::POST /render/flow failed against the published render image."
               docker logs render
               exit 1
             }

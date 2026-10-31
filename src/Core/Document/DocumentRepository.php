@@ -131,7 +131,14 @@ final class DocumentRepository
      * a positive claim that the document was raised with no values, which a
      * template carrying no placeholders legitimately is.
      *
-     * @param array{document_template_id?: ?int, template_name: string, title: string,
+     * `document_source_id` and `document_source_version` are the editor
+     * template and published version the document was issued from (migration
+     * 165), which a correction re-renders.
+     *
+     * `origin_key` is the caller's own name for what the document is (migration
+     * 167), unique per tenant where set.
+     *
+     * @param array{document_source_id?: ?int, document_source_version?: ?int, origin_key?: ?string, template_name: string, title: string,
      *              origin_ou_id?: ?int, created_by?: ?int,
      *              variable_data?: ?list<array<string, string>>} $rec
      */
@@ -141,14 +148,16 @@ final class DocumentRepository
 
         $stmt = $this->db->prepare(
             'INSERT INTO documents
-                 (tenant_id, document_template_id, template_name, title, origin_ou_id, created_by,
+                 (tenant_id, document_source_id, document_source_version, origin_key, template_name, title, origin_ou_id, created_by,
                   variable_data, created_at)
-             VALUES (:tenant_id, :document_template_id, :template_name, :title, :origin_ou_id, :created_by,
+             VALUES (:tenant_id, :document_source_id, :document_source_version, :origin_key, :template_name, :title, :origin_ou_id, :created_by,
                      :variable_data, NOW())'
         );
         $stmt->execute([
             ':tenant_id'            => $tenantId,
-            ':document_template_id' => $rec['document_template_id'] ?? null,
+            ':document_source_id'      => $rec['document_source_id'] ?? null,
+            ':document_source_version' => $rec['document_source_version'] ?? null,
+            ':origin_key'              => $rec['origin_key'] ?? null,
             ':template_name'        => $rec['template_name'],
             ':title'                => $rec['title'],
             ':origin_ou_id'         => $rec['origin_ou_id'] ?? null,
@@ -164,6 +173,20 @@ final class DocumentRepository
         ]);
 
         return (int) $this->db->lastInsertId();
+    }
+
+    /**
+     * The document a caller already issued under this origin key, tenant-scoped.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function findByOriginKey(string $originKey, int $tenantId): ?array
+    {
+        $stmt = $this->db->prepare('SELECT id FROM documents WHERE origin_key = :origin_key AND tenant_id = :tenant_id');
+        $stmt->execute([':origin_key' => $originKey, ':tenant_id' => $tenantId]);
+        $id = $stmt->fetchColumn();
+
+        return $id === false ? null : $this->findById((int) $id, $tenantId);
     }
 
     /**
@@ -183,8 +206,8 @@ final class DocumentRepository
         // DocumentPresenter takes for `sections` and `collection_ids`: absent
         // means "not fetched by this read", never "empty".
         $stmt = $this->db->prepare(
-            'SELECT id, tenant_id, document_template_id, template_name, title, origin_ou_id, created_by,
-                    variable_data, created_at
+            'SELECT id, tenant_id, document_template_id, document_source_id, document_source_version, origin_key, template_name,
+                    title, origin_ou_id, created_by, variable_data, created_at
              FROM documents WHERE id = :id AND tenant_id = :tenant_id'
         );
         $stmt->execute([':id' => $id, ':tenant_id' => $tenantId]);
@@ -217,7 +240,7 @@ final class DocumentRepository
         // `documents.id`, and PostgreSQL makes the original table name
         // unusable once an alias is introduced. An alias here would work on
         // SQLite and fail on production.
-        $sql = 'SELECT id, tenant_id, document_template_id, template_name, title,
+        $sql = 'SELECT id, tenant_id, document_template_id, document_source_id, document_source_version, origin_key, template_name, title,
                        origin_ou_id, created_by, created_at
                   FROM documents
                  WHERE tenant_id = :tenant_id';
@@ -242,6 +265,46 @@ final class DocumentRepository
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         return array_map($this->normalizeRow(...), $rows);
+    }
+
+    /**
+     * How many documents the criteria match per calendar month, from `$since`
+     * on: `['2026-09' => 12, ...]`, months with none left out. For the editor's
+     * chart blocks (M3), which count with the SAME visibility predicate as the
+     * list, so a chart never shows more than the reader's own document list.
+     *
+     * The month is the first seven characters of the timestamp as text, which
+     * is `YYYY-MM` on both PostgreSQL and SQLite.
+     *
+     * @return array<string, int>
+     */
+    public function countByMonthForCriteria(int $tenantId, DocumentCriteria $criteria, string $since): array
+    {
+        if ($criteria->matchesNothing) {
+            return [];
+        }
+
+        $sql = 'SELECT SUBSTR(CAST(created_at AS TEXT), 1, 7) AS month, COUNT(*) AS n
+                  FROM documents
+                 WHERE tenant_id = :tenant_id AND created_at >= :since';
+        $bindings = [];
+        $sql .= $this->criteriaSql($criteria, $bindings);
+        $sql .= ' GROUP BY SUBSTR(CAST(created_at AS TEXT), 1, 7)';
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+        $stmt->bindValue(':since', $since, PDO::PARAM_STR);
+        foreach ($bindings as $name => $value) {
+            $stmt->bindValue($name, $value, is_int($value) ? PDO::PARAM_INT : PDO::PARAM_STR);
+        }
+        $stmt->execute();
+
+        $counts = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $counts[(string) $row['month']] = (int) $row['n'];
+        }
+
+        return $counts;
     }
 
     /**
@@ -546,6 +609,9 @@ final class DocumentRepository
             'id'                   => (int) $row['id'],
             'tenant_id'            => (int) $row['tenant_id'],
             'document_template_id' => $row['document_template_id'] !== null ? (int) $row['document_template_id'] : null,
+            'document_source_id'   => isset($row['document_source_id']) ? (int) $row['document_source_id'] : null,
+            'document_source_version' => isset($row['document_source_version']) ? (int) $row['document_source_version'] : null,
+            'origin_key'           => isset($row['origin_key']) ? (string) $row['origin_key'] : null,
             'template_name'        => (string) $row['template_name'],
             'title'                => (string) $row['title'],
             'origin_ou_id'         => $row['origin_ou_id'] !== null ? (int) $row['origin_ou_id'] : null,

@@ -1,4 +1,3 @@
-import { collectBlockIds } from '@whity-org/ui/documents/blocks';
 import {
   describeAudience,
   needsPublish,
@@ -8,7 +7,7 @@ import {
 import type { GovernedRow } from '@/app/(protected)/admin/document-templates/types';
 
 /**
- * The pure half of the templates-and-blocks governance screen.
+ * The pure half of the Document templates page (A31).
  *
  * These assert on OUTCOMES a broken feature could not produce. Two habits are
  * deliberately avoided:
@@ -34,15 +33,10 @@ const t = ((_key: string, fallback?: string, vars?: Record<string, string | numb
 }) as Parameters<typeof describeAudience>[2];
 
 const row = (over: Partial<GovernedRow> = {}): GovernedRow => ({
-  id: 1,
-  name: 'Row',
   scope: 'tenant',
   required_permission: null,
   owner_ou_id: null,
-  is_system: false,
   created_by: 10,
-  created_at: '2026-01-01T00:00:00Z',
-  updated_at: '2026-01-01T00:00:00Z',
   ...over,
 });
 
@@ -178,47 +172,5 @@ describe('needsPublish — mirrors DocumentAccessPolicy::needsPublish', () => {
 
   it('treats an empty-string tag as no tag, like the server does', () => {
     expect(needsPublish('personal', '', null)).toBe(false);
-  });
-});
-
-describe('collectBlockIds — parity with PHP BlockReferenceScanner', () => {
-  it('finds pointers at any depth, under any key, and de-duplicates them', () => {
-    const ids = collectBlockIds({
-      version: 2,
-      pages: [
-        {
-          id: 'p1',
-          elements: [
-            { id: 'e1', type: 'text', text: 'hi' },
-            { id: 'e2', type: 'blockInstance', blockId: '4' },
-            // Nested somewhere the pages/elements shape does not predict. The PHP
-            // scanner deliberately does not assume that shape, and neither does
-            // this, so both stay correct across template-schema changes.
-            { id: 'e3', type: 'group', children: [{ id: 'e4', type: 'blockInstance', blockId: '9' }] },
-          ],
-        },
-        { id: 'p2', elements: [{ id: 'e5', type: 'blockInstance', blockId: '4' }] },
-      ],
-    });
-
-    expect(ids).toEqual(['4', '9']);
-  });
-
-  it('stringifies a numeric blockId, because the two sides disagree about the type', () => {
-    // The client's `blockId` is a string; the backend id is an integer. The
-    // scanner is where they meet, and a mismatch here would make every count
-    // zero while looking like it worked.
-    expect(collectBlockIds({ type: 'blockInstance', blockId: 7 })).toEqual(['7']);
-  });
-
-  it('ignores a blockInstance-shaped node with no blockId, and non-trees', () => {
-    expect(collectBlockIds({ type: 'blockInstance' })).toEqual([]);
-    expect(collectBlockIds(null)).toEqual([]);
-    expect(collectBlockIds('not a tree')).toEqual([]);
-    expect(collectBlockIds([])).toEqual([]);
-  });
-
-  it('does not treat a type it does not know as a reference', () => {
-    expect(collectBlockIds({ type: 'image', blockId: '4' })).toEqual([]);
   });
 });

@@ -4,6 +4,13 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Core\Document\Render;
 
+use Whity\Sdk\Hooks\Events;
+use Whity\Core\Hooks\HookManager;
+use Whity\Core\Document\Embed\DocumentEmbedRegistry;
+use Whity\Core\Document\Fields\DocumentFieldRegistry;
+use Whity\Core\Document\DocumentSourceVersionRepository;
+use Whity\Core\Document\Print\SourceDocumentPrinter;
+use Whity\Core\Document\Issuing\DocumentIssuing;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\FakeRenderServiceClient;
 use Tests\Support\SchemaFromMigrations;
@@ -232,6 +239,56 @@ final class SdkDocumentRendererTest extends TestCase
         // asserted in SdkPackageContractTest against the class rather than here
         // against an instance: static analysis already proves the property does
         // not exist, so a runtime check for it is a test that cannot fail.
+    }
+
+    /**
+     * Through the one issuing service (DOCUMENT-AUTOMATION.md phase A): an
+     * origin key issues once, so a plugin reacting to a redelivered event
+     * gets the same document back, and `document.issued` fires for it like
+     * any other document.
+     */
+    public function testThroughTheIssuingServiceAnOriginKeyIssuesOnceAndIsAnnounced(): void
+    {
+        $this->enableRendering();
+        $pdo = $this->pdo;
+        $hooks = new HookManager();
+        $issued = [];
+        $hooks->listen(Events::DOCUMENT_ISSUED, static function (array $data) use (&$issued): array {
+            $issued[] = $data['id'];
+
+            return $data;
+        });
+        $documents = new DocumentRepository($pdo);
+        $artifacts = new DocumentArtifactRepository($pdo);
+        $issuer = new DocumentIssuer($pdo, $documents, $artifacts, new DocumentArtifactStore(new LocalStorageDriver($this->storageRoot)));
+        $flow = new FlowDocumentRenderer($this->settings, $this->client);
+        $renderer = new SdkDocumentRenderer(
+            $flow,
+            $issuer,
+            $this->settings,
+            null,
+            new DocumentIssuing(
+                new SourceDocumentPrinter(new DocumentFieldRegistry(), new DocumentEmbedRegistry(), $this->settings),
+                new DocumentSourceVersionRepository($pdo),
+                $issuer,
+                $this->settings,
+                $flow,
+                null,
+                null,
+                $hooks,
+                $documents,
+                $artifacts,
+            ),
+            $artifacts,
+        );
+
+        $first = $renderer->issue($this->document(), 'Order 4812 receipt', 'order:4812:receipt');
+        $again = $renderer->issue($this->document(), 'Order 4812 receipt', 'order:4812:receipt');
+
+        self::assertSame($first->documentId, $again->documentId, 'the same document, not a second one');
+        self::assertTrue($again->hasArtifact());
+        self::assertSame([$first->documentId], $issued, 'issued once, and announced');
+        self::assertSame(1, $this->scalar("SELECT COUNT(*) FROM documents WHERE origin_key = 'order:4812:receipt'"));
     }
 
     public function testARefusedPersistNeverSpendsARender(): void

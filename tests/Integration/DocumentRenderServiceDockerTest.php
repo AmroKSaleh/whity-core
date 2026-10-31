@@ -5,13 +5,17 @@ declare(strict_types=1);
 namespace Tests\Integration;
 
 use PHPUnit\Framework\TestCase;
+use Whity\Core\Document\Render\DocumentRenderRejectedException;
+use Whity\Core\Document\Render\RenderServiceClient;
+use Whity\Core\Document\Render\RenderServiceUnavailableException;
 
 /**
- * The REAL `whity_render` integration proof (ADR 0012 / WC-docdesigner
- * Track 2): builds the actual Docker image, runs it as a throwaway
- * container, and asserts a genuine Puppeteer render round-trip — not a fake
- * client (see {@see \Tests\Api\DocumentRenderApiHandlerRealEngineTest}, which
- * exercises the PHP handler's own logic with a no-network double).
+ * The REAL `whity_render` integration proof (ADR 0012): builds the actual
+ * Docker image, runs it as a throwaway container, and asserts a genuine
+ * Puppeteer render round-trip through the production
+ * {@see RenderServiceClient} — not a fake client (see
+ * {@see \Tests\Api\DocumentCreateApiRealEngineTest}, which exercises the PHP
+ * issue path with a no-network double).
  *
  * DELIBERATELY OPT-IN, not part of any default suite run: building a
  * Chromium-bearing Docker image takes real time (and needs a working Docker
@@ -102,128 +106,88 @@ final class DocumentRenderServiceDockerTest extends TestCase
     }
 
     /**
-     * A real render exercising text + rich-text runs + math + barcode + QR —
-     * the exact element mix WC-docdesigner Track 1 added (rich-text spans,
-     * the `math` element type via @whity-org/ui/math-text/KaTeX) plus the
-     * original barcode/QR elements this whole tool exists to print — over
-     * REAL Puppeteer/headless-Chromium, not a mock. Arabic text is included
-     * (the hard cross-cutting RTL requirement); legibility (not tofu) was
-     * additionally verified by hand with a real screenshot during
-     * development (see the PR description) since a font-name string check
-     * turned out not to be a reliable automatable signal for glyph shaping —
-     * this test asserts structurally instead (valid, non-trivial PDF bytes
-     * with multiple distinct embedded font subsets), per the project's
-     * "no golden-image pixel diffing, structural/smoke checks only" guidance.
+     * A real flowing render of what an issued document sends — Arabic text,
+     * rich-text runs, math, a barcode and the verification QR — through
+     * {@see RenderServiceClient::renderFlow()} and REAL Puppeteer/headless
+     * Chromium, not a mock. Arabic is included (the hard cross-cutting RTL
+     * requirement); legibility (not tofu) was verified by hand with a
+     * screenshot when this proof was written, since a font-name string check
+     * is not a reliable automatable signal for glyph shaping — this test
+     * asserts structurally instead (valid, non-trivial PDF bytes with several
+     * embedded font subsets, and the page count the service reports), per the
+     * project's "no golden-image pixel diffing, structural/smoke checks only"
+     * guidance.
+     *
+     * The old canvas mode (`POST /render`, the Document designer's
+     * template + dataRows) is gone with the designer; documents are issued
+     * from editor templates through the flowing mode only (editor M4c).
      */
-    public function testRealRenderRoundTripProducesAValidPdf(): void
+    public function testRealFlowRenderRoundTripProducesAValidPdf(): void
     {
-        $payload = [
-            'template' => [
-                'version' => 2,
-                'page' => ['widthMm' => 100, 'heightMm' => 80, 'marginMm' => 2, 'background' => '#ffffff'],
-                'placeholders' => [],
-                'pages' => [[
-                    'id' => 'p1',
-                    'elements' => [
-                        [
-                            'id' => 'arabic', 'type' => 'text', 'x' => 2, 'y' => 2, 'w' => 96, 'h' => 12,
-                            'rotation' => 0, 'z' => 1, 'text' => 'مرحبا بالعالم',
-                            'style' => ['fontSize' => 18, 'fontWeight' => 'normal', 'fontStyle' => 'normal', 'align' => 'center', 'vAlign' => 'middle', 'color' => '#000000', 'direction' => 'rtl'],
-                        ],
-                        [
-                            'id' => 'rich', 'type' => 'text', 'x' => 2, 'y' => 14, 'w' => 96, 'h' => 8,
-                            'rotation' => 0, 'z' => 2, 'text' => 'Rich text sample',
-                            'style' => ['fontSize' => 10, 'fontWeight' => 'normal', 'fontStyle' => 'normal', 'align' => 'left', 'vAlign' => 'top', 'color' => '#111111'],
-                            'runs' => [['text' => 'Rich ', 'bold' => true], ['text' => 'text ', 'italic' => true], ['text' => 'sample']],
-                        ],
-                        [
-                            'id' => 'math', 'type' => 'math', 'x' => 2, 'y' => 22, 'w' => 60, 'h' => 14,
-                            'rotation' => 0, 'z' => 3, 'expression' => 'E = mc^2', 'block' => false,
-                        ],
-                        [
-                            'id' => 'barcode', 'type' => 'barcode', 'x' => 2, 'y' => 38, 'w' => 60, 'h' => 18,
-                            'rotation' => 0, 'z' => 4, 'symbology' => 'code128', 'value' => 'WC-DOCDESIGNER-1', 'showText' => true,
-                        ],
-                        [
-                            'id' => 'qr', 'type' => 'qr', 'x' => 65, 'y' => 22, 'w' => 30, 'h' => 30,
-                            'rotation' => 0, 'z' => 5, 'value' => 'https://example.com',
-                        ],
-                    ],
+        $rendered = $this->client(self::SHARED_SECRET)->renderFlow([
+            'page' => ['preset' => 'a4'],
+            'direction' => 'rtl',
+            'lang' => 'ar',
+            'content' => [
+                ['type' => 'heading', 'level' => 1, 'text' => 'مخبز المثال'],
+                ['type' => 'paragraph', 'text' => 'Rich text sample', 'runs' => [
+                    ['text' => 'Rich ', 'bold' => true],
+                    ['text' => 'text ', 'italic' => true],
+                    ['text' => 'sample'],
                 ]],
+                ['type' => 'math', 'tex' => 'E = mc^2'],
+                ['type' => 'barcode', 'symbology' => 'code128', 'value' => 'INV-2026-0042', 'showText' => true],
+                ['type' => 'qr', 'value' => 'https://docs.example.test/verify/abc', 'reference' => 'ABCD-EFGH'],
             ],
-            // A single empty row (this template binds no placeholders). An
-            // empty PHP array json_encodes as `[]` (a JSON array), which the
-            // render service's payload validator correctly rejects as a row
-            // shape (`{}` is what a flat data-row map looks like) — force the
-            // stdClass cast so it serialises as `[{}]`, not `[[]]`.
-            'dataRows' => [(object) []],
-        ];
+        ]);
 
-        $pdf = $this->postRender($payload);
-
-        self::assertStringStartsWith('%PDF-', $pdf, 'render service response must be a real PDF');
-        self::assertGreaterThan(5000, strlen($pdf), 'a real multi-element render should be well beyond a blank page');
+        self::assertStringStartsWith('%PDF-', $rendered->bytes, 'render service response must be a real PDF');
+        self::assertGreaterThan(5000, strlen($rendered->bytes), 'a real multi-block render should be well beyond a blank page');
+        self::assertGreaterThanOrEqual(1, $rendered->pageCount, 'the service reports how many pages it produced');
 
         // Rough "did real content actually get shaped" sanity check — several
         // distinct font subsets (body text + KaTeX math, at least) rather
         // than an exact golden-image/pixel diff (too fragile across
         // environments, per project convention).
-        $fontCount = substr_count($pdf, 'BaseFont');
-        self::assertGreaterThanOrEqual(2, $fontCount, 'expected multiple embedded font subsets for a real multi-element render');
-    }
-
-    public function testDisabledFeatureFlagNeverReachesTheRenderService(): void
-    {
-        // This is a light structural companion to the flag/RBAC coverage in
-        // DocumentRenderApiHandlerRealEngineTest (which fakes the render
-        // client entirely) — here it is enough to confirm the render service
-        // itself refuses an unauthenticated/wrong-secret call cleanly, which
-        // is what the PHP handler relies on for its own 503 mapping when
-        // misconfigured.
-        $response = $this->rawPost('/render', ['template' => ['page' => ['widthMm' => 10, 'heightMm' => 10], 'pages' => [['id' => 'p', 'elements' => []]]]], 'wrong-secret-wrong-secret-wrong');
-
-        self::assertSame(401, $response['status']);
+        $fontCount = substr_count($rendered->bytes, 'BaseFont');
+        self::assertGreaterThanOrEqual(2, $fontCount, 'expected multiple embedded font subsets for a real multi-block render');
     }
 
     /**
-     * @param array<string, mixed> $payload
+     * A payload the service refuses comes back as a REJECTION carrying the
+     * service's own reason, not as an outage: the issuer reports the two as
+     * `rejected` and `unavailable`, and only the real service can prove the
+     * client tells them apart.
      */
-    private function postRender(array $payload): string
+    public function testAnInvalidPayloadIsRejectedWithTheServicesReason(): void
     {
-        $response = $this->rawPost('/render', $payload, self::SHARED_SECRET);
-        self::assertSame(200, $response['status'], 'render request failed: ' . $response['body']);
-
-        return $response['body'];
-    }
-
-    /**
-     * @param array<string, mixed> $payload
-     * @return array{status: int, body: string}
-     */
-    private function rawPost(string $path, array $payload, string $secret): array
-    {
-        $body = (string) json_encode($payload);
-        $context = stream_context_create([
-            'http' => [
-                'method' => 'POST',
-                'header' => "Content-Type: application/json\r\nX-Render-Secret: {$secret}\r\n",
-                'content' => $body,
-                'timeout' => 30,
-                'ignore_errors' => true,
-            ],
-        ]);
-
-        $url = 'http://' . self::$renderHost . ':' . self::HOST_PORT . $path;
-        $http_response_header = [];
-        $raw = @file_get_contents($url, false, $context);
-        $status = 0;
-        foreach ($http_response_header as $line) {
-            if (preg_match('#^HTTP/\S+\s+(\d{3})#', $line, $m) === 1) {
-                $status = (int) $m[1];
-            }
+        try {
+            $this->client(self::SHARED_SECRET)->renderFlow([
+                'content' => [['type' => 'heading', 'level' => 9, 'text' => 'Too deep']],
+            ]);
+            self::fail('a heading level of 9 must be refused');
+        } catch (DocumentRenderRejectedException $e) {
+            self::assertStringContainsString('level', $e->clientMessage);
         }
+    }
 
-        return ['status' => $status, 'body' => is_string($raw) ? $raw : ''];
+    /**
+     * The wrong shared secret is refused by the service, and the client
+     * reports it as the service being unavailable — what the PHP side relies
+     * on for its 503 mapping when an instance is misconfigured.
+     */
+    public function testTheWrongSecretIsRefused(): void
+    {
+        $this->expectException(RenderServiceUnavailableException::class);
+
+        $this->client('wrong-secret-wrong-secret-wrong-secret')->renderFlow([
+            'content' => [['type' => 'paragraph', 'text' => 'Hello']],
+        ]);
+    }
+
+    private function client(string $secret): RenderServiceClient
+    {
+        return new RenderServiceClient('http://' . self::$renderHost . ':' . self::HOST_PORT, $secret);
     }
 
     private static function waitForHealth(): void

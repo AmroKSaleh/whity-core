@@ -3,18 +3,22 @@
  * stops, with the version it edited; a conflict stops saving and offers the
  * newer version instead of overwriting it; a failed save is retried.
  */
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 
 import { DocumentEditorScreen, type DocumentEditorAdapter, type SaveResult } from '@whity-org/features/document-editor';
 import { SAMPLE_DOCUMENT } from '@whity-org/ui/editor/sample';
-import type { WhityDocument } from '@whity-org/ui/editor/contract';
+import type { ResolvedDocumentTheme, WhityDocument } from '@whity-org/ui/editor/contract';
 
 let lastOnChange: ((doc: WhityDocument) => void) | null = null;
+let lastServices: unknown = 'not rendered';
+let lastProps: Record<string, unknown> = {};
 
 // The editor itself is covered by editor-*.test.ts; here only its onChange matters.
 jest.mock('@whity-org/ui/editor/doc-editor', () => ({
-  DocEditor: (props: { document: WhityDocument; onChange: (d: WhityDocument) => void; save?: { state: string } }) => {
+  DocEditor: (props: { document: WhityDocument; onChange: (d: WhityDocument) => void; save?: { state: string }; services?: unknown }) => {
     lastOnChange = props.onChange;
+    lastServices = props.services;
+    lastProps = props as unknown as Record<string, unknown>;
     return <div data-testid="editor" data-save={props.save?.state ?? ''}>{props.document.title}</div>;
   },
 }));
@@ -107,4 +111,331 @@ it('retries a failed save, later each time', async () => {
   expect(calls).toHaveLength(3);
   expect(calls[2]).toEqual({ title: 'Draft', version: 4 });
   expect(screen.getByTestId('editor').dataset.save).toBe('saved');
+});
+
+it('loads the services of the rich blocks once and hands them to the editor (M3)', async () => {
+  const { a } = adapter([]);
+  const services = { recordTypes: [{ key: 'document', label: 'Issued document' }] };
+  a.loadServices = jest.fn(async () => services);
+  await mount(a);
+
+  expect(a.loadServices).toHaveBeenCalledWith('7');
+  expect(lastServices).toBe(services);
+});
+
+it('still opens the document when its services fail to load', async () => {
+  const { a } = adapter([]);
+  a.loadServices = jest.fn(async () => {
+    throw new Error('offline');
+  });
+  await mount(a);
+
+  expect(lastServices).toEqual({});
+  expect(screen.getByTestId('editor').textContent).toBe(SAMPLE_DOCUMENT.title);
+});
+
+describe('templates (M4, the Document designer)', () => {
+  const TEMPLATE: WhityDocument = { ...SAMPLE_DOCUMENT, kind: 'template', recordType: 'document', defaultView: 'page', publishedVersion: 2 };
+  const SETUP = {
+    fields: [
+      { group: 'Document', items: [{ path: 'document.title', label: 'Document title' }, { path: 'document.number', label: 'Document number', required: true }] },
+      { group: 'Today', items: [{ path: 'today', label: 'Today' }] },
+    ],
+    letterhead: { name: 'Example Bakery', lines: [] },
+  };
+
+  function templateAdapter() {
+    const { a, calls } = adapter([]);
+    a.load = jest.fn(async () => ({ document: TEMPLATE, version: 4 }));
+    a.loadTemplate = jest.fn(async () => SETUP);
+    a.publishCheck = jest.fn(async () => []);
+    a.publish = jest.fn(async () => 3);
+    a.preview = jest.fn(async () => ({ label: '#3 · Receipt', values: { 'document.title': 'Receipt' } }));
+    return { a, calls };
+  }
+
+  it('hands the editor the fields, letterhead and the reference and date fields', async () => {
+    const { a } = templateAdapter();
+    await mount(a);
+
+    expect(a.loadTemplate).toHaveBeenCalledWith('document');
+    expect(lastProps.fields).toBe(SETUP.fields);
+    expect(lastProps.letterhead).toBe(SETUP.letterhead);
+    expect(lastProps.pageFields).toEqual({ reference: SETUP.fields[0].items[1], date: SETUP.fields[1].items[0] });
+    expect((lastProps.publish as { publishedVersion: number }).publishedVersion).toBe(2);
+  });
+
+  it('saves what is waiting before publishing, then publishes that version', async () => {
+    const { a, calls } = templateAdapter();
+    await mount(a);
+
+    act(() => lastOnChange?.({ ...TEMPLATE, title: 'Payment reminder' }));
+    const publish = lastProps.publish as { publish: () => Promise<void> };
+    await act(async () => {
+      await publish.publish();
+    });
+    expect(calls).toEqual([{ title: 'Payment reminder', version: 4 }]);
+    expect(a.publish).toHaveBeenCalledWith('7', 5);
+    expect((lastProps.publish as { publishedVersion: number }).publishedVersion).toBe(3);
+  });
+
+  describe('the document theme (M4d, E.44)', () => {
+    const THEME: ResolvedDocumentTheme = {
+      ref: 'tenant.workspace',
+      version: 2,
+      hash: 'h1',
+      tokens: { accent: '#B74C05', accentOnDark: '#F0A070', accentUse: 'title-and-headings', letterhead: { logo: 'wide', lines: ['phone', 'address', 'email'] } },
+      sources: {},
+      adjustments: [],
+    };
+    const THEMED_SETUP = {
+      ...SETUP,
+      letterhead: { name: 'Example Bakery', lines: ['Mecca Street 112, Amman', 'Tax no. 0123456'] },
+      letterheadParts: { address: 'Mecca Street 112, Amman', taxId: 'Tax no. 0123456', phone: '+962 6 555 0101', email: null },
+      logos: { wide: null, square: '/branding/square.png' },
+    };
+
+    it('hands the editor the theme tokens, and the letterhead the theme names from the parts', async () => {
+      const { a } = templateAdapter();
+      a.load = jest.fn(async () => ({ document: TEMPLATE, version: 4, resolvedTheme: THEME }));
+      a.loadTemplate = jest.fn(async () => THEMED_SETUP);
+      await mount(a);
+
+      expect(lastProps.theme).toEqual(THEME.tokens);
+      expect(lastProps).not.toHaveProperty('accent');
+      // The theme's lines in its order; the email isn't set, so it's left out. Wide falls back to square.
+      expect(lastProps.letterhead).toEqual({
+        name: 'Example Bakery',
+        lines: ['+962 6 555 0101', 'Mecca Street 112, Amman'],
+        logo: '/branding/square.png',
+        logoShape: 'square',
+      });
+    });
+
+    it('takes the new theme from the save response', async () => {
+      const { a } = templateAdapter();
+      a.load = jest.fn(async () => ({ document: TEMPLATE, version: 4, resolvedTheme: THEME }));
+      a.loadTemplate = jest.fn(async () => THEMED_SETUP);
+      const next: ResolvedDocumentTheme = { ...THEME, hash: 'h2', tokens: { ...THEME.tokens, accent: '#0961BB', accentUse: 'title', letterhead: { logo: 'none', lines: ['taxId'] } } };
+      a.save = jest.fn(async () => ({ ok: true as const, version: 5, updatedAt: 'now', resolvedTheme: next }));
+      await mount(a);
+
+      act(() => lastOnChange?.({ ...TEMPLATE, title: 'Payment reminder' }));
+      await act(async () => {
+        jest.advanceTimersByTime(800);
+      });
+      expect(a.save).toHaveBeenCalled();
+      expect(lastProps.theme).toEqual(next.tokens);
+      expect(lastProps.letterhead).toEqual({ name: 'Example Bakery', lines: ['Tax no. 0123456'], logo: null, logoShape: 'none' });
+    });
+
+    it('a save without a theme keeps the one it has', async () => {
+      const { a } = templateAdapter();
+      a.load = jest.fn(async () => ({ document: TEMPLATE, version: 4, resolvedTheme: THEME }));
+      await mount(a);
+
+      act(() => lastOnChange?.({ ...TEMPLATE, title: 'Payment reminder' }));
+      await act(async () => {
+        jest.advanceTimersByTime(800);
+      });
+      expect(a.save).toHaveBeenCalled();
+      expect(lastProps.theme).toEqual(THEME.tokens);
+    });
+
+    it('without a theme the letterhead is the default one', async () => {
+      const { a } = templateAdapter();
+      a.loadTemplate = jest.fn(async () => THEMED_SETUP);
+      await mount(a);
+
+      expect(lastProps.theme).toBeNull();
+      expect(lastProps.letterhead).toBe(THEMED_SETUP.letterhead);
+    });
+  });
+
+  it('a note has no fields or Publish', async () => {
+    const { a } = templateAdapter();
+    a.load = jest.fn(async () => ({ document: SAMPLE_DOCUMENT, version: 4 }));
+    await mount(a);
+
+    expect(a.loadTemplate).not.toHaveBeenCalled();
+    expect(lastProps.publish).toBeUndefined();
+    expect(lastProps.fields).toBeUndefined();
+  });
+});
+
+describe('issuing mode (M4c)', () => {
+  const TEMPLATE: WhityDocument = {
+    ...SAMPLE_DOCUMENT,
+    kind: 'template',
+    title: 'Draft title',
+    recordType: 'invoice',
+    defaultView: 'page',
+    publishedVersion: 2,
+    ownFields: [{ key: 'draftonly', label: 'Draft only' }],
+  };
+  const LETTER: WhityDocument = {
+    ...SAMPLE_DOCUMENT,
+    kind: 'letter',
+    title: 'Example Bakery invoice',
+    recordType: 'invoice',
+    defaultView: 'page',
+    ownFields: [{ key: 'slot', label: 'Delivery slot', sample: 'Tuesday' }],
+  };
+  const SETUP = {
+    fields: [{ group: 'Invoice', items: [{ path: 'invoice.number', label: 'Invoice number', required: true }] }],
+    letterhead: { name: 'Example Bakery', lines: [] },
+  };
+
+  function issueAdapter(document: WhityDocument) {
+    const { a, calls } = adapter([]);
+    a.load = jest.fn(async () => ({ document, version: 4 }));
+    a.loadTemplate = jest.fn(async () => SETUP);
+    a.publishCheck = jest.fn(async () => []);
+    a.publish = jest.fn(async () => 3);
+    a.findRecords = jest.fn(async () => [{ ref: 'invoice:32', label: 'INV-032 · Example Café' }]);
+    a.preview = jest.fn(async (_id: string, record: string | null) => ({
+      label: record === 'invoice:31' ? 'INV-031 · Example Bakery' : 'INV-032 · Example Café',
+      values: { 'invoice.number': record === 'invoice:31' ? 'INV-031' : 'INV-032' },
+    }));
+    // The published version differs from the draft: that is what must show.
+    a.loadVersion = jest.fn(async () => ({
+      title: 'Example Bakery invoice',
+      blocks: SAMPLE_DOCUMENT.blocks,
+      ownFields: [{ key: 'slot', label: 'Delivery slot', sample: 'Tuesday' }],
+    }));
+    a.copyForIssue = jest.fn(async () => '12');
+    a.issue = jest.fn(async () => ({ ok: true as const, documentId: 88 }));
+    return { a, calls };
+  }
+
+  async function mountIssue(a: DocumentEditorAdapter, record: string | null = 'invoice:31') {
+    const onIssued = jest.fn();
+    const onEditCopy = jest.fn();
+    render(<DocumentEditorScreen id="7" adapter={a} canEdit issue={{ record, onIssued, onEditCopy }} />);
+    await act(async () => {});
+    return { onIssued, onEditCopy };
+  }
+
+  it('on a template shows the published version, read-only, previewed with the record, without Publish', async () => {
+    const { a } = issueAdapter(TEMPLATE);
+    await mountIssue(a);
+
+    expect(a.loadVersion).toHaveBeenCalledWith('7', 2);
+    expect(screen.getByTestId('editor').textContent).toBe('Example Bakery invoice');
+    expect(lastProps.canEdit).toBe(false);
+    expect(lastProps.publish).toBeUndefined();
+    expect(lastProps.editWhilePreviewing).toBe(false);
+    expect(a.preview).toHaveBeenCalledWith('7', 'invoice:31');
+    expect((lastProps.preview as { label: string }).label).toBe('INV-031 · Example Bakery');
+    expect(screen.getByTestId('issue-record').textContent).toBe('INV-031 · Example Bakery');
+    // The published version's own fields, not the draft's.
+    expect(screen.getByText('Delivery slot')).toBeTruthy();
+    expect(screen.queryByText('Draft only')).toBeNull();
+
+    // Nothing is saved, whatever the editor reports.
+    act(() => lastOnChange?.({ ...TEMPLATE, title: 'Changed' }));
+    await act(async () => {
+      jest.advanceTimersByTime(2000);
+    });
+    expect(a.save).not.toHaveBeenCalled();
+  });
+
+  it('on a template prints with the theme frozen in the published version, not the draft’s', async () => {
+    const draft: ResolvedDocumentTheme = {
+      ref: 'tenant.autumn',
+      version: 3,
+      hash: 'draft',
+      tokens: { accent: '#0961BB', accentOnDark: '#7FB2F0', accentUse: 'title', letterhead: { logo: 'square', lines: ['address'] } },
+      sources: {},
+      adjustments: [],
+    };
+    const frozen: ResolvedDocumentTheme = { ...draft, ref: 'tenant.workspace', hash: 'frozen', tokens: { ...draft.tokens, accent: '#B74C05' } };
+    const { a } = issueAdapter(TEMPLATE);
+    a.load = jest.fn(async () => ({ document: TEMPLATE, version: 4, resolvedTheme: draft }));
+    const version = a.loadVersion!;
+    a.loadVersion = jest.fn(async (id: string, v: number) => ({ ...(await version(id, v)), resolvedTheme: frozen }));
+    await mountIssue(a);
+
+    expect(lastProps.theme).toEqual(frozen.tokens);
+  });
+
+  it('issues for the record with the own fields typed, which also show in the preview, then goes to the document', async () => {
+    const { a } = issueAdapter(TEMPLATE);
+    const { onIssued } = await mountIssue(a);
+
+    fireEvent.change(screen.getByLabelText('Delivery slot'), { target: { value: ' Tuesday 9:00 ' } });
+    expect((lastProps.preview as { values: Record<string, string> }).values['template.slot']).toBe('Tuesday 9:00');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Issue' }));
+    });
+    expect(a.issue).toHaveBeenCalledWith('7', { record: 'invoice:31', values: { slot: 'Tuesday 9:00' } });
+    expect(onIssued).toHaveBeenCalledWith(88);
+  });
+
+  it('shows the refusal plainly, naming own fields by their label', async () => {
+    const { a } = issueAdapter(TEMPLATE);
+    a.issue = jest.fn(async () => ({
+      ok: false as const,
+      message: 'Some required fields have no value',
+      missing: ['template.slot', 'invoice.number'],
+    }));
+    const { onIssued } = await mountIssue(a);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Issue' }));
+    });
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain('Some required fields have no value');
+    expect(alert.textContent).toContain('Some required fields have no value. Needs a value: Delivery slot, Invoice number.');
+    expect(onIssued).not.toHaveBeenCalled();
+  });
+
+  it('asks for the record when the template needs one and none was given, and cannot issue until then', async () => {
+    const { a } = issueAdapter(TEMPLATE);
+    await mountIssue(a, null);
+
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Issue', hidden: true }) as HTMLButtonElement).disabled).toBe(true);
+    expect(a.preview).not.toHaveBeenCalled();
+  });
+
+  it('Edit before issuing copies the published version and opens the copy with the same record', async () => {
+    const { a } = issueAdapter(TEMPLATE);
+    const { onEditCopy } = await mountIssue(a);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Edit before issuing' }));
+    });
+    expect(a.copyForIssue).toHaveBeenCalledWith('7');
+    expect(onEditCopy).toHaveBeenCalledWith('12', 'invoice:31');
+  });
+
+  it('a template never published cannot be issued, and says why', async () => {
+    const { a } = issueAdapter({ ...TEMPLATE, publishedVersion: undefined });
+    await mountIssue(a);
+
+    expect(a.loadVersion).not.toHaveBeenCalled();
+    expect(screen.getByText(/been published, so no document/)).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Issue' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole('button', { name: 'Edit before issuing' })).toBeNull();
+  });
+
+  it('on a letter edits and autosaves with the preview on, and saves the draft before issuing it', async () => {
+    const { a, calls } = issueAdapter(LETTER);
+    await mountIssue(a);
+
+    expect(a.loadVersion).not.toHaveBeenCalled();
+    expect(lastProps.canEdit).toBe(true);
+    expect(lastProps.editWhilePreviewing).toBe(true);
+    expect(lastProps.onClosePreview).toBeUndefined();
+    expect(screen.queryByRole('button', { name: 'Edit before issuing' })).toBeNull();
+
+    act(() => lastOnChange?.({ ...LETTER, title: 'Example Bakery invoice, kitchen' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Issue' }));
+    });
+    expect(calls).toEqual([{ title: 'Example Bakery invoice, kitchen', version: 4 }]);
+    expect(a.issue).toHaveBeenCalledWith('7', { record: 'invoice:31', values: {} });
+  });
 });

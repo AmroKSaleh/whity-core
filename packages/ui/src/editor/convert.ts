@@ -13,7 +13,7 @@ import { MARK_ORDER } from "./schema"
 
 type PmMark = { type: string; attrs?: Record<string, unknown> }
 
-const TEXT_BLOCKS = new Set(["paragraph", "heading", "quote", "bullet", "number", "checklist", "code", "divider"])
+const TEXT_BLOCKS = new Set(["paragraph", "heading", "quote", "bullet", "number", "checklist", "code", "divider", "callout"])
 
 /* ------------------------------------------------------------- inline */
 
@@ -151,10 +151,70 @@ export function blockToPm(block: Block): JSONContent {
       }
     case "divider":
       return { type: "divider", attrs: common(block) }
+    case "callout":
+      return { type: "callout", attrs: { ...common(block), kind: block.kind }, ...content(block.content) }
+    case "toggle":
+      return {
+        type: "toggle",
+        attrs: { ...common(block), open: block.open },
+        content: [{ type: "toggleSummary", ...content(block.summary) }, ...block.children.map(blockToPm)],
+      }
+    case "columns":
+      return {
+        type: "columns",
+        attrs: common(block),
+        content: block.columns.map((col) => ({ type: "column", ...(col.length ? { content: col.map(blockToPm) } : {}) })),
+      }
+    case "table":
+      return {
+        type: "table",
+        attrs: { ...common(block), headerRow: block.headerRow, columns: block.columns },
+        content: block.rows.map((row) => ({
+          type: "tableRow",
+          content: row.map((cell) => ({ type: "tableCell", ...content(cell) })),
+        })),
+      }
+    case "pageBreak":
+      return { type: "pageBreak", attrs: common(block) }
+    case "image":
+      return { type: "image", attrs: { ...common(block), src: block.src, alt: block.alt, width: block.width, caption: block.caption ?? null } }
+    case "file":
+      return { type: "file", attrs: { ...common(block), fileId: block.fileId, name: block.name, size: block.size, mime: block.mime } }
+    case "record":
+      return { type: "record", attrs: { ...common(block), ref: block.ref, view: block.view } }
+    case "chart":
+      return { type: "chart", attrs: { ...common(block), chart: block.chart, source: block.source, title: block.title ?? null } }
+    case "signature":
+      // @date-display-ignore: the signature date is text the author typed or a merge field (Inline[]), not a record timestamp.
+      return { type: "signature", attrs: { ...common(block), signers: block.signers, date: block.date, stamp: block.stamp } }
+    case "barcode":
+      return {
+        type: "barcode",
+        attrs: {
+          ...common(block),
+          symbology: block.symbology,
+          value: block.value,
+          showText: block.showText,
+          widthMm: block.widthMm ?? null,
+          heightMm: block.heightMm ?? null,
+        },
+      }
+    case "qr":
+      return { type: "qr", attrs: { ...common(block), value: block.value, caption: block.caption ?? null, sizeMm: block.sizeMm ?? null } }
+    case "math":
+      return { type: "math", attrs: { ...common(block), tex: block.tex } }
     default:
       return { type: "unknownBlock", attrs: { ...common(block), data: block } }
   }
 }
+
+/** Copy an optional contract field only when it is set, so a round trip adds nothing. */
+function optional<T extends object>(block: T, key: string, value: unknown): T {
+  if (value !== null && value !== undefined) (block as Record<string, unknown>)[key] = value
+  return block
+}
+
+type Of<T extends Block["type"]> = Extract<Block, { type: T }>
 
 function withCommon<T extends Block>(block: T, attrs: Record<string, unknown>): T {
   if (attrs.suggestion) (block as Block).suggestion = attrs.suggestion as Block["suggestion"]
@@ -189,11 +249,87 @@ export function blockFromPm(node: JSONContent): Block | null {
       )
     case "divider":
       return withCommon({ id, type: "divider" }, a)
+    case "callout":
+      return withCommon({ id, type: "callout", kind: a.kind === "important" ? "important" : "note", content: inline() }, a)
+    case "toggle": {
+      const [summary, ...children] = node.content ?? []
+      return withCommon(
+        { id, type: "toggle", open: Boolean(a.open), summary: inlineFromPm(summary?.content), children: blocksFromPm(children) },
+        a
+      )
+    }
+    case "columns": {
+      const cols = (node.content ?? []).map((col) => blocksFromPm(col.content))
+      return withCommon({ id, type: "columns", columns: [cols[0] ?? [], cols[1] ?? []] }, a)
+    }
+    case "table":
+      return withCommon(
+        {
+          id,
+          type: "table",
+          headerRow: Boolean(a.headerRow),
+          columns: (a.columns ?? []) as Of<"table">["columns"],
+          rows: (node.content ?? []).map((row) => (row.content ?? []).map((cell) => inlineFromPm(cell.content))),
+        },
+        a
+      )
+    case "pageBreak":
+      return withCommon({ id, type: "pageBreak" }, a)
+    case "image":
+      return withCommon(
+        optional<Of<"image">>(
+          { id, type: "image", src: String(a.src ?? ""), alt: String(a.alt ?? ""), width: (a.width ?? "full") as Of<"image">["width"] },
+          "caption",
+          a.caption
+        ),
+        a
+      )
+    case "file":
+      return withCommon(
+        { id, type: "file", fileId: String(a.fileId ?? ""), name: String(a.name ?? ""), size: Number(a.size ?? 0), mime: String(a.mime ?? "") },
+        a
+      )
+    case "record":
+      return withCommon({ id, type: "record", ref: a.ref as Of<"record">["ref"], view: a.view === "summary" ? "summary" : "card" }, a)
+    case "chart":
+      return withCommon(
+        optional<Of<"chart">>(
+          { id, type: "chart", chart: (a.chart ?? "bar") as Of<"chart">["chart"], source: a.source as Of<"chart">["source"] },
+          "title",
+          a.title
+        ),
+        a
+      )
+    case "signature":
+      return withCommon(
+        { id, type: "signature", signers: (a.signers ?? []) as Of<"signature">["signers"], date: (a.date ?? []) as Inline[], stamp: Boolean(a.stamp) },
+        a
+      )
+    case "barcode": {
+      const block: Of<"barcode"> = {
+        id,
+        type: "barcode",
+        symbology: (a.symbology ?? "code128") as Of<"barcode">["symbology"],
+        value: (a.value ?? []) as Of<"barcode">["value"],
+        showText: Boolean(a.showText),
+      }
+      return withCommon(optional(optional(block, "widthMm", a.widthMm), "heightMm", a.heightMm), a)
+    }
+    case "qr": {
+      const block: Of<"qr"> = { id, type: "qr", value: (a.value ?? []) as Of<"qr">["value"] }
+      return withCommon(optional(optional(block, "caption", a.caption), "sizeMm", a.sizeMm), a)
+    }
+    case "math":
+      return withCommon({ id, type: "math", tex: String(a.tex ?? "") }, a)
     case "unknownBlock":
       return a.data ? { ...(a.data as Block), id } : null
     default:
       return null
   }
+}
+
+function blocksFromPm(nodes: JSONContent[] | undefined): Block[] {
+  return (nodes ?? []).map(blockFromPm).filter((b): b is Block => b !== null)
 }
 
 /** The editor's content for a document's blocks. An empty document gets one empty paragraph. */
@@ -209,6 +345,14 @@ export function fromEditorContent(doc: JSONContent): Block[] {
 /** The canonical form of a document's blocks: equal to what a round trip through the editor returns. */
 export function normalizeBlocks(blocks: Block[]): Block[] {
   return blocks.map((block) => {
+    switch (block.type) {
+      case "toggle":
+        return { ...block, summary: normalizeInline(block.summary), children: normalizeBlocks(block.children) }
+      case "columns":
+        return { ...block, columns: [normalizeBlocks(block.columns[0]), normalizeBlocks(block.columns[1])] as Of<"columns">["columns"] }
+      case "table":
+        return { ...block, rows: block.rows.map((row) => row.map(normalizeInline)) }
+    }
     if (!TEXT_BLOCKS.has(block.type)) return block
     if ("content" in block && Array.isArray(block.content)) {
       return { ...block, content: normalizeInline(block.content) } as Block

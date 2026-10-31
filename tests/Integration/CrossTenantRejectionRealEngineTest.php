@@ -2509,6 +2509,76 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         self::assertNotNull($bCreate, "Tenant B's own override for the same key must be independent of Tenant A's");
     }
 
+    // ==================== workspace plugins (WHIT-760) ====================
+    //
+    // plugin_manifest_versions, tenant_plugins and tenant_plugin_permissions
+    // (migration 164): a workspace's own plugins. Every read and write binds
+    // tenant_id; the one cross-workspace read returns slugs only, to HIDE them.
+
+    public function testWorkspacePluginsAreTenantScoped(): void
+    {
+        $repo = new \Whity\Core\Plugin\Tenant\TenantPluginRepository($this->pdo);
+        $versionA = $repo->publish(self::TENANT_A, 'CakeOrders', '1.0.0', '{"a":1}', str_repeat('a', 64), ['cakeorders:read']);
+        $repo->publish(self::TENANT_B, 'Coffee', '1.0.0', '{"b":1}', str_repeat('b', 64), ['coffee:read']);
+
+        self::assertSame(['CakeOrders'], array_column($repo->active(self::TENANT_A), 'plugin_key'));
+        self::assertSame(['Coffee'], array_column($repo->active(self::TENANT_B), 'plugin_key'));
+        self::assertNull($repo->manifest(self::TENANT_B, $versionA), "Tenant A's manifest must be absent to Tenant B");
+    }
+
+    public function testTenantCannotPointOrSwitchOffForeignWorkspacePlugin(): void
+    {
+        $repo = new \Whity\Core\Plugin\Tenant\TenantPluginRepository($this->pdo);
+        $versionA = $repo->publish(self::TENANT_A, 'CakeOrders', '1.0.0', '{"a":1}', str_repeat('a', 64), ['cakeorders:read']);
+
+        self::assertFalse($repo->point(self::TENANT_B, 'CakeOrders', $versionA), "a foreign version can't be made live");
+        self::assertSame([], $repo->active(self::TENANT_B));
+        self::assertFalse($repo->setEnabled(self::TENANT_B, 'CakeOrders', false), 'a cross-tenant switch-off touches zero rows');
+        self::assertSame(['CakeOrders'], array_column($repo->active(self::TENANT_A), 'plugin_key'), "Tenant A's plugin stays live");
+    }
+
+    public function testForeignWorkspacePluginPermissionsAreOnlyEverHidden(): void
+    {
+        $repo = new \Whity\Core\Plugin\Tenant\TenantPluginRepository($this->pdo);
+        $repo->publish(self::TENANT_A, 'CakeOrders', '1.0.0', '{"a":1}', str_repeat('a', 64), ['cakeorders:read', 'shared:read']);
+        $repo->publish(self::TENANT_B, 'Coffee', '1.0.0', '{"b":1}', str_repeat('b', 64), ['coffee:read', 'shared:read']);
+
+        $hiddenFromB = $repo->permissionsOfOtherTenants(self::TENANT_B);
+        sort($hiddenFromB);
+        self::assertSame(['cakeorders:read'], $hiddenFromB, "a slug B's own plugins also declare is not hidden from B");
+    }
+
+    // ==================== document themes (editor M4d) ====================
+    //
+    // document_themes (migration 170): a workspace's own document themes, by
+    // key. Every read and write binds tenant_id, so the same key in two
+    // workspaces names two unrelated themes.
+
+    public function testDocumentThemesAreTenantScoped(): void
+    {
+        $repo = new \Whity\Core\Document\Theme\DocumentThemeRepository($this->pdo);
+        $repo->create(self::TENANT_A, 'house', 'House A', 'الدار أ', null, ['accent' => '#b74c05'], 0);
+        $repo->create(self::TENANT_B, 'house', 'House B', 'الدار ب', null, ['accent' => '#1f6f43'], 0);
+
+        self::assertSame(['House A'], array_column($repo->list(self::TENANT_A), 'name'));
+        self::assertSame('#1f6f43', $repo->find(self::TENANT_B, 'house')['tokens']['accent'] ?? null);
+        self::assertSame([], $repo->usage(self::TENANT_B, 'tenant.house')['drafts']);
+    }
+
+    public function testTenantCannotChangeArchiveOrDeleteForeignDocumentTheme(): void
+    {
+        $repo = new \Whity\Core\Document\Theme\DocumentThemeRepository($this->pdo);
+        $repo->create(self::TENANT_A, 'house', 'House A', 'الدار أ', null, ['accent' => '#b74c05'], 0);
+
+        self::assertNull($repo->update(self::TENANT_B, 'house', 1, ['name' => 'Taken'], 0), 'a foreign update touches zero rows');
+        self::assertNull($repo->setArchived(self::TENANT_B, 'house', true, 0));
+        self::assertFalse($repo->delete(self::TENANT_B, 'house'));
+        $a = $repo->find(self::TENANT_A, 'house');
+        self::assertNotNull($a);
+        self::assertSame('House A', $a['name']);
+        self::assertNull($a['archived_at'], "Tenant A's theme is untouched");
+    }
+
     // ==================== invitations (WHIT-417) ====================
     //
     // An invitation belongs to the tenant that issued it and carries that

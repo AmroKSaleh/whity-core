@@ -5,17 +5,14 @@ const { FlowLayoutError } = require('./errors');
 /**
  * Puppeteer orchestration for the FLOWING render mode (#1072, first half).
  *
- * Deliberately a separate file from src/renderer.js. The two modes share one
- * thing — the Chromium instance, which is expensive and must stay shared —
- * and nothing else: not the harness, not the stylesheet, not the page
- * geometry, not the readiness signal. Keeping them apart is what makes it
- * true, rather than merely intended, that adding a flowing mode cannot move a
- * fixed-canvas render by a millimetre.
+ * src/renderer.js owns the one shared Chromium instance (expensive, and it
+ * must stay shared); this file drives the pages: the HTML, the stylesheet,
+ * the page geometry and the readiness signal.
  *
  * The geometry, in one place so it is checkable:
  *
- *   `@page { size: WxH mm; margin: 0 }` and `page.pdf({ margin: 0 })`, exactly
- *   as the fixed-canvas mode does — because by the time Chromium sees this
+ *   `@page { size: WxH mm; margin: 0 }` and `page.pdf({ margin: 0 })` —
+ *   because by the time Chromium sees this
  *   document, pagination has ALREADY happened. The paginator has emitted one
  *   `.flow-page` element per output page at the exact physical size, so
  *   Chromium's only job is to print each box onto one sheet. The document's
@@ -35,8 +32,7 @@ const NAV_TIMEOUT_MS = Number(process.env.RENDER_FLOW_NAV_TIMEOUT_MS || 30000);
 /* Pagination is real work on a real DOM — the whole document is measured and
  * packed — and it scales with the document, not with the request. A
  * hundred-and-twenty-page document takes seconds, not milliseconds, so this
- * ceiling is generous and env-overridable rather than borrowed from the
- * fixed-canvas mode's 20 s, which was sized for a single designed page. */
+ * ceiling is generous and env-overridable. */
 const READY_TIMEOUT_MS = Number(process.env.RENDER_FLOW_READY_TIMEOUT_MS || 180000);
 const PDF_TIMEOUT_MS = Number(process.env.RENDER_FLOW_PDF_TIMEOUT_MS || 180000);
 
@@ -49,9 +45,15 @@ const PDF_TIMEOUT_MS = Number(process.env.RENDER_FLOW_PDF_TIMEOUT_MS || 180000);
  *          paginateMs: number}}>}
  */
 async function renderFlowToPdf(payload) {
-  const doc = normaliseFlowDocument(payload);
-  const html = buildFlowHtml(doc);
+  return renderHtmlToPdf(buildFlowHtml(normaliseFlowDocument(payload)));
+}
 
+/**
+ * Print a page built for this renderer: it sets `window.__FLOW_READY__` once
+ * laid out, and `window.__FLOW_RESULT__` (pageCount, problems) or
+ * `window.__FLOW_ERROR__`. Shared by the flowing mode and label sheets.
+ */
+async function renderHtmlToPdf(html) {
   const browser = await getBrowser();
   const page = await browser.newPage();
   const timings = {};
@@ -109,7 +111,7 @@ async function renderFlowToPdf(payload) {
   }
 }
 
-module.exports = { renderFlowToPdf };
+module.exports = { renderFlowToPdf, renderHtmlToPdf };
 
 /*
  * WHY `displayHeaderFooter` IS NOT USED

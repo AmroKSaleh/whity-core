@@ -88,11 +88,12 @@ final class DocumentIssuer
     /**
      * Create a document record from a template and store its first artifact.
      *
-     * @param array<string, mixed>              $template     A normalized `document_templates` row.
+     * @param array<string, mixed>              $template     What it was issued from: `name` (the snapshot),
+     *                                                        and for an editor template `source_id` and
+     *                                                        `source_version`.
      * @param string                            $bytes        The rendered payload.
-     * @param list<array<string, string>>|null   $variableData The values the document is raised with,
-     *                                                        already normalized by
-     *                                                        {@see \Whity\Core\Document\Render\VariableData}.
+     * @param list<array<string, string>>|null   $variableData The values the document was raised with:
+     *                                                        flat path => value maps.
      *                                                        Null records nothing — see
      *                                                        {@see DocumentRepository::create()} for why that
      *                                                        is not the same as `[]`.
@@ -170,7 +171,7 @@ final class DocumentIssuer
      *   artifact was not stored and why, and `POST /api/documents/{id}/render`
      *   is the retry.
      *
-     * @param array<string, mixed>             $template     A normalized `document_templates` row.
+     * @param array<string, mixed>             $template     As for {@see issue()}.
      * @param list<array<string, string>>|null $variableData Already normalized; see {@see issue()}.
      *
      * @return array<string, mixed> The document row.
@@ -230,10 +231,13 @@ final class DocumentIssuer
         ?array $variableData,
     ): int {
         return $this->documents->create($tenantId, [
-            'document_template_id' => isset($template['id']) ? (int) $template['id'] : null,
-            // Snapshot, not a join — the template may be renamed or deleted
-            // (ON DELETE SET NULL), and the record still has to be able to
-            // say what it came from.
+            // The editor template and published version it was issued from
+            // (migration 165); absent for a form or SDK document.
+            'document_source_id'      => isset($template['source_id']) ? (int) $template['source_id'] : null,
+            'document_source_version' => isset($template['source_version']) ? (int) $template['source_version'] : null,
+            'origin_key'              => isset($template['origin_key']) ? (string) $template['origin_key'] : null,
+            // Snapshot, not a join — the template may be renamed or deleted,
+            // and the record still has to be able to say what it came from.
             'template_name'        => (string) ($template['name'] ?? ''),
             'title'                => $title,
             'origin_ou_id'         => $actorId !== null ? $this->originOuFor($tenantId, $actorId) : null,

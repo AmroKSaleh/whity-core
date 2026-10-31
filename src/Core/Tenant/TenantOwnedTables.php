@@ -166,18 +166,25 @@ final class TenantOwnedTables
         'device_activation_codes' => '146_create_licensed_devices.php',
         'device_activation_redemptions' => '146_create_licensed_devices.php',
 
-        // WC-docdesigner — document/label designer persistence (migration 059).
-        // Saved templates and reusable blocks; the client object is stored as JSON
-        // in `data`. Tenant-scoped + RBAC-gated visibility; every query binds
-        // tenant_id (list/get additionally RBAC-filter server-side).
-        'document_templates' => '059_create_document_designer_tables.php',
-        'document_blocks'    => '059_create_document_designer_tables.php',
-
         // Editor M2 — written documents for the block editor (migration 160):
         // templates, letters, reports, notes and wiki pages, the draft's blocks
-        // stored as the WhityDocument contract's JSON. Same visibility columns as
-        // document_templates, filtered by the same DocumentAccessPolicy.
+        // stored as the WhityDocument contract's JSON. Visibility columns
+        // (scope, required_permission, owner_ou_id) filtered by DocumentAccessPolicy.
+        // They replaced the old designer's document_templates and
+        // document_blocks, dropped by migration 165.
         'document_sources' => '160_create_document_sources.php',
+        // Editor M3: images and files placed in those documents (migration
+        // 161). Bound to their document; read only through it.
+        'document_source_files' => '161_create_document_source_files.php',
+        'document_source_versions' => '162_create_document_source_versions.php',
+        // Editor M4d: the workspace's own document themes (migration 170, E.44).
+        'document_themes' => '170_create_document_themes.php',
+        // Whity Builder (WHIT-760): a workspace's own plugins as published
+        // manifest versions, the live pointer, and the permission slugs they
+        // declare (migration 164).
+        'plugin_manifest_versions' => '164_create_tenant_plugin_manifests.php',
+        'tenant_plugins' => '164_create_tenant_plugin_manifests.php',
+        'tenant_plugin_permissions' => '164_create_tenant_plugin_manifests.php',
 
         // #947 item 1 — issued documents and their stored render output
         // (migration 108). `documents` is the record; `document_artifacts` is
@@ -229,7 +236,7 @@ final class TenantOwnedTables
         // a node-based flow editor edits, and the two tables that hang off it.
         //
         // The design and the circulation are different records with different
-        // lifetimes, exactly as `document_templates` is a different record from
+        // lifetimes, exactly as a template (`document_sources`) is a different record from
         // `documents` — so these are three new tables rather than a nullable
         // column on the four above.
         //

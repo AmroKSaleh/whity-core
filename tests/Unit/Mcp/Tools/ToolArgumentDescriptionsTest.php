@@ -77,8 +77,6 @@ final class ToolArgumentDescriptionsTest extends TestCase
         'post_api_tenants_id_plan' => ['plan_id'],
         'post_api_billing_invoices_id_pay' => ['provider', 'return_url'],
         'put_api_tenants_id_subscription' => ['plan_id', 'status', 'enforcement_mode', 'current_period_end', 'grace_until', 'external_ref'],
-        'post_api_document_blocks' => ['name', 'data', 'scope', 'required_permission', 'owner_ou_id'],
-        'patch_api_document_blocks_id' => ['name', 'data', 'scope', 'required_permission', 'owner_ou_id'],
         'post_api_user_groups_preview' => ['rule_kind', 'rule_config'],
         'post_api_user_groups' => ['name', 'description', 'rule_kind', 'rule_config'],
         'patch_api_user_groups_id' => ['name', 'description', 'rule_kind', 'rule_config'],

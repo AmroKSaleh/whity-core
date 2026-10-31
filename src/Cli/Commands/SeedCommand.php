@@ -8,12 +8,12 @@ use Whity\Core\Document\Demo\DemoOrganisationSeeder;
 use Whity\Core\Document\Demo\DocumentDemoSeeder;
 use Whity\Core\Document\DocumentArtifactRepository;
 use Whity\Core\Document\DocumentArtifactStore;
-use Whity\Core\Document\DocumentBlockRepository;
 use Whity\Core\Document\DocumentCollectionRepository;
 use Whity\Core\Document\DocumentIssuer;
 use Whity\Core\Document\DocumentRepository;
-use Whity\Core\Document\DocumentStarterSeeder;
-use Whity\Core\Document\DocumentTemplateRepository;
+use Whity\Core\Document\DocumentSourceRepository;
+use Whity\Core\Document\DocumentSourceStarterSeeder;
+use Whity\Core\Document\DocumentSourceVersionRepository;
 use Whity\Core\Document\Qr\DocumentQrScanRepository;
 use Whity\Core\Document\Qr\DocumentQrService;
 use Whity\Core\Document\Qr\DocumentQrTokenRepository;
@@ -152,7 +152,7 @@ class SeedCommand implements CommandHelp, CliCommand
         echo "  " . self::FIXTURES_FLAG . "        Also seed the demo logins (admin@/user@/superuser@example.com).\n";
         echo "                          Seeded automatically when APP_ENV=development; this forces\n";
         echo "                          them on anywhere else.\n";
-        echo "  " . self::DOCUMENT_DEMO_FLAG . "  Also seed the document demo dataset (templates, blocks and\n";
+        echo "  " . self::DOCUMENT_DEMO_FLAG . "  Also seed the document demo dataset (editor templates and\n";
         echo "                          rendered documents). Off by default everywhere, including\n";
         echo "                          development: it writes real bytes through a storage driver.\n";
         echo "  " . self::BILLING_DEMO_FLAG . "   Also seed a billing dataset: three plan tiers, four\n";
@@ -308,8 +308,7 @@ class SeedCommand implements CommandHelp, CliCommand
         $storageRoot = getenv('STORAGE_ROOT') ?: (dirname(__DIR__, 3) . '/storage');
         $storage = StorageDriverFactory::fromSettings($settings, $_ENV, $storageRoot);
 
-        $templates = new DocumentTemplateRepository($pdo);
-        $blocks = new DocumentBlockRepository($pdo);
+        $sources = new DocumentSourceRepository($pdo);
         $documents = new DocumentRepository($pdo);
 
         // All four core kinds, the same set and the same construction order
@@ -344,9 +343,9 @@ class SeedCommand implements CommandHelp, CliCommand
             // DemoOrganisationSeeder for why a hand-rolled profile row is the
             // same mistake as a hand-rolled recipient row.
             new DemoOrganisationSeeder($pdo, new ProfileProvisioner($pdo)),
-            new DocumentStarterSeeder($templates, $blocks),
-            $templates,
-            $blocks,
+            new DocumentSourceStarterSeeder($sources),
+            $sources,
+            new DocumentSourceVersionRepository($pdo),
             $documents,
             new DocumentIssuer(
                 $pdo,

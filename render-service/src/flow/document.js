@@ -4,12 +4,6 @@
  * The FLOWING-document payload: validation, normalisation and numbering
  * (#1072, first half).
  *
- * This is the second of the render tier's two modes and it shares nothing
- * with the first. The fixed-canvas mode (`POST /render`, src/renderer.js)
- * takes a designer TEMPLATE — pages of absolutely-placed, mm-positioned
- * elements — and prints one PDF page per template page at `margin: 0`. It is
- * correct for what it serves and is not touched by any of this.
- *
  * The flowing mode (`POST /render/flow`) takes a CONTENT TREE — headings,
  * paragraphs, tables, figures — with no positions at all, and lets the
  * renderer decide how many pages it becomes. Everything that makes such a
@@ -66,8 +60,7 @@ const BLOCK_TYPES = new Set([
   'figure',
   'pageBreak',
   'spacer',
-  // The platform's verification code (#1036 for the fixed-canvas mode, extended
-  // to this one). Drawn here rather than embedded as a `figure` by the caller
+  // The platform's verification code (#1036). Drawn here rather than embedded as a `figure` by the caller
   // because the caller has no barcode encoder and this service already does —
   // and because an image the caller supplies is an image the caller chose,
   // which is the wrong property for the one mark on a document that is supposed
@@ -83,10 +76,30 @@ const BLOCK_TYPES = new Set([
   'list',
   'question',
   'divider',
+  // A printed letter's first page (the document editor's page view, E.7): the
+  // tenant's logo, name and address at the start side, the title, reference
+  // and date at the end side. One unit, so it is never split across pages.
+  'letterhead',
+  // The document editor's Barcode and Maths blocks (E.40, E.42). The editor's
+  // QR code block (E.41) prints as `qr` with its caption as the reference.
+  'barcode',
+  'math',
 ]);
 
-/** The colours a caller may theme, each a CSS custom property `--flow-<key>`. */
-const THEME_KEYS = ['ink', 'muted', 'accent', 'line', 'tint'];
+/** E.40: the symbologies the editor offers, as bwip-js names them. */
+const BARCODE_SYMBOLOGIES = { code128: 'code128', ean13: 'ean13', code39: 'code39' };
+const MAX_BARCODE_VALUE_LENGTH = 80;
+const MAX_MATH_LENGTH = 2000;
+
+/**
+ * What a caller may theme (document themes, E.44): the print colour, written
+ * as the custom property `--flow-accent`, and where it goes (E.45). The rest
+ * of a document's look is the register's and is not the caller's to change,
+ * so the greys and rules (ink, muted, line, tint) are no longer accepted.
+ */
+const THEME_KEYS = ['accent', 'accentUse'];
+const THEME_COLOURS = ['accent'];
+const ACCENT_USES = ['title', 'title-and-headings'];
 const HEX_COLOUR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
 const RUNNING_SLOTS = ['start', 'center', 'end'];
@@ -118,6 +131,7 @@ const MAX_FIELDS = 24;
 const MAX_FIELD_BOXES = 40;
 const MAX_LIST_ITEMS = 30;
 const MAX_CHOICES = 12;
+const MAX_LETTERHEAD_LINES = 6;
 const MAX_ANSWER_LINES = 25;
 const LIST_TONES = new Set(['plain', 'outline', 'tint']);
 const FIELD_KINDS = new Set(['line', 'boxes']);
@@ -194,9 +208,8 @@ function asFiniteNumber(value) {
 /**
  * Validate a flow payload's SHAPE and size.
  *
- * Returns an error string (the 422 body) or null. Deliberately mirrors
- * src/limits.js's `validatePayload` in style: a flat, first-error-wins check
- * that never throws, so the server can answer 422 with something a caller can
+ * Returns an error string (the 422 body) or null: a flat, first-error-wins
+ * check that never throws, so the server can answer 422 with something a caller can
  * act on rather than 500 with a stack trace.
  *
  * @param {unknown} payload
@@ -276,10 +289,15 @@ function validateRuns(block, at) {
     if (typeof run.text !== 'string') {
       return `"${at}.runs[${r}].text" must be a string`;
     }
-    for (const mark of ['bold', 'italic']) {
+    for (const mark of ['bold', 'italic', 'break']) {
       if (run[mark] !== undefined && typeof run[mark] !== 'boolean') {
         return `"${at}.runs[${r}].${mark}" must be true or false`;
       }
+    }
+    // A line break inside a paragraph (an address): its text is the newline
+    // the plain text carries, so runs and text still spell the same thing.
+    if (run.break === true && run.text !== '\n') {
+      return `"${at}.runs[${r}].text" must be "\\n" for a break`;
     }
     if (run.href !== undefined) {
       // Normalise, check the normalised value, then KEEP it. Checking a
@@ -388,6 +406,14 @@ function validateRunning(spec, name) {
   // number this mode ignores. Those are still ignored (unknown names) or
   // printed as text (numbers) - only the new OBJECT form is checked strictly.
   if (!isPlainObject(spec)) return null;
+  // The page the band starts on: a letter's running header begins on page 2,
+  // under page 1's letterhead.
+  if (spec.fromPage !== undefined) {
+    const from = asFiniteNumber(spec.fromPage);
+    if (from === null || !Number.isInteger(from) || from < 1) {
+      return `"${name}.fromPage" must be a whole number from 1`;
+    }
+  }
   for (const key of RUNNING_SLOTS) {
     const slot = spec[key];
     const at = `${name}.${key}`;
@@ -530,6 +556,125 @@ function validateFormBlock(block, i) {
   if (block.type === 'divider' && !optionalString(block.text)) {
     return `"${at}.text" must be a string`;
   }
+  if (block.type === 'letterhead') {
+    for (const side of ['start', 'end']) {
+      const part = block[side];
+      if (part === undefined) continue;
+      if (!isPlainObject(part)) return `"${at}.${side}" must be an object`;
+      if (!optionalString(part.name) || !optionalString(part.title)) {
+        return `"${at}.${side}.name" and "${at}.${side}.title" must be strings`;
+      }
+      if (part.lines !== undefined) {
+        if (!Array.isArray(part.lines) || part.lines.length > MAX_LETTERHEAD_LINES || !part.lines.every(isString)) {
+          return `"${at}.${side}.lines" must list up to ${MAX_LETTERHEAD_LINES} strings`;
+        }
+      }
+      if (part.image !== undefined) {
+        const err = validateImage(part.image, `${at}.${side}.image`);
+        if (err) return err;
+      }
+    }
+  }
+  return null;
+}
+
+/** Each block's own checks; `at` names the array in messages ("content"). */
+function validateBlocks(content, at) {
+  for (let i = 0; i < content.length; i += 1) {
+    const block = content[i];
+    if (!isPlainObject(block)) {
+      return `"${at}[${i}]" must be an object`;
+    }
+    if (!BLOCK_TYPES.has(block.type)) {
+      return `"${at}[${i}].type" must be one of: ${[...BLOCK_TYPES].join(', ')}`;
+    }
+    const layoutError = validateBlockLayout(block, i);
+    if (layoutError !== null) {
+      return layoutError;
+    }
+    const formError = validateFormBlock(block, i);
+    if (formError !== null) {
+      return formError;
+    }
+    if (block.type === 'heading') {
+      const level = asFiniteNumber(block.level);
+      if (level === null || level < 1 || level > 6 || Math.trunc(level) !== level) {
+        return `"${at}[${i}].level" must be a whole number 1-6`;
+      }
+      if (typeof block.text !== 'string') {
+        return `"${at}[${i}].text" must be a string`;
+      }
+    }
+    if (block.type === 'paragraph' && typeof block.text !== 'string') {
+      return `"${at}[${i}].text" must be a string`;
+    }
+    if (block.type === 'paragraph' || block.type === 'heading') {
+      const runsError = validateRuns(block, `${at}[${i}]`);
+      if (runsError !== null) {
+        return runsError;
+      }
+    }
+    if (block.type === 'table') {
+      if (!Array.isArray(block.rows)) {
+        return `"${at}[${i}].rows" must be an array of row arrays`;
+      }
+      if (block.rows.length > MAX_TABLE_ROWS) {
+        return `"${at}[${i}].rows" exceeds the render service's hard limit (${MAX_TABLE_ROWS} rows)`;
+      }
+      for (const row of block.rows) {
+        if (!Array.isArray(row)) {
+          return `"${at}[${i}].rows" entries must be arrays of cell values`;
+        }
+      }
+      if (block.columns !== undefined && !Array.isArray(block.columns)) {
+        return `"${at}[${i}].columns" must be an array`;
+      }
+    }
+    if (block.type === 'qr') {
+      if (typeof block.value !== 'string' || block.value === '') {
+        return `"${at}[${i}].value" must be the non-empty string the code encodes`;
+      }
+      if (block.value.length > MAX_QR_VALUE_LENGTH) {
+        // A QR's capacity is finite and its readability degrades into an
+        // unscannable lattice well before the encoder refuses outright.
+        // Refusing here names the reason; letting it through produces a printed
+        // document carrying a mark that looks like a verification code and
+        // scans as nothing.
+        return `"${at}[${i}].value" exceeds ${MAX_QR_VALUE_LENGTH} characters, beyond which the code stops being reliably scannable`;
+      }
+      if (block.reference !== undefined && typeof block.reference !== 'string') {
+        return `"${at}[${i}].reference" must be a string`;
+      }
+    }
+    if (block.type === 'barcode') {
+      if (!Object.prototype.hasOwnProperty.call(BARCODE_SYMBOLOGIES, block.symbology)) {
+        return `"${at}[${i}].symbology" must be one of: ${Object.keys(BARCODE_SYMBOLOGIES).join(', ')}`;
+      }
+      if (typeof block.value !== 'string' || block.value === '' || block.value.length > MAX_BARCODE_VALUE_LENGTH) {
+        return `"${at}[${i}].value" must be 1-${MAX_BARCODE_VALUE_LENGTH} characters`;
+      }
+      if (block.showText !== undefined && typeof block.showText !== 'boolean') {
+        return `"${at}[${i}].showText" must be true or false`;
+      }
+    }
+    if (block.type === 'math') {
+      if (typeof block.tex !== 'string' || block.tex === '' || block.tex.length > MAX_MATH_LENGTH) {
+        return `"${at}[${i}].tex" must be 1-${MAX_MATH_LENGTH} characters of TeX`;
+      }
+    }
+    if (block.type === 'figure') {
+      if (typeof block.src !== 'string' || block.src === '') {
+        return `"${at}[${i}].src" must be a non-empty data: URI`;
+      }
+      if (!block.src.startsWith('data:')) {
+        // A flowing render must not reach the network: an http(s) figure src
+        // would turn every render into an outbound fetch from inside the
+        // render tier, which is both an SSRF surface and a source of
+        // non-deterministic output. Callers embed their images.
+        return `"${at}[${i}].src" must be a data: URI (remote images are not fetched)`;
+      }
+    }
+  }
   return null;
 }
 
@@ -563,11 +708,17 @@ function validateFlowPayload(payload) {
 
   if (payload.theme !== undefined) {
     if (!isPlainObject(payload.theme)) {
-      return '"theme" must be an object of colours';
+      return '"theme" must be an object such as { "accent": "#b74c05" }';
     }
     for (const [key, value] of Object.entries(payload.theme)) {
       if (!THEME_KEYS.includes(key)) {
-        return `"theme.${key}" is not a theme colour; use ${THEME_KEYS.join(', ')}`;
+        return `"theme.${key}" is not a theme key; use ${THEME_KEYS.join(', ')}`;
+      }
+      if (key === 'accentUse') {
+        if (!ACCENT_USES.includes(value)) {
+          return `"theme.accentUse" must be one of ${ACCENT_USES.join(', ')}`;
+        }
+        continue;
       }
       // Hex only: the value is written into a stylesheet, and a colour NAME
       // is one short step from a value that closes the rule.
@@ -594,84 +745,9 @@ function validateFlowPayload(payload) {
     return `"content" exceeds the render service's hard limit (${MAX_BLOCKS} blocks)`;
   }
 
-  for (let i = 0; i < content.length; i += 1) {
-    const block = content[i];
-    if (!isPlainObject(block)) {
-      return `"content[${i}]" must be an object`;
-    }
-    if (!BLOCK_TYPES.has(block.type)) {
-      return `"content[${i}].type" must be one of: ${[...BLOCK_TYPES].join(', ')}`;
-    }
-    const layoutError = validateBlockLayout(block, i);
-    if (layoutError !== null) {
-      return layoutError;
-    }
-    const formError = validateFormBlock(block, i);
-    if (formError !== null) {
-      return formError;
-    }
-    if (block.type === 'heading') {
-      const level = asFiniteNumber(block.level);
-      if (level === null || level < 1 || level > 6 || Math.trunc(level) !== level) {
-        return `"content[${i}].level" must be a whole number 1-6`;
-      }
-      if (typeof block.text !== 'string') {
-        return `"content[${i}].text" must be a string`;
-      }
-    }
-    if (block.type === 'paragraph' && typeof block.text !== 'string') {
-      return `"content[${i}].text" must be a string`;
-    }
-    if (block.type === 'paragraph' || block.type === 'heading') {
-      const runsError = validateRuns(block, `content[${i}]`);
-      if (runsError !== null) {
-        return runsError;
-      }
-    }
-    if (block.type === 'table') {
-      if (!Array.isArray(block.rows)) {
-        return `"content[${i}].rows" must be an array of row arrays`;
-      }
-      if (block.rows.length > MAX_TABLE_ROWS) {
-        return `"content[${i}].rows" exceeds the render service's hard limit (${MAX_TABLE_ROWS} rows)`;
-      }
-      for (const row of block.rows) {
-        if (!Array.isArray(row)) {
-          return `"content[${i}].rows" entries must be arrays of cell values`;
-        }
-      }
-      if (block.columns !== undefined && !Array.isArray(block.columns)) {
-        return `"content[${i}].columns" must be an array`;
-      }
-    }
-    if (block.type === 'qr') {
-      if (typeof block.value !== 'string' || block.value === '') {
-        return `"content[${i}].value" must be the non-empty string the code encodes`;
-      }
-      if (block.value.length > MAX_QR_VALUE_LENGTH) {
-        // A QR's capacity is finite and its readability degrades into an
-        // unscannable lattice well before the encoder refuses outright.
-        // Refusing here names the reason; letting it through produces a printed
-        // document carrying a mark that looks like a verification code and
-        // scans as nothing.
-        return `"content[${i}].value" exceeds ${MAX_QR_VALUE_LENGTH} characters, beyond which the code stops being reliably scannable`;
-      }
-      if (block.reference !== undefined && typeof block.reference !== 'string') {
-        return `"content[${i}].reference" must be a string`;
-      }
-    }
-    if (block.type === 'figure') {
-      if (typeof block.src !== 'string' || block.src === '') {
-        return `"content[${i}].src" must be a non-empty data: URI`;
-      }
-      if (!block.src.startsWith('data:')) {
-        // A flowing render must not reach the network: an http(s) figure src
-        // would turn every render into an outbound fetch from inside the
-        // render tier, which is both an SSRF surface and a source of
-        // non-deterministic output. Callers embed their images.
-        return `"content[${i}].src" must be a data: URI (remote images are not fetched)`;
-      }
-    }
+  const blocksError = validateBlocks(content, 'content');
+  if (blocksError !== null) {
+    return blocksError;
   }
 
   if (payload.frontMatter !== undefined) {
@@ -846,13 +922,16 @@ function normaliseFlowDocument(payload) {
   };
 }
 
-/** Only the known keys, only valid hex: what reaches the stylesheet. */
+/** Only the known keys, only valid values: what reaches the stylesheet. */
 function normaliseTheme(theme) {
   const out = {};
-  for (const key of THEME_KEYS) {
+  for (const key of THEME_COLOURS) {
     if (typeof theme[key] === 'string' && HEX_COLOUR.test(theme[key])) {
       out[key] = theme[key];
     }
+  }
+  if (out.accent && theme.accentUse === 'title-and-headings') {
+    out.accentUse = 'title-and-headings';
   }
   return Object.keys(out).length > 0 ? out : null;
 }
@@ -885,11 +964,21 @@ function normaliseRunning(spec) {
       out[key] = clean;
     }
   }
+  const from = asFiniteNumber(spec.fromPage);
+  if (from !== null && Number.isInteger(from) && from > 1) out.fromPage = from;
   return out;
 }
 
 module.exports = {
+  BARCODE_SYMBOLOGIES,
   validateFlowPayload,
+  validateBlocks,
+  normaliseTheme,
+  isPlainObject,
+  asFiniteNumber,
+  HEX_COLOUR,
+  THEME_KEYS,
+  THEME_COLOURS,
   normaliseFlowDocument,
   resolvePage,
   PAGE_PRESETS,

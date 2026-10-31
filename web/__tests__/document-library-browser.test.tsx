@@ -59,7 +59,7 @@ jest.mock('@/lib/toast-context', () => ({
  */
 jest.mock('next/navigation', () => ({ useRouter: () => ({ push: jest.fn() }) }));
 
-const heldCapabilities = new Set<string>(['documents:render', 'documents:route']);
+const heldCapabilities = new Set<string>(['documents:issue', 'documents:route']);
 jest.mock('@/hooks/useCapabilities', () => ({
   useCapabilities: () => ({
     loading: false,
@@ -190,19 +190,21 @@ function installApi(options: {
     if (url.startsWith('/api/v1/documents/views')) {
       return answer(options.views ?? { ok: true, body: { data: VIEWS, unavailable_substrates: [] } });
     }
-    // #1023's template picker walks EVERY page through fetchAllPages, and treats
-    // a partial walk as a failure — so this answers with a complete envelope
-    // rather than a bare array.
-    if (url.startsWith('/api/v1/document-templates')) {
+    // The create dialog's picker: published editor templates (editor M4c).
+    if (url.startsWith('/api/v1/document-sources')) {
       return answer(
         options.templates ?? {
           ok: true,
           body: {
-            data: [{ id: 1, name: 'Invoice template', data: { placeholders: [] } }],
-            pagination: { page: 1, perPage: 100, total: 1, totalPages: 1 },
+            data: [
+              { id: 1, kind: 'template', title: 'Invoice template', record_type: null, own_fields: [], published_version: 1 },
+            ],
           },
         }
       );
+    }
+    if (url.startsWith('/api/v1/document-embeds')) {
+      return answer({ ok: true, body: { data: { record_types: [], chart_sources: [] } } });
     }
     if (url.startsWith('/api/v1/document-collections')) {
       return answer(options.collections ?? { ok: true, body: { data: [Q3, STARRED] } });
@@ -245,7 +247,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   window.localStorage.clear();
   heldCapabilities.clear();
-  heldCapabilities.add('documents:render');
+  heldCapabilities.add('documents:issue');
   heldCapabilities.add('documents:route');
   installApi();
 });

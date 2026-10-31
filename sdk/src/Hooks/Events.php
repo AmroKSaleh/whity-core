@@ -94,6 +94,20 @@ final class Events
     public const OU_ROLE_ASSIGNED = 'ou.role_assigned';
     public const OU_ROLE_REMOVED = 'ou.role_removed';
 
+    // ---- documents (SDK 1.49; DOCUMENT-AUTOMATION.md) ----
+    // Before a document is issued: a listener may veto with HookVetoException,
+    // and nothing is written. Payload: tenant_id, source_id, version, record,
+    // origin_key, actor — ids only, never field values.
+    public const DOCUMENT_ISSUING = 'document.issuing';
+    // A document was issued (its record exists, with its QR code when the
+    // tenant has them on). Payload as above, plus id.
+    public const DOCUMENT_ISSUED = 'document.issued';
+    public const DOCUMENT_ISSUED_ASYNC = 'document.issued.async';
+    // A PDF was stored for a document, on issue or on a correction. Payload:
+    // id, tenant_id, artifact_id, source_id, version.
+    public const DOCUMENT_RENDERED = 'document.rendered';
+    public const DOCUMENT_RENDERED_ASYNC = 'document.rendered.async';
+
     // ---- platform ----
     public const NAVIGATION_REGISTER = 'navigation.register';
     public const PERMISSION_REGISTERED = 'permission.registered';
