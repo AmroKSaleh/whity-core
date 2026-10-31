@@ -33,7 +33,8 @@ const rateLimit = require('express-rate-limit');
 
 const { renderToPdf, shutdown } = require('./renderer');
 const { validatePayload } = require('./limits');
-const { renderFlowToPdf } = require('./flow/render');
+const { renderFlowToPdf, renderHtmlToPdf } = require('./flow/render');
+const { validateLabelsPayload, buildLabelsHtml } = require('./flow/labels');
 const { validateFlowPayload } = require('./flow/document');
 const { readRecordedBrowser, versionFromUserAgent, versionsAgree } = require('./browser-info');
 const {
@@ -356,6 +357,36 @@ app.post('/render/flow', renderRateLimiter, async (req, res) => {
     }
     // eslint-disable-next-line no-console
     console.error('[whity_render] flow render failed:', err && err.stack ? err.stack : err);
+    res.status(500).json({ error: 'Render failed' });
+  }
+});
+
+/**
+ * POST /render/labels — a label sheet (E.43): one label per record or CSV
+ * row, as many sheets as it takes. No paginator; each sheet is one page.
+ * X-Render-Labels-Clipped says how many labels were cut at their edge.
+ * Same auth and rate limiter as the other routes (one Chromium).
+ */
+app.post('/render/labels', renderRateLimiter, async (req, res) => {
+  if (!isAuthorized(req)) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  const validationError = validateLabelsPayload(req.body);
+  if (validationError) {
+    res.status(422).json({ error: validationError });
+    return;
+  }
+  try {
+    const { pdf, pagination } = await renderHtmlToPdf(buildLabelsHtml(req.body));
+    res.status(200);
+    res.set('Content-Type', 'application/pdf');
+    res.set('X-Render-Page-Count', String(pagination.pageCount));
+    res.set('X-Render-Labels-Clipped', String(pagination.clipped ?? 0));
+    res.send(pdf);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error('[whity_render] labels render failed:', err && err.stack ? err.stack : err);
     res.status(500).json({ error: 'Render failed' });
   }
 });

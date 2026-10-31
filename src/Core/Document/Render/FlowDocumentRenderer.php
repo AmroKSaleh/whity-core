@@ -93,6 +93,33 @@ final class FlowDocumentRenderer
     }
 
     /**
+     * A label sheet (E.43). The block and table ceilings are about what a
+     * paginator fragments, which a label sheet has none of; the size of the
+     * request is the ceiling that still applies. How many labels one print
+     * may hold is the caller's to bound before it reads any records.
+     *
+     * @param array<string, mixed> $payload {sheet, grid, labels, ...}
+     *
+     * @throws DocumentRenderRejectedException   Over the size ceiling, or refused by the service.
+     * @throws RenderServiceUnavailableException The service could not do it.
+     */
+    public function renderLabels(int $tenantId, array $payload): RenderedDocument
+    {
+        $encoded = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($encoded === false) {
+            throw DocumentRenderRejectedException::because('Labels could not be encoded for rendering: ' . json_last_error_msg());
+        }
+        $maxBytes = $this->ceiling($this->settings->effective($tenantId), SettingsRegistry::DOCUMENTS_FLOW_MAX_BYTES);
+        if (strlen($encoded) > $maxBytes) {
+            throw DocumentRenderRejectedException::because(
+                'The labels exceed the maximum render size (' . strlen($encoded) . " bytes, max {$maxBytes})"
+            );
+        }
+
+        return $this->renderService->renderLabels($payload);
+    }
+
+    /**
      * Apply this tenant's ceilings WITHOUT rendering.
      *
      * Split out because one caller has to know the answer before it writes

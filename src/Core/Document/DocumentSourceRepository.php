@@ -23,7 +23,7 @@ use Whity\Core\Db\DbBool;
  */
 final class DocumentSourceRepository
 {
-    private const COLUMNS = 'id, tenant_id, kind, title, lang, default_view, full_width, page, record_type, blocks,
+    private const COLUMNS = 'id, tenant_id, kind, title, lang, default_view, full_width, page, record_type, blocks, own_fields,
         draft_version, published_version, scope, required_permission, created_by, owner_ou_id, updated_by,
         created_at, updated_at';
 
@@ -79,17 +79,18 @@ final class DocumentSourceRepository
     /**
      * @param array{kind: string, title: string, lang: string, default_view: string, full_width?: bool,
      *              page?: ?array<string, mixed>, record_type?: ?string, blocks: list<array<string, mixed>>,
-     *              scope?: string, required_permission?: ?string, created_by: int, owner_ou_id?: ?int} $rec
+     *              scope?: string, required_permission?: ?string, created_by: ?int, owner_ou_id?: ?int,
+     *              own_fields?: ?list<array<string, string>>, starter_key?: ?string, legacy_template_id?: ?int} $rec
      * @return int The new row id.
      */
     public function create(int $tenantId, array $rec): int
     {
         $stmt = $this->db->prepare(
             'INSERT INTO document_sources
-                 (tenant_id, kind, title, lang, default_view, full_width, page, record_type, blocks, draft_version,
-                  scope, required_permission, created_by, owner_ou_id, updated_by, created_at, updated_at)
-             VALUES (:tenant_id, :kind, :title, :lang, :default_view, :full_width, :page, :record_type, :blocks, 1,
-                  :scope, :required_permission, :created_by, :owner_ou_id, :updated_by, NOW(), NOW())'
+                 (tenant_id, kind, title, lang, default_view, full_width, page, record_type, blocks, own_fields, draft_version,
+                  scope, required_permission, created_by, owner_ou_id, updated_by, starter_key, legacy_template_id, created_at, updated_at)
+             VALUES (:tenant_id, :kind, :title, :lang, :default_view, :full_width, :page, :record_type, :blocks, :own_fields, 1,
+                  :scope, :required_permission, :created_by, :owner_ou_id, :updated_by, :starter_key, :legacy_template_id, NOW(), NOW())'
         );
         $stmt->execute([
             ':tenant_id'           => $tenantId,
@@ -101,11 +102,14 @@ final class DocumentSourceRepository
             ':page'                => isset($rec['page']) ? $this->encode($rec['page']) : null,
             ':record_type'         => $rec['record_type'] ?? null,
             ':blocks'              => $this->encode($rec['blocks']),
+            ':own_fields'          => isset($rec['own_fields']) ? $this->encode($rec['own_fields']) : null,
             ':scope'               => $rec['scope'] ?? DocumentAccessPolicy::SCOPE_PERSONAL,
             ':required_permission' => $rec['required_permission'] ?? null,
             ':created_by'          => $rec['created_by'],
             ':owner_ou_id'         => $rec['owner_ou_id'] ?? null,
             ':updated_by'          => $rec['created_by'],
+            ':starter_key'         => $rec['starter_key'] ?? null,
+            ':legacy_template_id'  => $rec['legacy_template_id'] ?? null,
         ]);
 
         return (int) $this->db->lastInsertId();
@@ -116,7 +120,8 @@ final class DocumentSourceRepository
      * version, or null when the row is at another version (or gone).
      *
      * @param array{title?: string, lang?: string, default_view?: string, full_width?: bool,
-     *              page?: ?array<string, mixed>, blocks?: list<array<string, mixed>>} $fields
+     *              page?: ?array<string, mixed>, blocks?: list<array<string, mixed>>,
+     *              own_fields?: ?list<array<string, string>>} $fields
      */
     public function saveDraft(int $id, int $tenantId, int $baseVersion, array $fields, int $updatedBy): ?int
     {
@@ -151,6 +156,10 @@ final class DocumentSourceRepository
             $sets[] = 'blocks = :blocks';
             $params[':blocks'] = $this->encode($fields['blocks']);
         }
+        if (array_key_exists('own_fields', $fields)) {
+            $sets[] = 'own_fields = :own_fields';
+            $params[':own_fields'] = $fields['own_fields'] !== null ? $this->encode($fields['own_fields']) : null;
+        }
 
         $stmt = $this->db->prepare(
             'UPDATE document_sources SET ' . implode(', ', $sets) . '
@@ -162,6 +171,32 @@ final class DocumentSourceRepository
         }
 
         return $baseVersion + 1;
+    }
+
+    /**
+     * The starters a tenant already has, by key; set only by the starter seeder.
+     *
+     * @return array<string, true>
+     */
+    public function starterKeys(int $tenantId): array
+    {
+        $stmt = $this->db->prepare('SELECT starter_key FROM document_sources WHERE tenant_id = :tenant_id AND starter_key IS NOT NULL');
+        $stmt->execute([':tenant_id' => $tenantId]);
+
+        return array_fill_keys(array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN)), true);
+    }
+
+    /**
+     * The old designer's templates already converted for a tenant, by id.
+     *
+     * @return array<int, true>
+     */
+    public function convertedTemplateIds(int $tenantId): array
+    {
+        $stmt = $this->db->prepare('SELECT legacy_template_id FROM document_sources WHERE tenant_id = :tenant_id AND legacy_template_id IS NOT NULL');
+        $stmt->execute([':tenant_id' => $tenantId]);
+
+        return array_fill_keys(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)), true);
     }
 
     public function delete(int $id, int $tenantId): void
@@ -177,6 +212,7 @@ final class DocumentSourceRepository
     private function normalizeRow(array $row, bool $withBlocks): array
     {
         $page = $row['page'] !== null ? json_decode((string) $row['page'], true) : null;
+        $ownFields = $row['own_fields'] !== null ? json_decode((string) $row['own_fields'], true) : null;
         $out = [
             'id'                  => (int) $row['id'],
             'tenant_id'           => (int) $row['tenant_id'],
@@ -187,6 +223,7 @@ final class DocumentSourceRepository
             'full_width'          => DbBool::of($row['full_width']),
             'page'                => is_array($page) ? $page : null,
             'record_type'         => $row['record_type'] !== null ? (string) $row['record_type'] : null,
+            'own_fields'          => is_array($ownFields) ? array_values($ownFields) : [],
             'draft_version'       => (int) $row['draft_version'],
             'published_version'   => $row['published_version'] !== null ? (int) $row['published_version'] : null,
             'scope'               => (string) $row['scope'],

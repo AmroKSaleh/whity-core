@@ -86,6 +86,9 @@ function BlockToolbar({ editor, labels, container }: { editor: Editor; labels: E
   const [error, setError] = React.useState<string | null>(null)
   const fileInput = React.useRef<HTMLInputElement>(null)
   const [top, setTop] = React.useState<number | null>(null)
+  // On a label sheet (E.43) the label is small and its neighbours repeat it, so
+  // the bar opens below the block, where it covers nothing the author needs.
+  const [below, setBelow] = React.useState(false)
 
   const pos = target?.pos
   React.useEffect(() => setEditing(null), [pos])
@@ -97,7 +100,10 @@ function BlockToolbar({ editor, labels, container }: { editor: Editor; labels: E
     const dom = editor.view.nodeDOM(pos) as HTMLElement | null
     if (!dom) return
     const box = container.current.getBoundingClientRect()
-    setTop(dom.getBoundingClientRect().top - box.top)
+    const rect = dom.getBoundingClientRect()
+    const inLabel = !!dom.closest(".wy-ls__label")
+    setBelow(inLabel)
+    setTop((inLabel ? rect.bottom + 10 : rect.top) - box.top)
   }, [editor, pos, container, target?.node])
 
   if (!target || top === null) return null
@@ -433,8 +439,11 @@ function BlockToolbar({ editor, labels, container }: { editor: Editor; labels: E
       role="toolbar"
       aria-label={labels.blockToolbar}
       data-slot="block-toolbar"
-      className="absolute start-0 z-20 grid max-w-full gap-1 rounded-control border border-border bg-popover p-[3px] shadow-float"
-      style={{ top, transform: "translateY(calc(-100% - 10px))" }}
+      className={cn(
+        "absolute start-0 z-20 grid gap-1 rounded-control border border-border bg-popover p-[3px] shadow-float",
+        below ? "w-max max-w-[420px]" : "max-w-full"
+      )}
+      style={below ? { top } : { top, transform: "translateY(calc(-100% - 10px))" }}
       onMouseDown={(e) => {
         if ((e.target as HTMLElement).tagName !== "INPUT" && (e.target as HTMLElement).tagName !== "SELECT") e.preventDefault()
       }}

@@ -103,6 +103,10 @@ function inlineContent(block, direction) {
 
   let out = '';
   for (const run of runs) {
+    if (run.break === true) {
+      out += '<br>';
+      continue;
+    }
     let piece = isolateForeignRuns(run.text, direction);
     if (run.italic) piece = `<em>${piece}</em>`;
     if (run.bold) piece = `<strong>${piece}</strong>`;
@@ -561,4 +565,4 @@ ${body}
 </html>`;
 }
 
-module.exports = { buildFlowHtml, isolateForeignRuns, escapeHtml, DEFAULT_FONT_STACK };
+module.exports = { buildFlowHtml, renderBlock, mm, FLOW_CSS, isolateForeignRuns, escapeHtml, DEFAULT_FONT_STACK };

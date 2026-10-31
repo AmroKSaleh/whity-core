@@ -32,6 +32,7 @@ import { BlockToolbar } from "./block-toolbar"
 import { EditorServicesProvider, type EditorServices, type FieldPreview } from "./services"
 import { FieldTrigger, filterFields, type FieldDef, type FieldGroup, type FieldTriggerState } from "./fields"
 import { FieldPicker, flatFields } from "./field-picker"
+import { DEFAULT_LABEL_GRID, LabelSetup, LabelSheetView, labelCells, type SheetSize } from "./label-sheet"
 import { PagePagination, PageView, fitZoom, type Letterhead } from "./page-view"
 import { PublishCheck } from "./publish-check"
 
@@ -55,7 +56,7 @@ const KIND_LABEL: Record<DocumentKind, keyof EditorLabels> = {
   report: "kindReport",
   note: "kindNote",
   wiki: "kindWiki",
-  label: "kindTemplate",
+  label: "kindLabel",
 }
 
 export interface DocEditorProps {
@@ -107,6 +108,8 @@ export interface DocEditorProps {
   }
   /** Downloads the PDF through Whity Render. */
   onExportPdf?: () => Promise<void> | void
+  /** Label sheets: Print fills one label per record or CSV row (E.43); the screen asks which. */
+  onPrintLabels?: () => void
   className?: string
 }
 
@@ -129,6 +132,20 @@ function countWords(editor: Editor): number {
  * with a record and Publish are M4's; comments and suggestions, agents and
  * plugin blocks join in M5–M7.
  */
+/** A key for a new own field from its name: lowercase letters, digits and _, unique. */
+export function ownFieldKey(label: string, taken: string[]): string {
+  const base =
+    label
+      .normalize("NFKD")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 32) || "field"
+  let key = base
+  for (let n = 2; taken.includes(key); n++) key = `${base}_${n}`
+  return key
+}
+
 function DocEditor({
   document: doc,
   onChange,
@@ -153,6 +170,7 @@ function DocEditor({
   onClosePreview,
   publish,
   onExportPdf,
+  onPrintLabels,
   className,
 }: DocEditorProps) {
   const labels = React.useMemo(() => ({ ...EDITOR_LABELS, ...labelProp }), [labelProp])
@@ -166,6 +184,11 @@ function DocEditor({
     onViewChange?.(v)
   }
   const [zoom, setZoom] = React.useState<PageZoom>("fit")
+  // E.43: a label sheet is one sheet of identical labels, page view only.
+  const isLabel = doc.kind === "label"
+  const labelGrid = doc.labels ?? DEFAULT_LABEL_GRID
+  const sheetSize: SheetSize = doc.page?.size === "Letter" ? "Letter" : "A4"
+  const [labelOverflow, setLabelOverflow] = React.useState(false)
   const [canvasWidth, setCanvasWidth] = React.useState(1000)
   const [pages, setPages] = React.useState(1)
   const [fieldQuery, setFieldQuery] = React.useState<FieldTriggerState>({ open: false, query: "", range: null, rect: null })
@@ -307,9 +330,26 @@ function DocEditor({
     return false
   }
 
-  const fieldGroups = React.useMemo(() => filterFields(fields ?? [], fieldQuery.query), [fields, fieldQuery.query])
+  // A template's own fields (`template.<key>`) join the record type's, as their own group.
+  const ownFields = doc.ownFields
+  const allFields = React.useMemo<FieldGroup[] | undefined>(() => {
+    if (!fields) return undefined
+    if (!ownFields?.length) return fields
+    const items = ownFields.map((f) => ({ path: `template.${f.key}`, label: f.label, sample: f.sample }))
+    return [...fields, { group: labels.fieldsThisTemplate, items }]
+  }, [fields, ownFields, labels.fieldsThisTemplate])
+  const createField = React.useCallback(
+    (label: string): FieldDef => {
+      const current = latest.current.ownFields ?? []
+      const key = ownFieldKey(label, current.map((f) => f.key))
+      onChange({ ...latest.current, ownFields: [...current, { key, label }] })
+      return { path: `template.${key}`, label }
+    },
+    [onChange]
+  )
+  const fieldGroups = React.useMemo(() => filterFields(allFields ?? [], fieldQuery.query), [allFields, fieldQuery.query])
   const fieldList = flatFields(fieldGroups)
-  const fieldOpen = fieldQuery.open && !!fields?.length
+  const fieldOpen = fieldQuery.open && !!allFields?.length
   React.useEffect(() => setFieldActive(0), [fieldQuery.query, fieldQuery.open])
   const pickField = React.useCallback(
     (index: number) => {
@@ -360,8 +400,8 @@ function DocEditor({
   }, [publish, editor])
 
   const fieldLabel = React.useCallback(
-    (path: string) => fields?.flatMap((g) => g.items).find((f) => f.path === path)?.label ?? path,
-    [fields]
+    (path: string) => allFields?.flatMap((g) => g.items).find((f) => f.path === path)?.label ?? path,
+    [allFields]
   )
   const fixBlocker = React.useCallback(
     (b: PublishBlocker) => {
@@ -489,6 +529,11 @@ function DocEditor({
               {labels.preview}
             </Button>
           )}
+          {isLabel && onPrintLabels && (
+            <Button variant="outline" size="sm" icon="print" onClick={onPrintLabels}>
+              {labels.printLabels}
+            </Button>
+          )}
           {onExportPdf && (
             <Button variant="outline" size="sm" icon="download" onClick={() => void onExportPdf()}>
               {labels.pdf}
@@ -511,11 +556,25 @@ function DocEditor({
           outline={outlineOpen}
           onOutline={() => setOutlineOpen((o) => !o)}
           onLink={() => openLink()}
-          fields={fields}
+          fields={allFields}
+          onCreateField={fields && editable ? createField : undefined}
           view={view}
           onView={doc.kind === "label" ? undefined : setView}
           zoom={zoom}
           onZoom={setZoom}
+          sheet={
+            isLabel ? (
+              <LabelSetup
+                grid={labelGrid}
+                sheet={sheetSize}
+                disabled={!editable}
+                labels={labels}
+                onChange={(grid, sheet) =>
+                  onChange({ ...latest.current, labels: grid, page: { size: sheet, marginMm: 16, letterhead: false } })
+                }
+              />
+            ) : undefined
+          }
         />
       ) : (
         <div className="h-11 border-b border-border bg-card" />
@@ -633,6 +692,13 @@ function DocEditor({
               </div>
             </EditorServicesProvider>
             )
+            if (isLabel) {
+              return (
+                <LabelSheetView editor={editor} grid={labelGrid} sheet={sheetSize} zoom={zoomFactor} accent={accent} labels={labels} onOverflow={setLabelOverflow}>
+                  {content}
+                </LabelSheetView>
+              )
+            }
             return view === "page" ? (
               <PageView
                 editor={editor}
@@ -670,7 +736,15 @@ function DocEditor({
       {/* Status bar (28px) */}
       <footer className="flex h-7 items-center gap-4 overflow-hidden border-t border-border bg-card px-4 text-xs whitespace-nowrap text-muted-foreground">
         <span>{meta?.words === 1 ? labels.word : fill(labels.words, { n: meta?.words ?? 0 })}</span>
-        {view === "page" ? (
+        {isLabel ? (
+          <>
+            <span>{fill(labels.labelsPerSheet, { n: labelCells(labelGrid, sheetSize).length })}</span>
+            <span dir="ltr">
+              {sheetSize} · {labelGrid.size.widthMm} × {labelGrid.size.heightMm} mm
+            </span>
+            {labelOverflow && <span className="text-error-text">{labels.labelOverflow}</span>}
+          </>
+        ) : view === "page" ? (
           <>
             <span>{fill(labels.pageOf, { page: 1, pages })}</span>
             <span>{labels.pageSetup}</span>

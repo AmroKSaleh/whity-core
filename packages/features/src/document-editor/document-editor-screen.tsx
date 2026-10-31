@@ -9,6 +9,7 @@ import type { FieldDef } from '@whity-org/ui/editor/fields';
 import type { EditorServices, FieldPreview } from '@whity-org/ui/editor/services';
 import { useTranslation } from '../i18n';
 import { useEditorLabels } from './editor-labels';
+import { PrintLabelsDialog } from './print-labels-dialog';
 import { RecordPicker } from './record-picker';
 import type { DocumentEditorAdapter, RecordChoice, TemplateSetup } from './types';
 
@@ -67,6 +68,7 @@ export function DocumentEditorScreen({
   const [preview, setPreview] = React.useState<FieldPreview | null>(null);
   const [previewRecord, setPreviewRecord] = React.useState<string | null>(null);
   const [pickerFor, setPickerFor] = React.useState<'preview' | 'pdf' | null>(null);
+  const [printingLabels, setPrintingLabels] = React.useState(false);
   const [publishedVersion, setPublishedVersion] = React.useState<number | null>(null);
 
   const version = React.useRef(0);
@@ -132,7 +134,10 @@ export function DocumentEditorScreen({
     saving.current = true;
     setSave({ state: 'saving' });
     try {
-      const result = await adapter.save(id, { title: next.title, blocks: next.blocks }, version.current);
+      // A label sheet's grid and sheet size are saved with it (E.43), and a template's own fields.
+      const sheet = next.kind === 'label' ? { page: next.page, labels: next.labels } : {};
+      const own = next.ownFields ? { ownFields: next.ownFields } : {};
+      const result = await adapter.save(id, { title: next.title, blocks: next.blocks, ...sheet, ...own }, version.current);
       retryDelay.current = RETRY_FIRST_MS;
       if (result.ok) {
         version.current = result.version;
@@ -290,9 +295,12 @@ export function DocumentEditorScreen({
                 setPreview(null);
                 setPreviewRecord(null);
               },
-              onExportPdf: adapter.exportPdf
-                ? () => (recordType && !previewRecord ? setPickerFor('pdf') : exportPdf(previewRecord))
-                : undefined,
+              // E.43: a label sheet prints labels, one per record or CSV row, not one PDF.
+              onExportPdf:
+                adapter.exportPdf && doc.kind !== 'label'
+                  ? () => (recordType && !previewRecord ? setPickerFor('pdf') : exportPdf(previewRecord))
+                  : undefined,
+              onPrintLabels: adapter.printLabels && doc.kind === 'label' ? () => setPrintingLabels(true) : undefined,
               publish:
                 adapter.publishCheck && adapter.publish
                   ? {
@@ -310,6 +318,26 @@ export function DocumentEditorScreen({
             }
           : {})}
       />
+      {printed && template && adapter.printLabels && doc.kind === 'label' && (
+        <PrintLabelsDialog
+          open={printingLabels}
+          onOpenChange={setPrintingLabels}
+          fields={
+            doc.ownFields?.length
+              ? [
+                  ...template.fields,
+                  {
+                    group: labels.fieldsThisTemplate,
+                    items: doc.ownFields.map((f) => ({ path: `template.${f.key}`, label: f.label, sample: f.sample })),
+                  },
+                ]
+              : template.fields
+          }
+          findRecords={findRecords}
+          canUseRecords={!!recordType && !!adapter.findRecords}
+          onPrint={(source) => adapter.printLabels!(id, source, doc.title)}
+        />
+      )}
       {recordType && (
         <RecordPicker
           open={pickerFor !== null}

@@ -211,3 +211,76 @@ export const Arabic: Story = {
   globals: { direction: "rtl" },
   render: () => <Live initial={{ ...TEMPLATE, lang: "ar", title: "تذكير بالدفع" }} />,
 }
+
+const LABELS: WhityDocument = {
+  ...SAMPLE_DOCUMENT,
+  id: "tpl-shipping-labels",
+  kind: "label",
+  title: "Shipping labels",
+  defaultView: "page",
+  page: { size: "A4", marginMm: 16, letterhead: false },
+  labels: { columns: 2, rows: 4, size: { widthMm: 99.1, heightMm: 67.7 }, gapMm: 2.5, gapYMm: 0 },
+  ownFields: [
+    { key: "ship_to", label: "Ship to", sample: "Example Clinic" },
+    { key: "address", label: "Address", sample: "Rainbow Street 21, Amman" },
+    { key: "tracking", label: "Tracking number", sample: "TRK000123456" },
+  ],
+  status: "draft",
+  blocks: [
+    { id: "l1", type: "paragraph", content: [t("From "), f("company.name", "Company name")] },
+    {
+      id: "l2",
+      type: "paragraph",
+      content: [{ ...f("template.ship_to", "Ship to"), marks: [{ type: "bold" }] }, { type: "break" }, f("template.address", "Address")],
+    },
+    { id: "l3", type: "barcode", symbology: "code128", value: [f("template.tracking", "Tracking number")], showText: true, heightMm: 12 },
+  ],
+}
+
+/**
+ * E.43: a label sheet. The first label is edited and the others repeat it;
+ * the stock is set beside the zoom; Print labels replaces PDF. Ship to,
+ * Address and Tracking number are the template's own fields (Field ▾ → This template).
+ */
+export const LabelSheet: Story = { render: () => <LabelLive initial={LABELS} /> }
+
+function LabelLive({ initial }: { initial: WhityDocument }) {
+  const [doc, setDoc] = React.useState(initial)
+  return (
+    <div style={{ height: "100vh" }}>
+      <DocEditor
+        document={doc}
+        onChange={setDoc}
+        canEdit
+        back={{ label: "Back to templates", onClick: () => {} }}
+        path="Templates · Labels"
+        save={{ state: "saved", at: "14:02" }}
+        fields={[FIELDS[2]]}
+        onPrintLabels={() => {}}
+        publish={{ publishedVersion: null, check: () => wait([]), publish: () => wait(undefined) }}
+      />
+    </div>
+  )
+}
+
+/** A label whose content runs past its edge is flagged; on paper it would be cut. */
+export const LabelOverflow: Story = {
+  render: () => (
+    <div style={{ height: "100vh" }}>
+      <DocEditor
+        document={{
+          ...LABELS,
+          labels: { columns: 3, rows: 8, size: { widthMm: 63.5, heightMm: 33.9 }, gapMm: 2.5, gapYMm: 0 },
+          blocks: [
+            ...LABELS.blocks,
+            { id: "l4", type: "paragraph", content: [t("Handle with care. Keep upright and away from heat.")] },
+          ],
+        }}
+        onChange={() => {}}
+        canEdit
+        fields={[FIELDS[2]]}
+        onPrintLabels={() => {}}
+      />
+    </div>
+  ),
+}

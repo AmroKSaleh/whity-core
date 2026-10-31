@@ -10427,6 +10427,154 @@
                 ]
             }
         },
+        "/api/v1/document-sources/{id}/print-labels": {
+            "post": {
+                "operationId": "post_api_v1_document_sources_id_print_labels",
+                "summary": "Print a label sheet",
+                "tags": [
+                    "documents"
+                ],
+                "description": "A label sheet (E.43) filled one label per record, or per row of a CSV the request carries, on its grid, as many sheets as it takes. A required field with no value on any label refuses the print with 422, naming the labels in details.missing (E.27). X-Labels-Count is how many labels printed and X-Labels-Clipped how many were cut at their edge.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DocumentSourcePrintLabelsRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The PDF",
+                        "content": {
+                            "application/pdf": {
+                                "schema": {
+                                    "type": "string",
+                                    "format": "binary"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document or record not found, or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Not a label sheet, or it has no published version yet",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "A required field has no value, the CSV or its columns are not usable, or the render was refused",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "The document render limit has been reached",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "503": {
+                        "description": "Rendering is not enabled or temporarily unavailable",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/document-sources/{id}/publish": {
             "post": {
                 "operationId": "post_api_v1_document_sources_id_publish",
@@ -42146,6 +42294,27 @@
                     "sort"
                 ]
             },
+            "DocumentOwnField": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "Lowercase letters, digits and underscores, at most 40; the field is `template.<key>`."
+                    },
+                    "label": {
+                        "type": "string",
+                        "description": "The name shown on the chip and in Field menus, at most 80 characters."
+                    },
+                    "sample": {
+                        "type": "string",
+                        "description": "An example value, at most 200 characters."
+                    }
+                },
+                "required": [
+                    "key",
+                    "label"
+                ]
+            },
             "DocumentPreviewResponse": {
                 "type": "object",
                 "properties": {
@@ -42741,6 +42910,13 @@
                         },
                         "description": "The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type"
                     },
+                    "own_fields": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DocumentOwnField"
+                        },
+                        "description": "A template's own fields, for values no record type provides (a CSV column on a label sheet): a list of {key, label, sample?}, at most 50. The editor inserts each as the field `template.<key>`."
+                    },
                     "draft_version": {
                         "type": "integer"
                     },
@@ -42837,7 +43013,7 @@
                         "type": "object",
                         "nullable": true,
                         "additionalProperties": true,
-                        "description": "Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`. Null for none."
+                        "description": "Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`; for a label sheet, `labels` is its grid (columns, rows, size {widthMm, heightMm}, gapMm, gapYMm). Null for none."
                     },
                     "record_type": {
                         "type": "string",
@@ -42908,7 +43084,7 @@
                         "type": "object",
                         "nullable": true,
                         "additionalProperties": true,
-                        "description": "Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`. Null for none."
+                        "description": "Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`; for a label sheet, `labels` is its grid (columns, rows, size {widthMm, heightMm}, gapMm, gapYMm). Null for none."
                     },
                     "blocks": {
                         "type": "array",
@@ -42917,6 +43093,14 @@
                             "additionalProperties": true
                         },
                         "description": "The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type"
+                    },
+                    "own_fields": {
+                        "type": "array",
+                        "nullable": true,
+                        "items": {
+                            "$ref": "#/components/schemas/DocumentOwnField"
+                        },
+                        "description": "A template's own fields, for values no record type provides (a CSV column on a label sheet): a list of {key, label, sample?}, at most 50. The editor inserts each as the field `template.<key>`."
                     }
                 }
             },
@@ -42973,6 +43157,33 @@
                 "required": [
                     "data"
                 ]
+            },
+            "DocumentSourcePrintLabelsRequest": {
+                "type": "object",
+                "properties": {
+                    "records": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "One label per record, each as `type:id` (at most 500). Send this or csv."
+                    },
+                    "csv": {
+                        "type": "string",
+                        "description": "One label per row of this CSV text (UTF-8, a header row, at most 2 MB and 5000 rows). Read for this print and never stored."
+                    },
+                    "columns": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string"
+                        },
+                        "description": "With csv: CSV column name to field path, for example {\"Name\": \"customer.name\"}."
+                    },
+                    "draft": {
+                        "type": "boolean",
+                        "description": "Print the draft instead of the published version, as a preview."
+                    }
+                }
             },
             "DocumentSourceRenderRequest": {
                 "type": "object",

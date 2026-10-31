@@ -58,6 +58,7 @@ final class DocumentSourcesApiHandler
     private const VIEWS = ['page', 'continuous'];
     private const MAX_BLOCKS = 5000;
     private const MAX_TITLE = 255;
+    private const MAX_OWN_FIELDS = 50;
 
     private DocumentSourceRepository $repo;
     private DocumentAccessPolicy $policy;
@@ -170,6 +171,7 @@ final class DocumentSourcesApiHandler
             'page'                => $fields['page'] ?? null,
             'record_type'         => is_string($body['record_type'] ?? null) ? $body['record_type'] : null,
             'blocks'              => $fields['blocks'] ?? [],
+            'own_fields'          => $fields['own_fields'] ?? null,
             'scope'               => $scope,
             'required_permission' => $requiredPermission,
             'created_by'          => $callerId,
@@ -257,7 +259,8 @@ final class DocumentSourcesApiHandler
      *
      * @param array<string, mixed> $body
      * @return array{title?: string, lang?: string, default_view?: string, full_width?: bool,
-     *               page?: ?array<string, mixed>, blocks?: list<array<string, mixed>>}|Response
+     *               page?: ?array<string, mixed>, blocks?: list<array<string, mixed>>,
+     *               own_fields?: ?list<array<string, string>>}|Response
      */
     private function documentFields(array $body): array|Response
     {
@@ -292,7 +295,24 @@ final class DocumentSourcesApiHandler
             }
             /** @var array<string, mixed>|null $page */
             $page = $body['page'];
+            if (is_array($page) && array_key_exists('labels', $page) && !self::validLabelGrid($page['labels'])) {
+                return Response::error(
+                    'page.labels must be {columns 1-10, rows 1-30, size {widthMm, heightMm 10-500}, gapMm 0-50, gapYMm? 0-50}',
+                    422,
+                );
+            }
             $fields['page'] = $page;
+        }
+        if (array_key_exists('own_fields', $body)) {
+            $own = self::validOwnFields($body['own_fields']);
+            if ($own === false) {
+                return Response::error(
+                    'own_fields must be a list of at most ' . self::MAX_OWN_FIELDS . ' {key, label, sample?}: keys unique, '
+                    . 'lowercase letters, digits and _ (at most 40); labels at most 80 characters; samples at most 200',
+                    422,
+                );
+            }
+            $fields['own_fields'] = $own;
         }
         if (array_key_exists('blocks', $body)) {
             $blocks = self::validBlocks($body['blocks']);
@@ -406,6 +426,62 @@ final class DocumentSourcesApiHandler
             'Cache-Control' => 'private, max-age=31536000, immutable',
             'X-Content-Type-Options' => 'nosniff',
         ]);
+    }
+
+    /**
+     * A template's own fields (editor M4b): null clears them, false when the
+     * list isn't valid.
+     *
+     * @return list<array<string, string>>|null|false
+     */
+    private static function validOwnFields(mixed $list): array|null|false
+    {
+        if ($list === null) {
+            return null;
+        }
+        if (!is_array($list) || !array_is_list($list) || count($list) > self::MAX_OWN_FIELDS) {
+            return false;
+        }
+        $out = [];
+        $seen = [];
+        foreach ($list as $field) {
+            if (!is_array($field)) {
+                return false;
+            }
+            $key = $field['key'] ?? null;
+            $label = $field['label'] ?? null;
+            $sample = $field['sample'] ?? null;
+            if (!is_string($key) || preg_match('/^[a-z0-9_]{1,40}$/', $key) !== 1 || isset($seen[$key])) {
+                return false;
+            }
+            if (!is_string($label) || trim($label) === '' || mb_strlen($label) > 80) {
+                return false;
+            }
+            if ($sample !== null && (!is_string($sample) || mb_strlen($sample) > 200)) {
+                return false;
+            }
+            $seen[$key] = true;
+            $out[] = $sample !== null && $sample !== '' ? ['key' => $key, 'label' => trim($label), 'sample' => $sample] : ['key' => $key, 'label' => trim($label)];
+        }
+
+        return $out;
+    }
+
+    /** E.43: a label sheet's grid, as the editor's LabelGrid. Whity Render checks it fits the sheet. */
+    private static function validLabelGrid(mixed $grid): bool
+    {
+        if (!is_array($grid) || !is_array($grid['size'] ?? null)) {
+            return false;
+        }
+        $whole = static fn (mixed $v, int $min, int $max): bool => is_int($v) && $v >= $min && $v <= $max;
+        $mm = static fn (mixed $v, float $min, float $max): bool => (is_int($v) || is_float($v)) && $v >= $min && $v <= $max;
+
+        return $whole($grid['columns'] ?? null, 1, 10)
+            && $whole($grid['rows'] ?? null, 1, 30)
+            && $mm($grid['size']['widthMm'] ?? null, 10, 500)
+            && $mm($grid['size']['heightMm'] ?? null, 10, 500)
+            && $mm($grid['gapMm'] ?? null, 0, 50)
+            && (!array_key_exists('gapYMm', $grid) || $mm($grid['gapYMm'], 0, 50));
     }
 
     /**

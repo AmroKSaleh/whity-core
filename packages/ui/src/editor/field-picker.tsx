@@ -20,6 +20,7 @@ function FieldPicker({
   onPick,
   labels,
   search,
+  footer,
   id,
 }: {
   /** Already filtered by the query. */
@@ -32,6 +33,8 @@ function FieldPicker({
   labels: EditorLabels
   /** Field ▾'s own search box, in place of the query line. */
   search?: React.ReactNode
+  /** Below the list: Field ▾'s "New field". */
+  footer?: React.ReactNode
   id: string
 }) {
   const listRef = React.useRef<HTMLDivElement>(null)
@@ -91,6 +94,7 @@ function FieldPicker({
           </div>
         ))}
       </div>
+      {footer}
     </div>
   )
 }

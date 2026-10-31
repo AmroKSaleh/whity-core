@@ -44,6 +44,11 @@ export interface WhityDocument {
   labels?: LabelGrid;
   /** For templates: the record type its fields come from, e.g. "invoice". */
   recordType?: string;
+  /**
+   * A template's own fields, for values no record type provides (a CSV column
+   * on a label sheet). Each is the field `template.<key>`; with a record it prints blank.
+   */
+  ownFields?: OwnField[];
   blocks: Block[];
   comments: CommentThread[];
   /** Open suggestions; their text and blocks carry `insertion`/`deletion` marks or a `suggestion` attr with the same id. */
@@ -167,17 +172,31 @@ export interface QrBlock extends BlockBase {
 /** E.42: a display formula in TeX, rendered with KaTeX on screen and in print. */
 export interface MathBlock extends BlockBase { type: 'math'; tex: string }
 
+/** A field a template declares itself: `key` is lowercase letters, digits and _. */
+export interface OwnField {
+  key: string;
+  label: string;
+  sample?: string;
+}
+
 /** E.43: the grid of a label sheet. A certificate is a one-label sheet (columns 1, rows 1). */
 export interface LabelGrid {
   columns: number;
   rows: number;
   size: { widthMm: number; heightMm: number };
+  /** Between columns, and between rows unless `gapYMm` is set. */
   gapMm: number;
+  /** Between rows, when stock differs from its column gap (Avery L7160: 2.5 and 0). */
+  gapYMm?: number;
 }
-/** E.43: what Print fills the labels from: one label per record, or per row of an uploaded CSV. */
+/**
+ * E.43: what Print fills the labels from: one label per record, or per row of a CSV.
+ * The CSV travels with the print request and is never stored: a mailing list is
+ * personal data, and documents' file store holds only PDFs and images.
+ */
 export type LabelPrintSource =
   | { kind: 'records'; records: RecordRef[] }
-  | { kind: 'csv'; fileId: string; columns: Record<string, string> /* CSV column -> field path */ };
+  | { kind: 'csv'; file: File; columns: Record<string, string> /* CSV column -> field path */ };
 
 /** E.21: a saved block in a document. Synced ones point at the library; copies are ordinary blocks. */
 export interface SavedBlockRef extends BlockBase {

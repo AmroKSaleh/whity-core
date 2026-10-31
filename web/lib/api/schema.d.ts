@@ -1557,6 +1557,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/document-sources/{id}/print-labels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Print a label sheet
+         * @description A label sheet (E.43) filled one label per record, or per row of a CSV the request carries, on its grid, as many sheets as it takes. A required field with no value on any label refuses the print with 422, naming the labels in details.missing (E.27). X-Labels-Count is how many labels printed and X-Labels-Clipped how many were cut at their edge.
+         */
+        post: operations["post_api_v1_document_sources_id_print_labels"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/document-sources/{id}/publish": {
         parameters: {
             query?: never;
@@ -6262,6 +6282,14 @@ export interface components {
                 direction: "asc" | "desc";
             };
         };
+        DocumentOwnField: {
+            /** @description Lowercase letters, digits and underscores, at most 40; the field is `template.<key>`. */
+            key: string;
+            /** @description The name shown on the chip and in Field menus, at most 80 characters. */
+            label: string;
+            /** @description An example value, at most 200 characters. */
+            sample?: string;
+        };
         DocumentPreviewResponse: {
             data: {
                 /** @description The record as it is named, for example `INV-1042 · Example Clinic` */
@@ -6444,6 +6472,8 @@ export interface components {
             blocks?: {
                 [key: string]: unknown;
             }[];
+            /** @description A template's own fields, for values no record type provides (a CSV column on a label sheet): a list of {key, label, sample?}, at most 50. The editor inserts each as the field `template.<key>`. */
+            own_fields?: components["schemas"]["DocumentOwnField"][];
             draft_version: number;
             published_version?: number | null;
             /** @enum {string} */
@@ -6475,7 +6505,7 @@ export interface components {
             default_view?: "page" | "continuous";
             /** @description For wiki pages with wide tables: use the full width instead of the 760px sheet. */
             full_width?: boolean;
-            /** @description Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`. Null for none. */
+            /** @description Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`; for a label sheet, `labels` is its grid (columns, rows, size {widthMm, heightMm}, gapMm, gapYMm). Null for none. */
             page?: {
                 [key: string]: unknown;
             } | null;
@@ -6510,7 +6540,7 @@ export interface components {
             default_view?: "page" | "continuous";
             /** @description For wiki pages with wide tables: use the full width instead of the 760px sheet. */
             full_width?: boolean;
-            /** @description Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`. Null for none. */
+            /** @description Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`; for a label sheet, `labels` is its grid (columns, rows, size {widthMm, heightMm}, gapMm, gapYMm). Null for none. */
             page?: {
                 [key: string]: unknown;
             } | null;
@@ -6518,6 +6548,8 @@ export interface components {
             blocks?: {
                 [key: string]: unknown;
             }[];
+            /** @description A template's own fields, for values no record type provides (a CSV column on a label sheet): a list of {key, label, sample?}, at most 50. The editor inserts each as the field `template.<key>`. */
+            own_fields?: components["schemas"]["DocumentOwnField"][] | null;
         };
         DocumentSourceFileResponse: {
             data: {
@@ -6532,6 +6564,18 @@ export interface components {
         };
         DocumentSourceListResponse: {
             data: components["schemas"]["DocumentSource"][];
+        };
+        DocumentSourcePrintLabelsRequest: {
+            /** @description One label per record, each as `type:id` (at most 500). Send this or csv. */
+            records?: string[];
+            /** @description One label per row of this CSV text (UTF-8, a header row, at most 2 MB and 5000 rows). Read for this print and never stored. */
+            csv?: string;
+            /** @description With csv: CSV column name to field path, for example {"Name": "customer.name"}. */
+            columns?: {
+                [key: string]: string;
+            };
+            /** @description Print the draft instead of the published version, as a preview. */
+            draft?: boolean;
         };
         DocumentSourceRenderRequest: {
             /** @description The record to fill the fields from, as `type:id`. Required when the template has a record type. */
@@ -17677,6 +17721,122 @@ export interface operations {
             };
             /** @description Internal server error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_document_sources_id_print_labels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentSourcePrintLabelsRequest"];
+            };
+        };
+        responses: {
+            /** @description The PDF */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Document or record not found, or not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not a label sheet, or it has no published version yet */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A required field has no value, the CSV or its columns are not usable, or the render was refused */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The document render limit has been reached */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Rendering is not enabled or temporarily unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -5690,6 +5690,7 @@ final class CoreApiSchemas
                 'page' => ['type' => 'object', 'nullable' => true, 'additionalProperties' => true],
                 'record_type' => self::str(true),
                 'blocks' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true], 'description' => 'The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type'],
+                'own_fields' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentOwnField'), 'description' => 'A template\'s own fields, for values no record type provides (a CSV column on a label sheet): a list of {key, label, sample?}, at most 50. The editor inserts each as the field `template.<key>`.'],
                 'draft_version' => self::int(),
                 'published_version' => self::int(true),
                 'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
@@ -5797,6 +5798,17 @@ final class CoreApiSchemas
                 'draft' => self::bool() + ['description' => 'Render the draft instead of the published version, as a preview. A draft is never issued.'],
                 'persist' => self::bool() + ['description' => 'Issue the PDF as a document; its values are kept with it.'],
             ], []),
+            'DocumentOwnField' => self::object([
+                'key' => self::str() + ['description' => 'Lowercase letters, digits and underscores, at most 40; the field is `template.<key>`.'],
+                'label' => self::str() + ['description' => 'The name shown on the chip and in Field menus, at most 80 characters.'],
+                'sample' => self::str() + ['description' => 'An example value, at most 200 characters.'],
+            ], ['key', 'label']),
+            'DocumentSourcePrintLabelsRequest' => self::object([
+                'records' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'One label per record, each as `type:id` (at most 500). Send this or csv.'],
+                'csv' => self::str() + ['description' => 'One label per row of this CSV text (UTF-8, a header row, at most 2 MB and 5000 rows). Read for this print and never stored.'],
+                'columns' => ['type' => 'object', 'additionalProperties' => ['type' => 'string'], 'description' => 'With csv: CSV column name to field path, for example {"Name": "customer.name"}.'],
+                'draft' => self::bool() + ['description' => 'Print the draft instead of the published version, as a preview.'],
+            ], []),
             'DocumentSourceResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentSource')),
             'DocumentSourceCreateRequest' => self::object([
                 'kind' => ['type' => 'string', 'enum' => ['template', 'letter', 'report', 'note', 'wiki', 'label']] + ['description' => 'What the document is: a `template`, `letter`, `report`, `note`, `wiki` page or `label` sheet. Templates and printed kinds open in the page view, notes and wiki pages in the continuous view.'],
@@ -5804,7 +5816,7 @@ final class CoreApiSchemas
                 'lang' => ['type' => 'string', 'enum' => ['en', 'ar']] + ['description' => 'The language the document is written in: `en` or `ar`. Each block also follows the direction of its own text.'],
                 'default_view' => ['type' => 'string', 'enum' => ['page', 'continuous']] + ['description' => 'How the document opens: `page` (the A4 view of what prints) or `continuous`. Defaults by kind.'],
                 'full_width' => self::bool() + ['description' => 'For wiki pages with wide tables: use the full width instead of the 760px sheet.'],
-                'page' => ['type' => 'object', 'nullable' => true, 'additionalProperties' => true] + ['description' => 'Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`. Null for none.'],
+                'page' => ['type' => 'object', 'nullable' => true, 'additionalProperties' => true] + ['description' => 'Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`; for a label sheet, `labels` is its grid (columns, rows, size {widthMm, heightMm}, gapMm, gapYMm). Null for none.'],
                 'record_type' => self::str(true) + ['description' => 'For templates: the record type its merge fields come from, for example `invoice`.'],
                 'blocks' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true], 'description' => 'The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type'],
                 'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']] + ['description' => 'Who can see the document: `personal` (only its creator, the default), `tenant`, `global` or `system`. Anything but personal needs documents:publish.'],
@@ -5816,8 +5828,9 @@ final class CoreApiSchemas
                 'lang' => ['type' => 'string', 'enum' => ['en', 'ar']] + ['description' => 'The language the document is written in: `en` or `ar`. Each block also follows the direction of its own text.'],
                 'default_view' => ['type' => 'string', 'enum' => ['page', 'continuous']] + ['description' => 'How the document opens: `page` (the A4 view of what prints) or `continuous`. Defaults by kind.'],
                 'full_width' => self::bool() + ['description' => 'For wiki pages with wide tables: use the full width instead of the 760px sheet.'],
-                'page' => ['type' => 'object', 'nullable' => true, 'additionalProperties' => true] + ['description' => 'Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`. Null for none.'],
+                'page' => ['type' => 'object', 'nullable' => true, 'additionalProperties' => true] + ['description' => 'Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`; for a label sheet, `labels` is its grid (columns, rows, size {widthMm, heightMm}, gapMm, gapYMm). Null for none.'],
                 'blocks' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true], 'description' => 'The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type'],
+                'own_fields' => ['type' => 'array', 'nullable' => true, 'items' => SchemaBuilder::ref('DocumentOwnField'), 'description' => 'A template\'s own fields, for values no record type provides (a CSV column on a label sheet): a list of {key, label, sample?}, at most 50. The editor inserts each as the field `template.<key>`.'],
             ], []),
             'DocumentBlockResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentBlock')),
             // scope/required_permission/owner_ou_id are all optional; setting a
@@ -11611,6 +11624,27 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Document or record not found, or not visible to the caller'),
                     409 => self::errorResponse('The template has no published version yet'),
                     422 => self::errorResponse('A required field has no value, the record is missing, or the render was refused'),
+                    429 => self::errorResponse('The document render limit has been reached'),
+                    503 => self::errorResponse('Rendering is not enabled or temporarily unavailable'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/document-sources/{id:\d+}/print-labels', 'documents:render', [
+                'summary' => 'Print a label sheet',
+                'description' =>
+                    'A label sheet (E.43) filled one label per record, or per row of a CSV the request carries, '
+                    . 'on its grid, as many sheets as it takes. A required field with no value on any label '
+                    . 'refuses the print with 422, naming the labels in details.missing (E.27). X-Labels-Count '
+                    . 'is how many labels printed and X-Labels-Clipped how many were cut at their edge.',
+                'tags' => ['documents'],
+                'request' => 'DocumentSourcePrintLabelsRequest',
+                'responses' => [
+                    200 => [
+                        'description' => 'The PDF',
+                        'content' => ['application/pdf' => ['schema' => ['type' => 'string', 'format' => 'binary']]],
+                    ],
+                    404 => self::errorResponse('Document or record not found, or not visible to the caller'),
+                    409 => self::errorResponse('Not a label sheet, or it has no published version yet'),
+                    422 => self::errorResponse('A required field has no value, the CSV or its columns are not usable, or the render was refused'),
                     429 => self::errorResponse('The document render limit has been reached'),
                     503 => self::errorResponse('Rendering is not enabled or temporarily unavailable'),
                 ] + self::authErrors(),

@@ -86,6 +86,25 @@ final class RenderServiceClient implements RenderServiceClientInterface
     }
 
     /**
+     * Label sheets (E.43): POST to `/render/labels`; the sheet count and how
+     * many labels were cut at their edge come back as headers.
+     *
+     * @param array<string, mixed> $payload {sheet, grid, labels, ...}
+     * @throws RenderServiceUnavailableException
+     */
+    public function renderLabels(array $payload): RenderedDocument
+    {
+        [$pdf, $lines] = $this->postForPdf('/render/labels', $payload);
+
+        return new RenderedDocument(
+            $pdf,
+            self::headerInt($lines, 'x-render-page-count'),
+            0,
+            self::headerInt($lines, 'x-render-labels-clipped'),
+        );
+    }
+
+    /**
      * The transport both modes share: encode, POST, and refuse anything that
      * is not a 200 carrying a PDF.
      *

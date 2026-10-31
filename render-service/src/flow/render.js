@@ -49,9 +49,15 @@ const PDF_TIMEOUT_MS = Number(process.env.RENDER_FLOW_PDF_TIMEOUT_MS || 180000);
  *          paginateMs: number}}>}
  */
 async function renderFlowToPdf(payload) {
-  const doc = normaliseFlowDocument(payload);
-  const html = buildFlowHtml(doc);
+  return renderHtmlToPdf(buildFlowHtml(normaliseFlowDocument(payload)));
+}
 
+/**
+ * Print a page built for this renderer: it sets `window.__FLOW_READY__` once
+ * laid out, and `window.__FLOW_RESULT__` (pageCount, problems) or
+ * `window.__FLOW_ERROR__`. Shared by the flowing mode and label sheets.
+ */
+async function renderHtmlToPdf(html) {
   const browser = await getBrowser();
   const page = await browser.newPage();
   const timings = {};
@@ -109,7 +115,7 @@ async function renderFlowToPdf(payload) {
   }
 }
 
-module.exports = { renderFlowToPdf };
+module.exports = { renderFlowToPdf, renderHtmlToPdf };
 
 /*
  * WHY `displayHeaderFooter` IS NOT USED
