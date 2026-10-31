@@ -133,17 +133,17 @@ test.describe('Sidebar navigation (admin)', () => {
     await page.goto('/admin/users');
     await expect(page.getByRole('heading', { name: 'Users' })).toBeVisible();
 
-    const access = shell.navGroupToggle('access');
-    const system = shell.navGroupToggle('system');
-    await expect(access).toHaveAttribute('aria-expanded', 'true');
-    await expect(system).toHaveAttribute('aria-expanded', 'false');
+    const people = shell.navGroupToggle('people');
+    const settings = shell.navGroupToggle('settings');
+    await expect(people).toHaveAttribute('aria-expanded', 'true');
+    await expect(settings).toHaveAttribute('aria-expanded', 'false');
 
     // Present but hidden — the distinction the RBAC specs depend on.
     await expect(shell.navLink('Website Settings')).toHaveCount(1);
     await expect(shell.navLink('Website Settings')).toBeHidden();
 
-    await system.click();
-    await expect(system).toHaveAttribute('aria-expanded', 'true');
+    await settings.click();
+    await expect(settings).toHaveAttribute('aria-expanded', 'true');
     await expect(shell.navLink('Website Settings')).toBeVisible();
   });
 

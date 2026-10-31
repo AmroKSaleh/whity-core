@@ -727,7 +727,7 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Users',
         'href' => '/admin/users',
         'icon' => 'users',
-        'group' => 'access',
+        'group' => 'people',
         'order' => 1,
         // WC-203: mirrors GET /api/users, now gated on users:read permission
         // (migration 022 grants this to admin). requiredRole is cleared so the
@@ -740,8 +740,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Roles',
         'href' => '/admin/roles',
         'icon' => 'lock',
-        'group' => 'access',
-        'order' => 2,
+        'group' => 'people',
+        'order' => 3,
         // Mirrors GET /api/roles, which #988 moved from the 'admin' ROLE NAME to
         // the `roles:read` SLUG. This item was left behind and kept asserting the
         // role, so an instance whose administrative role has been renamed — the
@@ -755,8 +755,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Organizational Units',
         'href' => '/admin/ous',
         'icon' => 'building-community',
-        'group' => 'access',
-        'order' => 3,
+        'group' => 'people',
+        'order' => 4,
         // Mirrors GET /api/ous, now gated on ous:read. requiredRole is cleared so
         // the item follows the route it mirrors rather than drifting from it —
         // that drift is what left the ous:* grants vestigial in the first place.
@@ -769,8 +769,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Delegations',
         'href' => '/admin/delegations',
         'icon' => 'share',
-        'group' => 'access',
-        'order' => 4,
+        'group' => 'people',
+        'order' => 5,
         // WC-34: the delegations admin area is gated on the delegation:manage
         // permission. The nav item carries the requirement so a
         // permission-aware client/consumer can hide it; the page also enforces
@@ -782,8 +782,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Family Relations',
         'href' => '/admin/relations',
         'icon' => 'users-group',
-        'group' => 'records',
-        'order' => 1,
+        'group' => 'people',
+        'order' => 6,
         // WC-65: the relations admin area is gated on relations:read. The nav
         // item carries the requirement so a permission-aware client can hide it;
         // the page also enforces it server-side via the RBAC-protected API (a 403
@@ -795,8 +795,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Tag Groups',
         'href' => '/admin/tag-groups',
         'icon' => 'tags',
-        'group' => 'records',
-        'order' => 2,
+        'group' => 'platform',
+        'order' => 12,
         // WC-621: the taxonomy admin. The nav item carries tags:read so a
         // permission-aware client hides it; the schema-driven CrudScreen also
         // fails closed (a 403 on the list renders the access-denied state).
@@ -807,8 +807,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Tags',
         'href' => '/admin/tags',
         'icon' => 'tag',
-        'group' => 'records',
-        'order' => 3,
+        'group' => 'platform',
+        'order' => 13,
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::TAGS_READ,
     ];
     // FORMS (migrations 127/128). Three entries because they are three jobs done
@@ -829,12 +829,12 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Form Builder',
         'icon' => 'forms',
         'href' => '/admin/x/' . \Whity\Core\Form\FormFrontendFeatures::BUILDER_ID,
-        'group' => 'records',
+        'group' => 'documents',
         // Group-local, a unique positive integer (#1007/#1010 — a fractional
         // order is silently skipped by a regroup that matches integers, and a
         // test now enforces the invariant). 1 = Family Relations, 2 = Tag Groups,
         // 3 = Tags, so this is 4 and the catalogue below it is 5.
-        'order' => 4,
+        'order' => 5,
         // Mirrors POST /api/v1/forms, gated forms:manage. Authoring a form is
         // organisational policy — deciding what everyone must declare — so this
         // entry is deliberately NOT visible to the far larger audience that only
@@ -846,8 +846,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Forms',
         'icon' => 'clipboard-list',
         'href' => '/admin/x/' . \Whity\Core\Form\FormFrontendFeatures::CATALOG_ID,
-        'group' => 'records',
-        'order' => 5,
+        'group' => 'documents',
+        'order' => 6,
         // Mirrors GET /api/v1/forms and /api/v1/form-submissions, both gated
         // forms:read — the approver's permission, not the author's.
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::FORMS_READ,
@@ -874,8 +874,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Tenants',
         'href' => '/admin/tenants',
         'icon' => 'building',
-        'group' => 'access',
-        'order' => 5,
+        'group' => 'platform',
+        'order' => 1,
         // #990: mirrors GET /api/tenants, now gated on tenants:read (migration
         // 138 grants it to every role that may write or delete a tenant).
         // requiredRole is cleared so the item follows the route it mirrors rather
@@ -894,9 +894,9 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         // administering its own account. It is NOT `access` — that group holds
         // the OPERATOR's plan catalogue and promotions, which decide what
         // somebody else is charged.
-        'group' => 'system',
+        'group' => 'platform',
         // 6 — orders are unique within a group, and 1-5 are taken.
-        'order' => 6,
+        'order' => 5,
         // Gated on the same slug as the route behind it. A nav entry that gated
         // on a role name while the route gates on a slug is how a deployment
         // with a renamed administrative role ends up holding the permission and
@@ -908,9 +908,9 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Promotions',
         'href' => '/admin/promotions',
         'icon' => 'discount',
-        'group' => 'access',
+        'group' => 'platform',
         // 8 — orders are unique within a group, and 7 is billing.
-        'order' => 8,
+        'order' => 6,
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::PLANS_MANAGE,
     ];
     $items[] = [
@@ -918,13 +918,13 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Plans & pricing',
         'href' => '/admin/billing',
         'icon' => 'receipt',
-        'group' => 'access',
+        'group' => 'platform',
         // 7, not 6: `user-groups` holds 6 and orders must be unique within a
         // group — CoreNavigationRegistrationTest fails a collision, because two
         // items sharing an order sit in whatever sequence the array happened to
         // be built in, and that is a menu whose shape changes when an unrelated
         // item is added.
-        'order' => 7,
+        'order' => 4,
         // Mirrors GET /api/plans, which gates on plans:manage. The ROUTE
         // additionally requires the system tenant, and the screen shows
         // read-only without that — a nav item cannot express "and the system
@@ -938,8 +938,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'User Groups',
         'href' => '/admin/user-groups',
         'icon' => 'users-group',
-        'group' => 'access',
-        'order' => 6,
+        'group' => 'people',
+        'order' => 2,
         // #1015: mirrors GET /api/user-groups, which is where the page's primary
         // fetch goes, so the link and the screen behind it cannot disagree about
         // who belongs here.
@@ -956,8 +956,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Audit Logs',
         'href' => '/admin/audit-logs',
         'icon' => 'history',
-        'group' => 'system',
-        'order' => 4,
+        'group' => 'platform',
+        'order' => 7,
         // WC-175 (#191): mirrors GET /api/audit-logs, gated on the audit:read
         // permission — so the nav item gates on the same permission.
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::AUDIT_READ,
@@ -967,8 +967,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Errors',
         'href' => '/admin/errors',
         'icon' => 'alert-triangle',
-        'group' => 'system',
-        'order' => 5,
+        'group' => 'platform',
+        'order' => 8,
         // WC-error-tracking: mirrors GET /api/errors, which is operator-only
         // (settings:manage + system tenant, enforced in the handler) — so the
         // nav item gates on the same permission. A tenant admin never sees it.
@@ -979,8 +979,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Notification Delivery',
         'href' => '/admin/notifications',
         'icon' => 'bell-cog',
-        'group' => 'system',
-        'order' => 7,
+        'group' => 'platform',
+        'order' => 9,
         // WC-notifications: mirrors GET /api/notification-metrics, which is
         // gated on notifications:manage in the handler — so the nav item gates
         // on the same permission and the link cannot disagree with the screen
@@ -996,8 +996,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Plugins',
         'href' => '/admin/plugins',
         'icon' => 'plug',
-        'group' => 'extend',
-        'order' => 1,
+        'group' => 'platform',
+        'order' => 2,
         // WC-218: mirrors GET /api/plugins, gated on the plugins:read
         // permission. The nav item carries the requirement so a permission-aware
         // client can hide it; the page also enforces it server-side via the
@@ -1009,8 +1009,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Plugin Store',
         'href' => '/admin/plugins/store',
         'icon' => 'building-store',
-        'group' => 'extend',
-        'order' => 2,
+        'group' => 'platform',
+        'order' => 3,
         // Browse + install from a trusted store. Mirrors GET
         // /api/plugins/store/catalog (gated plugins:read); the install action on
         // the page is separately gated plugins:upload server-side.
@@ -1021,7 +1021,7 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Website Settings',
         'href' => '/admin/settings',
         'icon' => 'settings',
-        'group' => 'system',
+        'group' => 'settings',
         'order' => 1,
         // Website Settings: mirrors GET /api/v1/settings, gated on the
         // settings:read permission (migration grants all three settings perms to
@@ -1084,7 +1084,7 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'href' => '/admin/document-sources',
         'icon' => 'notes',
         'group' => 'documents',
-        'order' => 6,
+        'order' => 4,
         // Editor M2: notes and wiki pages written in the block editor. Mirrors
         // GET /api/document-sources (DocumentSourcesApiHandler), gated on
         // documents:read; rows are filtered by DocumentAccessPolicy on top.
@@ -1101,7 +1101,7 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         // test now enforces the invariant). 1 = Documents, 3 = Approval
         // Gating, so this is 4 (2 was the old Document Designer, removed in
         // editor M4c).
-        'order' => 4,
+        'order' => 2,
         // A31: the editor's templates and label sheets — who can see each and
         // why, Whity's starters to use a copy of, and the editor to open them
         // in. The editor is a full-screen screen in the `(editor)` route
@@ -1123,7 +1123,7 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         // order is silently skipped by a regroup that matches integers, and a
         // test now enforces the invariant). 1 = Document Library, 2 = Documents,
         // 3 = Approval Gating, 4 = Templates & Blocks, so this is 5.
-        'order' => 5,
+        'order' => 3,
         // The node-based flow editor (#1027): the reusable, branching designs a
         // document travels. A sibling of "Templates & Blocks" rather than a tab
         // on it, because the two answer different questions about different
@@ -1144,8 +1144,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Approval Gating',
         'href' => '/admin/registrations',
         'icon' => 'user-check',
-        'group' => 'documents',
-        'order' => 3,
+        'group' => 'people',
+        'order' => 7,
         // WC-password-reset-2fa-recovery: unified admin page (tabs: Signup /
         // Password reset / 2FA auth reset — see web/app/(protected)/admin/
         // approval-gating/). The first tab, at this href, is the WC-235
@@ -1164,8 +1164,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'AI Principals',
         'href' => '/admin/ai-principals',
         'icon' => 'robot',
-        'group' => 'extend',
-        'order' => 3,
+        'group' => 'ai',
+        'order' => 1,
         // WC-0208ce4d: mirrors GET /api/v1/admin/mcp/tokens, gated on the
         // mcp:tokens:manage permission. Nav item carries the same requirement so
         // permission-aware clients can hide it; the page enforces it server-side.
@@ -1176,8 +1176,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'MCP Tools',
         'href' => '/admin/mcp-tools',
         'icon' => 'tools',
-        'group' => 'extend',
-        'order' => 4,
+        'group' => 'ai',
+        'order' => 2,
         // WC-0208ce4d: read-only view of MCP tools available in this tenant.
         // Gated on mcp:tokens:manage so only admins who manage AI credentials
         // can see which tools those credentials expose.
@@ -1188,8 +1188,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Languages',
         'href' => '/admin/languages',
         'icon' => 'language',
-        'group' => 'system',
-        'order' => 2,
+        'group' => 'platform',
+        'order' => 10,
         // WC-583: languages are a GLOBAL catalogue (no tenant_id column at
         // all) — create/update/enable/disable is a SYSTEM-TENANT-ONLY
         // PLATFORM capability (mirrors the Feature Flags/Email/Storage
@@ -1203,8 +1203,8 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'label' => 'Translations',
         'href' => '/admin/translations',
         'icon' => 'world',
-        'group' => 'system',
-        'order' => 3,
+        'group' => 'platform',
+        'order' => 11,
         // WC-583: translation rows ARE tenant-scoped (system default vs a
         // tenant's own override) — unlike Languages above, every tenant
         // holding translations:manage may reach this page to edit its own
