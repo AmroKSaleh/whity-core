@@ -192,14 +192,27 @@ final class AuditLogger implements AuditLoggerInterface
                 $encodedMetadata = '{}';
             }
 
+            // WHIT-753: person, agent for person, or system. The context's
+            // actor describes this row only when the row's actor id is the
+            // context's; a caller naming another actor id is recording a person.
+            $actor = AuditContext::getActor();
+            if ($actor->profileId !== $actorUserId) {
+                $actor = $actorUserId !== null ? Actor::person((int) $actorUserId) : Actor::system();
+            }
+
             $stmt = $this->db->prepare(
                 'INSERT INTO audit_log
-                    (tenant_id, actor_user_id, action, target_type, target_id, metadata, ip_address, created_at)
-                 VALUES (:tenant_id, :actor_user_id, :action, :target_type, :target_id, :metadata, :ip_address, NOW())'
+                    (tenant_id, actor_user_id, actor_kind, agent_principal_id, on_behalf_of_profile_id,
+                     action, target_type, target_id, metadata, ip_address, created_at)
+                 VALUES (:tenant_id, :actor_user_id, :actor_kind, :agent_principal_id, :on_behalf_of_profile_id,
+                     :action, :target_type, :target_id, :metadata, :ip_address, NOW())'
             );
             $stmt->execute([
                 ':tenant_id' => $tenantId,
                 ':actor_user_id' => $actorUserId,
+                ':actor_kind' => $actor->kind,
+                ':agent_principal_id' => $actor->agentPrincipalId,
+                ':on_behalf_of_profile_id' => $actor->onBehalfOfProfileId,
                 ':action' => $action,
                 ':target_type' => $targetType,
                 ':target_id' => $targetId,

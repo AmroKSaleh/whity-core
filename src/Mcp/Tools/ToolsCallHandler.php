@@ -248,7 +248,8 @@ final class ToolsCallHandler implements MethodHandler
         // Route the AI principal into AuditContext so that any hook-fired audit
         // entries (e.g. user.created by a mutation tool) also capture the MCP
         // actor rather than null.
-        AuditContext::set($principal->userId, null);
+        // WHIT-753: the actor is the principal's: the person, or an agent for them.
+        AuditContext::setActor($principal->actor());
 
         // 3. Resolve tool name → route declaration, or a hand-authored tool.
         //
@@ -277,6 +278,8 @@ final class ToolsCallHandler implements MethodHandler
                         'target_type'   => 'tool',
                         'metadata'      => [
                             'tool'   => $toolName,
+                            // ADR-0006 §6: which kind of principal called.
+                            'principal_kind' => $principal->principalKind,
                             // Named so an authored tool is distinguishable in
                             // the trail: it ran plugin code directly rather
                             // than dispatching through the router, so "which
@@ -304,7 +307,7 @@ final class ToolsCallHandler implements MethodHandler
                 // Pre-strip at the call site (defense-in-depth). AuditLogger
                 // also sanitizes metadata before the INSERT, but future
                 // AuditLoggerInterface implementations may not.
-                'metadata'     => ['tool' => $toolName, 'args' => $this->redactArgs($arguments)],
+                'metadata'     => ['tool' => $toolName, 'principal_kind' => $principal->principalKind, 'args' => $this->redactArgs($arguments)],
             ]);
         }
     }
