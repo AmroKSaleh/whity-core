@@ -67,36 +67,37 @@ final class ListModesTest extends TestCase
         TenantContext::reset();
     }
 
-    public function testTheBareEndpointStillServesTheFullList(): void
+    public function testTheBareEndpointIsSearchAndCallAndFullKeepsTheOldList(): void
     {
-        self::assertSame(['get_api_me', 'get_api_forms', 'get_api_ous'], $this->names('/mcp'));
+        // WHIT-750 (owner decision 2): ToolSurfaceRequest::BARE_MODE.
+        self::assertSame(['get_api_me', 'search_operations', 'call_operation'], $this->names('/mcp'));
+        self::assertSame(['get_api_me', 'search_operations', 'call_operation'], $this->names('/mcp?tools=nonsense'));
         self::assertSame(['get_api_me', 'get_api_forms', 'get_api_ous'], $this->names('/mcp?tools=full'));
-        self::assertSame(['get_api_me', 'get_api_forms', 'get_api_ous'], $this->names('/mcp?tools=nonsense'));
     }
 
     public function testDefaultModeListsTheAlwaysOnToolsThenDiscovery(): void
     {
-        self::assertSame(['get_api_me', 'search_tools', 'describe_tool', 'call_tool'], $this->names('/mcp?tools=default'));
-        self::assertSame(['search_tools', 'describe_tool', 'call_tool'], $this->names('/mcp?tools=discover'));
+        self::assertSame(['get_api_me', 'search_operations', 'call_operation'], $this->names('/mcp?tools=default'));
+        self::assertSame(['search_operations', 'call_operation'], $this->names('/mcp?tools=discover'));
     }
 
     public function testToolsetsLimitTheListAndSearchButNotWhatCanBeCalled(): void
     {
-        self::assertSame(['get_api_forms'], $this->names('/mcp?toolsets=core.forms'));
-        self::assertSame(['get_api_forms', 'get_api_ous'], $this->names('/mcp?toolsets=core.forms,core.people'));
-        self::assertSame(['search_tools', 'describe_tool', 'call_tool'], $this->names('/mcp?tools=default&toolsets=core.forms'));
+        self::assertSame(['get_api_forms'], $this->names('/mcp?tools=full&toolsets=core.forms'));
+        self::assertSame(['get_api_forms', 'get_api_ous'], $this->names('/mcp?tools=full&toolsets=core.forms,core.people'));
+        self::assertSame(['search_operations', 'call_operation'], $this->names('/mcp?toolsets=core.forms'));
 
-        $search = $this->rpc('/mcp?tools=discover&toolsets=core.forms', 'tools/call', ['name' => 'search_tools', 'arguments' => ['query' => '']]);
-        self::assertSame(['get_api_forms'], array_column(json_decode($search['result']['content'][0]['text'], true)['matches'], 'name'));
+        $search = $this->rpc('/mcp?tools=discover&toolsets=core.forms', 'tools/call', ['name' => 'search_operations', 'arguments' => ['query' => 'api']]);
+        self::assertSame(['get_api_forms'], array_column(json_decode($search['result']['content'][0]['text'], true)['matches'], 'operationId'));
 
         // Presentation only: a tool outside the selection is still callable by name.
-        $called = $this->rpc('/mcp?toolsets=core.forms', 'tools/call', ['name' => 'get_api_ous', 'arguments' => []]);
+        $called = $this->rpc('/mcp?tools=full&toolsets=core.forms', 'tools/call', ['name' => 'get_api_ous', 'arguments' => []]);
         self::assertArrayHasKey('result', $called);
     }
 
     public function testAClientCannotChooseTheSurfaceThroughMeta(): void
     {
-        $result = $this->rpc('/mcp', 'tools/list', ['_meta' => [ToolSurfaceRequest::META_KEY => ['mode' => 'full', 'toolsets' => ['core.forms']]]]);
+        $result = $this->rpc('/mcp?tools=full', 'tools/list', ['_meta' => [ToolSurfaceRequest::META_KEY => ['mode' => 'full', 'toolsets' => ['core.forms']]]]);
 
         self::assertSame(['get_api_me', 'get_api_forms', 'get_api_ous'], array_column($result['result']['tools'], 'name'));
     }

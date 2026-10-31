@@ -41,7 +41,7 @@ If `APP_URL` is unset, the wizard warns and uses the address of the page instead
 
 ### Tool search for large catalogues
 
-Adding `?tools=discover` to the endpoint (`https://your-whity-host/mcp?tools=discover`) gives the app three tools, `search_tools`, `describe_tool` and `call_tool`, that reach the whole catalogue on demand. Use it for apps that slow down or drop tools when given hundreds, Cursor above all. The wizard adds it for you when it's recommended. See MCP-Server, *Discovery mode*.
+The endpoint `https://your-whity-host/mcp` gives the app a few everyday tools plus `search_operations` and `call_operation`, which reach everything else on demand, so it stays small however many plugins are installed. Add `?tools=full` for every operation as its own tool (the list before WHIT-750), or `?tools=discover` for only the two search tools. See MCP-Server, *Search and call*.
 
 ### Per-app setup, and what is not yet confirmed
 

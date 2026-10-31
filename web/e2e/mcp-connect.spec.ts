@@ -76,8 +76,13 @@ test.describe('Connect an AI app', () => {
     expect(response.status(), await response.text()).toBe(200);
     const body = (await response.json()) as { result?: { tools: { name: string }[] } };
     expect(Array.isArray(body.result?.tools)).toBe(true);
+    // WHIT-750: `?tools=discover` lists search and call only; the bare URL
+    // lists the always-on tools first, then the same two.
+    const names = body.result?.tools.map((tool) => tool.name) ?? [];
     if (toolSearch) {
-      expect(body.result?.tools.map((tool) => tool.name)).toEqual(['search_tools', 'describe_tool', 'call_tool']);
+      expect(names).toEqual(['search_operations', 'call_operation']);
+    } else {
+      expect(names.slice(-2)).toEqual(['search_operations', 'call_operation']);
     }
 
     await expect(dialog.getByText('Connected', { exact: true })).toBeVisible({ timeout: 15_000 });

@@ -4612,9 +4612,9 @@ $mcpHandlers = [
 $mcpRecordTokenUse = static function (\Whity\Mcp\Auth\McpPrincipal $principal) use ($mcpTokenService): void {
     $mcpTokenService->recordUse($principal->jti, $principal->tenantId);
 };
-// WHIT-707: /mcp?tools=discover answers tools/list with three discovery tools
-// that search, describe and call the real catalogue through the handlers
-// above. Everything else -- auth, the tenant switch, rate limits, resources,
+// WHIT-707, WHIT-750: /mcp?tools=discover answers tools/list with
+// search_operations and call_operation, which search and call the real
+// catalogue through the handlers above. Everything else -- auth, the tenant switch, rate limits, resources,
 // prompts -- is the same. Its tool list never changes, so it announces no
 // list_changed.
 // WHIT-709: where an OAuth client signs in (MCP_OAUTH_ISSUER). Off when unset.
@@ -4641,7 +4641,7 @@ $mcpTransportHandler = new McpTransportHandler(
         array_merge($mcpHandlers, [
             'initialize' => new InitializeHandler(listChanged: false),
             'server/discover' => new DiscoverHandler(
-                'This server offers its actions through search_tools: search for what you need, describe_tool to see its arguments, then call_tool.',
+                'This server offers its operations through search_operations: search for what you need, search again with its operationId to see its arguments, then call_operation.',
             ),
             'tools/list' => $mcpDiscovery->listHandler(),
             'tools/call' => $mcpDiscovery->callHandler(),
@@ -4659,7 +4659,7 @@ $mcpTransportHandler = new McpTransportHandler(
         array_merge($mcpHandlers, [
             'initialize' => new InitializeHandler(listChanged: false),
             'server/discover' => new DiscoverHandler(
-                'A few everyday tools are listed directly. Everything else is reached through search_tools: search for what you need, describe_tool to see its arguments, then call_tool.',
+                'A few everyday tools are listed directly. Everything else is reached through search_operations: search for what you need, search again with its operationId to see its arguments, then call_operation. Add ?tools=full to the URL for the full list.',
             ),
             'tools/list' => $mcpDiscovery->defaultListHandler(),
             'tools/call' => $mcpDiscovery->callHandler(),

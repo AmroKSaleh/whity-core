@@ -144,23 +144,29 @@ Call `ToolDeriver::clearCache()` after registering plugin routes to ensure the n
 
 ---
 
-## Discovery mode (`?tools=discover`)
+## Search and call (the default since WHIT-750)
 
-Core alone derives over 300 tools, about 22k tokens of definitions every agent loads before it does anything. Several clients handle far fewer: Cursor is widely reported to drop every tool past 40, and agents reportedly pick tools less reliably past about 50 (WHIT-707).
-
-A client that connects to **`/mcp?tools=discover`** gets three tools in place of the catalogue:
+Core alone derives over 300 operations, about 150 KB of definitions every agent would load before doing anything, and every plugin adds more. Several clients handle far fewer, and agents pick tools less reliably past about 50 (WHIT-707). So a client connecting to **`/mcp`** gets a handful of everyday read-only tools (who am I, my inbox, get a document, list templates, search records) plus two tools that reach everything else:
 
 | Tool | Does |
 |---|---|
-| `search_tools` | Finds tools by what they do: `{query, limit?}`, returning name, title, description and whether each reads or deletes |
-| `describe_tool` | Returns one tool's full definition, including its input schema and annotations |
-| `call_tool` | Calls one tool by name: `{name, arguments}` |
+| `search_operations` | `{query?, toolset?, operationId?, limit?}`. With a query: matches by what they do, each with operationId, title, a short summary, toolset, whether it reads or deletes, and its agent policy. With an empty query: the areas (toolsets) the caller can search. With `operationId`: that one operation in full, including its input schema. |
+| `call_operation` | Calls one operation: `{operationId, arguments}`. Refusals and unknown names come back as tool errors the model can read. |
 
-The catalogue is unchanged and reached on demand, so the cost stays the same at 50 tools or 5,000.
+| URL | `tools/list` returns |
+|---|---|
+| `/mcp` | the always-on tools, then `search_operations` and `call_operation` |
+| `/mcp?tools=full` | every operation the caller may call (the list before WHIT-750) |
+| `/mcp?tools=discover` | only `search_operations` and `call_operation` |
+| `?toolsets=core.forms,acme.*` | limits the list and search to those toolsets, in any mode (calls are not limited; the token's own `toolset:` scope is what restricts) |
 
-**Nothing here decides access.** `search_tools` and `describe_tool` read the list through `ToolsListHandler::listFor()`, the same filter `tools/list` applies (exposure, scope, RBAC), so a tool the caller couldn't see in the full list can't be found either. Hidden and unknown names answer alike. `call_tool` hands the call to the real `ToolsCallHandler`, which re-checks everything and audits it, and a real tool called by its own name works too.
+The bare URL's mode is one constant, `ToolSurfaceRequest::BARE_MODE`. Calling an operation by its own name with `tools/call` works in every mode. The WHIT-707 tools `search_tools`, `describe_tool` and `call_tool` still answer, unlisted, for one minor release.
 
-The transport picks a separate `Dispatcher` for this URL, so the mode never sits in worker-global state. Resources, prompts, auth, the tenant switch and rate limits are identical. The discovery list never changes, so this dispatcher announces no `list_changed`.
+Search folds Arabic spellings and matches area titles in Arabic. Its ranking is held by `McpSearchEvalTest`: about 40 everyday requests, each of which must find its operation in the top three.
+
+**Nothing here decides access.** Search reads the list through `ToolsListHandler::listFor()`, the same filter `tools/list` applies (exposure, token toolsets and permissions, RBAC), so an operation the caller couldn't call can't be found either. Hidden and unknown names answer alike. `call_operation` hands the call to the real `ToolsCallHandler`, which re-checks everything and audits it.
+
+The transport picks a separate `Dispatcher` per mode, so the mode never sits in worker-global state. Resources, prompts, auth, the tenant switch and rate limits are identical. The search-and-call lists change only when the always-on set does, so those dispatchers announce no `list_changed`.
 
 The connect wizard turns tool search on when the access chosen exposes more tools than the app is reported to handle (40 for Cursor), or more than about 60 for any app, and lets the user override it.
 
@@ -315,7 +321,7 @@ Arguments that fail the tool's inputSchema come back as a tool result with `isEr
 Invalid arguments for post_api_users: Missing required argument: email. Expected: email (string, required), name (string).
 ```
 
-The route handler never runs and the call is audited as before. An unknown tool name is still -32601 at the top level. Under discovery mode, `call_tool` with an unknown name returns a tool error pointing at `search_tools`.
+The route handler never runs and the call is audited as before. An unknown tool name is still -32601 at the top level. Through `call_operation`, an unknown name returns a tool error pointing at `search_operations`.
 
 ### Application error containment
 
