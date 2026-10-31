@@ -561,6 +561,12 @@ seeded accounts and shared-database discipline.
    reviewers should focus on, note testing performed, and reference the tracking
    issue (e.g. `Relates to #1` / `Closes #9`). Do **not** add AI/tool attribution.
 
+   **Changelog:** don't edit `CHANGELOG.md`. Add a fragment,
+   `changelog.d/<id>.<section>.md` (for example `WHIT-789.added.md`), holding
+   the entry as a list item. Parallel PRs then never conflict on the shared
+   `[Unreleased]` section. `release-prepare.yml` folds the fragments in at
+   release. See [`changelog.d/README.md`](changelog.d/README.md).
+
 4. **CI must be green — all jobs.** Two workflows run on every PR to `main`;
    merge only after every job passes (never merge on a red or still-running
    check):

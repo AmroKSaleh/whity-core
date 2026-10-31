@@ -22,6 +22,7 @@
 - [ ] TypeScript: no `any`, `eslint` clean, `tsc --noEmit` clean (web changes)
 - [ ] For security-sensitive or large changes: adversarial review completed
       before merge
+- [ ] User-visible change: a fragment in `changelog.d/` (`<id>.<section>.md`), not an edit to `CHANGELOG.md`
 - [ ] CI green — both the SQLite job and the real-Postgres job
 
 ## Notes for reviewers
