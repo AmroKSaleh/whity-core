@@ -9,6 +9,9 @@ namespace Whity\Core\Document\Issuing;
  * stable `code` a caller can act on, the HTTP status the REST route answers
  * with, and details such as the missing fields. Nothing was written.
  *
+ * The message is written for the caller: {@see self::$clientMessage} is what
+ * a response may carry, unlike the text of an unexpected exception.
+ *
  * Codes: `invalid_request`, `template_not_found`, `record_not_found`,
  * `template_unpublished`, `concurrent_edit`, `slot_unavailable`,
  * `slot_unbound`, `slot_misfit`, `missing_fields`, `field_conflict`,
@@ -17,6 +20,8 @@ namespace Whity\Core\Document\Issuing;
  */
 final class DocumentIssueRefused extends \RuntimeException
 {
+    public readonly string $clientMessage;
+
     /** @param array<string, mixed> $details */
     public function __construct(
         public readonly string $reason,
@@ -25,6 +30,7 @@ final class DocumentIssueRefused extends \RuntimeException
         public readonly array $details = [],
     ) {
         parent::__construct($message);
+        $this->clientMessage = $message;
     }
 
     /** @param array<string, mixed> $details */

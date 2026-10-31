@@ -261,7 +261,7 @@ final class DocumentsApiHandler
                 IssueInput::fromBody(JsonBody::parsed($request)),
             );
         } catch (DocumentIssueRefused $e) {
-            return Response::error($e->getMessage(), $e->status, $e->details);
+            return Response::error($e->clientMessage, $e->status, $e->details);
         } catch (\Throwable $e) {
             error_log('[DocumentsApiHandler] raising the document failed: ' . $e->getMessage());
             return Response::error('The document could not be created', 503);
