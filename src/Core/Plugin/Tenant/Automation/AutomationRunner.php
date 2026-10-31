@@ -7,7 +7,12 @@ namespace Whity\Core\Plugin\Tenant\Automation;
 use PDO;
 use Throwable;
 use Whity\Auth\RoleChecker;
+use Whity\Core\Document\Issuing\ActingAs;
+use Whity\Core\Document\Issuing\DocumentIssueRefused;
+use Whity\Core\Document\Issuing\IssueInput;
 use Whity\Core\Notification\NotificationDispatcher;
+use Whity\Core\RBAC\CorePermissions;
+use Whity\Core\RBAC\ScopedPermissionSet;
 use Whity\Core\Plugin\Tenant\RecordActor;
 use Whity\Core\Plugin\Tenant\RecordWriter;
 use Whity\Core\Plugin\Tenant\TenantManifestHost;
@@ -38,9 +43,18 @@ use Whity\Sdk\Manifest\PluginManifest;
  * A run whose automation changed since it was queued stops rather than
  * matching its trace against different steps.
  *
- * A step that is refused (a rule, a permission, a record that's gone) fails
- * the run with its reason in the trace and stops; it isn't retried. An
- * unexpected error rolls the step back and is thrown, so the queue retries it.
+ * ISSUING A DOCUMENT is the one step that doesn't run inside its trace's
+ * transaction: it renders and stores a file, which a rollback can't take
+ * back. Its origin key (`automation:<run>:<step>`) makes it safe instead: a
+ * retry, or a second worker, gets the same document back (`replayed`), never
+ * a second one. It issues through the workspace's slot binding with
+ * {@see \Whity\Core\Document\Issuing\TemplateIssuing}, as the person the
+ * run acts for, who must hold `documents:issue` (DOCUMENT-AUTOMATION.md 3.7).
+ *
+ * A step that is refused (a rule, a permission, a record that's gone, a slot
+ * nothing is bound to) fails the run with its reason in the trace and stops;
+ * it isn't retried. An unexpected error rolls the step back and is thrown, so
+ * the queue retries it.
  */
 final class AutomationRunner
 {
@@ -52,6 +66,14 @@ final class AutomationRunner
 
     public const NOTIFICATION_TYPE = 'plugin.automation';
 
+    /** @var (\Closure(ActingAs, IssueInput): array<string, mixed>)|null */
+    private ?\Closure $issueDocument;
+
+    /**
+     * @param (\Closure(ActingAs, IssueInput): array<string, mixed>)|null $issueDocument
+     *        Issues a document ({@see \Whity\Core\Document\Issuing\TemplateIssuing::issue()});
+     *        throws DocumentIssueRefused. Null where documents can't be issued.
+     */
     public function __construct(
         private readonly PDO $db,
         private readonly AutomationRunRepository $runs,
@@ -61,7 +83,9 @@ final class AutomationRunner
         private readonly RecordWriter $writer,
         private readonly RoleChecker $roleChecker,
         private readonly ?NotificationDispatcher $notifications = null,
+        ?\Closure $issueDocument = null,
     ) {
+        $this->issueDocument = $issueDocument;
     }
 
     /**
@@ -119,6 +143,18 @@ final class AutomationRunner
             /** @var array<string, mixed> $args */
             $args = $step[$kind];
 
+            $outcome = null;
+            if ($kind === 'issue_document') {
+                // Outside the trace's transaction (see the class comment).
+                $this->db->beginTransaction();
+                $done = (($this->runs->lockTrace($tenantId, $runId) ?? [])[$i]['status'] ?? null) === 'done';
+                $this->db->commit();
+                if ($done) {
+                    continue;
+                }
+                $outcome = $this->issueDocument($tenantId, $manifest, $run, $i, $args, $actor);
+            }
+
             $this->db->beginTransaction();
             try {
                 $trace = $this->runs->lockTrace($tenantId, $runId) ?? [];
@@ -126,7 +162,7 @@ final class AutomationRunner
                     $this->db->commit();
                     continue;
                 }
-                $outcome = $this->step($tenantId, $manifest, $run, $kind, $args, $actor);
+                $outcome ??= $this->step($tenantId, $manifest, $run, $kind, $args, $actor);
                 $trace[$i] = ['step' => $i, 'kind' => $kind] + $outcome + ['at' => gmdate('Y-m-d\TH:i:s\Z')];
                 $this->runs->saveTrace($tenantId, $runId, $trace);
                 if ($outcome['status'] !== 'done') {
@@ -206,6 +242,77 @@ final class AutomationRunner
         }
 
         return ['status' => 'failed', 'reason' => 'unknown_step'];
+    }
+
+    /**
+     * Issue a document from one of the plugin's slots for the triggering
+     * record. Outside any transaction: see the class comment.
+     *
+     * @param array<string, mixed> $run
+     * @param array<string, mixed> $args
+     * @return array{status: 'done'|'failed', reason?: string, input?: mixed, outcome?: mixed}
+     */
+    private function issueDocument(int $tenantId, PluginManifest $manifest, array $run, int $step, array $args, RecordActor $actor): array
+    {
+        $type = (string) $run['record_type'];
+        $record = isset($manifest->records()[$type])
+            ? $this->records->find($tenantId, $manifest->name(), $type, (int) $run['record_id'])
+            : null;
+        if ($record === null) {
+            return ['status' => 'failed', 'reason' => 'record_gone'];
+        }
+        $slot = $manifest->name() . '.' . (string) $args['slot'];
+        $input = ['slot' => $slot];
+        if ($this->issueDocument === null) {
+            return ['status' => 'failed', 'reason' => 'documents_unavailable', 'input' => $input];
+        }
+        // No person, no document: issuing without one needs the workspace's
+        // background allow-list (DOCUMENT-AUTOMATION.md 3.7).
+        if ($actor->profileId === null
+            || !$this->roleChecker->hasPermissionForProfile($actor->profileId, CorePermissions::DOCUMENTS_ISSUE, $tenantId)) {
+            return ['status' => 'failed', 'reason' => 'not_permitted', 'input' => $input];
+        }
+
+        try {
+            $context = new ExpressionContext($record['data'], $record['state'], $this->writer->roles($tenantId, $actor), gmdate('Y-m-d'), gmdate('Y-m-d\TH:i:s\Z'));
+            $values = [];
+            foreach (self::values($args['values'] ?? [], $context) as $path => $value) {
+                $values[$path] = $value === null || is_array($value) ? null : (is_bool($value) ? ($value ? 'true' : 'false') : (string) $value);
+            }
+        } catch (ExpressionError $e) {
+            return ['status' => 'failed', 'reason' => 'expression_error', 'input' => $input, 'outcome' => ['message' => $e->getMessage()]];
+        }
+        $input += ['values' => $values];
+
+        try {
+            $issued = ($this->issueDocument)(
+                new ActingAs($tenantId, $actor->profileId, ScopedPermissionSet::forProfile($this->roleChecker, $actor->profileId, $tenantId)),
+                new IssueInput(
+                    slot: $slot,
+                    record: $manifest->name() . '.' . $type . ':' . $record['id'],
+                    values: $values,
+                    originKey: 'automation:' . $run['id'] . ':' . $step,
+                ),
+            );
+        } catch (DocumentIssueRefused $refused) {
+            return [
+                'status' => 'failed',
+                'reason' => $refused->reason,
+                'input' => $input,
+                'outcome' => ['message' => $refused->clientMessage, 'details' => $refused->details],
+            ];
+        }
+
+        /** @var array<string, mixed> $document */
+        $document = $issued['document'] ?? [];
+        /** @var array<string, mixed> $render */
+        $render = $issued['render'] ?? [];
+
+        return ['status' => 'done', 'input' => $input, 'outcome' => [
+            'document_id' => isset($document['id']) ? (int) $document['id'] : null,
+            'replayed' => ($issued['replayed'] ?? false) === true,
+            'rendered' => ($render['stored'] ?? false) === true,
+        ]];
     }
 
     /**

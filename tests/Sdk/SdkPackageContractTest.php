@@ -242,9 +242,12 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.56.0',
+            '1.57.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.56 ADDS DOCUMENTS FOR CODE PLUGINS: PluginDocumentsInterface declares template slots and '
+            'SDK 1.57 ADDS THE ISSUE_DOCUMENT AUTOMATION STEP: an automation may issue a document from one '
+            . 'of its own documents.slots for the triggering record, with merge values as expressions; the '
+            . 'host issues through the workspace binding under an origin key (WHIT-795). Purely additive. '
+            . 'SDK 1.56 ADDS DOCUMENTS FOR CODE PLUGINS: PluginDocumentsInterface declares template slots and '
             . 'record types as merge fields, and the host Documents service issues from a slot or a template '
             . 'as the person in the request, refusing with a stable reason (WHIT-742). Purely additive. '
             . 'SDK 1.55 ADDS TEMPLATE SLOTS: plugin.json gains documents.slots, the named places a workspace '

@@ -526,6 +526,33 @@
                       ]
                     }
                   }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "issue_document"
+                  ],
+                  "description": "Issue a document from one of the manifest's documents.slots for the triggering record (SDK 1.57).",
+                  "properties": {
+                    "issue_document": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "slot"
+                      ],
+                      "properties": {
+                        "slot": {
+                          "type": "string",
+                          "description": "A slot under documents.slots for the triggering record type."
+                        },
+                        "values": {
+                          "type": "object",
+                          "description": "Template field path (such as template.note) to an expression over the record."
+                        }
+                      }
+                    }
+                  }
                 }
               ]
             }

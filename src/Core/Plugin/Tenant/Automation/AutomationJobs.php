@@ -8,6 +8,10 @@ use PDO;
 use Psr\Log\LoggerInterface;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Audit\AuditLogger;
+use Whity\Core\Document\Issuing\ActingAs;
+use Whity\Core\Document\Issuing\DocumentIssueRefused;
+use Whity\Core\Document\Issuing\IssueInput;
+use Whity\Core\Document\Issuing\TemplateIssuing;
 use Whity\Core\Notification\NotificationDispatcher;
 use Whity\Core\Notification\NotificationRepository;
 use Whity\Core\Notification\TransportRegistry;
@@ -54,6 +58,17 @@ final class AutomationJobs
                 new RecordWriter($pdo, $records, $roleChecker, $audit, new AutomationTriggers($runs, $plugins, $queue)),
                 $roleChecker,
                 new NotificationDispatcher(new NotificationRepository($pdo), $transports, $queue, null, $logger, null, $audit),
+                // The kernel registers the issuing service (WHIT-742); resolved
+                // on the first issue, so a worker that never issues never needs it.
+                static function (ActingAs $actor, IssueInput $input): array {
+                    try {
+                        $issuing = \Whity\app(TemplateIssuing::class);
+                    } catch (\RuntimeException) {
+                        throw new DocumentIssueRefused('documents_unavailable', 'Documents can\'t be issued on this instance', 503);
+                    }
+
+                    return $issuing->issue($actor, $input);
+                },
             )),
             false
         );

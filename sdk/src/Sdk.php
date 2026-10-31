@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.56).
+ * SDK identity (v1.57).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -885,7 +885,14 @@ namespace Whity\Sdk;
  * `<plugin name>.<type>`), and says whether it would issue in the background.
  * The host service {@see Documents\Documents} issues from a slot or a
  * template for a record, as the person whose request it is, and refuses with
- * {@see Documents\DocumentNotIssuedException} and a stable reason (WHIT-742).
+ * {@see Documents\DocumentNotIssuedException} and a stable reason (WHIT-742). ->
+ * 1.57 (ISSUE A DOCUMENT FROM AN AUTOMATION: the `issue_document` step joins
+ * the automation catalogue. It names one of the manifest's own
+ * `documents.slots` for the triggering record type, with optional merge
+ * values for the template's own fields as expressions over the record. The
+ * host issues through the workspace's binding for that slot, as the person
+ * the run acts for, under an origin key so a retry never issues twice
+ * ({@see Manifest\AutomationValidator}, WHIT-795).
  *
  * Purely additive.)
  * Breaking changes require a new major version.
@@ -893,7 +900,7 @@ namespace Whity\Sdk;
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.56.0';
+    public const VERSION = '1.57.0';
 
     /**
      * Static identity only — never instantiated.

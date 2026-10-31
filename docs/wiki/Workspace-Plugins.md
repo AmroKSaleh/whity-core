@@ -163,8 +163,16 @@ A workspace plugin declares `automations`: what it does by itself when its recor
 | `create_record` | Creates a record of this plugin. `link` names a field of the new record that points back. |
 | `move` | Makes one of the record's declared moves. |
 | `notify` | Notifies a role the manifest declares, or the person in a person field, with an English and Arabic message. `{{field}}` in the message is replaced by the field's value. Only people who can read the record type are told, up to 50 of them. |
+| `issue_document` (SDK 1.57) | Issues a document from one of the manifest's own `documents.slots` for the triggering record, through the template the workspace bound to that slot. Optional `values` fill the template's own fields (`template.note`) as expressions over the record; values the record resolves can't be overwritten. |
 
-`issue_document`, `send_webhook`, `ask_approval`, `wait` and `call_action` are refused by name until the host runs them. Schedules, dates, forms, webhooks and buttons as triggers come later too.
+`send_webhook`, `ask_approval`, `wait` and `call_action` are refused by name until the host runs them.
+
+**Issuing a document.** The step issues through core's one issuing service (`TemplateIssuing`, WHIT-742), as the person the run acts for, who must hold `documents:issue`.
+
+- It runs outside the step's transaction, because it renders and stores a file. Its origin key, `automation:<run>:<step>`, makes a retry or a second worker get the same document back (`replayed` in the trace), never a second one.
+- A refusal fails the run with the service's reason in the trace: `slot_unbound`, `slot_unavailable`, `slot_misfit`, `template_unpublished`, `missing_fields`, `field_conflict`, `vetoed` and so on.
+- A run with no person can't issue until the workspace's background allow-list lands (DOCUMENT-AUTOMATION.md 3.7).
+- Issuing can't be undone, so when agents can start runs, a run an agent caused that would issue is always Ask first. Schedules, dates, forms, webhooks and buttons as triggers come later too.
 
 **How a run works:**
 
