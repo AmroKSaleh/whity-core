@@ -9,6 +9,7 @@ use Whity\Auth\RoleChecker;
 use Whity\Core\Request;
 use Whity\Core\Response;
 use Whity\Core\Hooks\HookManager;
+use Whity\Core\Plugin\Tenant\TenantPluginRepository;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\PermissionCompanions;
 use Whity\Core\RBAC\RecordSectionRequirement;
@@ -173,7 +174,8 @@ class RolesApiHandler
         PDO $db,
         HookManager $hookManager,
         ?LoggerInterface $logger = null,
-        ?RecordSectionResolver $sectionResolver = null
+        ?RecordSectionResolver $sectionResolver = null,
+        private readonly ?TenantPluginRepository $tenantPlugins = null
     ) {
         $this->db = $db;
         $this->hookManager = $hookManager;
@@ -2236,6 +2238,16 @@ class RolesApiHandler
 
             if (isset($nameToId[$value])) {
                 $resolved[$nameToId[$value]] = true;
+            }
+        }
+
+        // WHIT-760: a permission only other workspaces' own plugins declare
+        // can't be granted here. It gates nothing in this workspace, and the
+        // grant would be a way to learn it exists.
+        $tenantId = TenantContext::getTenantId();
+        if ($this->tenantPlugins !== null && $tenantId !== null && $resolved !== []) {
+            foreach ($this->permissionIdsByName($this->tenantPlugins->permissionsOfOtherTenants($tenantId)) as $hiddenId) {
+                unset($resolved[(int) $hiddenId]);
             }
         }
 
