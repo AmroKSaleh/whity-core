@@ -129,7 +129,7 @@ Checked against the 2026-07-28 specification and the SEP index on 2026-10-31.
 | List templates | `get_api_document_templates` | 259 |
 | Search records | `get_api_documents` (list documents with filters) for now | 1,389 |
 
-Core has no cross-record search route today; nothing derived matches search, find or lookup. Until one exists, document listing stands in, and building a real `GET /api/search` is open question 1 (§10). Together the five cost 2,885 bytes, about 720 tokens. With search and call the bare `/mcp` comes to about 1.1k tokens.
+Core has no cross-record search route today; nothing derived matches search, find or lookup. Until one exists, document listing stands in, and building a real `GET /api/search` is open question 1 (§10, WHIT-783). Together the five cost 2,885 bytes, about 720 tokens. With search and call the bare `/mcp` comes to about 1.1k tokens.
 
 **Plugin always-on tools.** A plugin may mark **one** tool `always-on`. Any more are demoted to `discoverable` at load, with a warning. The one tool is listed only after a tenant admin enables it on the admin MCP page (stored per tenant as `mcp.always_on_plugin_tools`; the operator can block it instance-wide). It must be read-only (`readOnlyHint: true`), because every write goes through search and call. Its description is capped at 500 characters, like every other description.
 
@@ -398,4 +398,4 @@ Taskaat, project WHIT, section "Plugins, SDK & API" (WHIT-755 is in "Docs & Ops"
 | WHIT-754 admin and wizard | admin MCP page (toolset, visibility, policy, sizes, enabling plugin always-on tools); wizard recommends `/mcp`, optional toolsets and splits | WHIT-748, WHIT-749 |
 | WHIT-755 docs and release notes | MCP-Server and MCP-Client-Connection wiki pages, runbook, the changelog and release-notes callout for the switch | WHIT-747 to WHIT-752 |
 | WHIT-765 splits | `/mcp/{split}` in search-and-call mode, split registry, hard boundary, per-split OAuth resource, `GET /api/mcp/splits`, Server Cards, core-only AI catalog | WHIT-748, WHIT-749, WHIT-750 |
-| New: core search route | decide and, if yes, build `GET /api/search` for the "search records" always-on tool (open question 1) | owner answer |
+| WHIT-783 core search route | decide and, if yes, build `GET /api/search` for the "search records" always-on tool (open question 1) | owner answer |
