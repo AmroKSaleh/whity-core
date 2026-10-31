@@ -242,9 +242,12 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.46.0',
+            '1.47.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.46 PASSES AN McpToolContext TO AUTHORED MCP TOOLS: a handler is called as '
+            'SDK 1.47 ADDS THE DOCUMENT EVENTS (document.issuing, which a listener may veto, '
+            . 'document.issued and document.rendered) and deprecates DocumentRenderer::issue(), '
+            . 'which now goes through the one issuing service. Purely additive. '
+            . 'SDK 1.46 PASSES AN McpToolContext TO AUTHORED MCP TOOLS: a handler is called as '
             . 'fn(array $arguments, McpToolContext $context), and the context carries the tenant '
             . 'the call is authorized in and the calling profile, so a multi-tenant tool can scope '
             . 'its queries without reaching into the internal tenant state of core (#1419). Purely '

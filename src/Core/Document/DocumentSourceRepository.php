@@ -25,7 +25,7 @@ final class DocumentSourceRepository
 {
     private const COLUMNS = 'id, tenant_id, kind, title, lang, default_view, full_width, page, record_type, blocks, own_fields,
         draft_version, published_version, scope, required_permission, created_by, owner_ou_id, updated_by,
-        created_at, updated_at';
+        starter_key, legacy_template_id, created_at, updated_at';
 
     private PDO $db;
 
@@ -199,6 +199,32 @@ final class DocumentSourceRepository
         return array_fill_keys(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)), true);
     }
 
+    /**
+     * Who can see a document: its scope, the permission it needs and the unit
+     * it is filed at. Not part of the draft, so it changes without a publish
+     * and without moving the draft version.
+     *
+     * @param array{scope?: string, required_permission?: ?string, owner_ou_id?: ?int} $fields
+     */
+    public function updateAudience(int $id, int $tenantId, array $fields): void
+    {
+        $set = [];
+        $params = [':id' => $id, ':tenant_id' => $tenantId];
+        foreach (['scope', 'required_permission', 'owner_ou_id'] as $column) {
+            if (array_key_exists($column, $fields)) {
+                $set[] = $column . ' = :' . $column;
+                $params[':' . $column] = $fields[$column];
+            }
+        }
+        if ($set === []) {
+            return;
+        }
+        $stmt = $this->db->prepare(
+            'UPDATE document_sources SET ' . implode(', ', $set) . ', updated_at = NOW() WHERE id = :id AND tenant_id = :tenant_id'
+        );
+        $stmt->execute($params);
+    }
+
     public function delete(int $id, int $tenantId): void
     {
         $stmt = $this->db->prepare('DELETE FROM document_sources WHERE id = :id AND tenant_id = :tenant_id');
@@ -231,6 +257,9 @@ final class DocumentSourceRepository
             'created_by'          => $row['created_by'] !== null ? (int) $row['created_by'] : null,
             'owner_ou_id'         => $row['owner_ou_id'] !== null ? (int) $row['owner_ou_id'] : null,
             'updated_by'          => $row['updated_by'] !== null ? (int) $row['updated_by'] : null,
+            // Whity's starter this came from, and the old designer template it was converted from.
+            'starter_key'         => $row['starter_key'] !== null ? (string) $row['starter_key'] : null,
+            'legacy_template_id'  => $row['legacy_template_id'] !== null ? (int) $row['legacy_template_id'] : null,
             'created_at'          => (string) $row['created_at'],
             'updated_at'          => (string) $row['updated_at'],
         ];

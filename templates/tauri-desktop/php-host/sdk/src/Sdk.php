@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.46).
+ * SDK identity (v1.47).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -782,13 +782,26 @@ namespace Whity\Sdk;
  * Purely additive. A one-parameter handler keeps working, since PHP ignores
  * the extra argument; on an older host a two-parameter handler is called with
  * one argument and fails, so a tool that needs the context should declare
- * `^1.46`.)
+ * `^1.46`.) ->
+ * 1.47 (DOCUMENT EVENTS: `Hooks\Events::DOCUMENT_ISSUING`, where a listener
+ * may refuse a document with HookVetoException before anything is written,
+ * and `DOCUMENT_ISSUED` and `DOCUMENT_RENDERED` with their `.async` forms.
+ * Payloads carry ids, never field values. Every issued document now goes
+ * through the host's one issuing service, so these fire for documents a
+ * plugin issues too. `Render\DocumentRenderer::issue()` takes an optional
+ * origin key (issuing again with it returns the first document), and is
+ * deprecated in favour of `Documents::issue()`, which issues from a template
+ * the workspace publishes (DOCUMENT-AUTOMATION.md phase B). It keeps working
+ * and is removed in SDK 2.0.0.
+ *
+ * Purely additive. On an older host the constants name events nobody
+ * dispatches.)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.46.0';
+    public const VERSION = '1.47.0';
 
     /**
      * Static identity only — never instantiated.

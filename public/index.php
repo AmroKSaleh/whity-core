@@ -1059,20 +1059,6 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         // has to become one entry per source.
     ];
     $items[] = [
-        'id' => 'documents',
-        'label' => 'Document Designer',
-        'href' => '/admin/documents',
-        'icon' => 'file-text',
-        'group' => 'documents',
-        'order' => 2,
-        // WC-docdesigner: the document/label template designer. Mirrors GET
-        // /api/document-templates (DocumentTemplatesApiHandler), gated on
-        // documents:read. The nav item carries the requirement so a
-        // permission-aware client hides it; the page/API also enforce it
-        // server-side (write/publish/render are separately gated).
-        'requiredPermission' => \Whity\Core\RBAC\CorePermissions::DOCUMENTS_READ,
-    ];
-    $items[] = [
         'id' => 'document-library',
         'label' => 'Documents',
         'href' => '/admin/document-library',
@@ -1080,10 +1066,10 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         'group' => 'documents',
         'order' => 1,
         // #978 (#947 item 5): the ORGANIZER, which browses issued documents —
-        // as distinct from the entry above it, which is the template DESIGNER.
+        // as distinct from Document templates below, where templates are made.
         // Two entries rather than one screen with tabs: designing a template and
         // finding a document somebody issued are different tasks done by
-        // different people, and the designer is a full-screen editor in the
+        // different people, and the editor is a full-screen screen in the
         // `(editor)` route group with no app sidebar at all.
         //
         // Mirrors GET /api/documents (DocumentsApiHandler), gated on
@@ -1106,28 +1092,25 @@ $hookManager->listen('navigation.register', function ($data, $context) {
     ];
     $items[] = [
         'id' => 'document-templates',
-        'label' => 'Templates & Blocks',
+        'label' => 'Document templates',
         'href' => '/admin/document-templates',
         'icon' => 'layout-grid',
         'group' => 'documents',
         // Group-local, a unique positive integer (#1007/#1010 — a fractional
         // order is silently skipped by a regroup that matches integers, and a
-        // test now enforces the invariant). 1 = Documents, 2 = Document
-        // Designer, 3 = Approval Gating, so this is 4.
+        // test now enforces the invariant). 1 = Documents, 3 = Approval
+        // Gating, so this is 4 (2 was the old Document Designer, removed in
+        // editor M4c).
         'order' => 4,
-        // The GOVERNANCE surface for the designer's saved work: who can see a
-        // template or block and why, where it is filed, what instances a block.
-        // A third documents entry rather than a tab on the designer, for the
-        // reason the designer/organizer split already records — the designer is
-        // a full-screen editor in the `(editor)` route group with no app sidebar,
-        // so it has nowhere to put an admin table, and re-scoping a template is
-        // not something you do while drawing on a canvas.
+        // A31: the editor's templates and label sheets — who can see each and
+        // why, Whity's starters to use a copy of, and the editor to open them
+        // in. The editor is a full-screen screen in the `(editor)` route
+        // group with no app sidebar, so the list lives here.
         //
-        // Mirrors GET /api/document-templates + /api/document-blocks, both gated
-        // documents:read, so the nav item gates on the same permission. Rename
-        // and delete are gated documents:write and re-scoping/publishing on
-        // documents:publish, per-control on the page; the API enforces all three
-        // regardless of what the client renders.
+        // Mirrors GET /api/document-sources, gated documents:read, so the nav
+        // item gates on the same permission. Copy and delete are gated
+        // documents:write and sharing on documents:publish, per-control on the
+        // page; the API enforces all three regardless of what the client renders.
         'requiredPermission' => \Whity\Core\RBAC\CorePermissions::DOCUMENTS_READ,
     ];
     $items[] = [
@@ -2853,54 +2836,18 @@ $resourceRoleAssignmentRepository = new \Whity\Core\RBAC\ResourceRoleAssignmentR
     $logger
 );
 
-// 13a-sexies. Document/label designer templates API (WC-docdesigner). Tenant-
-// scoped, RBAC-gated CRUD. The route permission (documents:read on GET,
-// documents:write on writes) is the baseline; the handler ADDITIONALLY row-
-// filters list/get by scope + required_permission (server-side, so a caller only
-// receives templates it may see) and gates publishing on documents:publish.
-$documentTemplateRepository = new \Whity\Core\Document\DocumentTemplateRepository($db->getPdo());
+// 13a-sexies. Who may see a document template (DocumentAccessPolicy: scope +
+// required_permission) and where it is filed. Tenant-scoped, RBAC-gated; the
+// handlers ADDITIONALLY row-filter by scope + required_permission (server-side,
+// so a caller only receives documents it may see) and gate sharing on
+// documents:publish.
 $documentAccessPolicy = new \Whity\Core\Document\DocumentAccessPolicy();
-// The WHERE half of designer visibility (migration 117): which units a
-// caller has standing at, so a dean's secretary and a department head's
-// secretary holding the SAME documents:write see different template sets.
-// REQUIRED by both handlers rather than nullable — an unwired reach
-// predicate answers 'yes' everywhere and republishes every placed row to
-// the whole tenant, silently.
+// The WHERE half of visibility (migration 117): which units a caller has
+// standing at, so a dean's secretary and a department head's secretary holding
+// the SAME documents:write see different template sets. REQUIRED rather than
+// nullable — an unwired reach predicate answers 'yes' everywhere and
+// republishes every placed row to the whole tenant, silently.
 $ouReachResolver = new \Whity\Core\Ou\OuReachResolver($db->getPdo(), $resourceRoleAssignmentRepository);
-$documentTemplatesHandler = new \Whity\Api\DocumentTemplatesApiHandler(
-    $documentTemplateRepository,
-    $documentAccessPolicy,
-    $roleChecker,
-    $ouReachResolver
-);
-$router->register('GET',    '/api/document-templates',          [$documentTemplatesHandler, 'list'],   null, null, CorePermissions::DOCUMENTS_READ);
-$router->register('POST',   '/api/document-templates',          [$documentTemplatesHandler, 'create'], null, null, CorePermissions::DOCUMENTS_WRITE);
-$router->register('GET',    '/api/document-templates/{id:\d+}', [$documentTemplatesHandler, 'show'],   null, null, CorePermissions::DOCUMENTS_READ);
-$router->register('PATCH',  '/api/document-templates/{id:\d+}', [$documentTemplatesHandler, 'update'], null, null, CorePermissions::DOCUMENTS_WRITE);
-$router->register('DELETE', '/api/document-templates/{id:\d+}', [$documentTemplatesHandler, 'delete'], null, null, CorePermissions::DOCUMENTS_WRITE);
-
-// 13a-septies. Document/label designer BLOCKS API (WC-521) — mirrors the
-// templates handler above exactly. The one thing beyond CRUD is the reference-
-// integrity delete guard: a block is pointer-referenced by templates via a
-// `blockInstance` element, so delete() 409s when DocumentTemplateRepository::
-// referencesBlock() finds a live reference anywhere in the tenant's templates
-// (never silently orphans the pointer).
-$documentBlockRepository = new \Whity\Core\Document\DocumentBlockRepository($db->getPdo());
-$documentBlocksHandler = new \Whity\Api\DocumentBlocksApiHandler(
-    $documentBlockRepository,
-    $documentTemplateRepository,
-    $documentAccessPolicy,
-    $roleChecker,
-    $ouReachResolver
-);
-$router->register('GET',    '/api/document-blocks',          [$documentBlocksHandler, 'list'],   null, null, CorePermissions::DOCUMENTS_READ);
-$router->register('POST',   '/api/document-blocks',          [$documentBlocksHandler, 'create'], null, null, CorePermissions::DOCUMENTS_WRITE);
-$router->register('GET',    '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'show'],   null, null, CorePermissions::DOCUMENTS_READ);
-// "What would break if this block changed" — gated documents:read, not :write,
-// because the whole point is to be asked BEFORE deciding to write.
-$router->register('GET',    '/api/document-blocks/{id:\d+}/usage', [$documentBlocksHandler, 'usage'], null, null, CorePermissions::DOCUMENTS_READ);
-$router->register('PATCH',  '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'update'], null, null, CorePermissions::DOCUMENTS_WRITE);
-$router->register('DELETE', '/api/document-blocks/{id:\d+}', [$documentBlocksHandler, 'delete'], null, null, CorePermissions::DOCUMENTS_WRITE);
 
 // 13a-septies-bis. The block editor's documents (editor M2): templates, letters,
 // reports, notes and wiki pages written in the new editor, their blocks stored
@@ -2914,13 +2861,20 @@ $documentSourcesHandler = new \Whity\Api\DocumentSourcesApiHandler(
     $ouReachResolver,
     // Images and files placed in the documents (editor M3, migration 161),
     // in the tenant's own storage.
-    new \Whity\Core\Document\DocumentSourceFileStore($storageDriver, $db->getPdo())
+    new \Whity\Core\Document\DocumentSourceFileStore($storageDriver, $db->getPdo()),
+    new \Whity\Core\Document\DocumentSourceVersionRepository($db->getPdo())
 );
 $router->register('GET',    '/api/document-sources',                [$documentSourcesHandler, 'list'],      null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('POST',   '/api/document-sources',                [$documentSourcesHandler, 'create'],    null, null, CorePermissions::DOCUMENTS_WRITE);
 $router->register('GET',    '/api/document-sources/{id:\d+}',       [$documentSourcesHandler, 'show'],      null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('PUT',    '/api/document-sources/{id:\d+}/draft', [$documentSourcesHandler, 'saveDraft'], null, null, CorePermissions::DOCUMENTS_WRITE);
 $router->register('DELETE', '/api/document-sources/{id:\d+}',       [$documentSourcesHandler, 'delete'],    null, null, CorePermissions::DOCUMENTS_WRITE);
+// Editor M4c (A31): who can see it, and "Use a copy". Sharing is checked again
+// in the handler (documents:publish), as on create.
+$router->register('PATCH',  '/api/document-sources/{id:\d+}',       [$documentSourcesHandler, 'updateAudience'], null, null, CorePermissions::DOCUMENTS_WRITE);
+$router->register('POST',   '/api/document-sources/{id:\d+}/copy',  [$documentSourcesHandler, 'copy'],      null, null, CorePermissions::DOCUMENTS_WRITE);
+// "Start from a template" (Edit before issuing): a personal letter from the published version.
+$router->register('POST',   '/api/document-sources/{id:\d+}/drafts', [$documentSourcesHandler, 'drafts'],    null, null, CorePermissions::DOCUMENTS_WRITE);
 $router->register('POST',   '/api/document-sources/{id:\d+}/files',  [$documentSourcesHandler, 'uploadFile'], null, null, CorePermissions::DOCUMENTS_WRITE);
 $router->register('GET',    '/api/document-sources/{id:\d+}/files/{fileId:\d+}/content', [$documentSourcesHandler, 'fileContent'], null, null, CorePermissions::DOCUMENTS_READ);
 
@@ -2937,9 +2891,9 @@ $router->register('GET',    '/api/document-sources/{id:\d+}/files/{fileId:\d+}/c
 //
 // The FLOWING render mode (#1072) and the SDK seam in front of it.
 //
-// The fixed-canvas renderer above prints one PDF page per designed template
-// page. This one takes a content TREE with no positions and lets the renderer
-// decide how many pages it becomes — which is the only way to produce the
+// The old fixed-canvas renderer printed one PDF page per designed template
+// page (it went with the old designer, editor M4c). This one takes a content
+// TREE with no positions and lets the renderer decide how many pages it becomes — which is the only way to produce the
 // document class #1072 is about: a submission of well over a hundred pages
 // carrying a contents list, a list of tables and a list of figures, each entry
 // page-numbered. Those page numbers are a property of the laid-out result, so
@@ -2968,23 +2922,6 @@ $flowDocumentRenderer = new \Whity\Core\Document\Render\FlowDocumentRenderer(
     )
 );
 
-// #947 item 1 split the render MECHANICS out into DocumentRenderer (ceilings,
-// dataRows normalisation, blockInstance resolution, the internal call) so the
-// re-render route below runs the same code rather than a second copy of it, and
-// added the optional `persist` flag that turns a render into a document record.
-$documentRenderer = new \Whity\Core\Document\Render\DocumentRenderer(
-    $documentBlockRepository,
-    $settingsService,
-    new \Whity\Core\Document\Render\RenderServiceClient(
-        (string) ($_ENV['RENDER_SERVICE_URL'] ?? 'http://render:8130'),
-        (string) ($_ENV['RENDER_SHARED_SECRET'] ?? ''),
-        (int) ($_ENV['RENDER_TIMEOUT_SECONDS'] ?? 30)
-    ),
-    // #1186: a template in DOCUMENT MODE goes to the flowing renderer instead.
-    // Built above rather than below for this line — PHP does not hoist, and
-    // without it a flow document silently printed its unused canvas pages.
-    $flowDocumentRenderer
-);
 $documentRepository = new \Whity\Core\Document\DocumentRepository($db->getPdo());
 $documentArtifactRepository = new \Whity\Core\Document\DocumentArtifactRepository($db->getPdo());
 // The SAME per-tenant routing driver branding uses (built in 13a-storage above):
@@ -3018,27 +2955,6 @@ $documentRenderMeters = new \Whity\Core\Entitlement\MeterService(
     $entitlementService,
     $settingsService
 );
-
-$documentRenderHandler = new \Whity\Api\DocumentRenderApiHandler(
-    $documentTemplateRepository,
-    $documentAccessPolicy,
-    $roleChecker,
-    $settingsService,
-    $documentRenderer,
-    $documentIssuer,
-    // The designer's OU-reach predicate (migration 117). Withholding a placed
-    // template HERE too is what stops this path being a way around the
-    // designer's own list: a 404 in one place and a render in another would
-    // be the client hiding what the server hands out.
-    $ouReachResolver,
-    // WHAT THE TENANT'S TIER ALLOWS THEM TO RENDER. Passed here rather than
-    // left null because this deployment DOES sell tiers, and a meter that is
-    // wired everywhere except the one endpoint that spends it is the failure
-    // this whole area exists to avoid: a limit priced on a screen, agreed by a
-    // customer, and enforced by nothing.
-    $documentRenderMeters
-);
-$router->register('POST', '/api/document-templates/{id:\d+}/render', [$documentRenderHandler, 'render'], null, null, CorePermissions::DOCUMENTS_RENDER);
 
 // 13a-nonies-bis. ISSUED DOCUMENTS (#947 item 1) — the records a persisted
 // render creates, and their immutable artifacts. Reads are gated on
@@ -3108,6 +3024,58 @@ $documentFieldRegistry->add(new \Whity\Core\Document\Fields\IssuedDocumentFieldP
 $documentFieldRegistry->add(new \Whity\Core\Document\Fields\CompanyFieldProvider($settingsService, $documentFieldLabels));
 $documentFieldRegistry->add(new \Whity\Core\Document\Fields\TodayFieldProvider($documentFieldLabels));
 \Whity\register_service(\Whity\Core\Document\Fields\DocumentFieldRegistry::class, $documentFieldRegistry);
+// 13a-nonies-quinquies. QR VERIFICATION ON DOCUMENTS (#1036). A code printed on
+// a document that anybody can scan to confirm it is genuine, and that a
+// signed-in reader with reach can follow through to the record.
+//
+// THE CONSTRAINT THIS WIRING EXISTS UNDER: the token IDENTIFIES a document and
+// must never AUTHORISE access to one. Note what is NOT passed to
+// DocumentQrService — no RoleChecker, no DocumentVisibilityPolicy, no permission
+// resolver of any kind. It has no collaborator that could answer an
+// authorization question, which is the structural half of the guarantee; the
+// other half is that the one route which turns a token into a record id
+// (`/api/documents/by-verification/{token}`) runs the UNCHANGED visibility
+// policy and answers 404 exactly as the id route does.
+//
+// The public base URL is the frontend's address ($frontendUrls: FRONTEND_URL,
+// else APP_URL; DOCUMENT_VERIFY_URL overrides the page). An instance that has never been told its address
+// cannot mint at all — DocumentQrService::isConfigured() is false, minting
+// returns null, and the record panel reports `configured: false` — rather than
+// encoding a relative path into a QR that nothing can follow.
+$documentQrTokenRepository = new \Whity\Core\Document\Qr\DocumentQrTokenRepository($db->getPdo());
+$documentQrScanRepository = new \Whity\Core\Document\Qr\DocumentQrScanRepository($db->getPdo());
+$documentQrService = new \Whity\Core\Document\Qr\DocumentQrService(
+    $db->getPdo(),
+    $documentQrTokenRepository,
+    $documentQrScanRepository,
+    $frontendUrls->base(),
+    $frontendUrls->link(\Whity\Core\Http\FrontendUrls::DOCUMENT_VERIFY)
+);
+
+// Editor M4c: documents are issued from editor templates. One printer and one
+// issuer serve the editor's own render route, POST /api/documents and a
+// correction, so a template prints the same way from all three, with the
+// verification code (above) minted against the document's id.
+$sourceDocumentPrinter = new \Whity\Core\Document\Print\SourceDocumentPrinter(
+    $documentFieldRegistry,
+    $documentEmbedRegistry,
+    $settingsService,
+    new \Whity\Core\Document\DocumentSourceFileStore($storageDriver, $db->getPdo()),
+    new \Whity\Core\Document\Print\PrintLabels($serverLabels),
+);
+$documentIssuing = new \Whity\Core\Document\Issuing\DocumentIssuing(
+    $sourceDocumentPrinter,
+    new \Whity\Core\Document\DocumentSourceVersionRepository($db->getPdo()),
+    $documentIssuer,
+    $settingsService,
+    $flowDocumentRenderer,
+    $documentQrService,
+    $documentRenderMeters,
+    // DOCUMENT-AUTOMATION.md phase A: the document.* events, and replays by origin key.
+    $hookManager,
+    $documentRepository,
+    $documentArtifactRepository,
+);
 $documentPublishingHandler = new \Whity\Api\DocumentPublishingApiHandler(
     $documentSourcesHandler,
     new \Whity\Core\Document\DocumentSourceVersionRepository($db->getPdo()),
@@ -3120,12 +3088,15 @@ $documentPublishingHandler = new \Whity\Api\DocumentPublishingApiHandler(
     new \Whity\Core\Document\DocumentSourceFileStore($storageDriver, $db->getPdo()),
     new \Whity\Core\Document\Print\PrintLabels($serverLabels),
     $documentRenderMeters,
+    $documentQrService,
+    $documentIssuing,
 );
 $router->register('GET',  '/api/document-fields',                         [$documentPublishingHandler, 'fields'],       null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/document-fields/records',                 [$documentPublishingHandler, 'records'],      null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/document-sources/{id:\d+}/publish-check', [$documentPublishingHandler, 'publishCheck'], null, null, CorePermissions::DOCUMENTS_PUBLISH);
 $router->register('POST', '/api/document-sources/{id:\d+}/publish',       [$documentPublishingHandler, 'publish'],      null, null, CorePermissions::DOCUMENTS_PUBLISH);
 $router->register('GET',  '/api/document-sources/{id:\d+}/versions',      [$documentPublishingHandler, 'history'],      null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('GET',  '/api/document-sources/{id:\d+}/versions/{version:\d+}', [$documentPublishingHandler, 'version'], null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/document-sources/{id:\d+}/preview',       [$documentPublishingHandler, 'preview'],      null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('POST', '/api/document-sources/{id:\d+}/render',        [$documentPublishingHandler, 'render'],       null, null, CorePermissions::DOCUMENTS_RENDER);
 $router->register('POST', '/api/document-sources/{id:\d+}/print-labels',  [$documentPublishingHandler, 'printLabels'],  null, null, CorePermissions::DOCUMENTS_RENDER);
@@ -3178,33 +3149,6 @@ $documentViews = new \Whity\Core\Document\Organizer\DocumentViewRegistry($docume
 
 $documentCollectionRepository = new \Whity\Core\Document\DocumentCollectionRepository($db->getPdo());
 
-// 13a-nonies-quinquies. QR VERIFICATION ON DOCUMENTS (#1036). A code printed on
-// a document that anybody can scan to confirm it is genuine, and that a
-// signed-in reader with reach can follow through to the record.
-//
-// THE CONSTRAINT THIS WIRING EXISTS UNDER: the token IDENTIFIES a document and
-// must never AUTHORISE access to one. Note what is NOT passed to
-// DocumentQrService — no RoleChecker, no DocumentVisibilityPolicy, no permission
-// resolver of any kind. It has no collaborator that could answer an
-// authorization question, which is the structural half of the guarantee; the
-// other half is that the one route which turns a token into a record id
-// (`/api/documents/by-verification/{token}`) runs the UNCHANGED visibility
-// policy and answers 404 exactly as the id route does.
-//
-// The public base URL is the frontend's address ($frontendUrls: FRONTEND_URL,
-// else APP_URL; DOCUMENT_VERIFY_URL overrides the page). An instance that has never been told its address
-// cannot mint at all — DocumentQrService::isConfigured() is false, minting
-// returns null, and the record panel reports `configured: false` — rather than
-// encoding a relative path into a QR that nothing can follow.
-$documentQrTokenRepository = new \Whity\Core\Document\Qr\DocumentQrTokenRepository($db->getPdo());
-$documentQrScanRepository = new \Whity\Core\Document\Qr\DocumentQrScanRepository($db->getPdo());
-$documentQrService = new \Whity\Core\Document\Qr\DocumentQrService(
-    $db->getPdo(),
-    $documentQrTokenRepository,
-    $documentQrScanRepository,
-    $frontendUrls->base(),
-    $frontendUrls->link(\Whity\Core\Http\FrontendUrls::DOCUMENT_VERIFY)
-);
 
 // THE SDK RENDERING SEAM (#1072), registered here rather than beside
 // $flowDocumentRenderer above because it needs $documentQrService and PHP does
@@ -3230,7 +3174,10 @@ $sdkDocumentRenderer = new \Whity\Core\Document\Render\SdkDocumentRenderer(
     $flowDocumentRenderer,
     $documentIssuer,
     $settingsService,
-    $documentQrService
+    $documentQrService,
+    // The one issuing service: a plugin's document gets the same veto and events.
+    $documentIssuing,
+    $documentArtifactRepository
 );
 \Whity\register_service(
     \Whity\Sdk\Render\DocumentRenderer::class, // @phpstan-ignore-line
@@ -3280,10 +3227,11 @@ $documentsHandler = new \Whity\Api\DocumentsApiHandler(
     $documentArtifactRepository,
     $documentArtifactStore,
     $documentVisibilityPolicy,
-    $documentTemplateRepository,
-    $documentAccessPolicy,
-    $documentRenderer,
-    $documentIssuer,
+    // Editor M4c: issued from editor templates, visible as the editor's own
+    // list shows them, printed by the shared issuer.
+    $documentSourcesHandler,
+    $documentFieldRegistry,
+    $documentIssuing,
     $roleChecker,
     $settingsService,
     $documentViews,
@@ -3296,10 +3244,6 @@ $documentsHandler = new \Whity\Api\DocumentsApiHandler(
     // instance-cached copies of both, which is precisely the drift those two
     // classes exist to prevent.
     $db->getPdo(),
-    // The designer's OU-reach predicate (migration 117): the ISSUE path reads
-    // a template, and must withhold one filed at a unit the caller has no
-    // standing at exactly as the designer's list does.
-    $ouReachResolver,
     // #993: the document RECORD PAGE gates its regions separately — who may
     // re-issue the document, who may add to its trail, and whether it is
     // currently awaiting this caller are three different questions — and the
@@ -3321,7 +3265,6 @@ $documentsHandler = new \Whity\Api\DocumentsApiHandler(
 );
 $documentQrHandler = new \Whity\Api\DocumentQrApiHandler(
     $documentRepository,
-    $documentTemplateRepository,
     $documentVisibilityPolicy,
     $documentQrService,
     $documentQrScanRepository,
@@ -3342,27 +3285,21 @@ $documentVerificationHandler = new \Whity\Api\DocumentVerificationApiHandler(
 // equally fine and would be a bug the day the constraint is loosened.
 $router->register('GET',  '/api/documents/views',                                      [$documentsHandler, 'views'],           null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/documents',                                            [$documentsHandler, 'list'],            null, null, CorePermissions::DOCUMENTS_READ);
-// CREATING a document: gated on DOCUMENTS_RENDER, and deliberately not on a new
-// slug of its own. Migration 113 already settled who may bring a document into
-// existence when it chose the audience for `documents:route` — "`documents:render`
-// is what gates `persist: true` on the render routes, so a role holding it is
-// precisely a role that can bring a document into existence". A `documents:create`
-// minted here would be a second answer to that question and, on every install
-// that already exists, a permission NOBODY HOLDS: the route would 403 for the
-// admin role, the demo dean and the registry officer alike until somebody wrote
-// a grant migration. The slug chosen is one the seeded `admin` role holds
-// (migration 060) and one four of the five demo roles hold, so the gate is a
-// gate rather than a lockout.
+// ISSUING a document — creating it, correcting it, and changing its QR code —
+// is gated on DOCUMENTS_ISSUE (editor M4c, the owner's call on 31 Oct), apart
+// from DOCUMENTS_RENDER, which now only previews and stores nothing. Migration
+// 165 grants it to every role that held render, so on every existing install
+// the people who could issue yesterday still can: a gate rather than a lockout.
 //
 // Note this route does NOT require the render TIER to be running — the
 // permission and the `documents.render_enabled` setting answer different
 // questions, and the handler renders opportunistically. See
 // DocumentsApiHandler::create().
-$router->register('POST', '/api/documents',                                            [$documentsHandler, 'create'],          null, null, CorePermissions::DOCUMENTS_RENDER);
+$router->register('POST', '/api/documents',                                            [$documentsHandler, 'create'],          null, null, CorePermissions::DOCUMENTS_ISSUE);
 $router->register('GET',  '/api/documents/{id:\d+}',                                   [$documentsHandler, 'show'],            null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/documents/{id:\d+}/content',                           [$documentsHandler, 'content'],         null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/documents/{id:\d+}/artifacts/{artifactId:\d+}/content', [$documentsHandler, 'artifactContent'], null, null, CorePermissions::DOCUMENTS_READ);
-$router->register('POST', '/api/documents/{id:\d+}/render',                            [$documentsHandler, 'rerender'],        null, null, CorePermissions::DOCUMENTS_RENDER);
+$router->register('POST', '/api/documents/{id:\d+}/render',                            [$documentsHandler, 'rerender'],        null, null, CorePermissions::DOCUMENTS_ISSUE);
 
 // #1036: the document's verification code.
 //
@@ -3381,12 +3318,11 @@ $router->register('GET',    '/api/documents/by-verification/{token}',           
 // DocumentsApiHandler::recordSections() — #975's rule that a region's dedicated
 // route carries the same gate as the region.
 $router->register('GET',    '/api/documents/{id:\d+}/qr',                              [$documentQrHandler, 'show'],   null, null, CorePermissions::DOCUMENTS_READ);
-// Rotating and withdrawing are gated on DOCUMENTS_RENDER — the slug that
-// already means "may change what this document's paper says", held by the
-// seeded admin role and four of the five demo roles, so the gate is a gate
-// rather than a lockout (the same argument POST /api/documents makes above).
-$router->register('POST',   '/api/documents/{id:\d+}/qr',                              [$documentQrHandler, 'mint'],   null, null, CorePermissions::DOCUMENTS_RENDER);
-$router->register('DELETE', '/api/documents/{id:\d+}/qr',                              [$documentQrHandler, 'revoke'], null, null, CorePermissions::DOCUMENTS_RENDER);
+// Rotating and withdrawing are gated on DOCUMENTS_ISSUE — the slug that means
+// "may change what this document's paper says", like issuing a corrected
+// version (see POST /api/documents above).
+$router->register('POST',   '/api/documents/{id:\d+}/qr',                              [$documentQrHandler, 'mint'],   null, null, CorePermissions::DOCUMENTS_ISSUE);
+$router->register('DELETE', '/api/documents/{id:\d+}/qr',                              [$documentQrHandler, 'revoke'], null, null, CorePermissions::DOCUMENTS_ISSUE);
 
 // THE PUBLIC END. Unauthenticated by construction — a courier holding a printed
 // decision has no session, and the whole point is that they do not need one. It

@@ -21,7 +21,7 @@ namespace Whity\Core\Document\Render;
  * Every failure mode — connection refused (service/profile not running),
  * DNS failure, timeout, non-200 status, or a 200 body that does not look like
  * a PDF — is normalised to {@see RenderServiceUnavailableException}. The
- * caller (DocumentRenderApiHandler) catches this and returns a generic 503;
+ * caller (the document renderers) catches this and returns a generic 503;
  * the real reason is logged here (server-side only) via error_log, never
  * leaked to the client (WC-186).
  */
@@ -52,18 +52,6 @@ final class RenderServiceClient implements RenderServiceClientInterface
     public function isConfigured(): bool
     {
         return $this->baseUrl !== '' && strlen($this->sharedSecret) >= 32;
-    }
-
-    /**
-     * POST the render payload to `whity_render` and return the raw PDF bytes.
-     *
-     * @param array<string, mixed> $payload {template, dataRows, sheet, blocks}
-     * @throws RenderServiceUnavailableException On any transport failure, a
-     *         non-200 response, or a 200 body that is not a PDF.
-     */
-    public function render(array $payload): string
-    {
-        return $this->postForPdf('/render', $payload)[0];
     }
 
     /**

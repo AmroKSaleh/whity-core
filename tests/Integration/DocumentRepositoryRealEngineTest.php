@@ -7,14 +7,20 @@ namespace Tests\Integration;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
-use Whity\Core\Document\DocumentBlockRepository;
-use Whity\Core\Document\DocumentTemplateRepository;
+use Whity\Core\Document\DocumentRepository;
+use Whity\Core\Document\DocumentSourceRepository;
+use Whity\Core\Document\DocumentSourceVersionRepository;
 
 /**
- * Real-engine tests for the document-designer repositories (WC-docdesigner): the
- * tenant-isolation proof for `document_templates` + `document_blocks`, plus the
- * JSON `data` round-trip (the client object is the contract) and the governance
- * columns (scope / required_permission / is_system).
+ * Real-engine tests for the repositories documents are issued through since
+ * editor M4c: the editor's templates (`document_sources`, published versions
+ * in `document_source_versions`) and the issued records (`documents`), which
+ * now say which template and which VERSION they were issued from.
+ *
+ * The old designer's repositories (`document_templates`, `document_blocks`)
+ * are gone with their tables (migration 164); what replaced their tests here
+ * is the same two kinds of claim about the new tables — tenant isolation, and
+ * that what is written is what is read back, on both engines.
  */
 final class DocumentRepositoryRealEngineTest extends TestCase
 {
@@ -22,282 +28,160 @@ final class DocumentRepositoryRealEngineTest extends TestCase
     private const TENANT_B = 2;
 
     private PDO $pdo;
-    private DocumentTemplateRepository $templates;
-    private DocumentBlockRepository $blocks;
+    private DocumentSourceRepository $sources;
+    private DocumentSourceVersionRepository $versions;
+    private DocumentRepository $documents;
 
     protected function setUp(): void
     {
         $this->pdo = SchemaFromMigrations::make(true);
-        $this->pdo->exec("INSERT INTO tenants (id, name, slug) VALUES (1, 'a', 'a'), (2, 'b', 'b')");
-        $this->templates = new DocumentTemplateRepository($this->pdo);
-        $this->blocks = new DocumentBlockRepository($this->pdo);
+        $this->pdo->exec("INSERT INTO tenants (id, name, slug) VALUES (1, 'Example Bakery', 'example-bakery'), (2, 'Example Clinic', 'example-clinic')");
+        $this->sources = new DocumentSourceRepository($this->pdo);
+        $this->versions = new DocumentSourceVersionRepository($this->pdo);
+        $this->documents = new DocumentRepository($this->pdo);
     }
 
-    /**
-     * A representative v2 DocTemplate — nested pages/elements — to prove the JSON
-     * round-trips byte-faithfully through the jsonb column.
-     *
-     * @return array<string, mixed>
-     */
-    private function sampleTemplate(): array
+    /** @param array{starter_key?: string, legacy_template_id?: int, own_fields?: list<array<string, string>>} $extra */
+    private function template(int $tenantId, string $title, array $extra = []): int
     {
-        return [
-            'version' => 2,
-            'name' => 'Invoice',
-            'page' => ['widthMm' => 210, 'heightMm' => 297, 'marginMm' => 10, 'background' => '#ffffff'],
-            'placeholders' => [['key' => 'customer', 'label' => 'Customer', 'sample' => 'Acme']],
-            'pages' => [[
-                'id' => 'p1',
-                'elements' => [
-                    ['id' => 'e1', 'type' => 'text', 'x' => 5, 'y' => 5, 'w' => 50, 'h' => 10, 'rotation' => 0, 'z' => 1, 'text' => 'Hello {{customer}}'],
-                    ['id' => 'e2', 'type' => 'blockInstance', 'x' => 0, 'y' => 20, 'w' => 80, 'h' => 30, 'rotation' => 0, 'z' => 2, 'blockId' => 'blk-42'],
-                ],
-            ]],
-        ];
+        return $this->sources->create($tenantId, $extra + [
+            'kind' => 'template',
+            'title' => $title,
+            'lang' => 'en',
+            'default_view' => 'page',
+            'blocks' => [['id' => 'b1', 'type' => 'paragraph', 'content' => [['type' => 'text', 'text' => $title]]]],
+            'scope' => 'tenant',
+            'created_by' => null,
+        ]);
     }
 
     // ── templates ───────────────────────────────────────────────────────────
 
-    public function testTemplateRoundTripsJsonAndGovernanceColumns(): void
-    {
-        $id = $this->templates->create(self::TENANT_A, [
-            'name' => 'Invoice',
-            'data' => $this->sampleTemplate(),
-            'scope' => 'tenant',
-            'required_permission' => 'documents:use:finance',
-            'is_system' => true,
-            'created_by' => 77,
-        ]);
-
-        $row = $this->templates->findById($id, self::TENANT_A);
-        self::assertNotNull($row);
-        // assertEquals, not assertSame: Postgres jsonb round-trips by VALUE but
-        // reorders object keys (SQLite preserves order — the classic mask). The
-        // client re-parses JSON, so value-equality is the contract; jsonb is kept
-        // for its containment queries (future block reference-integrity guard).
-        self::assertEquals($this->sampleTemplate(), $row['data'], 'the DocTemplate JSON must round-trip by value');
-        self::assertSame('tenant', $row['scope']);
-        self::assertSame('documents:use:finance', $row['required_permission']);
-        self::assertTrue($row['is_system']);
-        self::assertSame(77, $row['created_by']);
-    }
-
-    public function testTemplateIsTenantIsolated(): void
-    {
-        $id = $this->templates->create(self::TENANT_A, ['name' => 'A', 'data' => $this->sampleTemplate()]);
-
-        // Tenant B cannot read, update, or delete tenant A's template.
-        self::assertNull($this->templates->findById($id, self::TENANT_B));
-        self::assertSame(0, $this->templates->update($id, self::TENANT_B, ['name' => 'HIJACK']));
-        self::assertSame(0, $this->templates->delete($id, self::TENANT_B));
-
-        // The row is untouched under its real owner.
-        $row = $this->templates->findById($id, self::TENANT_A);
-        self::assertNotNull($row);
-        self::assertSame('A', $row['name']);
-
-        // And B's list never sees it.
-        self::assertSame([], $this->blocks->listForTenant(self::TENANT_B));
-        self::assertCount(1, $this->templates->listForTenant(self::TENANT_A));
-        self::assertSame([], $this->templates->listForTenant(self::TENANT_B));
-    }
-
-    public function testTemplateOwnerCanUpdateAndDelete(): void
-    {
-        $id = $this->templates->create(self::TENANT_A, ['name' => 'A', 'data' => ['version' => 2]]);
-        self::assertSame(1, $this->templates->update($id, self::TENANT_A, ['name' => 'A2', 'scope' => 'global']));
-        $row = $this->templates->findById($id, self::TENANT_A);
-        self::assertNotNull($row);
-        self::assertSame('A2', $row['name']);
-        self::assertSame('global', $row['scope']);
-
-        self::assertSame(1, $this->templates->delete($id, self::TENANT_A));
-        self::assertNull($this->templates->findById($id, self::TENANT_A));
-    }
-
-    public function testTemplateDefaultsScopePersonalAndNotSystem(): void
-    {
-        $id = $this->templates->create(self::TENANT_A, ['name' => 'A', 'data' => ['version' => 2]]);
-        $row = $this->templates->findById($id, self::TENANT_A);
-        self::assertNotNull($row);
-        self::assertSame('personal', $row['scope']);
-        self::assertFalse($row['is_system']);
-        self::assertNull($row['required_permission']);
-        self::assertNull($row['created_by']);
-    }
-
-    // ── blocks ──────────────────────────────────────────────────────────────
-
-    public function testBlockRoundTripsElementFragmentAndIsIsolated(): void
-    {
-        $elements = [
-            ['id' => 'b1', 'type' => 'image', 'x' => 0, 'y' => 0, 'w' => 40, 'h' => 20, 'rotation' => 0, 'z' => 1, 'src' => 'logo'],
-        ];
-        $id = $this->blocks->create(self::TENANT_A, ['name' => 'Logo lockup', 'data' => $elements, 'scope' => 'tenant']);
-
-        $row = $this->blocks->findById($id, self::TENANT_A);
-        self::assertNotNull($row);
-        self::assertEquals($elements, $row['data']); // value equality — jsonb reorders keys on PG
-        self::assertSame('tenant', $row['scope']);
-
-        // Isolation.
-        self::assertNull($this->blocks->findById($id, self::TENANT_B));
-        self::assertSame(0, $this->blocks->delete($id, self::TENANT_B));
-        self::assertNotNull($this->blocks->findById($id, self::TENANT_A));
-    }
-
-    // ── block reference-integrity guard (WC-521) ──────────────────────────────
-
     /**
-     * The delete-guard scan: a template holding a live `blockInstance` pointer
-     * at the block id is detected — on Postgres via the jsonb_path_exists()
-     * branch, on SQLite via the fetch+decode+scan fallback. Same answer either
-     * engine (the DocumentBlocksApiHandlerRealEngineTest 409/204 tests exercise
-     * this same method through the handler; this pins the repository method
-     * directly, tenant-scoped).
+     * Where a template came from survives the round trip: Whity's starter
+     * (`starter_key`, which the starter seeder reads to stay idempotent) and
+     * the old designer template it was converted from (`legacy_template_id`,
+     * which conversion reads for the same reason).
      */
-    public function testReferencesBlockDetectsALiveBlockInstancePointer(): void
+    public function testATemplateCarriesItsStarterAndLegacyOrigin(): void
     {
-        $blockId = $this->blocks->create(self::TENANT_A, ['name' => 'Logo', 'data' => [['id' => 'e1', 'type' => 'image']]]);
+        $starter = $this->template(self::TENANT_A, 'Payment reminder', ['starter_key' => 'payment-reminder']);
+        $converted = $this->template(self::TENANT_A, 'Faculty circular', ['legacy_template_id' => 41]);
+        $plain = $this->template(self::TENANT_A, 'Delivery note');
 
-        // No template references it yet.
-        self::assertFalse($this->templates->referencesBlock($blockId, self::TENANT_A));
+        $row = $this->sources->findById($starter, self::TENANT_A);
+        self::assertNotNull($row);
+        self::assertSame('payment-reminder', $row['starter_key']);
+        self::assertNull($row['legacy_template_id']);
 
-        $this->templates->create(self::TENANT_A, [
-            'name' => 'Invoice',
-            'data' => [
-                'version' => 2,
-                'pages' => [[
-                    'id' => 'p1',
-                    'elements' => [
-                        ['id' => 'e2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $blockId],
-                    ],
-                ]],
-            ],
-        ]);
+        $row = $this->sources->findById($converted, self::TENANT_A);
+        self::assertNotNull($row);
+        self::assertSame(41, $row['legacy_template_id']);
+        self::assertNull($row['starter_key']);
 
-        self::assertTrue($this->templates->referencesBlock($blockId, self::TENANT_A), 'a live blockInstance pointer must be detected');
+        $row = $this->sources->findById($plain, self::TENANT_A);
+        self::assertNotNull($row);
+        self::assertNull($row['starter_key']);
+        self::assertNull($row['legacy_template_id']);
 
-        // Tenant-scoped: the same block id is never "referenced" from another
-        // tenant's point of view, even if that tenant happens to hold a
-        // template pointing at the same numeric id (a different block, really).
-        self::assertFalse($this->templates->referencesBlock($blockId, self::TENANT_B));
+        self::assertSame(['payment-reminder' => true], $this->sources->starterKeys(self::TENANT_A));
+        self::assertSame([41 => true], $this->sources->convertedTemplateIds(self::TENANT_A));
+        self::assertSame([], $this->sources->starterKeys(self::TENANT_B), 'per tenant');
+    }
+
+    public function testATemplateIsTenantIsolated(): void
+    {
+        $id = $this->template(self::TENANT_A, 'Payment reminder');
+
+        self::assertNotNull($this->sources->findById($id, self::TENANT_A));
+        self::assertNull($this->sources->findById($id, self::TENANT_B));
+        self::assertNull($this->versions->publish($id, self::TENANT_B, 1, 1), 'another tenant cannot publish it');
+        self::assertNull($this->versions->find($id, self::TENANT_B, 1));
     }
 
     /**
-     * `referencingTemplates()` answers the same question as `referencesBlock()`
-     * but as a list — so the two must never be able to disagree. Asserted
-     * together, on one fixture, because they carry SEPARATE jsonpath/PHP-walk
-     * implementations and a drift between them would show up as a management
-     * screen that says "nothing uses this" over a delete that then 409s.
+     * Publishing copies the draft as it was at the checked version, and a
+     * stale version publishes nothing — so what was checked is what is issued.
      */
-    public function testReferencingTemplatesNamesEveryTemplateHoldingAPointer(): void
+    public function testPublishingCopiesTheCheckedDraftOnly(): void
     {
-        $blockId = $this->blocks->create(self::TENANT_A, ['name' => 'Logo', 'data' => [['id' => 'e1', 'type' => 'image']]]);
+        $id = $this->template(self::TENANT_A, 'Payment reminder', [
+            'own_fields' => [['key' => 'reference', 'label' => 'Reference']],
+        ]);
 
-        // assertCount, not assertSame([], …): PHPStan's PHPUnit extension takes an
-        // assertSame against a literal `[]` as narrowing the METHOD's return type
-        // to array{} for the rest of the scope, which then reports the honest
-        // agreement check further down as a comparison that can never be true.
-        self::assertCount(0, $this->templates->referencingTemplates($blockId, self::TENANT_A));
-        self::assertFalse($this->templates->referencesBlock($blockId, self::TENANT_A));
+        self::assertSame(1, $this->versions->publish($id, self::TENANT_A, 1, 1));
+        self::assertNull($this->versions->publish($id, self::TENANT_A, 7, 1), 'a draft version that is not the current one');
 
-        $this->templates->create(self::TENANT_A, ['name' => 'Invoice', 'data' => $this->treeReferencing($blockId)]);
-        $this->templates->create(self::TENANT_A, ['name' => 'Works order', 'data' => $this->treeReferencing($blockId)]);
-        // A template pointing elsewhere, and one with no pointer at all.
-        $this->templates->create(self::TENANT_A, ['name' => 'Other block', 'data' => $this->treeReferencing($blockId + 999)]);
-        $this->templates->create(self::TENANT_A, ['name' => 'Plain', 'data' => ['version' => 2, 'pages' => []]]);
+        $version = $this->versions->find($id, self::TENANT_A, 1);
+        self::assertNotNull($version);
+        self::assertSame('Payment reminder', $version['title']);
+        self::assertSame('Payment reminder', $version['blocks'][0]['content'][0]['text']);
+        self::assertSame([['key' => 'reference', 'label' => 'Reference']], $version['own_fields']);
 
-        $rows = $this->templates->referencingTemplates($blockId, self::TENANT_A);
-        $names = array_map(static fn (array $r): string => (string) $r['name'], $rows);
-        sort($names);
-        self::assertSame(['Invoice', 'Works order'], $names);
+        $row = $this->sources->findById($id, self::TENANT_A);
+        self::assertNotNull($row);
+        self::assertSame(1, $row['published_version']);
+    }
 
-        // The list and the boolean guard must never disagree — they carry separate
-        // jsonpath/PHP-walk implementations, and a drift shows up as a management
-        // screen saying "nothing uses this" over a delete the server then refuses.
-        self::assertSame(
-            $rows !== [],
-            $this->templates->referencesBlock($blockId, self::TENANT_A),
-            'referencingTemplates() and referencesBlock() answered differently'
-        );
+    // ── issued documents ────────────────────────────────────────────────────
 
-        // Tenant-scoped, exactly like the boolean guard.
-        self::assertCount(0, $this->templates->referencingTemplates($blockId, self::TENANT_B));
+    /**
+     * A document records the template and the version it was issued from —
+     * what a correction re-renders — on the single read and on the list, and
+     * is invisible from another tenant.
+     */
+    public function testADocumentRecordsItsTemplateAndVersion(): void
+    {
+        $source = $this->template(self::TENANT_A, 'Payment reminder');
+        $id = $this->documents->create(self::TENANT_A, [
+            'document_source_id' => $source,
+            'document_source_version' => 3,
+            'template_name' => 'Payment reminder',
+            'title' => 'Payment reminder · Example Clinic',
+            'variable_data' => [['template.reference' => 'INV-2026-0042']],
+        ]);
+
+        $row = $this->documents->findById($id, self::TENANT_A);
+        self::assertNotNull($row);
+        self::assertSame($source, $row['document_source_id']);
+        self::assertSame(3, $row['document_source_version']);
+        self::assertNull($row['document_template_id'], 'the old designer is not involved');
+        self::assertSame([['template.reference' => 'INV-2026-0042']], $row['variable_data']);
+
+        self::assertNull($this->documents->findById($id, self::TENANT_B));
     }
 
     /**
-     * The reference rows carry the governance columns the visibility policy reads
-     * — otherwise the handler could not filter them — and carry NO template body.
-     *
-     * The empty `data` is asserted rather than merely documented: a later "reuse
-     * normalizeRow, it is right there" refactor would silently start shipping N
-     * full template trees to render N names, and nothing else in the suite would
-     * notice.
+     * A document raised by a form or a plugin names no template, and says so
+     * with nulls rather than zeros: a zero would read as "template 0".
      */
-    public function testReferencingTemplatesCarryGovernanceColumnsButNotTheTemplateBody(): void
+    public function testADocumentWithNoTemplateRecordsNulls(): void
     {
-        $blockId = $this->blocks->create(self::TENANT_A, ['name' => 'Logo', 'data' => [['id' => 'e1', 'type' => 'image']]]);
-        $this->templates->create(self::TENANT_A, [
-            'name'                => 'Gated contract',
-            'data'                => $this->treeReferencing($blockId),
-            'scope'               => 'tenant',
-            'required_permission' => 'documents:use:contracts',
-            'created_by'          => 77,
-            'owner_ou_id'         => null,
-        ]);
+        $id = $this->documents->create(self::TENANT_A, ['template_name' => 'Leave request', 'title' => 'Leave request 12']);
 
-        $rows = $this->templates->referencingTemplates($blockId, self::TENANT_A);
-        self::assertCount(1, $rows);
-        $row = $rows[0];
-
-        self::assertSame('Gated contract', $row['name']);
-        self::assertSame('tenant', $row['scope']);
-        self::assertSame('documents:use:contracts', $row['required_permission']);
-        self::assertSame(77, $row['created_by']);
-        self::assertNull($row['owner_ou_id']);
-        self::assertFalse($row['is_system']);
-        self::assertSame(self::TENANT_A, $row['tenant_id']);
-        self::assertSame([], $row['data'], 'a usage listing must not haul every referencing template body across');
+        $row = $this->documents->findById($id, self::TENANT_A);
+        self::assertNotNull($row);
+        self::assertNull($row['document_source_id']);
+        self::assertNull($row['document_source_version']);
+        self::assertNull($row['variable_data'], 'nothing recorded is not the same as an empty row');
     }
 
     /**
-     * A minimal v2 tree whose only element points at $blockId.
-     *
-     * @return array<string, mixed>
+     * Arabic values are stored as Arabic, not as `\u` escapes: they decode
+     * either way, but the column has to stay readable to an operator querying
+     * it, and Arabic content is a first-class requirement.
      */
-    private function treeReferencing(int $blockId): array
+    public function testArabicValuesAreStoredReadably(): void
     {
-        return [
-            'version' => 2,
-            'pages' => [[
-                'id' => 'p1',
-                'elements' => [
-                    ['id' => 'e2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) $blockId],
-                ],
-            ]],
-        ];
-    }
-
-    public function testReferencesBlockIsFalseWhenNoTemplatePointsAtIt(): void
-    {
-        $blockId = $this->blocks->create(self::TENANT_A, ['name' => 'Unreferenced', 'data' => [['id' => 'e1', 'type' => 'image']]]);
-
-        // A template exists, but its blockInstance points at a different id.
-        $this->templates->create(self::TENANT_A, [
-            'name' => 'Invoice',
-            'data' => [
-                'version' => 2,
-                'pages' => [[
-                    'id' => 'p1',
-                    'elements' => [
-                        ['id' => 'e2', 'type' => 'blockInstance', 'x' => 0, 'y' => 0, 'w' => 10, 'h' => 10, 'rotation' => 0, 'z' => 1, 'blockId' => (string) ($blockId + 999)],
-                    ],
-                ]],
-            ],
+        $id = $this->documents->create(self::TENANT_A, [
+            'template_name' => 'Payment reminder',
+            'title' => 'تذكير بالدفع',
+            'variable_data' => [['template.customer' => 'مخبز المثال']],
         ]);
 
-        self::assertFalse($this->templates->referencesBlock($blockId, self::TENANT_A));
+        $stmt = $this->pdo->prepare('SELECT variable_data FROM documents WHERE id = ?');
+        $stmt->execute([$id]);
+        self::assertStringContainsString('مخبز المثال', (string) $stmt->fetchColumn());
     }
 
     /**

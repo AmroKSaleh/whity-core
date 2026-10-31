@@ -658,14 +658,15 @@ class OusApiHandler
                 );
             }
 
-            // Refuse while designer rows are still FILED here (migration 117).
+            // Refuse while documents are still FILED here (migrations 117 and
+            // 160; editor templates since the old designer went, migration 164).
             //
-            // `document_templates.owner_ou_id` / `document_blocks.owner_ou_id`
-            // carry ON DELETE SET NULL, the house convention for a nullable OU
-            // reference — and here that convention is the wrong semantic on its
-            // own: those columns are the WHERE half of a visibility rule, so
-            // letting the constraint fire would turn a delete into a silent
-            // WIDENING, republishing a faculty's templates to the whole tenant.
+            // `document_sources.owner_ou_id` carries ON DELETE SET NULL, the
+            // house convention for a nullable OU reference — and here that
+            // convention is the wrong semantic on its own: the column is the
+            // WHERE half of a visibility rule, so letting the constraint fire
+            // would turn a delete into a silent WIDENING, republishing a
+            // faculty's templates to the whole tenant.
             //
             // A third 409 beside the children and members ones, rather than a
             // cascade or an automatic re-filing to the parent: re-filing guesses
@@ -675,18 +676,15 @@ class OusApiHandler
             // guards above. The constraint stays as the backstop for anything
             // that deletes a unit by another route, where a widened-but-present
             // row beats a pointer to a unit that no longer exists.
-            $placedStmt = $this->db->prepare("
-                SELECT
-                    (SELECT COUNT(*) FROM document_templates WHERE owner_ou_id = ? AND tenant_id = ?)
-                  + (SELECT COUNT(*) FROM document_blocks    WHERE owner_ou_id = ? AND tenant_id = ?)
-                    AS placed
-            ");
-            $placedStmt->execute([$id, $tenantId, $id, $tenantId]);
+            $placedStmt = $this->db->prepare(
+                'SELECT COUNT(*) FROM document_sources WHERE owner_ou_id = ? AND tenant_id = ?'
+            );
+            $placedStmt->execute([$id, $tenantId]);
             $placedCount = (int) $placedStmt->fetchColumn();
             if ($placedCount > 0) {
                 return Response::error(
                     'Cannot delete organizational unit with ' . $placedCount
-                    . ' document template(s)/block(s) filed against it',
+                    . ' document(s) filed against it',
                     409
                 );
             }

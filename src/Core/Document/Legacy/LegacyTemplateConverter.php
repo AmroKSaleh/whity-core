@@ -12,9 +12,11 @@ namespace Whity\Core\Document\Legacy;
  * Canvas templates place elements at fixed millimetre positions, and blocks
  * flow, so a canvas becomes blocks in READING ORDER: page by page, top to
  * bottom, start to end. What has a block becomes one (text, fields, images,
- * barcodes, QR codes, maths); a horizontal line becomes a divider. What has
- * none (rectangles, vertical lines, saved block instances) is left out and
- * counted, and the document starts with a callout naming it, for the author
+ * barcodes, QR codes, maths); a horizontal line becomes a divider. A saved
+ * block's elements are placed where its instance sat (editor M4c: the saved
+ * blocks are removed with the old designer). What has no block (rectangles,
+ * vertical lines, a saved block that is gone) is left out and counted, and
+ * the document starts with a callout naming it, for the author
  * to check and delete. A template printed on label stock, or on a page the
  * size of a label, becomes a label sheet (E.43). Flow templates map block for
  * block.
@@ -42,20 +44,30 @@ final class LegacyTemplateConverter
     /** @var array<string, int> what was left out, by kind */
     private array $dropped = [];
 
+    /** @var array<array-key, list<array<string, mixed>>> saved block id => its elements */
+    private array $savedBlocks = [];
+
+    /** How deep saved blocks may nest, as the old designer allowed. */
+    private const MAX_BLOCK_DEPTH = 8;
+
     public function __construct(private readonly ConversionLabels $labels = new ConversionLabels())
     {
     }
 
     /**
-     * @param array<string, mixed> $data The old template's `data`.
+     * @param array<string, mixed>                          $data        The old template's `data`.
+     * @param array<array-key, list<array<string, mixed>>> $savedBlocks The tenant's saved blocks
+     *        (`document_blocks.data` by id): an instance's elements are placed where the instance
+     *        sat, since the saved blocks themselves don't survive the old designer.
      * @return array{kind: string, title: string, lang: string, page: array<string, mixed>, blocks: list<array<string, mixed>>,
      *               own_fields: list<array{key: string, label: string, sample?: string}>, dropped: array<string, int>}
      */
-    public function convert(string $name, array $data): array
+    public function convert(string $name, array $data, array $savedBlocks = []): array
     {
         $this->ids = 0;
         $this->own = [];
         $this->dropped = [];
+        $this->savedBlocks = $savedBlocks;
 
         foreach (is_array($data['placeholders'] ?? null) ? $data['placeholders'] : [] as $p) {
             if (is_array($p) && is_string($p['key'] ?? null)) {
@@ -148,7 +160,7 @@ final class LegacyTemplateConverter
             if ($n > 0 && $blocks !== []) {
                 $blocks[] = ['id' => $this->id(), 'type' => 'pageBreak'];
             }
-            $visible = array_values(array_filter($elements, static fn (array $e): bool => ($e['hidden'] ?? false) !== true));
+            $visible = $this->expanded($elements, 0.0, 0.0, []);
             // Reading order: rows top to bottom (within 2 mm is one row), then start to end.
             usort($visible, static function (array $a, array $b): int {
                 $dy = (float) ($a['y'] ?? 0) - (float) ($b['y'] ?? 0);
@@ -167,6 +179,38 @@ final class LegacyTemplateConverter
         }
 
         return $blocks;
+    }
+
+    /**
+     * The visible elements, with each saved block instance replaced by the
+     * block's own elements, moved to where the instance sat. A block that is
+     * gone, contains itself or nests too deep is left out and counted.
+     *
+     * @param list<array<string, mixed>> $elements
+     * @param list<string>               $path     The blocks open above this point.
+     * @return list<array<string, mixed>>
+     */
+    private function expanded(array $elements, float $dx, float $dy, array $path): array
+    {
+        $out = [];
+        foreach ($elements as $e) {
+            if (!is_array($e) || ($e['hidden'] ?? false) === true) {
+                continue;
+            }
+            if (($e['type'] ?? null) !== 'blockInstance') {
+                $out[] = ['x' => (float) ($e['x'] ?? 0) + $dx, 'y' => (float) ($e['y'] ?? 0) + $dy] + $e;
+                continue;
+            }
+            $id = (string) ($e['blockId'] ?? '');
+            $block = $this->savedBlocks[$id] ?? null;
+            if ($block === null || in_array($id, $path, true) || count($path) >= self::MAX_BLOCK_DEPTH) {
+                $out[] = $e;
+                continue;
+            }
+            array_push($out, ...$this->expanded($block, (float) ($e['x'] ?? 0) + $dx, (float) ($e['y'] ?? 0) + $dy, [...$path, $id]));
+        }
+
+        return $out;
     }
 
     /**

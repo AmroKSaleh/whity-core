@@ -486,11 +486,10 @@ final class SettingsRegistry
     // and the trail, the inbox and every folder are unaffected, because none of
     // them is derived from a notification.
     public const DOCUMENTS_ROUTING_NOTIFICATION_CHANNELS = 'documents.routing_notification_channels';
-    // The master switch for QR verification codes on documents (#1036), scope 1
-    // of three — the tenant setting, the per-template flag inside
-    // `document_templates.data`, and where the element sits on the page. They
-    // compose in {@see \Whity\Core\Document\Qr\DocumentQrPolicy}, which is also
-    // where the reasoning for the polarity of each one lives.
+    // The switch for QR verification codes on documents (#1036). Since the old
+    // designer went (editor M4c) it is the only one: the code is automatic and
+    // printed at the end of every document issued while it is on. See
+    // {@see \Whity\Core\Document\Qr\DocumentQrPolicy}.
     //
     // TENANT-OVERRIDABLE, unlike DOCUMENTS_RENDER_ENABLED above, and the
     // difference is real rather than a preference: the render switch asks

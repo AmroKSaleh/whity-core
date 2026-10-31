@@ -125,8 +125,7 @@ final class CoreApiSchemas
             self::planRoutes(),
             self::billingRoutes(),
             self::subscriptionRoutes(),
-            self::documentTemplateRoutes(),
-            self::documentBlockRoutes(),
+            self::featureRoutes(),
             self::documentSourceRoutes(),
             self::documentRecordRoutes(),
             self::documentRoutingRoutes(),
@@ -4791,78 +4790,16 @@ final class CoreApiSchemas
                 'external_ref' => self::str(true),
             ], []),
 
-            // ── Document/label designer templates (WC-docdesigner) ────────────
-            // `data` is the verbatim client DocTemplate JSON (freeform object).
-            'DocumentTemplate' => self::object([
-                'id' => self::int(),
-                'tenant_id' => self::int(),
-                'name' => self::str(),
-                'data' => ['type' => 'object', 'additionalProperties' => true],
-                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
-                'required_permission' => self::str(true),
-                'is_system' => self::bool(),
-                'created_by' => self::int(true),
-                // Where in the organisation the row is filed (migration 117). null = tenant-wide,
-                // which is what every row was before it and what an unplaced row still is.
-                'owner_ou_id' => self::int(true),
-                // WHICH shipped starter this row is, or null for anything a user made
-                // (#1013). `is_system` says "a system row" and cannot answer it, so a
-                // client rendering a Starter badge off that alone can label the row but
-                // never offer to restore the starter it came from.
-                'starter_key' => self::str(true),
-                'created_at' => self::str(),
-                'updated_at' => self::str(),
-            ], ['id', 'tenant_id', 'name', 'data', 'scope', 'is_system', 'created_at', 'updated_at']),
-            'DocumentTemplateListResponse' => self::listEnvelope('DocumentTemplate'),
-            'DocumentTemplateResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentTemplate')),
-            // scope/required_permission/owner_ou_id are all optional; setting a
-            // shared scope, a permission tag, or a placement requires
-            // documents:publish (403 otherwise). owner_ou_id must be a unit of the
-            // caller's own tenant (422 otherwise); null files the row tenant-wide.
-            'DocumentTemplateCreateRequest' => self::object([
-                'name' => self::str() + ['description' => 'Template name.'],
-                'data' => ['type' => 'object', 'additionalProperties' => true, 'description' => 'The template design as produced by the document designer (pages, elements, placeholders).'],
-                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system'], 'description' => 'Who can use it: `personal` (you), `tenant`, `global` or `system`. Anything but `personal` needs documents:publish.'],
-                'required_permission' => self::str(true) + ['description' => 'Permission a user must hold to use the template; null for none. Needs documents:publish.'],
-                'owner_ou_id' => self::int(true) + ['description' => 'Organizational unit the template is filed under; null files it tenant-wide. Needs documents:publish.'],
-            ], ['name', 'data']),
-            'DocumentTemplateUpdateRequest' => self::object([
-                'name' => self::str() + ['description' => 'New template name.'],
-                'data' => ['type' => 'object', 'additionalProperties' => true, 'description' => 'Replacement template design.'],
-                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system'], 'description' => 'Who can use it: `personal` (you), `tenant`, `global` or `system`. Anything but `personal` needs documents:publish.'],
-                'required_permission' => self::str(true) + ['description' => 'Permission a user must hold to use the template; null for none.'],
-                'owner_ou_id' => self::int(true) + ['description' => 'Organizational unit the template is filed under; null files it tenant-wide.'],
-            ], []),
-
-            // Server-side render (ADR 0012 / WC-docdesigner Track 2). `dataRows`
-            // is one flat string=>string map per label/row (omitted or empty ->
-            // a single row from the template's own placeholder samples);
-            // `sheet` is the optional N-up label-sheet tiling layout — both
-            // freeform (mirror the client's DocElement-adjacent JSON shapes
-            // rather than a rigid schema, same "verbatim client JSON" posture
-            // as DocumentTemplate.data itself).
-            //
-            // `persist` (#947 item 1) turns the render into a DOCUMENT RECORD:
-            // the response becomes a DocumentResponse (201) instead of PDF
-            // bytes. It defaults to FALSE because the dominant caller is the
-            // designer's preview, which must not write to storage — see
-            // DocumentRenderApiHandler. `title` names the record and is ignored
-            // when not persisting.
-            'DocumentRenderRequest' => self::object([
-                'dataRows' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']], 'description' => 'Values for the template\'s placeholders: one object per label or page, mapping placeholder key to text. Omitted or empty renders one copy with the template\'s sample values.'],
-                'sheet' => ['type' => 'object', 'additionalProperties' => true, 'nullable' => true, 'description' => 'Optional label-sheet layout for printing several labels per page; null for one per page.'],
-                'persist' => ['type' => 'boolean', 'default' => false, 'description' => 'true to record the result as a document (returns the record); false (default) returns the PDF as a preview only.'],
-                'title' => self::str(true) + ['description' => 'Title of the recorded document. Used only when `persist` is true.'],
-            ], []),
-
             // ── Issued documents (#947 item 1) ────────────────────────────────
             // A document is the RECORD; its artifacts are the immutable files
             // that were issued from it. `content_url` is the durable reference —
             // an API path, not a storage key (which is never on the wire) and
             // not a signed URL (the local driver cannot produce one).
-            // `document_template_id` is nullable because the template may be
-            // deleted after the fact; `template_name` is the snapshot that keeps
-            // the record legible when it is.
+            // `document_source_id` and `document_source_version` are the editor
+            // template and published version a document was issued from (editor
+            // M4c), which a correction re-renders. `document_template_id` is the
+            // old designer's template, kept for documents issued before it went;
+            // `template_name` is the snapshot that keeps the record legible.
             'DocumentArtifact' => self::object([
                 'id' => self::int(),
                 'document_id' => self::int(),
@@ -4880,6 +4817,9 @@ final class CoreApiSchemas
                 'id' => self::int(),
                 'tenant_id' => self::int(),
                 'document_template_id' => self::int(true),
+                'document_source_id' => self::int(true),
+                'document_source_version' => self::int(true),
+                'origin_key' => self::str(true),
                 'template_name' => self::str(),
                 'title' => self::str(),
                 'origin_ou_id' => self::int(true),
@@ -4957,25 +4897,25 @@ final class CoreApiSchemas
             // fallback, because a client that knows nothing but the template
             // should still be able to raise a document from it.
             //
-            // `dataRows` is the SAME shape the render routes take, deliberately,
-            // and is what the values are STORED as (migration 118,
-            // `documents.variable_data`) rather than a second authoring format
-            // that would have to be converted before it could be rendered. Keys
-            // are the template's own placeholder keys; a key the template does
-            // not declare is a 422 naming it, because a typo silently accepted
-            // renders as the literal text `{{reference}}` in a finished document.
+            // Issued from an editor template's PUBLISHED version (editor M4c):
+            // the record it is for fills its fields, and `values` fills the
+            // template's own fields. A field the template does not declare is a
+            // 422 naming it; a required field with no value is a 422 listing the
+            // paths in details.missing (E.27). What printed is stored with the
+            // document (migration 118, `documents.variable_data`).
             //
             // `render` is a TRI-STATE and its absent case is the common one:
             // absent = "render if this instance can", true = "I require an
             // artifact" (503 when it cannot), false = "record only". Omitting it
             // is what a client that does not care should do.
             'DocumentCreateRequest' => self::object([
-                'document_template_id' => self::int() + ['description' => 'Template to issue the document from (see GET /api/document-templates).'],
-                'title' => self::str(true) + ['description' => 'Document title; defaults from the template.'],
-                'dataRows' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']], 'description' => 'Values for the template\'s placeholders: one object per label or page, mapping placeholder key to text. A key the template does not declare is refused.'],
-                'sheet' => ['type' => 'object', 'additionalProperties' => true, 'nullable' => true, 'description' => 'Optional label-sheet layout for printing several labels per page; null for one per page.'],
+                'document_source_id' => self::int() + ['description' => 'The template to issue the document from (see GET /api/document-sources?kind=template): its published version is issued. A letter or report (a copy made to edit before issuing) is issued as it is now, frozen as a version.'],
+                'record' => self::str() + ['description' => 'The record the document is for, as `type:id`. Required when the template has a record type.'],
+                'values' => ['type' => 'object', 'additionalProperties' => ['type' => 'string'], 'description' => 'Values by field path: the template\'s own fields (for example {"template.reference": "REF-1042"}) and any field the record left empty. At most 1000 characters each. A field the template does not offer is refused, and a value for a field the record resolved is 422 `field_conflict`: merge data can\'t overwrite what the record says.'],
+                'title' => self::str(true) + ['description' => 'Document title; defaults to the template\'s title and the record\'s name.'],
+                'origin_key' => self::str(true) + ['description' => 'Your own name for what this document is, for example `order:4812:invoice` (1 to 160 letters, digits or : . _ / -). Issuing again with the same key returns the first document (200, `replayed: true`) instead of a second one; the same key for another template is 409 `origin_key_conflict`.'],
                 'render' => ['type' => 'boolean', 'nullable' => true, 'description' => 'Omit to render when this server can; true to require a rendered file (503 if rendering is unavailable); false to record without rendering.'],
-            ], ['document_template_id']),
+            ], ['document_source_id']),
 
             // Why the render outcome is a SIBLING of `data` rather than a status
             // code, and why `reason` is a closed vocabulary: a 201 means the
@@ -4988,6 +4928,7 @@ final class CoreApiSchemas
             // create's `resolved`/`delivered` keys.
             'DocumentCreateResponse' => self::object([
                 'data' => SchemaBuilder::ref('Document'),
+                'replayed' => self::bool() + ['description' => 'True when `origin_key` already named this document: nothing new was issued (HTTP 200).'],
                 'render' => self::object([
                     'attempted' => self::bool(),
                     'stored' => self::bool(),
@@ -5001,18 +4942,12 @@ final class CoreApiSchemas
                             'rejected',
                             'unavailable',
                             'storage_unavailable',
+                            'limit',
                             null,
                         ],
                     ],
                 ], ['attempted', 'stored']),
             ], ['data', 'render']),
-            // The re-render body. Same render inputs as DocumentRenderRequest
-            // minus `persist`/`title`: this route ALWAYS persists (that is what
-            // it is for) and never renames the record it appends to.
-            'DocumentRerenderRequest' => self::object([
-                'dataRows' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => ['type' => 'string']], 'description' => 'Values for the template\'s placeholders: one object per label or page, mapping placeholder key to text.'],
-                'sheet' => ['type' => 'object', 'additionalProperties' => true, 'nullable' => true, 'description' => 'Optional label-sheet layout for printing several labels per page; null for one per page.'],
-            ], []),
 
             // -- Document routing (#947 item 3) --------------------------------
             // A ROUTE is one circulation of one document; its STEPS are the
@@ -5651,31 +5586,6 @@ final class CoreApiSchemas
                 'starred' => self::bool(),
             ], ['data', 'starred']),
 
-            // ── Document/label designer blocks (WC-521) ───────────────────────
-            // `data` is the verbatim client DocElement[] fragment (freeform array);
-            // documents reference a block by POINTER (a `blockInstance` element
-            // carrying this block's id), never an inline copy.
-            'DocumentBlock' => self::object([
-                'id' => self::int(),
-                'tenant_id' => self::int(),
-                'name' => self::str(),
-                'data' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
-                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
-                'required_permission' => self::str(true),
-                'is_system' => self::bool(),
-                'created_by' => self::int(true),
-                // Where in the organisation the row is filed (migration 117). null = tenant-wide,
-                // which is what every row was before it and what an unplaced row still is.
-                'owner_ou_id' => self::int(true),
-                // WHICH shipped starter this row is, or null for anything a user made
-                // (#1013). `is_system` says "a system row" and cannot answer it, so a
-                // client rendering a Starter badge off that alone can label the row but
-                // never offer to restore the starter it came from.
-                'starter_key' => self::str(true),
-                'created_at' => self::str(),
-                'updated_at' => self::str(),
-            ], ['id', 'tenant_id', 'name', 'data', 'scope', 'is_system', 'created_at', 'updated_at']),
-            'DocumentBlockListResponse' => self::listEnvelope('DocumentBlock'),
             // ── The block editor's documents (editor M2) ──────────────────────
             // `blocks` is the WhityDocument contract's Block[], stored verbatim.
             // List rows omit it; GET /{id} and saves return it.
@@ -5698,9 +5608,28 @@ final class CoreApiSchemas
                 'created_by' => self::int(true),
                 'owner_ou_id' => self::int(true),
                 'updated_by' => self::int(true),
+                'starter_key' => self::str(true) + ['description' => 'Which of Whity\'s starters this is, or null for anything a person made'],
+                'legacy_template_id' => self::int(true) + ['description' => 'The old Document designer template this was converted from (migration 164), or null'],
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
             ], ['id', 'tenant_id', 'kind', 'title', 'lang', 'default_view', 'full_width', 'draft_version', 'scope', 'created_at', 'updated_at']),
+            'DocumentSourceAudienceRequest' => self::object([
+                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']] + ['description' => 'Who can see the document: `personal` (only its creator), `tenant`, `global` or `system`. Anything but personal needs documents:publish.'],
+                'required_permission' => self::str(true) + ['description' => 'A permission a reader must also hold to see a shared document; null for none. Needs documents:publish.'],
+                'owner_ou_id' => self::int(true) + ['description' => 'The organizational unit the document is filed under; null files it tenant-wide. Needs documents:publish.'],
+            ], []),
+            'DocumentSourceCopyRequest' => self::object([
+                'title' => self::str() + ['description' => 'The copy\'s title, at most 255 characters; defaults to the original\'s.'],
+            ], []),
+            'DocumentSourceVersionResponse' => self::dataEnvelope(self::object([
+                'version' => self::int(),
+                'title' => self::str(),
+                'page' => ['type' => 'object', 'nullable' => true, 'additionalProperties' => true],
+                'blocks' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
+                'own_fields' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentOwnField')],
+                'published_by' => self::int(true),
+                'published_at' => self::str(),
+            ], ['version', 'title', 'blocks', 'own_fields', 'published_at'])),
             'DocumentSourceListResponse' => self::listEnvelope('DocumentSource'),
             'DocumentSourceFileResponse' => self::object([
                 'data' => self::object([
@@ -5796,7 +5725,7 @@ final class CoreApiSchemas
             'DocumentSourceRenderRequest' => self::object([
                 'record' => self::str() + ['description' => 'The record to fill the fields from, as `type:id`. Required when the template has a record type.'],
                 'draft' => self::bool() + ['description' => 'Render the draft instead of the published version, as a preview. A draft is never issued.'],
-                'persist' => self::bool() + ['description' => 'Issue the PDF as a document; its values are kept with it.'],
+                'persist' => self::bool() + ['description' => 'Issue the published version as a document, as POST /api/documents does (201 with the document and what happened to its PDF); its values are kept with it.'],
             ], []),
             'DocumentOwnField' => self::object([
                 'key' => self::str() + ['description' => 'Lowercase letters, digits and underscores, at most 40; the field is `template.<key>`.'],
@@ -5832,39 +5761,6 @@ final class CoreApiSchemas
                 'blocks' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true], 'description' => 'The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type'],
                 'own_fields' => ['type' => 'array', 'nullable' => true, 'items' => SchemaBuilder::ref('DocumentOwnField'), 'description' => 'A template\'s own fields, for values no record type provides (a CSV column on a label sheet): a list of {key, label, sample?}, at most 50. The editor inserts each as the field `template.<key>`.'],
             ], []),
-            'DocumentBlockResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentBlock')),
-            // scope/required_permission/owner_ou_id are all optional; setting a
-            // shared scope, a permission tag, or a placement requires
-            // documents:publish (403 otherwise). owner_ou_id must be a unit of the
-            // caller's own tenant (422 otherwise); null files the row tenant-wide.
-            'DocumentBlockCreateRequest' => self::object([
-                'name' => self::str(),
-                'data' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
-                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
-                'required_permission' => self::str(true),
-                'owner_ou_id' => self::int(true),
-            ], ['name', 'data']),
-            'DocumentBlockUpdateRequest' => self::object([
-                'name' => self::str(),
-                'data' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
-                'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
-                'required_permission' => self::str(true),
-                'owner_ou_id' => self::int(true),
-            ], []),
-            // What would break if this block changed — the answer a management UI
-            // needs BEFORE offering an edit or a delete, since a block is
-            // pointer-referenced and an edit propagates to every instance.
-            //
-            // `templates` is row-filtered (never the identity of a template the
-            // caller may not see); `total` is NOT, and `hidden` is the difference.
-            // A visible-only total would understate the blast radius of an edit
-            // to exactly the callers whose reach is narrowest — the argument is
-            // written out in full on DocumentBlocksApiHandler::usage().
-            //
-            // `owner_ou_id` is an id, not a name: resolving unit names is
-            // ous:read's job and this route is gated on documents:read, so a
-            // client that cannot read units renders the id rather than being
-            // handed a name this endpoint had no authority to look up.
             // The FEATURE catalogue (#feature-flags). Three booleans per row on
             // purpose: "off" is not one condition, and an operator switch and a
             // missing entitlement need different actions from different people.
@@ -5878,34 +5774,6 @@ final class CoreApiSchemas
                 'entitled' => self::bool(),
             ], ['key', 'enabled', 'operator_enabled', 'entitlement', 'entitled']),
             'FeatureListResponse' => self::listEnvelope('Feature'),
-
-            'DocumentBlockUsage' => self::object([
-                'block_id' => self::int(),
-                'total' => self::int(),
-                'hidden' => self::int(),
-                'templates' => ['type' => 'array', 'items' => self::object([
-                    'id' => self::int(),
-                    'name' => self::str(),
-                    'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
-                    'required_permission' => self::str(true),
-                    'owner_ou_id' => self::int(true),
-                    'is_system' => self::bool(),
-                    'updated_at' => self::str(),
-                ], ['id', 'name', 'scope', 'is_system', 'updated_at'])],
-                // The OTHER kind of user (#1186). Blocks may contain blocks, so
-                // a block held only by another block used to report no users
-                // here and then refuse to delete with a 409.
-                'blocks' => ['type' => 'array', 'items' => self::object([
-                    'id' => self::int(),
-                    'name' => self::str(),
-                    'scope' => ['type' => 'string', 'enum' => ['personal', 'tenant', 'global', 'system']],
-                    'required_permission' => self::str(true),
-                    'owner_ou_id' => self::int(true),
-                    'is_system' => self::bool(),
-                    'updated_at' => self::str(),
-                ], ['id', 'name', 'scope', 'is_system', 'updated_at'])],
-            ], ['block_id', 'total', 'hidden', 'templates', 'blocks']),
-            'DocumentBlockUsageResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentBlockUsage')),
 
             // ── Resource-scoped role grants (WC-712 §3) ───────────────────────
             // `profile_id` nullability carries the meaning, so it is nullable
@@ -10137,80 +10005,6 @@ final class CoreApiSchemas
     }
 
     /**
-     * Document/label designer template routes (WC-docdesigner). Tenant-scoped,
-     * RBAC-gated CRUD; list/get are additionally row-filtered server-side by
-     * scope + required_permission, and publishing needs documents:publish.
-     *
-     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
-     */
-    private static function documentTemplateRoutes(): array
-    {
-        return [
-            self::permissionRoute('GET', '/api/document-templates', 'documents:read', [
-                'summary' => 'List document/label templates visible to the caller',
-                'tags' => ['documents'],
-                'responses' => [
-                    200 => self::jsonResponse('The templates the caller may see (RBAC-filtered)', 'DocumentTemplateListResponse'),
-                ] + self::authErrors(),
-            ]),
-            self::permissionRoute('POST', '/api/document-templates', 'documents:write', [
-                'summary' => 'Create a document/label template',
-                'tags' => ['documents'],
-                'request' => 'DocumentTemplateCreateRequest',
-                'responses' => [
-                    201 => self::jsonResponse('The created template', 'DocumentTemplateResponse'),
-                    403 => self::errorResponse('Publishing a shared template requires documents:publish'),
-                    422 => self::errorResponse('Validation failed'),
-                ] + self::authErrors(),
-            ]),
-            self::permissionRoute('GET', '/api/document-templates/{id:\d+}', 'documents:read', [
-                'summary' => 'Get a document/label template',
-                'tags' => ['documents'],
-                'responses' => [
-                    200 => self::jsonResponse('The template', 'DocumentTemplateResponse'),
-                    404 => self::errorResponse('Template not found or not visible to the caller'),
-                ] + self::authErrors(),
-            ]),
-            self::permissionRoute('PATCH', '/api/document-templates/{id:\d+}', 'documents:write', [
-                'summary' => 'Update a document/label template',
-                'tags' => ['documents'],
-                'request' => 'DocumentTemplateUpdateRequest',
-                'responses' => [
-                    200 => self::jsonResponse('The updated template', 'DocumentTemplateResponse'),
-                    403 => self::errorResponse('Publishing a shared template requires documents:publish'),
-                    404 => self::errorResponse('Template not found or not visible to the caller'),
-                    422 => self::errorResponse('Validation failed'),
-                ] + self::authErrors(),
-            ]),
-            self::permissionRoute('DELETE', '/api/document-templates/{id:\d+}', 'documents:write', [
-                'summary' => 'Delete a document/label template',
-                'tags' => ['documents'],
-                'responses' => [
-                    204 => ['description' => 'Template deleted'],
-                    404 => self::errorResponse('Template not found or not visible to the caller'),
-                ] + self::authErrors(),
-            ]),
-            // Server-side render (ADR 0012 / WC-docdesigner Track 2): calls the
-            // separate `whity_render` service and streams back a PDF. Gated on
-            // documents.render_enabled (503 when the operator has the render
-            // tier turned off) BEFORE any RBAC/tenant work; 503 again if the
-            // render service itself is unreachable/errors — never a raw
-            // exception or a downstream stack trace.
-            self::permissionRoute('POST', '/api/document-templates/{id:\d+}/render', 'documents:render', [
-                'summary' => 'Render a document/label template to PDF',
-                'tags' => ['documents'],
-                'request' => 'DocumentRenderRequest',
-                'responses' => [
-                    200 => ['description' => 'The rendered PDF', 'content' => ['application/pdf' => ['schema' => ['type' => 'string', 'format' => 'binary']]]],
-                    404 => self::errorResponse('Template not found or not visible to the caller'),
-                    422 => self::errorResponse('Validation failed (bad dataRows, or a batch/size limit exceeded)'),
-                    503 => self::errorResponse('Rendering is disabled on this instance, or the render service is unavailable'),
-                ] + self::authErrors(),
-            ]),
-        ];
-    }
-
-    /**
      * Issued-document routes (#947 item 1). Tenant-scoped; reads are gated on
      * documents:read at the route and row-filtered on top (you raised it, or
      * you hold documents:read:all), so a caller who may not see a document is
@@ -10258,8 +10052,8 @@ final class CoreApiSchemas
             // "precisely a role that can bring a document into existence", and a
             // new `documents:create` would be a permission nobody on any
             // existing install holds. See public/index.php's registration.
-            self::permissionRoute('POST', '/api/documents', 'documents:render', [
-                'summary' => 'Raise a document from a template, supplying values for its placeholders',
+            self::permissionRoute('POST', '/api/documents', 'documents:issue', [
+                'summary' => 'Issue a document from a template, for a record and with the template\'s own fields',
                 'description' =>
                     'The record is the deliverable and the rendered artifact is opportunistic. '
                     . '`documents.render_enabled` defaults to FALSE, so on a default install this '
@@ -10268,8 +10062,9 @@ final class CoreApiSchemas
                     . 'are stored on the record, and POST /api/documents/{id}/render mints the '
                     . 'artifact from them if the tier is later switched on. The `render` block says '
                     . 'what happened. Sending `render: true` turns "could not render" into a 503 '
-                    . 'instead, for a caller who genuinely requires the bytes. A template the caller '
-                    . 'cannot SEE is a 404, never a 403, and the check is the designer\'s own '
+                    . 'instead, for a caller who genuinely requires the bytes. The template\'s published '
+                    . 'version is issued, with the verification QR when the tenant has it on. A template '
+                    . 'the caller cannot SEE is a 404, never a 403, and the check is the editor\'s own '
                     . 'visibility policy — creating from a gated template must not be a way to read it.',
                 'tags' => ['documents'],
                 'request' => 'DocumentCreateRequest',
@@ -10278,10 +10073,12 @@ final class CoreApiSchemas
                         'The document, and whether an artifact was rendered for it',
                         'DocumentCreateResponse'
                     ),
-                    404 => self::errorResponse('No such template, or it is not visible to the caller'),
+                    200 => self::jsonResponse('The document `origin_key` already names; nothing new was issued', 'DocumentCreateResponse'),
+                    404 => self::errorResponse('No such template or record, or it is not visible to the caller'),
+                    409 => self::errorResponse('The template has no published version yet, `origin_key` names a document from another template (`origin_key_conflict`), or a plugin refused it (`vetoed`)'),
                     422 => self::errorResponse(
-                        'No template named, a bad dataRows shape, or a value supplied for a '
-                        . 'placeholder the template does not declare'
+                        'No template named, not a template, a bad record, a value for a field the '
+                        . 'template does not declare, or a required field with no value (details.missing)'
                     ),
                     503 => self::errorResponse(
                         'render:true was requested and rendering or persistence is disabled on this instance'
@@ -10358,15 +10155,20 @@ final class CoreApiSchemas
                     503 => self::errorResponse('The stored artifact could not be read from storage'),
                 ] + self::authErrors(),
             ]),
-            self::permissionRoute('POST', '/api/documents/{id:\\d+}/render', 'documents:render', [
+            self::permissionRoute('POST', '/api/documents/{id:\\d+}/render', 'documents:issue', [
                 'summary' => 'Re-render the document and APPEND a new artifact (never replaces one)',
+                'description' =>
+                    'Re-renders the template version the document was issued from, with the values it '
+                    . 'printed; records and charts are read again. A document issued from the old Document '
+                    . 'designer cannot be re-rendered (409, with details.document_source_id naming its '
+                    . 'converted template to issue a new one from).',
                 'tags' => ['documents'],
-                'request' => 'DocumentRerenderRequest',
                 'responses' => [
                     201 => self::jsonResponse('The document with the new artifact at the head of its history', 'DocumentResponse'),
                     404 => self::errorResponse('Document not found or not visible to the caller'),
-                    409 => self::errorResponse('The template this document was issued from is no longer available'),
-                    422 => self::errorResponse('Validation failed (bad dataRows, or a batch/size limit exceeded)'),
+                    409 => self::errorResponse('Nothing to re-render from: an old designer document, or its template is gone'),
+                    422 => self::errorResponse('The template could not be rendered with these values'),
+                    429 => self::errorResponse('The document render limit has been reached'),
                     503 => self::errorResponse('Rendering or persistence is disabled, or the render service is unavailable'),
                 ] + self::authErrors(),
             ]),
@@ -11131,7 +10933,7 @@ final class CoreApiSchemas
                     404 => self::errorResponse('No such document, or it is not visible to the caller'),
                 ] + self::authErrors(),
             ]),
-            self::permissionRoute('POST', '/api/documents/{id:\d+}/qr', 'documents:render', [
+            self::permissionRoute('POST', '/api/documents/{id:\d+}/qr', 'documents:issue', [
                 'summary' => 'Issue a new verification code, retiring the current one',
                 'description' =>
                     'ALWAYS ROTATES. The previous code is retired as `superseded` in the same '
@@ -11159,7 +10961,7 @@ final class CoreApiSchemas
                     503 => self::errorResponse('This instance has no public address configured'),
                 ] + self::authErrors(),
             ]),
-            self::permissionRoute('DELETE', '/api/documents/{id:\d+}/qr', 'documents:render', [
+            self::permissionRoute('DELETE', '/api/documents/{id:\d+}/qr', 'documents:issue', [
                 'summary' => 'Stop honouring the verification code on a document',
                 'description' =>
                     'The answer to "paper cannot be recalled". The symbol stays legible on every copy in '
@@ -11300,45 +11102,13 @@ final class CoreApiSchemas
     }
 
     /**
-     * Document/label designer block routes (WC-521). Tenant-scoped, RBAC-gated
-     * CRUD; list/get are additionally row-filtered server-side by scope +
-     * required_permission, publishing needs documents:publish, and delete is
-     * refused (409) while a template still holds a live blockInstance pointer
-     * at the block (reference-integrity guard).
+     * The feature catalogue (#feature-flags).
      *
      * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
      */
-    private static function documentBlockRoutes(): array
+    private static function featureRoutes(): array
     {
         return [
-            self::permissionRoute('GET', '/api/document-blocks', 'documents:read', [
-                'summary' => 'List document/label blocks visible to the caller',
-                'tags' => ['documents'],
-                'responses' => [
-                    200 => self::jsonResponse('The blocks the caller may see (RBAC-filtered)', 'DocumentBlockListResponse'),
-                ] + self::authErrors(),
-            ]),
-            self::permissionRoute('POST', '/api/document-blocks', 'documents:write', [
-                'summary' => 'Create a document/label block',
-                'tags' => ['documents'],
-                'request' => 'DocumentBlockCreateRequest',
-                'responses' => [
-                    201 => self::jsonResponse('The created block', 'DocumentBlockResponse'),
-                    403 => self::errorResponse('Publishing a shared block requires documents:publish'),
-                    422 => self::errorResponse('Validation failed'),
-                ] + self::authErrors(),
-            ]),
-            self::permissionRoute('GET', '/api/document-blocks/{id:\d+}', 'documents:read', [
-                'summary' => 'Get a document/label block',
-                'tags' => ['documents'],
-                'responses' => [
-                    200 => self::jsonResponse('The block', 'DocumentBlockResponse'),
-                    404 => self::errorResponse('Block not found or not visible to the caller'),
-                ] + self::authErrors(),
-            ]),
-            // Listed after GET /{id} and before the write routes purely for
-            // readability; `usage` is not a digit, so it could never have matched
-            // the /{id:\d+} constraint either way.
             self::permissionRoute('GET', '/api/features', 'settings:read', [
                 'summary' => 'Feature flags composed with the tenant plan: what this tenant can actually use',
                 'description' =>
@@ -11353,43 +11123,6 @@ final class CoreApiSchemas
                 'tags' => ['settings'],
                 'responses' => [
                     200 => self::jsonResponse('The feature catalogue for this tenant', 'FeatureListResponse'),
-                ] + self::authErrors(),
-            ]),
-            self::permissionRoute('GET', '/api/document-blocks/{id:\d+}/usage', 'documents:read', [
-                'summary' => 'What would break if this block changed: the templates and blocks that instance it',
-                'description' =>
-                    'A block is POINTER-referenced (a `blockInstance` element), so editing it propagates '
-                    . 'to everything that instances it — and unlike delete, an edit is never refused. '
-                    . 'This is the answer a client needs before offering either action. There are TWO kinds '
-                    . 'of user: `templates`, and `blocks`, since a block may contain another block. Both are '
-                    . 'row-filtered to what the caller may see; `total` counts EVERY reference of both kinds '
-                    . 'in the tenant and `hidden` is the difference, so a caller with narrow reach is told '
-                    . 'the edit reaches further than they can see instead of being quietly understated. '
-                    . '`total > 0` means exactly that a DELETE would be refused with 409.',
-                'tags' => ['documents'],
-                'responses' => [
-                    200 => self::jsonResponse('The referencing templates and blocks, plus the unfiltered total', 'DocumentBlockUsageResponse'),
-                    404 => self::errorResponse('Block not found or not visible to the caller'),
-                ] + self::authErrors(),
-            ]),
-            self::permissionRoute('PATCH', '/api/document-blocks/{id:\d+}', 'documents:write', [
-                'summary' => 'Update a document/label block',
-                'tags' => ['documents'],
-                'request' => 'DocumentBlockUpdateRequest',
-                'responses' => [
-                    200 => self::jsonResponse('The updated block', 'DocumentBlockResponse'),
-                    403 => self::errorResponse('Publishing a shared block requires documents:publish'),
-                    404 => self::errorResponse('Block not found or not visible to the caller'),
-                    422 => self::errorResponse('Validation failed'),
-                ] + self::authErrors(),
-            ]),
-            self::permissionRoute('DELETE', '/api/document-blocks/{id:\d+}', 'documents:write', [
-                'summary' => 'Delete a document/label block',
-                'tags' => ['documents'],
-                'responses' => [
-                    204 => ['description' => 'Block deleted'],
-                    404 => self::errorResponse('Block not found or not visible to the caller'),
-                    409 => self::errorResponse('Cannot delete a block that is still referenced by a template'),
                 ] + self::authErrors(),
             ]),
         ];
@@ -11458,6 +11191,50 @@ final class CoreApiSchemas
                 'responses' => [
                     204 => ['description' => 'Document deleted'],
                     404 => self::errorResponse('Document not found or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/document-sources/{id:\d+}', 'documents:write', [
+                'summary' => 'Change who can see an editor document',
+                'description' =>
+                    'Its scope, the permission a reader needs and the unit it is filed at (A31). Not part of '
+                    . 'the draft: it changes without a publish. Making a document shared needs documents:publish; '
+                    . 'a value sent back unchanged is not a change.',
+                'tags' => ['documents'],
+                'request' => 'DocumentSourceAudienceRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The document', 'DocumentSourceResponse'),
+                    403 => self::errorResponse('Sharing a document requires documents:publish'),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                    422 => self::errorResponse('Validation failed'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/document-sources/{id:\d+}/drafts', 'documents:write', [
+                'summary' => 'Start a document from a template, to change before issuing it',
+                'description' =>
+                    'The template\'s published version becomes a personal letter of the caller\'s, with the same '
+                    . 'record type and own fields, to change and then issue with POST /api/documents (which '
+                    . 'freezes what it says as a version). The template itself is untouched.',
+                'tags' => ['documents'],
+                'request' => 'DocumentSourceCopyRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The draft', 'DocumentSourceResponse'),
+                    404 => self::errorResponse('Template not found or not visible to the caller'),
+                    409 => self::errorResponse('The template has no published version yet'),
+                    422 => self::errorResponse('Not a template, or a bad title'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/document-sources/{id:\d+}/copy', 'documents:write', [
+                'summary' => 'Use a copy of an editor document',
+                'description' =>
+                    'A personal, unpublished draft of the caller\'s with the original\'s draft content and own '
+                    . 'fields, for example to start from one of Whity\'s starters. It does not inherit the '
+                    . 'original\'s audience.',
+                'tags' => ['documents'],
+                'request' => 'DocumentSourceCopyRequest',
+                'responses' => [
+                    201 => self::jsonResponse('The copy', 'DocumentSourceResponse'),
+                    404 => self::errorResponse('Document not found or not visible to the caller'),
+                    422 => self::errorResponse('Validation failed'),
                 ] + self::authErrors(),
             ]),
             self::permissionRoute('POST', '/api/document-sources/{id:\d+}/files', 'documents:write', array_merge([
@@ -11591,6 +11368,15 @@ final class CoreApiSchemas
                     404 => self::errorResponse('Document not found or not visible to the caller'),
                 ] + self::authErrors(),
             ]),
+            self::permissionRoute('GET', '/api/document-sources/{id:\d+}/versions/{version:\d+}', 'documents:read', [
+                'summary' => 'What one published version says',
+                'description' => 'Its title, page, blocks and own fields: what a document issued from it prints.',
+                'tags' => ['documents'],
+                'responses' => [
+                    200 => self::jsonResponse('The version', 'DocumentSourceVersionResponse'),
+                    404 => self::errorResponse('Document or version not found, or not visible to the caller'),
+                ] + self::authErrors(),
+            ]),
             self::permissionRoute('GET', '/api/document-sources/{id:\d+}/preview', 'documents:read', [
                 'summary' => 'Fill a template fields from one record, for Preview with a record',
                 'description' =>
@@ -11620,7 +11406,7 @@ final class CoreApiSchemas
                         'description' => 'The PDF',
                         'content' => ['application/pdf' => ['schema' => ['type' => 'string', 'format' => 'binary']]],
                     ],
-                    201 => self::jsonResponse('The issued document', 'DocumentResponse'),
+                    201 => self::jsonResponse('The issued document, and whether its PDF was stored', 'DocumentCreateResponse'),
                     404 => self::errorResponse('Document or record not found, or not visible to the caller'),
                     409 => self::errorResponse('The template has no published version yet'),
                     422 => self::errorResponse('A required field has no value, the record is missing, or the render was refused'),

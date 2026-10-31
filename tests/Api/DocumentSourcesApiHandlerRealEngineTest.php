@@ -19,6 +19,7 @@ use Whity\Core\Document\Embed\IssuedDocumentRecordProvider;
 use Whity\Core\Document\Embed\IssuedDocumentsByMonthChartSource;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\Document\DocumentSourceRepository;
+use Whity\Core\Document\DocumentSourceVersionRepository;
 use Whity\Core\Ou\OuReachResolver;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
@@ -74,6 +75,7 @@ final class DocumentSourcesApiHandlerRealEngineTest extends TestCase
             $roleChecker,
             new OuReachResolver($this->pdo, $resourceRoles),
             new DocumentSourceFileStore(new LocalStorageDriver($this->storageRoot), $this->pdo),
+            new DocumentSourceVersionRepository($this->pdo),
         );
 
         $documents = new DocumentRepository($this->pdo);
@@ -377,6 +379,92 @@ final class DocumentSourcesApiHandlerRealEngineTest extends TestCase
         self::assertSame(422, $this->save(self::WRITER, $id, '"1"', ['full_width' => 'yes'])->getStatusCode());
     }
 
+    // ── who can see it, and use a copy (A31, editor M4c) ────────────────────
+
+    /**
+     * Sharing is a publish action whether it happens at create or later: a
+     * writer may change a personal document's audience only to another
+     * personal one, and the publisher's change takes effect for readers.
+     */
+    public function testChangingWhoCanSeeADocumentNeedsPublishToShareIt(): void
+    {
+        $id = $this->idOf($this->create(self::OWNER, ['kind' => 'template', 'title' => 'Invoice']));
+
+        self::assertSame(422, $this->audience(self::OWNER, $id, [])->getStatusCode(), 'nothing to change');
+        self::assertSame(422, $this->audience(self::OWNER, $id, ['scope' => 'everyone'])->getStatusCode());
+
+        $shared = $this->audience(self::OWNER, $id, ['scope' => 'tenant', 'required_permission' => 'documents:read']);
+        self::assertSame(200, $shared->getStatusCode(), $shared->getBody());
+        self::assertSame('tenant', $this->data($shared)['scope']);
+        self::assertSame('documents:read', $this->data($shared)['required_permission']);
+        self::assertCount(1, $this->list(self::VIEWER), 'readers see it now');
+        self::assertSame(1, $this->data($shared)['draft_version'], 'not a draft change');
+
+        $mine = $this->idOf($this->create(self::WRITER, ['kind' => 'template', 'title' => 'Mine']));
+        self::assertSame(403, $this->audience(self::WRITER, $mine, ['scope' => 'tenant'])->getStatusCode(), 'sharing needs documents:publish');
+        self::assertSame(200, $this->audience(self::WRITER, $mine, ['scope' => 'personal'])->getStatusCode(), 'sending back what it already is changes nothing');
+        self::assertSame(404, $this->audience(self::VIEWER, $mine, ['scope' => 'personal'])->getStatusCode(), 'hidden is missing');
+        self::assertSame(404, $this->audience(self::FOREIGN, $id, ['scope' => 'personal'], self::OTHER_TENANT)->getStatusCode());
+    }
+
+    /**
+     * Use a copy: a personal, unpublished draft of the caller's with the
+     * original's content, whoever owned the original and whatever its audience.
+     */
+    public function testUseACopyIsAPersonalDraftWithTheOriginalsContent(): void
+    {
+        $blocks = [['id' => 'b1', 'type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Dear Example Clinic']]]];
+        $id = $this->idOf($this->create(self::OWNER, [
+            'kind' => 'label', 'title' => 'Shipping labels', 'scope' => 'tenant', 'blocks' => $blocks,
+            'page' => ['size' => 'A4', 'marginMm' => 16, 'letterhead' => false, 'labels' => ['columns' => 2, 'rows' => 4, 'size' => ['widthMm' => 99.1, 'heightMm' => 67.7], 'gapMm' => 2.5]],
+        ]));
+
+        $res = $this->copy(self::WRITER, $id, ['title' => 'Our shipping labels']);
+        self::assertSame(201, $res->getStatusCode(), $res->getBody());
+        $copy = $this->data($res);
+        self::assertNotSame($id, $copy['id']);
+        self::assertSame('Our shipping labels', $copy['title']);
+        self::assertSame('label', $copy['kind']);
+        self::assertSame('personal', $copy['scope'], 'it does not inherit an audience chosen for another document');
+        self::assertSame(self::WRITER, $copy['created_by']);
+        self::assertNull($copy['published_version']);
+        self::assertEquals($blocks, $copy['blocks']);
+        self::assertSame(4, $copy['page']['labels']['rows']);
+
+        self::assertSame('Shipping labels', $this->data($this->copy(self::WRITER, $id, []))['title'], 'the original\'s title by default');
+        self::assertSame(404, $this->copy(self::FOREIGN, $id, [], self::OTHER_TENANT)->getStatusCode());
+        self::assertSame(422, $this->copy(self::WRITER, $id, ['title' => str_repeat('x', 256)])->getStatusCode());
+    }
+
+    /**
+     * "Edit before issuing": the copy is a one-off letter made from the
+     * template's PUBLISHED version, not its draft, keeping its record type and
+     * own fields; a template never published has nothing to copy.
+     */
+    public function testStartingFromATemplateIsALetterFromThePublishedVersion(): void
+    {
+        $published = [['id' => 'b1', 'type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'Published text']]]];
+        $id = $this->idOf($this->create(self::OWNER, [
+            'kind' => 'template', 'title' => 'Invoice', 'scope' => 'tenant', 'record_type' => 'document',
+            'blocks' => $published, 'own_fields' => [['key' => 'note', 'label' => 'Note']],
+        ]));
+        self::assertSame(409, $this->drafts(self::WRITER, $id)->getStatusCode(), 'nothing published yet');
+
+        (new DocumentSourceVersionRepository($this->pdo))->publish($id, self::TENANT, 1, self::OWNER);
+        $this->save(self::OWNER, $id, '"1"', ['blocks' => [['id' => 'b1', 'type' => 'paragraph', 'content' => [['type' => 'text', 'text' => 'A draft nobody published']]]]]);
+
+        $res = $this->drafts(self::WRITER, $id);
+        self::assertSame(201, $res->getStatusCode(), $res->getBody());
+        $copy = $this->data($res);
+        self::assertSame('letter', $copy['kind']);
+        self::assertSame('document', $copy['record_type']);
+        self::assertEquals($published, $copy['blocks'], 'the published version, not the draft');
+        self::assertSame([['key' => 'note', 'label' => 'Note']], $copy['own_fields']);
+        self::assertSame('personal', $copy['scope']);
+
+        self::assertSame(422, $this->drafts(self::WRITER, $this->idOf($this->create(self::WRITER, ['kind' => 'note'])))->getStatusCode());
+    }
+
     public function testDelete(): void
     {
         $id = $this->idOf($this->create(self::WRITER, ['kind' => 'note']));
@@ -464,6 +552,32 @@ final class DocumentSourcesApiHandlerRealEngineTest extends TestCase
     private function create(int $userId, array $body, int $tenant = self::TENANT): Response
     {
         return $this->handler->create($this->request('POST', '/api/document-sources', $userId, (string) json_encode($body), $tenant));
+    }
+
+    /** @param array<string, mixed> $body */
+    private function audience(int $userId, int $id, array $body, int $tenant = self::TENANT): Response
+    {
+        return $this->handler->updateAudience(
+            $this->request('PATCH', '/api/document-sources/' . $id, $userId, (string) json_encode((object) $body), $tenant),
+            ['id' => (string) $id],
+        );
+    }
+
+    /** @param array<string, mixed> $body */
+    private function copy(int $userId, int $id, array $body, int $tenant = self::TENANT): Response
+    {
+        return $this->handler->copy(
+            $this->request('POST', '/api/document-sources/' . $id . '/copy', $userId, (string) json_encode((object) $body), $tenant),
+            ['id' => (string) $id],
+        );
+    }
+
+    private function drafts(int $userId, int $id, int $tenant = self::TENANT): Response
+    {
+        return $this->handler->drafts(
+            $this->request('POST', '/api/document-sources/' . $id . '/drafts', $userId, '{}', $tenant),
+            ['id' => (string) $id],
+        );
     }
 
     private function show(int $userId, int $id, int $tenant = self::TENANT): Response

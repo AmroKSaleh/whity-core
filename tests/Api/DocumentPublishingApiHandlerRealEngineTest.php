@@ -198,6 +198,14 @@ final class DocumentPublishingApiHandlerRealEngineTest extends TestCase
         self::assertSame([2, 1], array_column($versions, 'version'));
         self::assertSame(['Reminder, second edition', 'Payment reminder'], array_column($versions, 'title'));
 
+        // One version's content, for the editor's issuing mode to show what will print.
+        $v1 = $this->handler->version($this->request('GET', "/api/document-sources/{$id}/versions/1", self::OWNER), ['id' => (string) $id, 'version' => '1']);
+        self::assertSame(200, $v1->getStatusCode());
+        self::assertSame('Payment reminder', $this->data($v1)['title']);
+        self::assertIsArray($this->data($v1)['blocks']);
+        self::assertSame(404, $this->handler->version($this->request('GET', "/api/document-sources/{$id}/versions/9", self::OWNER), ['id' => (string) $id, 'version' => '9'])->getStatusCode());
+        self::assertSame(404, $this->handler->version($this->request('GET', "/api/document-sources/{$id}/versions/1", self::VIEWER), ['id' => (string) $id, 'version' => '1'])->getStatusCode(), 'a hidden template is missing');
+
         $shown = json_decode($this->sources->show($this->request('GET', "/api/document-sources/{$id}", self::OWNER), ['id' => (string) $id])->getBody(), true)['data'];
         self::assertSame(2, $shown['published_version']);
     }
@@ -264,6 +272,23 @@ final class DocumentPublishingApiHandlerRealEngineTest extends TestCase
 
     // ── render ──────────────────────────────────────────────────────────────
 
+    /**
+     * The feature flag (documents.render_enabled) is checked before anything
+     * else, and a disabled instance never calls Whity Render: the reference
+     * pattern for every flag (docs/wiki/Feature-Flags.md).
+     */
+    public function testRenderingOffIsA503AndNeverCallsTheRenderService(): void
+    {
+        $id = $this->template(self::OWNER, [$this->para('Hi')]);
+        $this->publish(self::OWNER, $id, '"1"');
+        $doc = $this->issue(self::OWNER, 'Payment reminder');
+        $this->settings->setGlobal(SettingsRegistry::DOCUMENTS_RENDER_ENABLED, 'false');
+
+        self::assertSame(503, $this->renderPdf(self::OWNER, $id, ['record' => 'document:' . $doc])->getStatusCode());
+        self::assertSame(503, $this->renderPdf(self::OWNER, $id, ['record' => 'document:' . $doc, 'persist' => true])->getStatusCode());
+        self::assertSame([], $this->render->calls, 'the render service was never called');
+    }
+
     public function testRenderPrintsThePublishedVersionWithTheValuesFrozenIn(): void
     {
         $this->settings->setTenant(self::TENANT, SettingsRegistry::BILLING_SELLER_NAME, 'Example Bakery');
@@ -323,6 +348,10 @@ final class DocumentPublishingApiHandlerRealEngineTest extends TestCase
         self::assertSame(201, $res->getStatusCode(), $res->getBody());
         $issued = $this->data($res);
         self::assertSame('Payment reminder · #' . $doc . ' · Payment reminder', $issued['title']);
+        self::assertSame(['attempted' => true, 'stored' => true, 'reason' => null], json_decode($res->getBody(), true)['render']);
+        self::assertCount(1, $issued['artifacts']);
+        self::assertSame($id, $issued['document_source_id'], 'the template it was issued from');
+        self::assertSame(1, $issued['document_source_version'], 'and the version');
 
         $row = (new DocumentRepository($this->pdo))->findById((int) $issued['id'], self::TENANT);
         self::assertNotNull($row);

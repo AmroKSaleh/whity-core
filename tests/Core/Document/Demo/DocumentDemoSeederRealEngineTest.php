@@ -15,12 +15,12 @@ use Whity\Core\Document\Demo\DocumentDemoSeeder;
 use Whity\Core\Document\DocumentAccessPolicy;
 use Whity\Core\Document\DocumentArtifactRepository;
 use Whity\Core\Document\DocumentArtifactStore;
-use Whity\Core\Document\DocumentBlockRepository;
 use Whity\Core\Document\DocumentCollectionRepository;
 use Whity\Core\Document\DocumentIssuer;
 use Whity\Core\Document\DocumentRepository;
-use Whity\Core\Document\DocumentStarterSeeder;
-use Whity\Core\Document\DocumentTemplateRepository;
+use Whity\Core\Document\DocumentSourceRepository;
+use Whity\Core\Document\DocumentSourceStarterSeeder;
+use Whity\Core\Document\DocumentSourceVersionRepository;
 use Whity\Core\Document\Qr\DocumentQrScanRepository;
 use Whity\Core\Document\Qr\DocumentQrService;
 use Whity\Core\Document\Qr\DocumentQrTokenRepository;
@@ -83,7 +83,7 @@ use Whity\Database\Database;
  * Plus idempotency, which is the property `seed` is run against dev databases
  * on the strength of, and two guards on the fixture's LEGIBILITY: that every
  * demo role can name a unit, a person and a role rather than printing their ids,
- * and that no designer row is gated on a permission every demo role holds —
+ * and that no demo template is gated on a permission every demo role holds —
  * which is what stops the next well-meant grant flattening the distinctions
  * above without failing anything.
  *
@@ -116,8 +116,8 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
     private Database $db;
     private string $storageRoot;
     private DocumentDemoSeeder $seeder;
-    private DocumentTemplateRepository $templates;
-    private DocumentBlockRepository $blocks;
+    private DocumentSourceRepository $sources;
+    private DocumentSourceVersionRepository $versions;
     private DocumentRepository $documents;
     private RouteTemplateRepository $routeTemplates;
     private DocumentQrTokenRepository $qrTokens;
@@ -146,8 +146,8 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
 
         $this->storageRoot = sys_get_temp_dir() . '/whity-doc-demo-' . bin2hex(random_bytes(6));
 
-        $this->templates = new DocumentTemplateRepository($this->pdo);
-        $this->blocks = new DocumentBlockRepository($this->pdo);
+        $this->sources = new DocumentSourceRepository($this->pdo);
+        $this->versions = new DocumentSourceVersionRepository($this->pdo);
         $this->documents = new DocumentRepository($this->pdo);
         $this->routeTemplates = new RouteTemplateRepository($this->pdo);
         $this->qrTokens = new DocumentQrTokenRepository($this->pdo);
@@ -178,9 +178,9 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
         $this->seeder = new DocumentDemoSeeder(
             $this->pdo,
             new DemoOrganisationSeeder($this->pdo, new \Whity\Core\Identity\ProfileProvisioner($this->pdo)),
-            new DocumentStarterSeeder($this->templates, $this->blocks),
-            $this->templates,
-            $this->blocks,
+            new DocumentSourceStarterSeeder($this->sources),
+            $this->sources,
+            $this->versions,
             $this->documents,
             new DocumentIssuer(
                 $this->pdo,
@@ -302,8 +302,8 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
      *
      * This is the case the fixture used to get wrong, and it was measured rather
      * than assumed: before the `documents:write`-tagged template existed,
-     * `civil-technician@` and `civil-secretary@` saw byte-identical template and
-     * block sets. Reach cannot separate them — they stand in one unit — and the
+     * `civil-technician@` and `civil-secretary@` saw byte-identical template
+     * sets. Reach cannot separate them — they stand in one unit — and the
      * only tag in the set was `documents:publish`, which neither holds.
      * "Technicians don't see contract templates" was therefore true only against
      * the DEAN, two levels up and four permissions richer, where a difference
@@ -394,12 +394,12 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
      *
      * The whole value of this dataset is that two people see different things.
      * A permission granted to EVERY demo role is, by construction, incapable of
-     * telling any two of them apart — so if a designer row were ever gated on
+     * telling any two of them apart — so if a demo template were ever gated on
      * one, that row would silently stop discriminating and every screen would
      * still render perfectly. This is the guard against the next well-meant
      * grant, not against the ones just added.
      */
-    public function testNoDesignerRowIsGatedOnAPermissionEveryDemoRoleHolds(): void
+    public function testNoDemoTemplateIsGatedOnAPermissionEveryDemoRoleHolds(): void
     {
         $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
 
@@ -412,13 +412,13 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
         }
 
         $tags = $this->taggedPermissions();
-        self::assertNotSame([], $tags, 'The fixture must gate at least one designer row on a permission.');
+        self::assertNotSame([], $tags, 'The fixture must gate at least one template on a permission.');
 
         foreach ($tags as $permission) {
             self::assertLessThan(
                 count($roleIds),
                 $holders[$permission] ?? 0,
-                "Every demo role holds '{$permission}', so gating a designer row on it hides that "
+                "Every demo role holds '{$permission}', so gating a template on it hides that "
                 . 'row from nobody — the fixture would look like it discriminates and would not.'
             );
             self::assertGreaterThan(
@@ -430,140 +430,128 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
         }
     }
 
-    /** Blocks are placed too, because {@see DocumentAccessPolicy} governs both tables. */
-    public function testBlocksArePlacedAsWellAsTemplates(): void
-    {
-        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
-
-        self::assertNotEquals(
-            $this->visibleBlockNames(DemoOrganisationSeeder::FACULTY_SECRETARY),
-            $this->visibleBlockNames(DemoOrganisationSeeder::CIVIL_SECRETARY),
-            'A demo that placed only templates would leave half of #1004 unverifiable by eye.'
-        );
-    }
-
-    // ── 1b. #1024: blocks are POINTERS, and the demo has to contain some ─────
+    // ── 1c. editor templates (editor M4c): published, and issued from ────────
 
     /**
-     * ONE BLOCK, INSTANCED BY TEMPLATES IN MORE THAN ONE UNIT.
+     * The editor's own starters reach the tenant, beside the demo's rows.
      *
-     * The regression this pins is that the dataset placed blocks and instanced
-     * them NOWHERE — zero `blockInstance` elements across every seeded template.
-     * A demo whose whole purpose is to make behaviour visible then showed the
-     * block library as though blocks were standalone documents: every usage count
-     * zero, the delete guard never engaged, the disclosure never populated. It did
-     * not merely omit synced patterns, it taught that blocks are copies.
-     *
-     * Asserted through the SAME repository query the `/usage` endpoint runs
-     * ({@see DocumentTemplateRepository::referencingTemplates()}), not through a
-     * re-scan of the JSON here, so a fixture that stopped satisfying the actual
-     * scanner could not pass this.
+     * Asserted by key against {@see DocumentSourceStarterSeeder::starters()}
+     * rather than by a count typed here, so a seventh starter keeps this green.
      */
-    public function testOneBlockIsInstancedByTemplatesInMoreThanOneUnit(): void
+    public function testTheEditorStartersAreSeededBesideTheDemoTemplates(): void
     {
         $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
 
-        $referencing = $this->templates->referencingTemplates($this->blockId('demo-faculty-letterhead'), self::TENANT);
-
-        self::assertGreaterThan(
-            1,
-            count($referencing),
-            'Propagation needs somewhere to propagate to: a block instanced once demonstrates nothing.'
-        );
-
-        $units = array_unique(array_map(static fn (array $row): ?int => $row['owner_ou_id'], $referencing));
-        self::assertGreaterThan(
-            1,
-            count($units),
-            'The referencing templates must sit in different units, or the reach half of the story is missing.'
-        );
-    }
-
-    /**
-     * THE CIVIL SECRETARY IS TOLD "2 templates, 1 you cannot see".
-     *
-     * The case worth seeding permanently, because it is the one that stops
-     * somebody editing a block believing they can see everything it affects. She
-     * can see the site-safety block — it is filed in her department — and exactly
-     * one of the two templates that instance it; the other is at Mechanical
-     * Engineering, out of her reach entirely.
-     *
-     * Computed the way {@see \Whity\Api\DocumentBlocksApiHandler::usage()}
-     * computes it — unfiltered total, filtered list, hidden as the difference —
-     * rather than by asserting on a literal the fixture could drift away from.
-     */
-    public function testTheCivilSecretaryIsToldOneOfTheTwoUsersIsHiddenFromHer(): void
-    {
-        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
-        $blockId = $this->blockId('demo-civil-safety-notice');
-
-        self::assertSame(
-            ['total' => 2, 'hidden' => 1],
-            $this->usageFor(DemoOrganisationSeeder::CIVIL_SECRETARY, $blockId),
-            'Her row must read "2 templates, 1 you cannot see" — a real number, not a zero.'
-        );
-
-        // And the disclosure is a DIFFERENCE, not a constant: the two people who
-        // reach the whole faculty are told the same total with nothing hidden, so
-        // the number above is about her reach rather than about the endpoint.
-        foreach ([DemoOrganisationSeeder::DEAN, DemoOrganisationSeeder::FACULTY_SECRETARY] as $email) {
-            self::assertSame(
-                ['total' => 2, 'hidden' => 0],
-                $this->usageFor($email, $blockId),
-                $email . ' reaches both units and must be told nothing is hidden.'
-            );
-        }
-    }
-
-    /**
-     * Every pointer the demo lays down resolves to a block that is actually there.
-     *
-     * A `blockInstance` carrying an id nothing matches renders as an orphan
-     * placeholder in the designer and counts towards nothing — a fixture that
-     * looked seeded and demonstrated the broken case instead of the working one.
-     * Cheap to get wrong (an id written before the block exists) and invisible
-     * without this.
-     */
-    public function testEveryBlockInstanceInTheDemoPointsAtABlockThatExists(): void
-    {
-        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
-
-        $blockIds = [];
-        foreach ($this->blocks->listForTenant(self::TENANT) as $block) {
-            $blockIds[(string) $block['id']] = true;
-        }
-
-        $found = 0;
-        foreach ($this->templates->listForTenant(self::TENANT) as $template) {
-            foreach (self::collectBlockIds($template['data']) as $referenced) {
-                $found++;
-                self::assertArrayHasKey(
-                    $referenced,
-                    $blockIds,
-                    'Template "' . $template['name'] . '" points at block ' . $referenced . ', which does not exist.'
-                );
+        $keys = [];
+        foreach ($this->sources->listForTenant(self::TENANT) as $row) {
+            if ($row['starter_key'] !== null) {
+                $keys[] = $row['starter_key'];
             }
         }
 
-        self::assertGreaterThan(0, $found, 'The whole point of #1024 is that there ARE pointers.');
+        foreach (array_keys((new DocumentSourceStarterSeeder($this->sources))->starters()) as $starter) {
+            self::assertContains($starter, $keys, "The editor starter '{$starter}' must be seeded.");
+        }
+        self::assertNotSame([], $this->demoTemplates(), 'The demo must seed its own templates too.');
     }
 
     /**
-     * And at least one template instances nothing.
+     * Every demo template is an editor template, published exactly once, and the
+     * published version is the draft as it was seeded.
      *
-     * The used-by-nothing state is what makes a delete safe, and a fixture in
-     * which every template references something renders it nowhere.
+     * Published because a document is issued from a VERSION (E.9): a demo whose
+     * templates were drafts could not have issued a single one of its documents
+     * through the product.
      */
-    public function testAtLeastOneSeededTemplateInstancesNoBlockAtAll(): void
+    public function testEveryDemoTemplateIsAnEditorTemplatePublishedOnce(): void
     {
         $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
 
-        $withoutPointers = array_filter(
-            $this->templates->listForTenant(self::TENANT),
-            static fn (array $row): bool => self::collectBlockIds($row['data']) === [],
-        );
+        foreach ($this->demoTemplates() as $row) {
+            $source = $this->sources->findById((int) $row['id'], self::TENANT);
+            self::assertNotNull($source);
+            self::assertSame('template', $source['kind']);
+            self::assertSame(DocumentAccessPolicy::SCOPE_TENANT, $source['scope'], 'A system row would skip the permission gate.');
+            self::assertNotNull($source['owner_ou_id'], 'Every demo template is placed at a unit.');
+            self::assertSame(1, $source['published_version'], $source['title'] . ' must be published once.');
 
-        self::assertNotSame([], $withoutPointers);
+            $history = $this->versions->listForSource((int) $source['id'], self::TENANT);
+            self::assertCount(1, $history);
+
+            $version = $this->versions->find((int) $source['id'], self::TENANT, 1);
+            self::assertNotNull($version);
+            self::assertSame($source['title'], $version['title']);
+            self::assertSame($source['blocks'], $version['blocks']);
+            self::assertNotSame([], $version['own_fields']);
+
+            // Every own-field node in the blocks names a field the template
+            // declares; an undeclared one prints as an unknown field.
+            $declared = array_map(static fn (array $f): string => 'template.' . $f['key'], $version['own_fields']);
+            foreach (self::fieldPaths($version['blocks']) as $path) {
+                if (str_starts_with($path, 'template.')) {
+                    self::assertContains($path, $declared, $source['title'] . " prints an undeclared field '{$path}'.");
+                }
+            }
+        }
+    }
+
+    /**
+     * Every demo document records the template and version it was issued from
+     * and the values it printed (migration 164) — the provenance a correction
+     * re-renders from.
+     */
+    public function testEveryDemoDocumentIsIssuedFromAPublishedDemoTemplateVersion(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        $demoIds = array_map(static fn (array $row): int => (int) $row['id'], $this->demoTemplates());
+        $used = [];
+
+        $titles = $this->documentTitles();
+        self::assertNotSame([], $titles);
+        foreach (array_keys($titles) as $documentId) {
+            $document = $this->documents->findById($documentId, self::TENANT);
+            self::assertNotNull($document);
+            $sourceId = $document['document_source_id'];
+            self::assertIsInt($sourceId, $document['title'] . ' must record the template it was issued from.');
+            self::assertContains($sourceId, $demoIds);
+            self::assertSame(1, $document['document_source_version']);
+
+            $version = $this->versions->find($sourceId, self::TENANT, 1);
+            self::assertNotNull($version);
+            self::assertSame($version['title'], $document['template_name'], 'The snapshot is the version title.');
+
+            $expected = [];
+            foreach ($version['own_fields'] as $field) {
+                $expected['template.' . $field['key']] = (string) $field['sample'];
+            }
+            // Key order is not part of the claim: PostgreSQL's jsonb keeps its own.
+            $rows = $document['variable_data'];
+            self::assertIsArray($rows);
+            self::assertCount(1, $rows, 'One row: the values it printed.');
+            $printed = $rows[0];
+            ksort($expected);
+            ksort($printed);
+            self::assertSame($expected, $printed, 'The row holds the values it printed.');
+
+            $used[$sourceId] = true;
+        }
+
+        self::assertGreaterThan(1, count($used), 'The documents come from more than one template.');
+    }
+
+    /** A second run adds no template and publishes no further version. */
+    public function testASecondRunAddsNoTemplateAndNoVersion(): void
+    {
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+        $sources = count($this->sources->listForTenant(self::TENANT));
+        $versions = $this->countRows('document_source_versions');
+
+        $this->seeder->seedForTenant(self::TENANT, 'Demo Tenant');
+
+        self::assertSame($sources, count($this->sources->listForTenant(self::TENANT)));
+        self::assertSame($versions, $this->countRows('document_source_versions'));
+        self::assertGreaterThan(0, $versions);
     }
 
     // ── 2. routing states that differ from each other ────────────────────────
@@ -949,15 +937,6 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
         self::assertGreaterThan(0, $first);
     }
 
-    // ── helpers ──────────────────────────────────────────────────────────────
-
-    /**
-     * A demo block's id from its stable `starter_key`.
-     *
-     * By key rather than by name because the key is the identity — and because
-     * the row carries it again (#1013), which is what let the seeder point a
-     * template at a block in the first place.
-     */
     // ── 8. the OUTCOMES tranche: what was decided, not only where it is ─────
 
     /**
@@ -1700,74 +1679,54 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
         return $rules;
     }
 
-    private function blockId(string $starterKey): int
-    {
-        foreach ($this->blocks->listForTenant(self::TENANT) as $row) {
-            if (($row['starter_key'] ?? null) === $starterKey) {
-                return (int) $row['id'];
-            }
-        }
-
-        self::fail('The demo must seed a block with starter_key "' . $starterKey . '".');
-    }
-
     /**
-     * `total` and `hidden` for one caller, computed exactly as
-     * {@see \Whity\Api\DocumentBlocksApiHandler::usage()} computes them: the
-     * unfiltered set of referencing templates, and the same set through
-     * {@see DocumentAccessPolicy}.
+     * The demo's own templates, by the `demo.` starter-key prefix the seeder
+     * guarantees.
      *
-     * @return array{total: int, hidden: int}
+     * @return list<array<string, mixed>>
      */
-    private function usageFor(string $email, int $blockId): array
+    private function demoTemplates(): array
     {
-        $referencing = $this->templates->referencingTemplates($blockId, self::TENANT);
-        // ROWS, not names: two templates may legitimately share a name, and a
-        // count of distinct names would then quietly understate `hidden` — which
-        // is the one number this whole fixture exists to make non-zero.
-        $visible = $this->visibleRows($email, $referencing);
-
-        return ['total' => count($referencing), 'hidden' => count($referencing) - count($visible)];
+        return array_values(array_filter(
+            $this->sources->listForTenant(self::TENANT),
+            static fn (array $row): bool => is_string($row['starter_key']) && str_starts_with($row['starter_key'], 'demo.'),
+        ));
     }
 
     /**
-     * The block ids a template body references, by the same recursive-descent
-     * walk both production scanners use (PHP's
-     * {@see DocumentTemplateRepository::referencingTemplates()} and the
-     * TypeScript `collectBlockIds`).
+     * Every inline field path in a block list, at any depth.
      *
-     * @param mixed $node
      * @return list<string>
      */
-    private static function collectBlockIds(mixed $node): array
+    private static function fieldPaths(mixed $node): array
     {
         if (!is_array($node)) {
             return [];
         }
-
         $out = [];
-        if (($node['type'] ?? null) === 'blockInstance' && array_key_exists('blockId', $node)) {
-            $out[] = (string) $node['blockId'];
+        if (($node['type'] ?? null) === 'field' && is_string($node['path'] ?? null)) {
+            $out[] = $node['path'];
         }
         foreach ($node as $value) {
-            foreach (self::collectBlockIds($value) as $id) {
-                $out[] = $id;
-            }
+            array_push($out, ...self::fieldPaths($value));
         }
 
         return $out;
     }
 
+    private function countRows(string $table): int
+    {
+        // The table name comes from a literal at the call site, never from input.
+        $stmt = $this->pdo->prepare('SELECT count(*) FROM ' . $table . ' WHERE tenant_id = :tenant_id');
+        $stmt->execute([':tenant_id' => self::TENANT]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
     /** @return list<string> Sorted, so set comparisons are order-independent. */
     private function visibleTemplateNames(string $email): array
     {
-        return $this->visibleNames($email, $this->templates->listForTenant(self::TENANT));
-    }
-
-    /** @return list<string> */
-    private function visibleBlockNames(string $email): array
-    {
-        return $this->visibleNames($email, $this->blocks->listForTenant(self::TENANT));
+        return $this->visibleNames($email, $this->sources->listForTenant(self::TENANT));
     }
 
     /**
@@ -1781,7 +1740,7 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
     private function visibleNames(string $email, array $rows): array
     {
         $names = array_map(
-            static fn (array $row): string => (string) $row['name'],
+            static fn (array $row): string => (string) $row['title'],
             $this->visibleRows($email, $rows),
         );
         sort($names);
@@ -1827,7 +1786,7 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
     private function taggedTemplateName(string $permission): string
     {
         $stmt = $this->pdo->prepare(
-            'SELECT name FROM document_templates
+            'SELECT title FROM document_sources
               WHERE tenant_id = :tenant_id AND required_permission = :permission'
         );
         $stmt->execute([':tenant_id' => self::TENANT, ':permission' => $permission]);
@@ -1839,29 +1798,19 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
     }
 
     /**
-     * Every permission any designer row in this tenant is gated on.
-     *
-     * Templates AND blocks, because migration 117 gave both tables the column
-     * and {@see DocumentAccessPolicy} is applied to both — a guard that read only
-     * templates would go quiet the first time a block was tagged.
+     * Every permission any template in this tenant is gated on.
      *
      * @return list<string>
      */
     private function taggedPermissions(): array
     {
-        $found = [];
-        foreach (['document_templates', 'document_blocks'] as $table) {
-            $stmt = $this->pdo->prepare(
-                "SELECT DISTINCT required_permission FROM {$table}
-                  WHERE tenant_id = :tenant_id AND required_permission IS NOT NULL"
-            );
-            $stmt->execute([':tenant_id' => self::TENANT]);
-            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $permission) {
-                $found[(string) $permission] = true;
-            }
-        }
+        $stmt = $this->pdo->prepare(
+            'SELECT DISTINCT required_permission FROM document_sources
+              WHERE tenant_id = :tenant_id AND required_permission IS NOT NULL'
+        );
+        $stmt->execute([':tenant_id' => self::TENANT]);
 
-        return array_keys($found);
+        return array_map(static fn ($permission): string => (string) $permission, $stmt->fetchAll(PDO::FETCH_COLUMN));
     }
 
     /**
@@ -1991,8 +1940,8 @@ final class DocumentDemoSeederRealEngineTest extends TestCase
             'organizational_units',
             'roles',
             'memberships',
-            'document_templates',
-            'document_blocks',
+            'document_sources',
+            'document_source_versions',
             'documents',
             'document_artifacts',
             'document_routes',

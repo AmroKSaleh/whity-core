@@ -6,19 +6,17 @@ namespace Tests\Api;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\EditorTemplateFixture;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Api\DocumentCollectionsApiHandler;
 use Whity\Api\DocumentsApiHandler;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Audience\ExplicitRuleResolver;
-use Whity\Core\Document\DocumentAccessPolicy;
 use Whity\Core\Document\DocumentArtifactRepository;
 use Whity\Core\Document\DocumentArtifactStore;
 use Whity\Core\Document\DocumentCollectionRepository;
 use Whity\Core\Document\DocumentIssuer;
-use Whity\Core\Document\DocumentBlockRepository;
 use Whity\Core\Document\DocumentRepository;
-use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\DocumentVisibilityPolicy;
 use Whity\Core\Document\Routing\DocumentRouter;
 use Whity\Core\Document\Routing\RoleBelowActorRuleResolver;
@@ -35,11 +33,9 @@ use Whity\Core\Document\Organizer\CoreDocumentViews;
 use Whity\Core\Document\Organizer\DocumentSubstrateRegistry;
 use Whity\Core\Document\Organizer\DocumentViewRegistry;
 use Whity\Core\Document\Organizer\PdoSchemaPresence;
-use Whity\Core\Document\Render\DocumentRenderer;
 use Whity\Core\Group\GroupResolver;
 use Whity\Core\Group\GroupRuleResolver;
 use Whity\Core\Group\UserGroupRepository;
-use Whity\Core\Ou\OuReachResolver;
 use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
 use Whity\Core\RBAC\ResourceTypeRegistry;
 use Whity\Core\RBAC\CorePermissions;
@@ -113,11 +109,10 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
 
     private PDO $pdo;
     private \Tests\Support\FakeRenderServiceClient $fakeRender;
-    private DocumentTemplateRepository $templateRepo;
+    private EditorTemplateFixture $editor;
     private DocumentCollectionRepository $collectionRepo;
     private DocumentsApiHandler $documents;
     private DocumentCollectionsApiHandler $collections;
-    private \Whity\Api\DocumentRenderApiHandler $renderHandler;
     private DocumentRouter $router;
     private string $storageRoot;
 
@@ -140,7 +135,6 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
         $db = $this->wrapSqlite($this->pdo);
 
         $this->storageRoot = sys_get_temp_dir() . '/whity-organizer-' . bin2hex(random_bytes(6));
-        $this->templateRepo = new DocumentTemplateRepository($this->pdo);
         $documentRepo = new DocumentRepository($this->pdo);
         $artifactRepo = new DocumentArtifactRepository($this->pdo);
         $this->collectionRepo = new DocumentCollectionRepository($this->pdo);
@@ -151,11 +145,6 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
             new TenantSettingsRepository($this->pdo)
         );
         $store = new DocumentArtifactStore(new LocalStorageDriver($this->storageRoot));
-        $renderer = new DocumentRenderer(
-            new DocumentBlockRepository($this->pdo),
-            $settings,
-            $this->fakeRender
-        );
         $issuer = new DocumentIssuer($this->pdo, $documentRepo, $artifactRepo, $store);
         $roleChecker = new RoleChecker($db, new PermissionRegistry());
         // #947 item 3 widened the policy with two disjuncts: a route reached you,
@@ -168,7 +157,17 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
             $recipientRepo,
             new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())
         );
-        $templatePolicy = new DocumentAccessPolicy();
+        // Documents are issued from editor templates (editor M4c), through the
+        // same three collaborators public/index.php gives the handler.
+        $this->editor = new EditorTemplateFixture(
+            $this->pdo,
+            $settings,
+            $roleChecker,
+            $this->fakeRender,
+            $issuer,
+            $documentRepo,
+            $visibility,
+        );
 
         // The real routing engine, so the routing folders are asked about rows
         // the engine actually wrote. The alternative — INSERTing recipient and
@@ -218,9 +217,6 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
             $artifactRepo,
             $store,
             $visibility,
-            $templatePolicy,
-            $renderer,
-            $issuer,
             $roleChecker,
             $settings
         ): DocumentsApiHandler {
@@ -234,17 +230,15 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
                 $artifactRepo,
                 $store,
                 $visibility,
-                $this->templateRepo,
-                $templatePolicy,
-                $renderer,
-                $issuer,
+                $this->editor->sources,
+                $this->editor->fields,
+                $this->editor->issuing,
                 $roleChecker,
                 $settings,
                 $views,
                 $substrates,
                 $this->collectionRepo,
                 $this->pdo,
-                new OuReachResolver($this->pdo, new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())),
             );
         };
         $this->documents = ($this->makeDocuments)();
@@ -254,16 +248,6 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
             $documentRepo,
             $visibility,
             $roleChecker,
-        );
-
-        $this->renderHandler = new \Whity\Api\DocumentRenderApiHandler(
-            $this->templateRepo,
-            $templatePolicy,
-            $roleChecker,
-            $settings,
-            $renderer,
-            $issuer,
-            new OuReachResolver($this->pdo, new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())),
         );
 
         $settings->setGlobal(SettingsRegistry::DOCUMENTS_RENDER_ENABLED, 'true');
@@ -1372,21 +1356,11 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
         self::assertSame(1, $body['pagination']['total']);
     }
 
-    /** The render route does not compute filing, so it says nothing about it. */
-    public function testTheRenderRouteOmitsTheFilingFieldsRatherThanGuessingThem(): void
+    /** The create route does not compute filing, so it says nothing about it. */
+    public function testTheCreateRouteOmitsTheFilingFieldsRatherThanGuessingThem(): void
     {
-        TenantContext::reset();
-        TenantContext::setTenantId(self::TENANT);
         $templateId = $this->createTemplate(self::AUDITOR, 'Invoice Template');
-        $req = new Request(
-            'POST',
-            "/api/document-templates/{$templateId}/render",
-            [],
-            (string) json_encode(['persist' => true, 'title' => 'Invoice'])
-        );
-        $req->user = (object) ['profile_id' => self::AUDITOR, 'active_tenant_id' => self::TENANT];
-
-        $rendered = self::decode($this->renderHandler->render($req, ['id' => (string) $templateId]))['data'];
+        $rendered = self::data($this->createDocument(self::AUDITOR, $templateId, 'Invoice'));
 
         self::assertArrayNotHasKey('starred', $rendered, 'absent means "not computed", false would be a claim');
         self::assertArrayNotHasKey('collection_ids', $rendered);
@@ -1566,7 +1540,7 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
         return (int) self::data($res)['id'];
     }
 
-    /** Issue a document the way production does: a persisted render. */
+    /** Issue a document the way production does: `POST /api/documents`, rendered. */
     private function issue(int $actorId, string $title): int
     {
         TenantContext::reset();
@@ -1586,20 +1560,25 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
      */
     private function issueFromTemplate(int $actorId, int $templateId, string $title): int
     {
+        $res = $this->createDocument($actorId, $templateId, $title);
+        self::assertSame(201, $res->getStatusCode(), 'fixture setup: issuing must succeed: ' . $res->getBody());
+
+        return (int) self::data($res)['id'];
+    }
+
+    private function createDocument(int $actorId, int $templateId, string $title): Response
+    {
         TenantContext::reset();
         TenantContext::setTenantId(self::TENANT);
         $req = new Request(
             'POST',
-            "/api/document-templates/{$templateId}/render",
+            '/api/documents',
             [],
-            (string) json_encode(['persist' => true, 'title' => $title])
+            (string) json_encode(['document_source_id' => $templateId, 'title' => $title, 'render' => true])
         );
         $req->user = (object) ['profile_id' => $actorId, 'active_tenant_id' => self::TENANT];
 
-        $res = $this->renderHandler->render($req, ['id' => (string) $templateId]);
-        self::assertSame(201, $res->getStatusCode(), 'fixture setup: the persisted render must succeed');
-
-        return (int) self::data($res)['id'];
+        return $this->documents->create($req);
     }
 
     /**
@@ -1619,19 +1598,10 @@ final class DocumentOrganizerApiRealEngineTest extends TestCase
         self::assertSame(1, $stmt->rowCount(), "fixture setup: no document titled '{$title}'");
     }
 
+    /** A published, tenant-wide editor template; its title is the snapshot `template_name`. */
     private function createTemplate(int $actorId, string $name): int
     {
-        return $this->templateRepo->create(self::TENANT, [
-            'name' => $name,
-            'data' => [
-                'version' => 2,
-                'page' => ['widthMm' => 210, 'heightMm' => 297, 'marginMm' => 10, 'background' => '#fff'],
-                'placeholders' => [],
-                'pages' => [['id' => 'p1', 'elements' => []]],
-            ],
-            'scope' => 'tenant',
-            'created_by' => $actorId,
-        ]);
+        return $this->editor->published(self::TENANT, $actorId, $name);
     }
 
     /**

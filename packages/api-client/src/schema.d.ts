@@ -1167,63 +1167,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/document-blocks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List document/label blocks visible to the caller */
-        get: operations["get_api_v1_document_blocks"];
-        put?: never;
-        /** Create a document/label block */
-        post: operations["post_api_v1_document_blocks"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/document-blocks/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get a document/label block */
-        get: operations["get_api_v1_document_blocks_id"];
-        put?: never;
-        post?: never;
-        /** Delete a document/label block */
-        delete: operations["delete_api_v1_document_blocks_id"];
-        options?: never;
-        head?: never;
-        /** Update a document/label block */
-        patch: operations["patch_api_v1_document_blocks_id"];
-        trace?: never;
-    };
-    "/api/v1/document-blocks/{id}/usage": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * What would break if this block changed: the templates and blocks that instance it
-         * @description A block is POINTER-referenced (a `blockInstance` element), so editing it propagates to everything that instances it — and unlike delete, an edit is never refused. This is the answer a client needs before offering either action. There are TWO kinds of user: `templates`, and `blocks`, since a block may contain another block. Both are row-filtered to what the caller may see; `total` counts EVERY reference of both kinds in the tenant and `hidden` is the difference, so a caller with narrow reach is told the edit reaches further than they can see instead of being quietly understated. `total > 0` means exactly that a DELETE would be refused with 409.
-         */
-        get: operations["get_api_v1_document_blocks_id_usage"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/document-collections": {
         parameters: {
             query?: never;
@@ -1474,6 +1417,30 @@ export interface paths {
         delete: operations["delete_api_v1_document_sources_id"];
         options?: never;
         head?: never;
+        /**
+         * Change who can see an editor document
+         * @description Its scope, the permission a reader needs and the unit it is filed at (A31). Not part of the draft: it changes without a publish. Making a document shared needs documents:publish; a value sent back unchanged is not a change.
+         */
+        patch: operations["patch_api_v1_document_sources_id"];
+        trace?: never;
+    };
+    "/api/v1/document-sources/{id}/copy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Use a copy of an editor document
+         * @description A personal, unpublished draft of the caller's with the original's draft content and own fields, for example to start from one of Whity's starters. It does not inherit the original's audience.
+         */
+        post: operations["post_api_v1_document_sources_id_copy"];
+        delete?: never;
+        options?: never;
+        head?: never;
         patch?: never;
         trace?: never;
     };
@@ -1491,6 +1458,26 @@ export interface paths {
          */
         put: operations["put_api_v1_document_sources_id_draft"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/document-sources/{id}/drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a document from a template, to change before issuing it
+         * @description The template's published version becomes a personal letter of the caller's, with the same record type and own fields, to change and then issue with POST /api/documents (which freezes what it says as a version). The template itself is untouched.
+         */
+        post: operations["post_api_v1_document_sources_id_drafts"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1654,54 +1641,20 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/document-templates": {
+    "/api/v1/document-sources/{id}/versions/{version}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List document/label templates visible to the caller */
-        get: operations["get_api_v1_document_templates"];
-        put?: never;
-        /** Create a document/label template */
-        post: operations["post_api_v1_document_templates"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/document-templates/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get a document/label template */
-        get: operations["get_api_v1_document_templates_id"];
+        /**
+         * What one published version says
+         * @description Its title, page, blocks and own fields: what a document issued from it prints.
+         */
+        get: operations["get_api_v1_document_sources_id_versions_version"];
         put?: never;
         post?: never;
-        /** Delete a document/label template */
-        delete: operations["delete_api_v1_document_templates_id"];
-        options?: never;
-        head?: never;
-        /** Update a document/label template */
-        patch: operations["patch_api_v1_document_templates_id"];
-        trace?: never;
-    };
-    "/api/v1/document-templates/{id}/render": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Render a document/label template to PDF */
-        post: operations["post_api_v1_document_templates_id_render"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1742,8 +1695,8 @@ export interface paths {
         get: operations["get_api_v1_documents"];
         put?: never;
         /**
-         * Raise a document from a template, supplying values for its placeholders
-         * @description The record is the deliverable and the rendered artifact is opportunistic. `documents.render_enabled` defaults to FALSE, so on a default install this returns a document with no artifact and `content_url: null` — which is a complete, routable document, not a degraded one: the values it was raised with are stored on the record, and POST /api/documents/{id}/render mints the artifact from them if the tier is later switched on. The `render` block says what happened. Sending `render: true` turns "could not render" into a 503 instead, for a caller who genuinely requires the bytes. A template the caller cannot SEE is a 404, never a 403, and the check is the designer's own visibility policy — creating from a gated template must not be a way to read it.
+         * Issue a document from a template, for a record and with the template's own fields
+         * @description The record is the deliverable and the rendered artifact is opportunistic. `documents.render_enabled` defaults to FALSE, so on a default install this returns a document with no artifact and `content_url: null` — which is a complete, routable document, not a degraded one: the values it was raised with are stored on the record, and POST /api/documents/{id}/render mints the artifact from them if the tier is later switched on. The `render` block says what happened. Sending `render: true` turns "could not render" into a 503 instead, for a caller who genuinely requires the bytes. The template's published version is issued, with the verification QR when the tenant has it on. A template the caller cannot SEE is a 404, never a 403, and the check is the editor's own visibility policy — creating from a gated template must not be a way to read it.
          */
         post: operations["post_api_v1_documents"];
         delete?: never;
@@ -1917,7 +1870,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Re-render the document and APPEND a new artifact (never replaces one) */
+        /**
+         * Re-render the document and APPEND a new artifact (never replaces one)
+         * @description Re-renders the template version the document was issued from, with the values it printed; records and charts are read again. A document issued from the old Document designer cannot be re-rendered (409, with details.document_source_id naming its converted template to issue a new one from).
+         */
         post: operations["post_api_v1_documents_id_render"];
         delete?: never;
         options?: never;
@@ -6040,6 +5996,9 @@ export interface components {
             id: number;
             tenant_id: number;
             document_template_id?: number | null;
+            document_source_id?: number | null;
+            document_source_version?: number | null;
+            origin_key?: string | null;
             template_name: string;
             title: string;
             origin_ou_id?: number | null;
@@ -6062,77 +6021,6 @@ export interface components {
             rendered_by?: number | null;
             rendered_at: string;
             content_url: string;
-        };
-        DocumentBlock: {
-            id: number;
-            tenant_id: number;
-            name: string;
-            data: {
-                [key: string]: unknown;
-            }[];
-            /** @enum {string} */
-            scope: "personal" | "tenant" | "global" | "system";
-            required_permission?: string | null;
-            is_system: boolean;
-            created_by?: number | null;
-            owner_ou_id?: number | null;
-            starter_key?: string | null;
-            created_at: string;
-            updated_at: string;
-        };
-        DocumentBlockCreateRequest: {
-            name: string;
-            data: {
-                [key: string]: unknown;
-            }[];
-            /** @enum {string} */
-            scope?: "personal" | "tenant" | "global" | "system";
-            required_permission?: string | null;
-            owner_ou_id?: number | null;
-        };
-        DocumentBlockListResponse: {
-            data: components["schemas"]["DocumentBlock"][];
-        };
-        DocumentBlockResponse: {
-            data: components["schemas"]["DocumentBlock"];
-        };
-        DocumentBlockUpdateRequest: {
-            name?: string;
-            data?: {
-                [key: string]: unknown;
-            }[];
-            /** @enum {string} */
-            scope?: "personal" | "tenant" | "global" | "system";
-            required_permission?: string | null;
-            owner_ou_id?: number | null;
-        };
-        DocumentBlockUsage: {
-            block_id: number;
-            total: number;
-            hidden: number;
-            templates: {
-                id: number;
-                name: string;
-                /** @enum {string} */
-                scope: "personal" | "tenant" | "global" | "system";
-                required_permission?: string | null;
-                owner_ou_id?: number | null;
-                is_system: boolean;
-                updated_at: string;
-            }[];
-            blocks: {
-                id: number;
-                name: string;
-                /** @enum {string} */
-                scope: "personal" | "tenant" | "global" | "system";
-                required_permission?: string | null;
-                owner_ou_id?: number | null;
-                is_system: boolean;
-                updated_at: string;
-            }[];
-        };
-        DocumentBlockUsageResponse: {
-            data: components["schemas"]["DocumentBlockUsage"];
         };
         DocumentCollection: {
             id: number;
@@ -6172,28 +6060,30 @@ export interface components {
             data: components["schemas"]["DocumentConveningEntry"][];
         };
         DocumentCreateRequest: {
-            /** @description Template to issue the document from (see GET /api/document-templates). */
-            document_template_id: number;
-            /** @description Document title; defaults from the template. */
-            title?: string | null;
-            /** @description Values for the template's placeholders: one object per label or page, mapping placeholder key to text. A key the template does not declare is refused. */
-            dataRows?: {
+            /** @description The template to issue the document from (see GET /api/document-sources?kind=template): its published version is issued. A letter or report (a copy made to edit before issuing) is issued as it is now, frozen as a version. */
+            document_source_id: number;
+            /** @description The record the document is for, as `type:id`. Required when the template has a record type. */
+            record?: string;
+            /** @description Values by field path: the template's own fields (for example {"template.reference": "REF-1042"}) and any field the record left empty. At most 1000 characters each. A field the template does not offer is refused, and a value for a field the record resolved is 422 `field_conflict`: merge data can't overwrite what the record says. */
+            values?: {
                 [key: string]: string;
-            }[];
-            /** @description Optional label-sheet layout for printing several labels per page; null for one per page. */
-            sheet?: {
-                [key: string]: unknown;
-            } | null;
+            };
+            /** @description Document title; defaults to the template's title and the record's name. */
+            title?: string | null;
+            /** @description Your own name for what this document is, for example `order:4812:invoice` (1 to 160 letters, digits or : . _ / -). Issuing again with the same key returns the first document (200, `replayed: true`) instead of a second one; the same key for another template is 409 `origin_key_conflict`. */
+            origin_key?: string | null;
             /** @description Omit to render when this server can; true to require a rendered file (503 if rendering is unavailable); false to record without rendering. */
             render?: boolean | null;
         };
         DocumentCreateResponse: {
             data: components["schemas"]["Document"];
+            /** @description True when `origin_key` already named this document: nothing new was issued (HTTP 200). */
+            replayed?: boolean;
             render: {
                 attempted: boolean;
                 stored: boolean;
                 /** @enum {string|null} */
-                reason?: "declined" | "disabled" | "persist_disabled" | "rejected" | "unavailable" | "storage_unavailable" | null;
+                reason?: "declined" | "disabled" | "persist_disabled" | "rejected" | "unavailable" | "storage_unavailable" | "limit" | null;
             };
         };
         DocumentEmbedCatalogueResponse: {
@@ -6315,33 +6205,6 @@ export interface components {
             data: {
                 published_version: number;
             };
-        };
-        DocumentRenderRequest: {
-            /** @description Values for the template's placeholders: one object per label or page, mapping placeholder key to text. Omitted or empty renders one copy with the template's sample values. */
-            dataRows?: {
-                [key: string]: string;
-            }[];
-            /** @description Optional label-sheet layout for printing several labels per page; null for one per page. */
-            sheet?: {
-                [key: string]: unknown;
-            } | null;
-            /**
-             * @description true to record the result as a document (returns the record); false (default) returns the PDF as a preview only.
-             * @default false
-             */
-            persist: boolean;
-            /** @description Title of the recorded document. Used only when `persist` is true. */
-            title?: string | null;
-        };
-        DocumentRerenderRequest: {
-            /** @description Values for the template's placeholders: one object per label or page, mapping placeholder key to text. */
-            dataRows?: {
-                [key: string]: string;
-            }[];
-            /** @description Optional label-sheet layout for printing several labels per page; null for one per page. */
-            sheet?: {
-                [key: string]: unknown;
-            } | null;
         };
         DocumentResponse: {
             data: components["schemas"]["Document"];
@@ -6482,8 +6345,27 @@ export interface components {
             created_by?: number | null;
             owner_ou_id?: number | null;
             updated_by?: number | null;
+            /** @description Which of Whity's starters this is, or null for anything a person made */
+            starter_key?: string | null;
+            /** @description The old Document designer template this was converted from (migration 164), or null */
+            legacy_template_id?: number | null;
             created_at: string;
             updated_at: string;
+        };
+        DocumentSourceAudienceRequest: {
+            /**
+             * @description Who can see the document: `personal` (only its creator), `tenant`, `global` or `system`. Anything but personal needs documents:publish.
+             * @enum {string}
+             */
+            scope?: "personal" | "tenant" | "global" | "system";
+            /** @description A permission a reader must also hold to see a shared document; null for none. Needs documents:publish. */
+            required_permission?: string | null;
+            /** @description The organizational unit the document is filed under; null files it tenant-wide. Needs documents:publish. */
+            owner_ou_id?: number | null;
+        };
+        DocumentSourceCopyRequest: {
+            /** @description The copy's title, at most 255 characters; defaults to the original's. */
+            title?: string;
         };
         DocumentSourceCreateRequest: {
             /**
@@ -6582,7 +6464,7 @@ export interface components {
             record?: string;
             /** @description Render the draft instead of the published version, as a preview. A draft is never issued. */
             draft?: boolean;
-            /** @description Issue the PDF as a document; its values are kept with it. */
+            /** @description Issue the published version as a document, as POST /api/documents does (201 with the document and what happened to its PDF); its values are kept with it. */
             persist?: boolean;
         };
         DocumentSourceResponse: {
@@ -6596,6 +6478,21 @@ export interface components {
                 published_at: string;
             }[];
         };
+        DocumentSourceVersionResponse: {
+            data: {
+                version: number;
+                title: string;
+                page?: {
+                    [key: string]: unknown;
+                } | null;
+                blocks: {
+                    [key: string]: unknown;
+                }[];
+                own_fields: components["schemas"]["DocumentOwnField"][];
+                published_by?: number | null;
+                published_at: string;
+            };
+        };
         DocumentStarResponse: {
             data: components["schemas"]["DocumentCollection"] | null;
             starred: boolean;
@@ -6604,63 +6501,6 @@ export interface components {
             key: string;
             description: string;
             provenance?: string | null;
-        };
-        DocumentTemplate: {
-            id: number;
-            tenant_id: number;
-            name: string;
-            data: {
-                [key: string]: unknown;
-            };
-            /** @enum {string} */
-            scope: "personal" | "tenant" | "global" | "system";
-            required_permission?: string | null;
-            is_system: boolean;
-            created_by?: number | null;
-            owner_ou_id?: number | null;
-            starter_key?: string | null;
-            created_at: string;
-            updated_at: string;
-        };
-        DocumentTemplateCreateRequest: {
-            /** @description Template name. */
-            name: string;
-            /** @description The template design as produced by the document designer (pages, elements, placeholders). */
-            data: {
-                [key: string]: unknown;
-            };
-            /**
-             * @description Who can use it: `personal` (you), `tenant`, `global` or `system`. Anything but `personal` needs documents:publish.
-             * @enum {string}
-             */
-            scope?: "personal" | "tenant" | "global" | "system";
-            /** @description Permission a user must hold to use the template; null for none. Needs documents:publish. */
-            required_permission?: string | null;
-            /** @description Organizational unit the template is filed under; null files it tenant-wide. Needs documents:publish. */
-            owner_ou_id?: number | null;
-        };
-        DocumentTemplateListResponse: {
-            data: components["schemas"]["DocumentTemplate"][];
-        };
-        DocumentTemplateResponse: {
-            data: components["schemas"]["DocumentTemplate"];
-        };
-        DocumentTemplateUpdateRequest: {
-            /** @description New template name. */
-            name?: string;
-            /** @description Replacement template design. */
-            data?: {
-                [key: string]: unknown;
-            };
-            /**
-             * @description Who can use it: `personal` (you), `tenant`, `global` or `system`. Anything but `personal` needs documents:publish.
-             * @enum {string}
-             */
-            scope?: "personal" | "tenant" | "global" | "system";
-            /** @description Permission a user must hold to use the template; null for none. */
-            required_permission?: string | null;
-            /** @description Organizational unit the template is filed under; null files it tenant-wide. */
-            owner_ou_id?: number | null;
         };
         DocumentTrailEvent: {
             id: number;
@@ -15320,455 +15160,6 @@ export interface operations {
             };
         };
     };
-    get_api_v1_document_blocks: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The blocks the caller may see (RBAC-filtered) */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DocumentBlockListResponse"];
-                };
-            };
-            /** @description Missing or invalid authentication */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Insufficient permissions */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Method not allowed */
-            405: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    post_api_v1_document_blocks: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DocumentBlockCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description The created block */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DocumentBlockResponse"];
-                };
-            };
-            /** @description Invalid request body */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Missing or invalid authentication */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Publishing a shared block requires documents:publish */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Method not allowed */
-            405: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Validation failed */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    get_api_v1_document_blocks_id: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The block */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DocumentBlockResponse"];
-                };
-            };
-            /** @description Missing or invalid authentication */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Insufficient permissions */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Block not found or not visible to the caller */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Method not allowed */
-            405: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    delete_api_v1_document_blocks_id: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Block deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Missing or invalid authentication */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Insufficient permissions */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Block not found or not visible to the caller */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Method not allowed */
-            405: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Cannot delete a block that is still referenced by a template */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    patch_api_v1_document_blocks_id: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DocumentBlockUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description The updated block */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DocumentBlockResponse"];
-                };
-            };
-            /** @description Invalid request body */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Missing or invalid authentication */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Publishing a shared block requires documents:publish */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Block not found or not visible to the caller */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Method not allowed */
-            405: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Validation failed */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    get_api_v1_document_blocks_id_usage: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The referencing templates and blocks, plus the unfiltered total */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DocumentBlockUsageResponse"];
-                };
-            };
-            /** @description Missing or invalid authentication */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Insufficient permissions */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Block not found or not visible to the caller */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Method not allowed */
-            405: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
     get_api_v1_document_collections: {
         parameters: {
             query?: never;
@@ -17361,6 +16752,184 @@ export interface operations {
             };
         };
     };
+    patch_api_v1_document_sources_id: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentSourceAudienceRequest"];
+            };
+        };
+        responses: {
+            /** @description The document */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentSourceResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Sharing a document requires documents:publish */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Document not found or not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_document_sources_id_copy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentSourceCopyRequest"];
+            };
+        };
+        responses: {
+            /** @description The copy */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentSourceResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Document not found or not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation failed */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     put_api_v1_document_sources_id_draft: {
         parameters: {
             query?: never;
@@ -17450,6 +17019,104 @@ export interface operations {
             };
             /** @description If-Match with the draft version is required */
             428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_document_sources_id_drafts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocumentSourceCopyRequest"];
+            };
+        };
+        responses: {
+            /** @description The draft */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentSourceResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Template not found or not visible to the caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The template has no published version yet */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not a template, or a bad title */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -18031,13 +17698,13 @@ export interface operations {
                     "application/pdf": string;
                 };
             };
-            /** @description The issued document */
+            /** @description The issued document, and whether its PDF was stored */
             201: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DocumentResponse"];
+                    "application/json": components["schemas"]["DocumentCreateResponse"];
                 };
             };
             /** @description Invalid request body */
@@ -18199,176 +17866,25 @@ export interface operations {
             };
         };
     };
-    get_api_v1_document_templates: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The templates the caller may see (RBAC-filtered) */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DocumentTemplateListResponse"];
-                };
-            };
-            /** @description Missing or invalid authentication */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Insufficient permissions */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Method not allowed */
-            405: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    post_api_v1_document_templates: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DocumentTemplateCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description The created template */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DocumentTemplateResponse"];
-                };
-            };
-            /** @description Invalid request body */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Missing or invalid authentication */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Publishing a shared template requires documents:publish */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Method not allowed */
-            405: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Validation failed */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    get_api_v1_document_templates_id: {
+    get_api_v1_document_sources_id_versions_version: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 id: number;
+                version: number;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description The template */
+            /** @description The version */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DocumentTemplateResponse"];
+                    "application/json": components["schemas"]["DocumentSourceVersionResponse"];
                 };
             };
             /** @description Missing or invalid authentication */
@@ -18389,7 +17905,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Template not found or not visible to the caller */
+            /** @description Document or version not found, or not visible to the caller */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -18409,258 +17925,6 @@ export interface operations {
             };
             /** @description Internal server error */
             500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    delete_api_v1_document_templates_id: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Template deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Missing or invalid authentication */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Insufficient permissions */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Template not found or not visible to the caller */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Method not allowed */
-            405: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    patch_api_v1_document_templates_id: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DocumentTemplateUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description The updated template */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DocumentTemplateResponse"];
-                };
-            };
-            /** @description Invalid request body */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Missing or invalid authentication */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Publishing a shared template requires documents:publish */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Template not found or not visible to the caller */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Method not allowed */
-            405: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Validation failed */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-        };
-    };
-    post_api_v1_document_templates_id_render: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DocumentRenderRequest"];
-            };
-        };
-        responses: {
-            /** @description The rendered PDF */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/pdf": string;
-                };
-            };
-            /** @description Invalid request body */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Missing or invalid authentication */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Insufficient permissions */
-            403: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Template not found or not visible to the caller */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Method not allowed */
-            405: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Validation failed (bad dataRows, or a batch/size limit exceeded) */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
-                };
-            };
-            /** @description Rendering is disabled on this instance, or the render service is unavailable */
-            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -18874,6 +18138,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description The document `origin_key` already names; nothing new was issued */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentCreateResponse"];
+                };
+            };
             /** @description The document, and whether an artifact was rendered for it */
             201: {
                 headers: {
@@ -18910,7 +18183,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description No such template, or it is not visible to the caller */
+            /** @description No such template or record, or it is not visible to the caller */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -18928,7 +18201,16 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description No template named, a bad dataRows shape, or a value supplied for a placeholder the template does not declare */
+            /** @description The template has no published version yet, `origin_key` names a document from another template (`origin_key_conflict`), or a plugin refused it (`vetoed`) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No template named, not a template, a bad record, a value for a field the template does not declare, or a required field with no value (details.missing) */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -19715,11 +18997,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DocumentRerenderRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description The document with the new artifact at the head of its history */
             201: {
@@ -19728,15 +19006,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DocumentResponse"];
-                };
-            };
-            /** @description Invalid request body */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Error"];
                 };
             };
             /** @description Missing or invalid authentication */
@@ -19775,7 +19044,7 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description The template this document was issued from is no longer available */
+            /** @description Nothing to re-render from: an old designer document, or its template is gone */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -19784,8 +19053,17 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            /** @description Validation failed (bad dataRows, or a batch/size limit exceeded) */
+            /** @description The template could not be rendered with these values */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The document render limit has been reached */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

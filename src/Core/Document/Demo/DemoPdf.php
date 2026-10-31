@@ -9,13 +9,13 @@ namespace Whity\Core\Document\Demo;
  *
  * WHY THE BYTES ARE NOT RENDERED
  * ------------------------------
- * They cannot be, from a seeder. {@see \Whity\Core\Document\Render\DocumentRenderer}
+ * They cannot be, from a seeder. {@see \Whity\Core\Document\Render\FlowDocumentRenderer}
  * produces artifact bytes by calling out over HTTP to the separate
  * `whity_render` container (headless Chromium + Puppeteer, ADR 0012), which is
  * an OPT-IN compose profile that is off by default, needs `RENDER_SERVICE_URL`
  * and a `RENDER_SHARED_SECRET`, and 503s cleanly when absent. `seed` therefore
  * cannot drive it, and must not require an operator to stand up a Chromium
- * container before their designer has anything in it.
+ * container before the demo has anything in it.
  *
  * So the RECORD half of #947 item 1 is driven for real —
  * {@see \Whity\Core\Document\DocumentIssuer} writes the object through the

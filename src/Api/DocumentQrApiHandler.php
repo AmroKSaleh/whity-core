@@ -6,7 +6,6 @@ namespace Whity\Api;
 
 use Whity\Auth\RoleChecker;
 use Whity\Core\Document\DocumentRepository;
-use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\DocumentVisibilityPolicy;
 use Whity\Core\Document\Qr\DocumentQrPolicy;
 use Whity\Core\Document\Qr\DocumentQrScanRepository;
@@ -77,7 +76,6 @@ final class DocumentQrApiHandler
 
     public function __construct(
         private readonly DocumentRepository $documents,
-        private readonly DocumentTemplateRepository $templates,
         private readonly DocumentVisibilityPolicy $visibility,
         private readonly DocumentQrService $qr,
         private readonly DocumentQrScanRepository $scans,
@@ -373,21 +371,14 @@ final class DocumentQrApiHandler
     }
 
     /**
-     * Scopes 1 and 2 for this document, re-read rather than remembered.
-     *
-     * The template is re-read because scope 2 lives inside its JSON and a
-     * document whose template was deleted (`document_template_id → SET NULL`)
-     * inherits only scope 1.
+     * Whether this document should carry a code: the tenant decides (the
+     * per-template switch went with the old designer, editor M4c).
      *
      * @param array<string, mixed> $document
      */
     private function enabledFor(int $tenantId, array $document): bool
     {
-        $templateId = $document['document_template_id'];
-        $template = is_int($templateId) ? $this->templates->findById($templateId, $tenantId) : null;
-        $templateData = is_array($template['data'] ?? null) ? $template['data'] : [];
-
-        return DocumentQrPolicy::enabled($this->settings->effective($tenantId), $templateData);
+        return DocumentQrPolicy::enabledForTenant($this->settings->effective($tenantId));
     }
 
     /**

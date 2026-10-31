@@ -6,19 +6,18 @@ namespace Tests\Api;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\EditorTemplateFixture;
+use Tests\Support\FakeRenderServiceClient;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Api\DocumentQrApiHandler;
 use Whity\Api\DocumentVerificationApiHandler;
 use Whity\Api\DocumentsApiHandler;
 use Whity\Auth\RoleChecker;
-use Whity\Core\Document\DocumentAccessPolicy;
 use Whity\Core\Document\DocumentArtifactRepository;
 use Whity\Core\Document\DocumentArtifactStore;
-use Whity\Core\Document\DocumentBlockRepository;
 use Whity\Core\Document\DocumentCollectionRepository;
 use Whity\Core\Document\DocumentIssuer;
 use Whity\Core\Document\DocumentRepository;
-use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\DocumentVisibilityPolicy;
 use Whity\Core\Document\Organizer\CoreDocumentSubstrates;
 use Whity\Core\Document\Organizer\CoreDocumentViews;
@@ -28,11 +27,8 @@ use Whity\Core\Document\Organizer\PdoSchemaPresence;
 use Whity\Core\Document\Qr\DocumentQrScanRepository;
 use Whity\Core\Document\Qr\DocumentQrService;
 use Whity\Core\Document\Qr\DocumentQrTokenRepository;
-use Whity\Core\Document\Qr\QrTemplateComposer;
-use Whity\Core\Document\Render\DocumentRenderer;
 use Whity\Core\Document\Routing\RouteEventRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
-use Whity\Core\Ou\OuReachResolver;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
@@ -47,7 +43,6 @@ use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
 use Whity\Sdk\Http\Response;
 use Whity\Storage\LocalStorageDriver;
-use Tests\Support\FakeRenderServiceClient;
 
 /**
  * POSSESSING A VALID QR TOKEN GRANTS NOTHING (#1036).
@@ -110,7 +105,8 @@ final class DocumentQrTokenGrantsNothingTest extends TestCase
     private DocumentQrApiHandler $qrHandler;
     private DocumentVerificationApiHandler $publicHandler;
     private DocumentQrService $qr;
-    private DocumentTemplateRepository $templates;
+    private EditorTemplateFixture $editor;
+    private DocumentRepository $documentRepo;
     private FakeRenderServiceClient $renderService;
     private string $storageRoot;
 
@@ -122,8 +118,8 @@ final class DocumentQrTokenGrantsNothingTest extends TestCase
 
         $this->storageRoot = sys_get_temp_dir() . '/whity-qrgrant-' . bin2hex(random_bytes(6));
 
-        $this->templates = new DocumentTemplateRepository($this->pdo);
         $documentRepo = new DocumentRepository($this->pdo);
+        $this->documentRepo = $documentRepo;
         $artifactRepo = new DocumentArtifactRepository($this->pdo);
         $this->settings = new SettingsService(
             new GlobalSettingsRepository($this->pdo),
@@ -132,19 +128,10 @@ final class DocumentQrTokenGrantsNothingTest extends TestCase
 
         $store = new DocumentArtifactStore(new LocalStorageDriver($this->storageRoot));
         $this->renderService = new FakeRenderServiceClient();
-        $renderer = new DocumentRenderer(
-            new DocumentBlockRepository($this->pdo),
-            $this->settings,
-            $this->renderService
-        );
         $issuer = new DocumentIssuer($this->pdo, $documentRepo, $artifactRepo, $store);
         $roleChecker = new RoleChecker($db, new PermissionRegistry());
         $visibility = new DocumentVisibilityPolicy(
             new RouteRecipientRepository($this->pdo),
-            new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())
-        );
-        $ouReach = new OuReachResolver(
-            $this->pdo,
             new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())
         );
 
@@ -157,22 +144,33 @@ final class DocumentQrTokenGrantsNothingTest extends TestCase
         $scanRepo = new DocumentQrScanRepository($this->pdo);
         $this->qr = new DocumentQrService($this->pdo, $tokenRepo, $scanRepo, 'https://docs.example.test');
 
+        // Issuing from editor templates (editor M4c), with the SAME QR service:
+        // the issuer is what stamps the code onto the printed page.
+        $this->editor = new EditorTemplateFixture(
+            $this->pdo,
+            $this->settings,
+            $roleChecker,
+            $this->renderService,
+            $issuer,
+            $documentRepo,
+            $visibility,
+            $this->qr,
+        );
+
         $this->documents = new DocumentsApiHandler(
             $documentRepo,
             $artifactRepo,
             $store,
             $visibility,
-            $this->templates,
-            new DocumentAccessPolicy(),
-            $renderer,
-            $issuer,
+            $this->editor->sources,
+            $this->editor->fields,
+            $this->editor->issuing,
             $roleChecker,
             $this->settings,
             $views,
             $substrates,
             new DocumentCollectionRepository($this->pdo),
             $this->pdo,
-            $ouReach,
             null,
             null,
             null,
@@ -181,7 +179,6 @@ final class DocumentQrTokenGrantsNothingTest extends TestCase
 
         $this->qrHandler = new DocumentQrApiHandler(
             $documentRepo,
-            $this->templates,
             $visibility,
             $this->qr,
             $scanRepo,
@@ -375,12 +372,12 @@ final class DocumentQrTokenGrantsNothingTest extends TestCase
      * The code that gets MINTED is the code that reaches the RENDERER, carrying
      * the URL a phone will actually open.
      *
-     * The three halves of this feature are individually covered — the policy
-     * composes the scopes, the composer places an element, the service mints a
-     * token — and that is exactly the shape of coverage that lets a feature be
-     * wrong anyway: each piece correct, the wiring between them not. This is the
-     * only test that follows one document from `POST /api/documents` to the
-     * payload the render service is handed.
+     * The halves of this feature are individually covered — the tenant switch
+     * decides, the issuer appends a block, the service mints a token — and that
+     * is exactly the shape of coverage that lets a feature be wrong anyway: each
+     * piece correct, the wiring between them not. This is the only test that
+     * follows one document from `POST /api/documents` to the payload the render
+     * service is handed and back through the public endpoint.
      *
      * The URL is rebuilt here from the token READ OUT OF THE DATABASE rather
      * than from the service that produced it, so a bug in
@@ -391,31 +388,22 @@ final class DocumentQrTokenGrantsNothingTest extends TestCase
         $this->settings->setGlobal(SettingsRegistry::DOCUMENTS_RENDER_ENABLED, 'true');
         $this->settings->setGlobal(SettingsRegistry::DOCUMENTS_PERSIST_ENABLED, 'true');
 
-        $documentId = $this->raise(self::OWNER, 'Minutes', render: true);
-        $token = $this->tokenFor($documentId);
+        $documentId = $this->raiseThroughTheRoute(self::OWNER, 'Minutes', render: true);
+        $active = $this->qr->active(self::TENANT, $documentId);
+        self::assertIsArray($active, 'issuing with QR on mints a code for the document');
+        $token = (string) $active['token'];
 
-        self::assertNotSame([], $this->renderService->calls, 'fixture: the render must have been attempted');
-        $payload = $this->renderService->calls[0];
+        self::assertNotSame([], $this->renderService->flowCalls, 'fixture: the render must have been attempted');
 
-        // 1. The element is on the page, bound to the reserved key — placed by
-        //    default, because this template has no QR element authored on it.
-        $bindings = [];
-        foreach ($payload['template']['pages'] as $page) {
-            foreach ($page['elements'] as $element) {
-                if (isset($element['binding'])) {
-                    $bindings[] = $element['binding'];
-                }
-            }
-        }
-        self::assertContains(QrTemplateComposer::VERIFICATION_BINDING, $bindings);
+        // 1. One code block is on the page, appended to the template's flow.
+        $codes = EditorTemplateFixture::qrBlocks($this->renderService->flowCalls[0]);
+        self::assertCount(1, $codes);
 
-        // 2. The value it resolves against is the real, absolute, scannable URL
-        //    for the token that was actually minted for THIS document.
-        $row = $payload['dataRows'][0];
-        $resolved = is_array($row) ? $row : (array) $row;
+        // 2. It encodes the real, absolute, scannable URL for the token that was
+        //    actually minted for THIS document.
         self::assertSame(
             'https://docs.example.test/verify/' . $token,
-            $resolved[QrTemplateComposer::VERIFICATION_BINDING],
+            $codes[0]['value'],
             'the QR must encode the page a phone camera opens, for the code minted for this document'
         );
 
@@ -429,40 +417,29 @@ final class DocumentQrTokenGrantsNothingTest extends TestCase
     }
 
     /**
-     * With the switch OFF, an authored code is REMOVED from what the renderer is
-     * sent — and no token is minted for the document at all.
+     * With the switch OFF, nothing is appended to what the renderer is sent —
+     * and no token is minted for the document at all.
      *
      * The converse of the test above, and the one that is easy to leave out. A
-     * template keeps its QR element after a tenant switches verification off;
-     * the element resolves against a binding nothing supplies, and the designer
-     * renders an unresolved QR as a dashed placeholder box. Every document that
-     * tenant issued would carry an empty square in the corner — which reads, to
-     * the person holding it, as a verification feature that is broken rather
-     * than one that is off.
+     * code printed for a tenant that switched verification off would point at
+     * a page that refuses to confirm anything — which reads, to the person
+     * holding it, as a verification feature that is broken rather than one that
+     * is off. (The old designer's per-template switch and its authored QR
+     * element are gone; the tenant's setting is the only switch now.)
      */
-    public function testWithTheSwitchOffAnAuthoredCodeIsStrippedAndNothingIsMinted(): void
+    public function testWithTheSwitchOffNoCodeIsPrintedAndNothingIsMinted(): void
     {
         $this->settings->setGlobal(SettingsRegistry::DOCUMENTS_QR_ENABLED, 'false');
         $this->settings->setGlobal(SettingsRegistry::DOCUMENTS_RENDER_ENABLED, 'true');
         $this->settings->setGlobal(SettingsRegistry::DOCUMENTS_PERSIST_ENABLED, 'true');
 
-        $templateId = $this->createTemplate(self::OWNER, 'Certificate', withAuthoredCode: true);
-        $documentId = $this->raiseFromTemplate(self::OWNER, $templateId, 'Certificate', render: true);
+        $documentId = $this->raiseThroughTheRoute(self::OWNER, 'Certificate', render: true);
 
-        self::assertNotSame([], $this->renderService->calls, 'fixture: the render must have been attempted');
-        $bindings = [];
-        foreach ($this->renderService->calls[0]['template']['pages'] as $page) {
-            foreach ($page['elements'] as $element) {
-                if (isset($element['binding'])) {
-                    $bindings[] = $element['binding'];
-                }
-            }
-        }
-
-        self::assertNotContains(
-            QrTemplateComposer::VERIFICATION_BINDING,
-            $bindings,
-            'a code the tenant switched off must not be sent to the renderer to draw as an empty box'
+        self::assertNotSame([], $this->renderService->flowCalls, 'fixture: the render must have been attempted');
+        self::assertSame(
+            [],
+            EditorTemplateFixture::qrBlocks($this->renderService->flowCalls[0]),
+            'a code the tenant switched off must not be sent to the renderer'
         );
         self::assertNull(
             $this->qr->active(self::TENANT, $documentId),
@@ -472,25 +449,30 @@ final class DocumentQrTokenGrantsNothingTest extends TestCase
 
     // ── fixtures ─────────────────────────────────────────────────────────────
 
-    private function raise(int $actorId, string $title, bool $render = false): int
+    /**
+     * A document raised by `$actorId`, written directly: the subject of this file is
+     * what a token grants, not how a document comes to exist.
+     */
+    private function raise(int $actorId, string $title): int
     {
-        return $this->raiseFromTemplate(
-            $actorId,
-            $this->createTemplate($actorId, $title . ' Template'),
-            $title,
-            $render,
-        );
+        return $this->documentRepo->create(self::TENANT, [
+            'template_name' => 'Minutes',
+            'title' => $title,
+            'created_by' => $actorId,
+        ]);
     }
 
-    private function raiseFromTemplate(int $actorId, int $templateId, string $title, bool $render = false): int
+    /** `POST /api/documents` from a published editor template, for the two print-path tests. */
+    private function raiseThroughTheRoute(int $actorId, string $title, bool $render): int
     {
+        $templateId = $this->editor->published(self::TENANT, $actorId, $title . ' Template');
         TenantContext::reset();
         TenantContext::setTenantId(self::TENANT);
         $request = new Request(
             'POST',
             '/api/documents',
             [],
-            (string) json_encode(['document_template_id' => $templateId, 'title' => $title, 'render' => $render])
+            (string) json_encode(['document_source_id' => $templateId, 'title' => $title, 'render' => $render])
         );
         $request->user = (object) ['profile_id' => $actorId, 'active_tenant_id' => self::TENANT];
 
@@ -500,43 +482,16 @@ final class DocumentQrTokenGrantsNothingTest extends TestCase
         return (int) self::data($response)['id'];
     }
 
-    private function createTemplate(int $actorId, string $name, bool $withAuthoredCode = false): int
-    {
-        $elements = $withAuthoredCode ? [[
-            'id' => 'authored-code',
-            'type' => 'qr',
-            'x' => 20.0,
-            'y' => 20.0,
-            'w' => 25.0,
-            'h' => 25.0,
-            'rotation' => 0,
-            'z' => 3,
-            'value' => '',
-            'binding' => QrTemplateComposer::VERIFICATION_BINDING,
-        ]] : [];
-
-        return $this->templates->create(self::TENANT, [
-            'name' => $name,
-            'data' => [
-                'version' => 2,
-                'name' => $name,
-                'page' => ['widthMm' => 210, 'heightMm' => 297, 'marginMm' => 10, 'background' => '#fff'],
-                'placeholders' => [],
-                'pages' => [['id' => 'p1', 'elements' => $elements]],
-            ],
-            'scope' => 'tenant',
-            'required_permission' => null,
-            'is_system' => false,
-            'created_by' => $actorId,
-            'owner_ou_id' => null,
-        ]);
-    }
-
-    /** The live code for a document — minted by `create()`, read back here. */
+    /**
+     * The document's live code, minted the way the record page's panel mints
+     * one for a document that has none (`DocumentQrService::ensure()`) — a
+     * document only gets one at issue time when it is RENDERED with the
+     * tenant's switch on, which is not what these tests are about.
+     */
     private function tokenFor(int $documentId): string
     {
-        $token = $this->qr->active(self::TENANT, $documentId);
-        self::assertIsArray($token, 'fixture: creating a document with QR on must mint a code');
+        $token = $this->qr->ensure(self::TENANT, $documentId, self::OWNER);
+        self::assertIsArray($token, 'fixture: a configured service with QR on must mint a code');
 
         return (string) $token['token'];
     }
@@ -615,6 +570,7 @@ final class DocumentQrTokenGrantsNothingTest extends TestCase
         // into a test of nothing.
         $this->grant($pdo, 103, CorePermissions::DOCUMENTS_READ);
         $this->grant($pdo, 103, CorePermissions::DOCUMENTS_RENDER);
+        $this->grant($pdo, 103, CorePermissions::DOCUMENTS_ISSUE);
 
         $pdo->exec("
             INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at) VALUES

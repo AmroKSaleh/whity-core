@@ -6,6 +6,20 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+### Changed
+
+- **Documents are issued from the document editor's templates, and the old Document designer is gone (editor M4c).** Upgrading runs migration 164 once: every workspace's old templates become editor drafts (a canvas in reading order, saved blocks placed where they were used, placeholders as the template's own fields), documents issued from them point at their copies, and the `document_templates` and `document_blocks` tables are dropped. If any template can't be converted, nothing is dropped and the upgrade names it. Documents issued from old templates keep their PDFs, codes and routes but can't be re-rendered. `/api/document-templates`, `/api/document-blocks` and Whity Render's canvas `/render` route are removed; `POST /api/documents` takes `document_source_id`, `record` and `values`.
+- **Issuing has its own permission, `documents:issue`.** It gates creating a document, correcting it, and minting or withdrawing its QR code. `documents:render` now means a PDF preview and label printing, which store nothing. Migration 165 grants `documents:issue` to every role that holds `documents:render`, so nobody loses access on upgrade.
+
+### Added
+
+- **One issuing service.** Every way of issuing a document (the editor, `POST /api/documents`, the editor's render route with `persist`, and plugins) goes through it, so every issued document records its template and version and gets its QR code. An `origin_key` names what a document is (for example `order:4812:invoice`): issuing again with it returns the first document instead of a second one. A value given with the request can fill a template's own fields and any field the record left empty, never one the record resolved.
+- **Document events (plugin SDK 1.47).** `document.issuing` (a listener may refuse with `HookVetoException`), `document.issued` and `document.rendered`, with `.async` forms. They carry ids, never field values.
+
+### Deprecated
+
+- **`Whity\Sdk\Render\DocumentRenderer::issue()` (plugin SDK 1.47).** Use `Documents::issue()`, which issues from a template the workspace publishes, once it ships. Until then `issue()` keeps working through the issuing service and takes an optional origin key. It is removed in SDK 2.0.0.
+
 ## [0.2.19] - 2026-10-29
 
 ### Fixed

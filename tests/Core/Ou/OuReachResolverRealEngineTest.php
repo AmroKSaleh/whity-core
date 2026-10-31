@@ -13,10 +13,11 @@ use Whity\Core\RBAC\ResourceTypeRegistry;
 
 /**
  * Real-engine tests for {@see OuReachResolver} — the narrowing half of
- * RBAC-scoped access to document templates and design blocks.
+ * RBAC-scoped access to the editor's templates (`document_sources`).
  *
  * The API-level consequences are asserted in
- * {@see \Tests\Api\DocumentTemplatesApiHandlerRealEngineTest}. These cover the
+ * {@see \Tests\Api\DocumentCreateApiRealEngineTest} (raising a document from a
+ * template placed at a unit, from inside and outside it). These cover the
  * resolver's own edges, which that test cannot reach through HTTP: the tenant
  * boundary, several memberships at once, the everyone-grant exclusion, and the
  * empty answer for somebody with no standing at all.
