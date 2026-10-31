@@ -31,6 +31,42 @@ Core's fixed entry points ask the host, so nothing is registered into a worker's
 
 The system tenant can't publish a workspace plugin, because its roles are global.
 
+### The versions API (WHIT-764)
+
+| Route (served under `/api/v1`) | Permission |
+| --- | --- |
+| `GET /api/workspace-plugins` (the workspace's plugins, live version, switches) | `plugins:read` |
+| `POST /api/workspace-plugins/validate` `{manifest}` | `plugins:build` |
+| `POST /api/workspace-plugins/impact` `{manifest}` | `plugins:build` |
+| `POST /api/workspace-plugins` `{manifest, notes?, confirmDestructive?}` | `plugins:publish` |
+| `GET /api/workspace-plugins/{plugin}/versions` | `plugins:read` |
+| `GET /api/workspace-plugins/{plugin}/versions/{id}` (with its manifest) | `plugins:read` |
+| `POST /api/workspace-plugins/{plugin}/versions/{id}/activate` `{confirmDestructive?}` | `plugins:publish` |
+
+- **Validate** answers `{ok, errors}`. It runs the whole manifest check and the workspace-plugin policy, so names of plugins installed for every workspace are refused here too.
+- **Impact** compares a draft with the live version (`ManifestImpact`) and counts the records each change touches. Each change has an `effect`, a `path`, an English `message` and an Arabic `messageAr`:
+  - `safe`: nothing existing changes.
+  - `data`: existing records need attention, such as a required field they don't have yet, or a permission roles will lose.
+  - `destructive`: existing values stop being served, such as a record type, field or state removed while records use it, or a field's type changed under its values.
+  - The plan's `level` is its worst change.
+- **Publish and activate** run the same comparison first. A destructive plan answers `409` with the plan until it is sent again with `confirmDestructive: true`.
+  - Nothing is deleted from the record store either way, so rolling back serves the old values again.
+  - Every publish (`tenant_plugin.published`), activation (`tenant_plugin.activated`) and refused publish (`tenant_plugin.publish_refused`, with the reason) is audited.
+- **Activate** makes an older version live again (a rollback), or a newer one after a rollback.
+  - The version is checked as if it were being published, so a version that no longer passes the policy is refused.
+  - Its permission slugs become the plugin's again, and its roles are seeded where missing.
+- `{plugin}` is the plugin's slug. Another workspace's plugin or version answers `404`.
+
+`plugins:build` and `plugins:publish` (migration 177) are granted to every role that holds `plugins:enable`. The split lets someone draft a change that someone else puts live.
+
+Not yet:
+
+- previewing a draft against real data with its writes rolled back;
+- replaying an automation on a past event;
+- manifest tests as the publish check;
+- OpenAPI schemas and the MCP tools derived from them;
+- publish and activate as agent proposals (agentPolicy `propose`) once agent proposals exist.
+
 ## What a workspace plugin may not declare
 
 `TenantManifestPolicy` refuses:

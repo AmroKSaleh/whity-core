@@ -47,6 +47,16 @@ final class RouteCatalogueCompletenessTest extends TestCase
         'GET /api/workspace-plugins/{plugin}/automation-runs',
         'GET /api/workspace-plugins/{plugin}/automation-runs/{id}',
         'PUT /api/workspace-plugins/{plugin}/automations',
+        // WHIT-764: a workspace's own plugins and their versions. Schemas,
+        // and the MCP tools derived from them, follow with the next slice
+        // (preview, tests and agent proposals).
+        'GET /api/workspace-plugins',
+        'POST /api/workspace-plugins',
+        'POST /api/workspace-plugins/validate',
+        'POST /api/workspace-plugins/impact',
+        'GET /api/workspace-plugins/{plugin}/versions',
+        'GET /api/workspace-plugins/{plugin}/versions/{id}',
+        'POST /api/workspace-plugins/{plugin}/versions/{id}/activate',
         // WC-235: public self-service registration — OpenAPI schema to follow in
         // a dedicated documentation task (mirrors the auth-routes rollout).
         'POST /api/register',

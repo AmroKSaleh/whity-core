@@ -79,6 +79,13 @@ final class CorePermissions
     public const PLUGINS_UNINSTALL = 'plugins:uninstall';
     public const PLUGINS_RELOAD = 'plugins:reload';
 
+    // Whity Builder (WHIT-764): a workspace's own plugins. BUILD is drafting
+    // (validate a manifest, see what publishing it would change); PUBLISH makes
+    // a version live, including rolling back to an older one. Split so a
+    // builder can prepare a change someone else puts live.
+    public const PLUGINS_BUILD = 'plugins:build';
+    public const PLUGINS_PUBLISH = 'plugins:publish';
+
     // Desktop plugin release catalog/download. Distinct from PLUGINS_READ: this
     // gates an enrolled desktop device's access to proprietary obfuscated
     // desktop-plugin builds (list + zip download), a different trust boundary
@@ -464,6 +471,8 @@ final class CorePermissions
             self::PLUGINS_UPLOAD,
             self::PLUGINS_UNINSTALL,
             self::PLUGINS_RELOAD,
+            self::PLUGINS_BUILD,
+            self::PLUGINS_PUBLISH,
             self::DESKTOP_PLUGINS_READ,
             self::DESKTOP_APP_UPDATES_READ,
             self::DELEGATION_MANAGE,

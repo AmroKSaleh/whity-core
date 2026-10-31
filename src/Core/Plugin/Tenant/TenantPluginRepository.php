@@ -67,17 +67,7 @@ final class TenantPluginRepository
 
             $this->point($tenantId, $pluginKey, $versionId);
 
-            $delete = $this->db->prepare(
-                'DELETE FROM tenant_plugin_permissions WHERE tenant_id = :tenant_id AND plugin_key = :plugin_key'
-            );
-            $delete->execute([':tenant_id' => $tenantId, ':plugin_key' => $pluginKey]);
-            $add = $this->db->prepare(
-                'INSERT INTO tenant_plugin_permissions (tenant_id, plugin_key, permission)
-                 VALUES (:tenant_id, :plugin_key, :permission)'
-            );
-            foreach (array_unique($permissions) as $permission) {
-                $add->execute([':tenant_id' => $tenantId, ':plugin_key' => $pluginKey, ':permission' => $permission]);
-            }
+            $this->replacePermissions($tenantId, $pluginKey, $permissions);
 
             if ($own) {
                 $this->db->commit();
@@ -142,6 +132,103 @@ final class TenantPluginRepository
 
         /** @var array<string, mixed>|null */
         return is_array($decoded) ? $decoded : null;
+    }
+
+    /**
+     * The workspace's plugins, switched on or not, with their live version
+     * (WHIT-764).
+     *
+     * @return list<array{plugin: string, version_id: int, version: string, enabled: bool, automations_enabled: bool, updated_at: string}>
+     */
+    public function plugins(int $tenantId): array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT tp.plugin_key, tp.active_version_id, v.version, tp.enabled, tp.automations_enabled, tp.updated_at
+               FROM tenant_plugins tp
+               JOIN plugin_manifest_versions v ON v.id = tp.active_version_id AND v.tenant_id = tp.tenant_id
+              WHERE tp.tenant_id = :tenant_id
+              ORDER BY tp.plugin_key'
+        );
+        $stmt->execute([':tenant_id' => $tenantId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $out[] = [
+                'plugin' => (string) $row['plugin_key'],
+                'version_id' => (int) $row['active_version_id'],
+                'version' => (string) $row['version'],
+                'enabled' => DbBool::of($row['enabled']),
+                'automations_enabled' => DbBool::of($row['automations_enabled']),
+                'updated_at' => (string) $row['updated_at'],
+            ];
+        }
+
+        return $out;
+    }
+
+    /** The live version's id of a workspace's plugin, switched on or not. */
+    public function liveVersionId(int $tenantId, string $pluginKey): ?int
+    {
+        $stmt = $this->db->prepare(
+            'SELECT active_version_id FROM tenant_plugins WHERE tenant_id = :tenant_id AND plugin_key = :plugin_key'
+        );
+        $stmt->execute([':tenant_id' => $tenantId, ':plugin_key' => $pluginKey]);
+        $id = $stmt->fetchColumn();
+
+        return $id === false ? null : (int) $id;
+    }
+
+    /**
+     * Every published version of a workspace's plugin, newest first. The
+     * manifests themselves stay out; read one with {@see self::manifest()}.
+     *
+     * @return list<array{id: int, version: string, hash: string, notes: ?string, published_by: ?int, acting_for: ?int, approved_by: ?int, published_at: string}>
+     */
+    public function history(int $tenantId, string $pluginKey): array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT id, version, hash, notes, published_by, acting_for, approved_by, published_at
+               FROM plugin_manifest_versions
+              WHERE tenant_id = :tenant_id AND plugin_key = :plugin_key
+              ORDER BY id DESC'
+        );
+        $stmt->execute([':tenant_id' => $tenantId, ':plugin_key' => $pluginKey]);
+        $int = static fn (mixed $v): ?int => $v === null ? null : (int) $v;
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $out[] = [
+                'id' => (int) $row['id'],
+                'version' => (string) $row['version'],
+                'hash' => trim((string) $row['hash']),
+                'notes' => $row['notes'] === null ? null : (string) $row['notes'],
+                'published_by' => $int($row['published_by']),
+                'acting_for' => $int($row['acting_for']),
+                'approved_by' => $int($row['approved_by']),
+                'published_at' => (string) $row['published_at'],
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Make a version's permission slugs the plugin's own again, as publish
+     * does (a rollback).
+     *
+     * @param list<string> $permissions
+     */
+    public function replacePermissions(int $tenantId, string $pluginKey, array $permissions): void
+    {
+        $delete = $this->db->prepare(
+            'DELETE FROM tenant_plugin_permissions WHERE tenant_id = :tenant_id AND plugin_key = :plugin_key'
+        );
+        $delete->execute([':tenant_id' => $tenantId, ':plugin_key' => $pluginKey]);
+        $add = $this->db->prepare(
+            'INSERT INTO tenant_plugin_permissions (tenant_id, plugin_key, permission)
+             VALUES (:tenant_id, :plugin_key, :permission)'
+        );
+        foreach (array_unique($permissions) as $permission) {
+            $add->execute([':tenant_id' => $tenantId, ':plugin_key' => $pluginKey, ':permission' => $permission]);
+        }
     }
 
     /**
