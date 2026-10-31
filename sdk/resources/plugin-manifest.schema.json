@@ -533,6 +533,94 @@
         }
       }
     },
+    "tests": {
+      "description": "Examples a record type's rules must keep (SDK 1.54), run before a version is published.",
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "label",
+          "record",
+          "expect"
+        ],
+        "properties": {
+          "label": {
+            "$ref": "#/$defs/label"
+          },
+          "record": {
+            "type": "string"
+          },
+          "as": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "given": {
+            "type": "object",
+            "description": "Field name to a literal value."
+          },
+          "state": {
+            "type": "string"
+          },
+          "create": {
+            "type": "object",
+            "description": "Field name to a literal value."
+          },
+          "update": {
+            "type": "object",
+            "description": "Field name to a literal value."
+          },
+          "move": {
+            "type": "string"
+          },
+          "expect": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "refused"
+            ],
+            "properties": {
+              "refused": {
+                "type": "boolean"
+              },
+              "issues": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "fields": {
+                "type": "object",
+                "description": "Field name to a literal value."
+              },
+              "state": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "oneOf": [
+          {
+            "required": [
+              "create"
+            ]
+          },
+          {
+            "required": [
+              "update"
+            ]
+          },
+          {
+            "required": [
+              "move"
+            ]
+          }
+        ]
+      }
+    },
     "documents": {
       "description": "Template slots (SDK 1.55): the named places this plugin needs a document template. The host addresses each as <plugin name>.<slot>, and a workspace binds a published template to it.",
       "type": "object",

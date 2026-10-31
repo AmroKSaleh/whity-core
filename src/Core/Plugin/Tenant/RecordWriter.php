@@ -175,6 +175,10 @@ final class RecordWriter
      */
     public function roles(int $tenantId, RecordActor $actor): array
     {
+        if ($actor->roles !== null) {
+            return $actor->roles;
+        }
+
         return $actor->profileId === null
             ? []
             : array_values($this->roleChecker->getEffectiveRolesForProfile($actor->profileId, $tenantId));

@@ -270,6 +270,18 @@ final class PluginManifest
     }
 
     /**
+     * Examples the record types' rules must keep (SDK 1.54), as declared. The
+     * host runs them before a version can be published.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function tests(): array
+    {
+        /** @var list<array<string, mixed>> */
+        return array_values($this->data['tests'] ?? []);
+    }
+
+    /**
      * Template slots (SDK 1.55), as declared under `documents.slots`: the
      * named places this plugin needs a document template, keyed by local name.
      * The host addresses each as `<plugin name>.<key>`.

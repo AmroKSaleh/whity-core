@@ -38,6 +38,7 @@ The system tenant can't publish a workspace plugin, because its roles are global
 | `GET /api/workspace-plugins` (the workspace's plugins, live version, switches) | `plugins:read` |
 | `POST /api/workspace-plugins/validate` `{manifest}` | `plugins:build` |
 | `POST /api/workspace-plugins/impact` `{manifest}` | `plugins:build` |
+| `POST /api/workspace-plugins/test` `{manifest}` | `plugins:build` |
 | `POST /api/workspace-plugins` `{manifest, notes?, confirmDestructive?}` | `plugins:publish` |
 | `GET /api/workspace-plugins/{plugin}/versions` | `plugins:read` |
 | `GET /api/workspace-plugins/{plugin}/versions/{id}` (with its manifest) | `plugins:read` |
@@ -49,6 +50,14 @@ The system tenant can't publish a workspace plugin, because its roles are global
   - `data`: existing records need attention, such as a required field they don't have yet, or a permission roles will lose.
   - `destructive`: existing values stop being served, such as a record type, field or state removed while records use it, or a field's type changed under its values.
   - The plan's `level` is its worst change.
+- **Tests** (SDK 1.54) are examples a version's rules must keep, declared under `tests`:
+  - Each test `create`s a record, or starts from a `given` record in a `state` and `update`s fields or makes a `move`.
+  - It acts with the roles `as` lists.
+  - It `expect`s the write `refused` (optionally on the fields in `issues`) or the `fields` and `state` it leaves.
+  - They run through the same write path as the API, so the version's real rules, defaults, computed fields, locks and lifecycle apply, in a transaction that is always rolled back.
+  - Permissions and automations aren't exercised.
+  - `test` runs them and answers `{passed, failed, results}`. A failed result has a `reason` (`refused`, `not_refused`, `issues_differ`, `field_differs`, `state_differs`, `error`) and what the write actually gave.
+- **Publish** runs the version's tests first and answers `422` (`tests_failed`) with the results when one fails.
 - **Publish and activate** run the same comparison first. A destructive plan answers `409` with the plan until it is sent again with `confirmDestructive: true`.
   - Nothing is deleted from the record store either way, so rolling back serves the old values again.
   - Every publish (`tenant_plugin.published`), activation (`tenant_plugin.activated`) and refused publish (`tenant_plugin.publish_refused`, with the reason) is audited.
@@ -63,7 +72,6 @@ Not yet:
 
 - previewing a draft against real data with its writes rolled back;
 - replaying an automation on a past event;
-- manifest tests as the publish check;
 - OpenAPI schemas and the MCP tools derived from them;
 - publish and activate as agent proposals (agentPolicy `propose`) once agent proposals exist.
 

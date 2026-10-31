@@ -862,6 +862,14 @@ namespace Whity\Sdk;
  * reads them (WHIT-763).
  *
  * Purely additive.) ->
+ * 1.54 (MANIFEST TESTS: `plugin.json` gains `tests`, examples a record type's
+ * rules must keep: create a record, or from a given one update fields or make
+ * a move, acting with the roles `as` names, and expect it refused (on which
+ * fields) or the fields and state it leaves. Values are literals. Checked by
+ * {@see Manifest\ManifestTestValidator}; {@see Manifest\PluginManifest::tests()}
+ * reads them; the host runs them before a version can be published (WHIT-764).
+ *
+ * Purely additive.) ->
  * 1.55 (TEMPLATE SLOTS: `plugin.json` gains `documents.slots`, the named
  * places a workspace plugin needs a document template. Each has a label, a
  * record type of the manifest's own and the document kinds that can fill

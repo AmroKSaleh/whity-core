@@ -9,8 +9,11 @@ use PHPUnit\Framework\TestCase;
 use Tests\Sdk\Manifest\RecordTypeValidatorTest;
 use Tests\Support\SchemaFromMigrations;
 use Whity\Api\TenantPluginVersionsApiHandler;
+use Whity\Auth\RoleChecker;
 use Whity\Core\Audit\AuditLogger;
 use Whity\Core\Plugin\Tenant\ManifestImpact;
+use Whity\Core\Plugin\Tenant\ManifestTestRunner;
+use Whity\Core\Plugin\Tenant\RecordWriter;
 use Whity\Core\Plugin\Tenant\TenantManifestPublisher;
 use Whity\Core\Plugin\Tenant\TenantPluginRepository;
 use Whity\Core\Plugin\Tenant\TenantRecordRepository;
@@ -132,6 +135,58 @@ final class TenantPluginVersionsRealEngineTest extends TestCase
         ));
     }
 
+    public function testAVersionsOwnTestsRunRolledBackAndGatePublishing(): void
+    {
+        $l = static fn (string $en, string $ar): array => ['en' => $en, 'ar' => $ar];
+        $manifest = RecordRulesRealEngineTest::manifest();
+        $manifest['roles'] = ['manager' => ['label' => $l('Manager', 'مدير'), 'permissions' => ['cakeorders:manage']]];
+        $manifest['tests'] = [
+            [
+                'label' => $l('A low deposit can\'t be confirmed', 'لا يمكن تأكيد طلب بعربون قليل'),
+                'record' => 'order',
+                'given' => ['customer' => 'Example Bakery', 'price' => 50000, 'deposit' => 10000, 'pickup_on' => '2026-11-03'],
+                'state' => 'draft',
+                'move' => 'confirm',
+                'expect' => ['refused' => true, 'issues' => ['deposit']],
+            ],
+            [
+                'label' => $l('The balance is worked out', 'يُحسب المتبقي'),
+                'record' => 'order',
+                'as' => ['manager'],
+                'create' => ['customer' => 'Example Bakery', 'price' => 50000, 'deposit' => 20000, 'pickup_on' => '2026-11-03'],
+                'expect' => ['refused' => false, 'fields' => ['balance' => 30000, 'paid' => false], 'state' => 'draft'],
+            ],
+            [
+                'label' => $l('The price is locked once confirmed', 'يُقفل السعر بعد التأكيد'),
+                'record' => 'order',
+                'given' => ['customer' => 'Example Bakery', 'price' => 50000, 'deposit' => 20000, 'pickup_on' => '2026-11-03'],
+                'state' => 'confirmed',
+                'update' => ['price' => 60000],
+                'expect' => ['refused' => true, 'issues' => ['price']],
+            ],
+        ];
+
+        $ran = $this->json($this->call('test', self::A, ['manifest' => $manifest]))['data'];
+        self::assertSame([3, 0], [$ran['passed'], $ran['failed']], (string) json_encode($ran));
+        $left = $this->pdo->query('SELECT COUNT(*) FROM plugin_records');
+        self::assertNotFalse($left);
+        self::assertSame(0, (int) $left->fetchColumn(), 'tests write nothing that stays');
+
+        // A test that expects the wrong answer fails, and the version can't be published.
+        $manifest['tests'][1]['expect']['fields']['balance'] = 99;
+        $refused = $this->call('publish', self::A, ['manifest' => $manifest]);
+        self::assertSame(422, $refused->getStatusCode());
+        $details = $this->json($refused)['details'];
+        self::assertSame('tests_failed', $details['reason']);
+        $failed = $details['tests']['results'][1];
+        self::assertSame(['field_differs', 'balance', 30000], [$failed['reason'], $failed['got']['field'], $failed['got']['fields']['balance']]);
+        self::assertSame([], $this->plugins->history(self::A, 'CakeOrders'), 'nothing was published');
+        self::assertSame(1, $this->auditCount(TenantPluginVersionsApiHandler::AUDIT_REFUSED));
+
+        $manifest['tests'][1]['expect']['fields']['balance'] = 30000;
+        self::assertSame(201, $this->call('publish', self::A, ['manifest' => $manifest])->getStatusCode());
+    }
+
     public function testTheSystemTenantHasNoWorkspacePlugins(): void
     {
         self::assertSame(403, $this->call('publish', 0, ['manifest' => RecordTypeValidatorTest::manifest()])->getStatusCode());
@@ -151,12 +206,13 @@ final class TenantPluginVersionsRealEngineTest extends TestCase
             $this->plugins,
             new TenantManifestPublisher($this->pdo, $this->plugins, new PluginRoleSeeder($this->pdo), $installed, $audit),
             new ManifestImpact($this->records),
+            new ManifestTestRunner($this->pdo, $this->records, new RecordWriter($this->pdo, $this->records, $this->createMock(RoleChecker::class))),
             $audit,
         );
         $request = new Request($body === null ? 'GET' : 'POST', '/api/workspace-plugins', [], $body === null ? '' : (string) json_encode($body));
         $request->user = (object) ['profile_id' => self::MANAGER];
 
-        return in_array($method, ['list', 'validate', 'impact', 'publish'], true)
+        return in_array($method, ['list', 'validate', 'impact', 'test', 'publish'], true)
             ? $handler->{$method}($request)
             : $handler->{$method}($request, $params);
     }

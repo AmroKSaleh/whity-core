@@ -2057,12 +2057,20 @@ $tenantPluginVersionsHandler = new \Whity\Api\TenantPluginVersionsApiHandler(
         $auditLogger
     ),
     new \Whity\Core\Plugin\Tenant\ManifestImpact($tenantRecordRepository),
+    // The publish check: a version's own tests, through a writer with no
+    // audit and no automations, in a transaction that is always rolled back.
+    new \Whity\Core\Plugin\Tenant\ManifestTestRunner(
+        $db->getPdo(),
+        $tenantRecordRepository,
+        new \Whity\Core\Plugin\Tenant\RecordWriter($db->getPdo(), $tenantRecordRepository, $roleChecker)
+    ),
     $auditLogger
 );
 $router->register('GET', '/api/workspace-plugins', [$tenantPluginVersionsHandler, 'list'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_READ);
 $router->register('POST', '/api/workspace-plugins', [$tenantPluginVersionsHandler, 'publish'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_PUBLISH);
 $router->register('POST', '/api/workspace-plugins/validate', [$tenantPluginVersionsHandler, 'validate'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_BUILD);
 $router->register('POST', '/api/workspace-plugins/impact', [$tenantPluginVersionsHandler, 'impact'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_BUILD);
+$router->register('POST', '/api/workspace-plugins/test', [$tenantPluginVersionsHandler, 'test'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_BUILD);
 $router->register('GET', '/api/workspace-plugins/{plugin:[a-z][a-z0-9_]*}/versions', [$tenantPluginVersionsHandler, 'versions'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_READ);
 $router->register('GET', '/api/workspace-plugins/{plugin:[a-z][a-z0-9_]*}/versions/{id:\d+}', [$tenantPluginVersionsHandler, 'version'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_READ);
 $router->register('POST', '/api/workspace-plugins/{plugin:[a-z][a-z0-9_]*}/versions/{id:\d+}/activate', [$tenantPluginVersionsHandler, 'activate'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_PUBLISH);
@@ -4603,8 +4611,6 @@ $toolDeriver = new ToolDeriver(
 // requirements. Uses the same ToolDeriver instance as the MCP transport so
 // the admin sees exactly what an MCP client would receive from tools/list,
 // without per-caller RBAC filtering (the page is for audit/planning).
-$mcpToolsAdminHandler = new McpToolsAdminHandler($toolDeriver, $roleChecker);
-$router->register('GET', '/api/admin/mcp/tools', [$mcpToolsAdminHandler, 'list'], null, null, CorePermissions::MCP_TOKENS_MANAGE);
 
 // WC-c10b292e: MCP Streamable-HTTP endpoint. Registered UNVERSIONED so the
 // path is exactly /mcp (not /api/v1/mcp). No requiredRole/requiredPermission —
@@ -4651,6 +4657,15 @@ $mcpListChangedNotifier = new ListChangedNotifier(
 // ONE registry — a second instance would answer tools/list from a different set
 // than tools/call dispatches from.
 $authoredMcpTools = new AuthoredToolRegistry();
+// WHIT-754: the plugin MCP tools a workspace turned on as always-on.
+$mcpEnabledPluginAlwaysOn = static function (int $tenantId) use ($settingsService): array {
+    $raw = (string) ($settingsService->effective($tenantId)[\Whity\Core\Settings\SettingsRegistry::MCP_ALWAYS_ON_PLUGIN_TOOLS] ?? '');
+    return array_values(array_filter(array_map('trim', explode(',', $raw)), static fn (string $n): bool => $n !== ''));
+};
+// WC-0208ce4d: admin read-only view of the MCP tools and their access
+// requirements, plugin-authored tools included (WHIT-754).
+$mcpToolsAdminHandler = new McpToolsAdminHandler($toolDeriver, $roleChecker, $authoredMcpTools, $mcpEnabledPluginAlwaysOn);
+$router->register('GET', '/api/admin/mcp/tools', [$mcpToolsAdminHandler, 'list'], null, null, CorePermissions::MCP_TOKENS_MANAGE);
 $mcpToolsListHandler = new ToolsListHandler($toolDeriver, $roleChecker, $tokenValidator, $authoredMcpTools);
 $mcpServerEnabled = (bool) filter_var($_ENV['MCP_ENABLED'] ?? 'false', FILTER_VALIDATE_BOOLEAN);
 // WHIT-784: an agent's Ask-first call is stored for its person to approve.
@@ -4731,6 +4746,9 @@ $mcpDiscovery = new DiscoveryTools(
         },
         $mcpRateLimiter->limits(),
     ),
+    // WHIT-754: a plugin's always-on tool is listed only once this workspace's
+    // admin turned it on (the mcp.always_on_plugin_tools setting).
+    $mcpEnabledPluginAlwaysOn,
 );
 $mcpTransportHandler = new McpTransportHandler(
     new Dispatcher($mcpHandlers, $tokenValidator, $mcpRateLimiter, $tenantMcpEnabled, $mcpListChangedNotifier, $mcpRecordTokenUse),

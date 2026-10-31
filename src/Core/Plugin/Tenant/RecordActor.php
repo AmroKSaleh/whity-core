@@ -12,7 +12,8 @@ namespace Whity\Core\Plugin\Tenant;
  * so it carries that person (or none, for a run nobody caused) plus how many
  * automation hops led here: the depth guard reads it to stop automations
  * triggering each other forever. `rootRunId` is the first run of the chain,
- * which the per-write run budget counts against.
+ * which the per-write run budget counts against. A manifest test acts as
+ * nobody, with the roles the test names (`tester()`).
  */
 final class RecordActor
 {
@@ -22,6 +23,8 @@ final class RecordActor
         public readonly ?int $runId,
         public readonly ?string $automation,
         public readonly ?int $rootRunId,
+        /** @var list<string>|null Role names that stand in for a person's, in a manifest test. */
+        public readonly ?array $roles = null,
     ) {
     }
 
@@ -34,6 +37,16 @@ final class RecordActor
     public static function automation(?int $profileId, int $depth, int $runId, string $automation, int $rootRunId): self
     {
         return new self($profileId, $depth, $runId, $automation, $rootRunId);
+    }
+
+    /**
+     * A manifest test's actor: no person, the roles the test names.
+     *
+     * @param list<string> $roles
+     */
+    public static function tester(array $roles): self
+    {
+        return new self(null, 0, null, null, null, $roles);
     }
 
     public function isAutomation(): bool
