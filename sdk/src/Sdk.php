@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.51).
+ * SDK identity (v1.52).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -840,13 +840,24 @@ namespace Whity\Sdk;
  * expression is validated, and every `field` it names must be one of the
  * record type's fields (WHIT-762).
  *
- * Purely additive.)
+ * Purely additive.) ->
+ * 1.52 (MCP TOOL SURFACE: {@see PluginMcpToolsInterface} descriptors take
+ * `toolset`, `visibility` (`always-on` | `discoverable`), `agentPolicy`
+ * (`allow` | `propose` | `suggest-only` | `refuse`) and `undo`; names must
+ * fit `[A-Za-z0-9_-]{1,64}` and descriptions 500 characters, a plugin gets one
+ * read-only always-on tool, and unprefixed names are deprecated. The new
+ * optional {@see PluginMcpToolsetsInterface} titles and describes a plugin's
+ * toolsets (WHIT-752, docs/design/MCP-TOOL-SURFACE.md §5.7).
+ *
+ * Additive. A descriptor that already broke a budget (a name with a dot or
+ * over 64 characters, a description over 500 characters) is now refused at
+ * load; no plugin in this repository does.)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.51.0';
+    public const VERSION = '1.52.0';
 
     /**
      * Static identity only — never instantiated.

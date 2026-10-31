@@ -80,7 +80,7 @@ loading today must still load on any later `1.y`.
 **A minor MAY:**
 
 - add a new optional interface a plugin can choose to implement
-  (`PluginHealthProbesInterface`, `PluginMcpToolsInterface`, …);
+  (`PluginHealthProbesInterface`, `PluginMcpToolsInterface`, `PluginMcpToolsetsInterface` (1.52), …);
 - add an OPTIONAL parameter to an existing method, with a default;
 - add a new value object, exception type, or testing kit;
 - add a new optional key to a declared array shape (a route declaration, a

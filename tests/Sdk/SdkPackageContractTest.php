@@ -242,9 +242,12 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.51.0',
+            '1.52.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.51 ADDS RECORD RULES: record types may declare rules (require, when, an English and '
+            'SDK 1.52 ADDS THE MCP TOOL SURFACE: authored tool descriptors take toolset, visibility, '
+            . 'agentPolicy and undo, with name and description budgets, and PluginMcpToolsetsInterface '
+            . 'titles and describes each plugin toolset (WHIT-752). Additive. '
+            . 'SDK 1.51 ADDS RECORD RULES: record types may declare rules (require, when, an English and '
             . 'Arabic message) and fields may declare default, computed and lockedWhen, all as manifest '
             . 'expressions over the record type own fields (WHIT-762). Purely additive. '
             . 'SDK 1.50 ADDS MANIFEST RECORDS: plugin.json gains records, record types a workspace plugin '

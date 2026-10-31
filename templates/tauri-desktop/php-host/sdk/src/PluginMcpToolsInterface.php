@@ -71,6 +71,32 @@ namespace Whity\Sdk;
  *   take the spec's cautious defaults. Hints only: they never change who may
  *   call the tool. Unknown keys and wrong types are dropped.
  *
+ * SDK 1.52 (WHIT-752, docs/design/MCP-TOOL-SURFACE.md §5.7), all optional:
+ *
+ * - `toolset` (string): a sub-toolset of the plugin's own, relative
+ *   (`'locks'`) or absolute (`'period-close.locks'`). Default: the plugin's
+ *   root toolset. A toolset outside the plugin's own is REFUSED. Describe your
+ *   toolsets with {@see PluginMcpToolsetsInterface}.
+ * - `visibility` (`'discoverable'` | `'always-on'`, default `'discoverable'`).
+ *   Most tools are found through `search_operations`. ONE tool per plugin may
+ *   be `'always-on'`, listed directly next to search, and only when it is
+ *   read-only (`annotations.readOnlyHint: true`) and a tenant admin has
+ *   enabled it. A second always-on tool is demoted with a warning.
+ * - `agentPolicy` (`'allow'` | `'propose'` | `'suggest-only'` | `'refuse'`,
+ *   default `'allow'`): a ceiling on what an AI agent may do with the tool.
+ *   `'allow'` leaves it to the person's scope grant; `'propose'` always makes
+ *   it a proposal a person approves; `'suggest-only'` only its suggestion
+ *   variant; `'refuse'` never for agents. People's own clients are unaffected.
+ * - `undo` (array): `['windowSeconds' => int, 'operation' => '<tool name that
+ *   reverses it>']`, or `'handler' => callable` instead of `operation`. A
+ *   write with no undo is always Ask first for agents, whatever the grant.
+ *
+ * Budgets, REFUSED at load: `name` must match `[A-Za-z0-9_-]{1,64}` (some
+ * model APIs refuse anything else) and `description` is at most 500
+ * characters. New names should start with the plugin's slug and an
+ * underscore (`period_close_lock`); an unprefixed name loads with a
+ * deprecation warning and is refused from SDK 2.0.
+ *
  * A DESCRIPTOR MUST DECLARE ITS AUDIENCE. `requiredRole`, `requiredPermission`
  * or `open: true` — a tool declaring none of the three is REFUSED at load.
  *

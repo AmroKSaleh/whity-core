@@ -51,7 +51,11 @@ final class AuthoredToolRegistry implements HostWiredService
      *     handler: callable,
      *     requiredRole: ?string,
      *     requiredPermission: ?string,
-     *     plugin: string
+     *     plugin: string,
+     *     toolset: string,
+     *     visibility: string,
+     *     agentPolicy: string,
+     *     undo: array{windowSeconds: int, operation: ?string, handler: ?callable}|null
      * }>
      */
     private array $tools = [];
@@ -63,6 +67,15 @@ final class AuthoredToolRegistry implements HostWiredService
      * @var array<string, true>
      */
     private array $suppressedPlugins = [];
+
+    /** @var array<string, array{id: string, title: string, titleAr: string, description: string, split: bool, requiresEntitlement: ?string, plugin: string}> */
+    private array $toolsets = [];
+
+    /** @var list<string> */
+    private array $warnings = [];
+
+    /** A description is read by a model on every search; longer is cost, not clarity. */
+    public const MAX_DESCRIPTION = 500;
 
     /**
      * Register one descriptor. Returns null on success, or the reason it was
@@ -119,6 +132,53 @@ final class AuthoredToolRegistry implements HostWiredService
                 . 'add one, or set `open: true` to state deliberately that any authenticated caller may invoke it';
         }
 
+        // SDK 1.52 (WHIT-752): name and description budgets, toolset,
+        // visibility, agent policy and undo. Refusals here are load-time
+        // warnings for the author, never a broken dispatcher later.
+        if (preg_match('/^[A-Za-z0-9_-]{1,64}$/', $name) !== 1) {
+            return "tool '{$name}' has a name outside [A-Za-z0-9_-]{1,64}, which some model APIs refuse";
+        }
+        if (mb_strlen($description) > self::MAX_DESCRIPTION) {
+            return "tool '{$name}' has a description over " . self::MAX_DESCRIPTION . ' characters';
+        }
+        $root = CoreToolsets::pluginToolsetIdForClass($pluginKey);
+        $slug = str_replace('-', '_', $root);
+        if (!str_starts_with($name, $slug . '_')) {
+            $this->warnings[] = "tool '{$name}' should start with '{$slug}_'; unprefixed names are deprecated and refused from SDK 2.0";
+        }
+        $toolset = self::toolset($descriptor['toolset'] ?? null, $root);
+        if ($toolset === null) {
+            return "tool '{$name}' names a toolset outside its plugin's own ('{$root}')";
+        }
+        $annotations = ToolAnnotations::sanitize($descriptor['annotations'] ?? null);
+        $visibility  = $descriptor['visibility'] ?? ToolSurface::VISIBILITY_DISCOVERABLE;
+        if (!in_array($visibility, [ToolSurface::VISIBILITY_ALWAYS_ON, ToolSurface::VISIBILITY_DISCOVERABLE], true)) {
+            return "tool '{$name}' has visibility " . json_encode($visibility) . "; use 'always-on' or 'discoverable'";
+        }
+        if ($visibility === ToolSurface::VISIBILITY_ALWAYS_ON) {
+            // Every write goes through search and call (owner decision 4).
+            if (($annotations['readOnlyHint'] ?? false) !== true) {
+                return "tool '{$name}' is always-on but not read-only; declare annotations.readOnlyHint: true, or make it discoverable";
+            }
+            // One always-on tool per plugin (owner decision 5). A second is
+            // demoted rather than refused, so the tool still works.
+            foreach ($this->tools as $other) {
+                if ($other['plugin'] === $pluginKey && $other['visibility'] === ToolSurface::VISIBILITY_ALWAYS_ON) {
+                    $this->warnings[] = "tool '{$name}' asked to be always-on, but '{$other['name']}' already is; a plugin gets one, so it is discoverable";
+                    $visibility = ToolSurface::VISIBILITY_DISCOVERABLE;
+                    break;
+                }
+            }
+        }
+        $agentPolicy = $descriptor['agentPolicy'] ?? ToolSurface::AGENT_ALLOW;
+        if (!in_array($agentPolicy, ToolSurface::AGENT_POLICIES, true)) {
+            return "tool '{$name}' has agentPolicy " . json_encode($agentPolicy) . '; use ' . implode(', ', ToolSurface::AGENT_POLICIES);
+        }
+        $undo = self::undo($descriptor['undo'] ?? null);
+        if ($undo === false) {
+            return "tool '{$name}' has a malformed undo; use ['windowSeconds' => int > 0, 'operation' => string] or 'handler' => callable";
+        }
+
         $this->tools[$name] = [
             'name'               => $name,
             'description'        => $description,
@@ -126,14 +186,137 @@ final class AuthoredToolRegistry implements HostWiredService
             // WHIT-706: only what the plugin declares. An authored tool has no
             // HTTP method to derive hints from, and a guessed "read-only" is
             // worse than none: the spec's defaults are the cautious reading.
-            'annotations'        => ToolAnnotations::sanitize($descriptor['annotations'] ?? null),
+            'annotations'        => $annotations,
             'handler'            => $handler,
             'requiredRole'       => is_string($role) && $role !== '' ? $role : null,
             'requiredPermission' => is_string($permission) && $permission !== '' ? $permission : null,
             'plugin'             => $pluginKey,
+            'toolset'            => $toolset,
+            'visibility'         => $visibility,
+            'agentPolicy'        => $agentPolicy,
+            'undo'               => $undo,
         ];
 
         return null;
+    }
+
+    /**
+     * Register a plugin's toolset declarations (SDK 1.52,
+     * {@see \Whity\Sdk\PluginMcpToolsetsInterface}). Ids are relative to the
+     * plugin's root toolset, which the host prefixes; an empty id is the root.
+     * Returns the reasons any were refused, for the caller to log.
+     *
+     * @param array<mixed> $declarations
+     * @return list<string>
+     */
+    public function registerToolsets(array $declarations, string $pluginKey): array
+    {
+        $root    = CoreToolsets::pluginToolsetIdForClass($pluginKey);
+        $refused = [];
+        foreach ($declarations as $declaration) {
+            if (!is_array($declaration)) {
+                $refused[] = 'a toolset declaration is not an array';
+                continue;
+            }
+            $relative = $declaration['id'] ?? '';
+            $id       = is_string($relative) ? ($relative === '' ? $root : $root . '.' . $relative) : '';
+            $title    = $declaration['title'] ?? null;
+            $summary  = $declaration['description'] ?? null;
+            if (!is_string($relative) || !ToolSurface::isToolsetId($id)) {
+                $refused[] = 'toolset id ' . json_encode($relative) . ' is malformed';
+            } elseif (!is_string($title) || trim($title) === '' || mb_strlen($title) > 40) {
+                $refused[] = "toolset '{$id}' needs a title of at most 40 characters";
+            } elseif (!is_string($summary) || trim($summary) === '' || mb_strlen($summary) > 160) {
+                $refused[] = "toolset '{$id}' needs a one-sentence description of at most 160 characters";
+            } else {
+                $entitlement = $declaration['requiresEntitlement'] ?? null;
+                $titleAr     = $declaration['titleAr'] ?? null;
+                $this->toolsets[$id] = [
+                    'id'                  => $id,
+                    'title'               => $title,
+                    'titleAr'             => is_string($titleAr) && $titleAr !== '' ? $titleAr : $title,
+                    'description'         => $summary,
+                    // A root toolset always gets a split; a sub-toolset only when asked.
+                    'split'               => $id === $root || ($declaration['split'] ?? false) === true,
+                    'requiresEntitlement' => is_string($entitlement) && $entitlement !== '' ? $entitlement : null,
+                    'plugin'              => $pluginKey,
+                ];
+            }
+        }
+
+        return $refused;
+    }
+
+    /**
+     * Every declared plugin toolset, by id.
+     *
+     * @return array<string, array{id: string, title: string, titleAr: string, description: string, split: bool, requiresEntitlement: ?string, plugin: string}>
+     */
+    public function toolsets(): array
+    {
+        return $this->toolsets;
+    }
+
+    /**
+     * Load-time notes for plugin authors that refused nothing (deprecated
+     * names, demotions). Taken once: the caller logs them.
+     *
+     * @return list<string>
+     */
+    public function drainWarnings(): array
+    {
+        $warnings       = $this->warnings;
+        $this->warnings = [];
+        return $warnings;
+    }
+
+    /**
+     * The toolset a descriptor asks for, under the plugin's root, or null when
+     * it names one outside it. Relative (`palettes`) or absolute
+     * (`theme-creator.palettes`).
+     */
+    private static function toolset(mixed $requested, string $root): ?string
+    {
+        if ($requested === null || $requested === '') {
+            return $root;
+        }
+        if (!is_string($requested)) {
+            return null;
+        }
+        if (ToolSurface::isWithin($requested, $root)) {
+            return ToolSurface::isToolsetId($requested) ? $requested : null;
+        }
+        if (str_contains($requested, '.')) {
+            return null;
+        }
+        $id = $root . '.' . $requested;
+        return ToolSurface::isToolsetId($id) ? $id : null;
+    }
+
+    /**
+     * A descriptor's undo (WHIT-752, design §5.11): null when there is none,
+     * false when it is malformed.
+     *
+     * @return array{windowSeconds: int, operation: ?string, handler: ?callable}|null|false
+     */
+    private static function undo(mixed $raw): array|null|false
+    {
+        if ($raw === null) {
+            return null;
+        }
+        if (!is_array($raw) || !is_int($raw['windowSeconds'] ?? null) || $raw['windowSeconds'] <= 0) {
+            return false;
+        }
+        $operation = $raw['operation'] ?? null;
+        $handler   = $raw['handler'] ?? null;
+        if (!(is_string($operation) && $operation !== '') && !is_callable($handler)) {
+            return false;
+        }
+        return [
+            'windowSeconds' => $raw['windowSeconds'],
+            'operation'     => is_string($operation) && $operation !== '' ? $operation : null,
+            'handler'       => is_callable($handler) ? $handler : null,
+        ];
     }
 
     /** Record that a plugin's own routes must not be derived into tools. */
@@ -158,6 +341,8 @@ final class AuthoredToolRegistry implements HostWiredService
     public function reset(): void
     {
         $this->tools = [];
+        $this->toolsets = [];
+        $this->warnings = [];
         $this->suppressedPlugins = [];
     }
 
@@ -208,15 +393,9 @@ final class AuthoredToolRegistry implements HostWiredService
             if ($tool['annotations'] !== null) {
                 $object['annotations'] = $tool['annotations'];
             }
-            // WHIT-747: the plugin's own toolset. The descriptor keys that let a
-            // plugin choose a sub-toolset, visibility and agent policy arrive with
-            // SDK 1.47 (WHIT-752); until then every authored tool is reached
-            // through search and leaves agents to the scope grant.
-            $object['_meta'] = ToolSurface::meta(
-                CoreToolsets::pluginToolsetIdForClass($tool['plugin']),
-                ToolSurface::VISIBILITY_DISCOVERABLE,
-                ToolSurface::AGENT_ALLOW,
-            );
+            // WHIT-747, WHIT-752: the toolset, visibility and agent policy the
+            // descriptor declared, as the registry accepted them.
+            $object['_meta'] = ToolSurface::meta($tool['toolset'], $tool['visibility'], $tool['agentPolicy']);
             $out[] = $object;
         }
 
@@ -246,7 +425,8 @@ final class AuthoredToolRegistry implements HostWiredService
     /** The toolset an authored tool belongs to (its plugin's), or null for an unknown name. */
     public function toolsetOf(string $name): ?string
     {
-        return isset($this->tools[$name]) ? CoreToolsets::pluginToolsetIdForClass($this->tools[$name]['plugin']) : null;
+        // The toolset the descriptor declared, as accepted at registration (SDK 1.52).
+        return isset($this->tools[$name]) ? $this->tools[$name]['toolset'] : null;
     }
 
     public function has(string $name): bool
@@ -262,7 +442,11 @@ final class AuthoredToolRegistry implements HostWiredService
      *     handler: callable,
      *     requiredRole: ?string,
      *     requiredPermission: ?string,
-     *     plugin: string
+     *     plugin: string,
+     *     toolset: string,
+     *     visibility: string,
+     *     agentPolicy: string,
+     *     undo: array{windowSeconds: int, operation: ?string, handler: ?callable}|null
      * }|null
      */
     public function get(string $name): ?array
