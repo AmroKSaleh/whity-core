@@ -42,7 +42,7 @@ final class ManifestValidator
 
     /** @var list<string> */
     public const TOP_LEVEL_KEYS = [
-        'manifest', 'plugin', 'requires', 'permissions', 'roles', 'screens', 'tables', 'dataTypes', 'limits',
+        'manifest', 'plugin', 'requires', 'permissions', 'roles', 'screens', 'tables', 'dataTypes', 'limits', 'records',
     ];
 
     private const NAME_PATTERN = '/^[A-Za-z][A-Za-z0-9_]{0,63}$/';
@@ -93,6 +93,14 @@ final class ManifestValidator
         $tables = self::checkTables($manifest['tables'] ?? null, $errors);
         self::checkDataTypes($manifest['dataTypes'] ?? null, $tables, $permissions, $errors);
         self::checkLimits($manifest['limits'] ?? null, $pluginName, $errors);
+        RecordTypeValidator::check(
+            $manifest['records'] ?? null,
+            $permissions,
+            static function (mixed $label, string $path, int $max, bool $required, array &$errs): void {
+                self::checkLabel($label, $path, $max, $required, $errs);
+            },
+            $errors,
+        );
 
         return ['ok' => $errors === [], 'errors' => $errors];
     }

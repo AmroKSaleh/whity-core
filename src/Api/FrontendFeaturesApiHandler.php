@@ -219,6 +219,30 @@ final class FrontendFeaturesApiHandler
         $this->labels = $labels;
     }
 
+    /** Where a workspace plugin's own routes live, as written in its manifest. */
+    private const WORKSPACE_API_PATHS = '/api/x/';
+
+    /**
+     * Version every `/api/x/...` string in a workspace plugin's block tree
+     * through the router, so the prefix is decided in one place.
+     */
+    private function versionApiPaths(mixed $node): mixed
+    {
+        if (is_string($node)) {
+            $isWorkspaceApi = str_starts_with($node, self::WORKSPACE_API_PATHS);
+
+            return $isWorkspaceApi ? $this->router->versionedPath($node) : $node;
+        }
+        if (!is_array($node)) {
+            return $node;
+        }
+        foreach ($node as $key => $value) {
+            $node[$key] = $this->versionApiPaths($value);
+        }
+
+        return $node;
+    }
+
     /**
      * Every descriptor this endpoint serves: core's first, then the plugins'.
      *
@@ -274,6 +298,11 @@ final class FrontendFeaturesApiHandler
             $taken = array_flip(array_map(static fn (array $f): string => (string) ($f['id'] ?? ''), $features));
             foreach ($this->tenantPlugins->frontendFeatures($tenantId) as $feature) {
                 if (!isset($taken[$feature['id']])) {
+                    // Their blocks name record routes as declared
+                    // (`/api/x/...`); serve them at the versioned path a
+                    // renderer fetches verbatim, as the loader does for an
+                    // installed plugin's blocks.
+                    $feature['blocks'] = $this->versionApiPaths($feature['blocks'] ?? []);
                     $features[] = $feature;
                     $taken[$feature['id']] = true;
                 }
