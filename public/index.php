@@ -3120,6 +3120,7 @@ $documentPublishingHandler = new \Whity\Api\DocumentPublishingApiHandler(
     new \Whity\Core\Document\DocumentSourceFileStore($storageDriver, $db->getPdo()),
     new \Whity\Core\Document\Print\PrintLabels($serverLabels),
     $documentRenderMeters,
+    new \Whity\Core\Document\Print\LetterheadLogo($settingsService, $storageDriver),
 );
 $router->register('GET',  '/api/document-fields',                         [$documentPublishingHandler, 'fields'],       null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/document-fields/records',                 [$documentPublishingHandler, 'records'],      null, null, CorePermissions::DOCUMENTS_READ);
