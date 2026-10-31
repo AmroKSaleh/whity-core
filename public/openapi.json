@@ -40555,10 +40555,1242 @@
                     }
                 ]
             }
+        },
+        "/api/v1/workspace-plugins": {
+            "get": {
+                "operationId": "get_api_v1_workspace_plugins",
+                "summary": "List the workspace's own plugins",
+                "tags": [
+                    "platform-ops"
+                ],
+                "description": "Plugins this workspace published (not those installed for every workspace), with the live version and whether the plugin and its automations are switched on.",
+                "responses": {
+                    "200": {
+                        "description": "The workspace's plugins",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/WorkspacePluginListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_v1_workspace_plugins",
+                "summary": "Publish a version of a workspace plugin",
+                "tags": [
+                    "platform-ops"
+                ],
+                "description": "Runs its tests, then compares it with the live version; a destructive change needs confirmDestructive. Makes it live for the whole workspace on the next request.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/PublishWorkspacePluginRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The published version, with its plan and test results",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PublishedWorkspacePluginResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Destructive and not confirmed; details.impact is the plan",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Invalid (details.errors) or its tests failed (details.tests)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/workspace-plugins/impact": {
+            "post": {
+                "operationId": "post_api_v1_workspace_plugins_impact",
+                "summary": "See what publishing a manifest would change",
+                "tags": [
+                    "platform-ops"
+                ],
+                "description": "Compares it with the live version and counts the records each change touches: safe, data (records need attention) or destructive (values stop being served). Publishes nothing.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/WorkspacePluginManifestRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The plan",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ManifestImpactResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "The manifest isn't valid; details.errors lists why",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/workspace-plugins/test": {
+            "post": {
+                "operationId": "post_api_v1_workspace_plugins_test",
+                "summary": "Run a manifest's own tests",
+                "tags": [
+                    "platform-ops"
+                ],
+                "description": "Runs the examples under tests against the real record store in a transaction that is always rolled back, so nothing stays. Each failure says why and what the write gave.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/WorkspacePluginManifestRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The results",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ManifestTestResultsResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "The manifest isn't valid; details.errors lists why",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/workspace-plugins/validate": {
+            "post": {
+                "operationId": "post_api_v1_workspace_plugins_validate",
+                "summary": "Validate a workspace plugin manifest",
+                "tags": [
+                    "platform-ops"
+                ],
+                "description": "Checks a plugin.json as a whole and against what a workspace plugin may declare. Publishes nothing. Answers ok with every error by path.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/WorkspacePluginManifestRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Whether it is valid, and every error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ManifestValidationResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "No manifest was sent",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/workspace-plugins/{plugin}/automation-runs": {
+            "get": {
+                "operationId": "get_api_v1_workspace_plugins_plugin_automation_runs",
+                "summary": "List a workspace plugin's automation runs",
+                "tags": [
+                    "platform-ops"
+                ],
+                "description": "Newest first, each with its trigger, status, reason and trace. Only runs whose record types the caller can read are listed: traces carry record values.",
+                "parameters": [
+                    {
+                        "name": "plugin",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "plugin",
+                        "in": "path",
+                        "required": true,
+                        "description": "The workspace plugin's slug: its name in lower case, as its permissions start with.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "before",
+                        "in": "query",
+                        "required": false,
+                        "description": "Only runs older than this run id, for the next page.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "required": false,
+                        "description": "How many runs, 1 to 100 (50 if left out).",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The runs",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AutomationRunListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not one of this workspace's live plugins",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/workspace-plugins/{plugin}/automation-runs/{id}": {
+            "get": {
+                "operationId": "get_api_v1_workspace_plugins_plugin_automation_runs_id",
+                "summary": "Get one automation run with its trace",
+                "tags": [
+                    "platform-ops"
+                ],
+                "description": "What triggered it, who it acted for, how far it got and why it stopped. Needs read access to the record types its trace shows.",
+                "parameters": [
+                    {
+                        "name": "plugin",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "plugin",
+                        "in": "path",
+                        "required": true,
+                        "description": "The workspace plugin's slug: its name in lower case, as its permissions start with.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "description": "The run's id.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The run",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AutomationRunResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found, or not readable by the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/workspace-plugins/{plugin}/automations": {
+            "put": {
+                "operationId": "put_api_v1_workspace_plugins_plugin_automations",
+                "summary": "Switch a workspace plugin's automations on or off",
+                "tags": [
+                    "platform-ops"
+                ],
+                "description": "The plugin keeps serving its screens and records either way. Switching on needs plugins:enable and off plugins:disable, checked by the handler. Queued runs stop while off.",
+                "parameters": [
+                    {
+                        "name": "plugin",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "plugin",
+                        "in": "path",
+                        "required": true,
+                        "description": "The workspace plugin's slug: its name in lower case, as its permissions start with.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/AutomationsSwitchRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The switch as it now stands",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/AutomationsSwitchResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not one of this workspace's live plugins",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "enabled must be true or false",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/workspace-plugins/{plugin}/versions": {
+            "get": {
+                "operationId": "get_api_v1_workspace_plugins_plugin_versions",
+                "summary": "List a workspace plugin's versions",
+                "tags": [
+                    "platform-ops"
+                ],
+                "description": "Every published version, newest first, with who published it and which one is live. Versions are never deleted.",
+                "parameters": [
+                    {
+                        "name": "plugin",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "plugin",
+                        "in": "path",
+                        "required": true,
+                        "description": "The workspace plugin's slug: its name in lower case, as its permissions start with.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The versions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/WorkspacePluginVersionListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not one of this workspace's plugins",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/workspace-plugins/{plugin}/versions/{id}": {
+            "get": {
+                "operationId": "get_api_v1_workspace_plugins_plugin_versions_id",
+                "summary": "Get one version of a workspace plugin",
+                "tags": [
+                    "platform-ops"
+                ],
+                "description": "The version with its full manifest.",
+                "parameters": [
+                    {
+                        "name": "plugin",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "plugin",
+                        "in": "path",
+                        "required": true,
+                        "description": "The workspace plugin's slug: its name in lower case, as its permissions start with.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "description": "The version's id.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The version",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/WorkspacePluginVersionResponse"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not one of this workspace's versions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/workspace-plugins/{plugin}/versions/{id}/activate": {
+            "post": {
+                "operationId": "post_api_v1_workspace_plugins_plugin_versions_id_activate",
+                "summary": "Make a version of a workspace plugin live (roll back)",
+                "tags": [
+                    "platform-ops"
+                ],
+                "description": "Checks the version as if it were being published, compares it with the live one, and makes it live. A destructive change needs confirmDestructive.",
+                "parameters": [
+                    {
+                        "name": "plugin",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "plugin",
+                        "in": "path",
+                        "required": true,
+                        "description": "The workspace plugin's slug: its name in lower case, as its permissions start with.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "description": "The version to make live.",
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/ActivateWorkspacePluginRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The version now live, with its plan",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PublishedWorkspacePluginResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not one of this workspace's versions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Destructive and not confirmed; details.impact is the plan",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "The version no longer passes the checks; details.errors lists why",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
         }
     },
     "components": {
         "schemas": {
+            "ActivateWorkspacePluginRequest": {
+                "type": "object",
+                "properties": {
+                    "confirmDestructive": {
+                        "type": "boolean",
+                        "description": "Go ahead although the change is destructive (existing values stop being served). Nothing is deleted, so a rollback serves them again."
+                    }
+                }
+            },
             "ActivationCodeIssueRequest": {
                 "type": "object",
                 "properties": {
@@ -41239,6 +42471,191 @@
                 "required": [
                     "data",
                     "pagination"
+                ]
+            },
+            "AutomationRun": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "plugin": {
+                        "type": "string"
+                    },
+                    "automation": {
+                        "type": "string"
+                    },
+                    "event": {
+                        "type": "string",
+                        "description": "What triggered it, such as order.moved.confirmed"
+                    },
+                    "record_type": {
+                        "type": "string"
+                    },
+                    "record_id": {
+                        "type": "integer"
+                    },
+                    "depth": {
+                        "type": "integer",
+                        "description": "How many automation hops produced the event; 1 when a person caused it"
+                    },
+                    "actor_profile_id": {
+                        "type": "integer",
+                        "nullable": true,
+                        "description": "The person it acts for"
+                    },
+                    "root_run_id": {
+                        "type": "integer",
+                        "nullable": true,
+                        "description": "The first run of its chain, when another run started it"
+                    },
+                    "automation_hash": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "queued",
+                            "running",
+                            "done",
+                            "failed",
+                            "stopped"
+                        ]
+                    },
+                    "reason": {
+                        "type": "string",
+                        "nullable": true,
+                        "description": "Why it failed or was stopped, such as depth_limit or automations_off"
+                    },
+                    "trace": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AutomationRunStep"
+                        }
+                    },
+                    "created_at": {
+                        "type": "string"
+                    },
+                    "finished_at": {
+                        "type": "string",
+                        "nullable": true
+                    }
+                },
+                "required": [
+                    "id",
+                    "plugin",
+                    "automation",
+                    "event",
+                    "record_type",
+                    "record_id",
+                    "depth",
+                    "status",
+                    "trace",
+                    "created_at"
+                ]
+            },
+            "AutomationRunListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/AutomationRun"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "AutomationRunResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/AutomationRun"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "AutomationRunStep": {
+                "type": "object",
+                "properties": {
+                    "step": {
+                        "type": "integer",
+                        "description": "Its position in the automation's steps"
+                    },
+                    "kind": {
+                        "type": "string",
+                        "description": "set_fields, create_record, move or notify"
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "done",
+                            "failed"
+                        ]
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Why it failed, such as not_permitted or issues"
+                    },
+                    "input": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "description": "The values it worked with"
+                    },
+                    "outcome": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "nullable": true,
+                        "description": "What it did, such as the record it created or the people notified"
+                    },
+                    "at": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "step",
+                    "kind",
+                    "status",
+                    "at"
+                ]
+            },
+            "AutomationsSwitchRequest": {
+                "type": "object",
+                "properties": {
+                    "enabled": {
+                        "type": "boolean",
+                        "description": "true to switch the plugin's automations on, false to switch them off"
+                    }
+                },
+                "required": [
+                    "enabled"
+                ]
+            },
+            "AutomationsSwitchResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "plugin": {
+                                "type": "string"
+                            },
+                            "automationsEnabled": {
+                                "type": "boolean"
+                            }
+                        },
+                        "required": [
+                            "plugin",
+                            "automationsEnabled"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "BillingAccessResponse": {
@@ -48124,6 +49541,213 @@
                     "status"
                 ]
             },
+            "ManifestImpact": {
+                "type": "object",
+                "properties": {
+                    "plugin": {
+                        "type": "string"
+                    },
+                    "from": {
+                        "type": "string",
+                        "nullable": true,
+                        "description": "The live version, or null for a new plugin"
+                    },
+                    "to": {
+                        "type": "string"
+                    },
+                    "level": {
+                        "type": "string",
+                        "enum": [
+                            "safe",
+                            "data",
+                            "destructive"
+                        ],
+                        "description": "The worst change"
+                    },
+                    "changes": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ManifestImpactChange"
+                        }
+                    }
+                },
+                "required": [
+                    "plugin",
+                    "from",
+                    "to",
+                    "level",
+                    "changes"
+                ]
+            },
+            "ManifestImpactChange": {
+                "type": "object",
+                "properties": {
+                    "effect": {
+                        "type": "string",
+                        "enum": [
+                            "safe",
+                            "data",
+                            "destructive"
+                        ],
+                        "description": "What it does to existing data"
+                    },
+                    "change": {
+                        "type": "string",
+                        "description": "The kind of change, such as field_removed or automation_added"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Where in the manifest, such as records.order.fields.paid"
+                    },
+                    "records": {
+                        "type": "integer",
+                        "description": "How many existing records it touches, when it counts them"
+                    },
+                    "message": {
+                        "type": "string"
+                    },
+                    "messageAr": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "effect",
+                    "change",
+                    "path",
+                    "message",
+                    "messageAr"
+                ]
+            },
+            "ManifestImpactResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/ManifestImpact"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "ManifestTestResult": {
+                "type": "object",
+                "properties": {
+                    "test": {
+                        "type": "integer",
+                        "description": "Its position in tests"
+                    },
+                    "label": {
+                        "type": "object",
+                        "properties": {
+                            "en": {
+                                "type": "string",
+                                "description": "English"
+                            },
+                            "ar": {
+                                "type": "string",
+                                "description": "Arabic"
+                            }
+                        },
+                        "required": [
+                            "en",
+                            "ar"
+                        ]
+                    },
+                    "passed": {
+                        "type": "boolean"
+                    },
+                    "reason": {
+                        "type": "string",
+                        "enum": [
+                            "refused",
+                            "not_refused",
+                            "issues_differ",
+                            "field_differs",
+                            "state_differs",
+                            "error"
+                        ],
+                        "description": "Why it failed"
+                    },
+                    "got": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "description": "What the write gave: refused, and the issues, or the fields and state (field names the one that differed)"
+                    }
+                },
+                "required": [
+                    "test",
+                    "label",
+                    "passed"
+                ]
+            },
+            "ManifestTestResults": {
+                "type": "object",
+                "properties": {
+                    "passed": {
+                        "type": "integer"
+                    },
+                    "failed": {
+                        "type": "integer"
+                    },
+                    "results": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/ManifestTestResult"
+                        }
+                    }
+                },
+                "required": [
+                    "passed",
+                    "failed",
+                    "results"
+                ]
+            },
+            "ManifestTestResultsResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/ManifestTestResults"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "ManifestValidationResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "ok": {
+                                "type": "boolean"
+                            },
+                            "errors": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                },
+                                "description": "Each names its path, such as records.order.fields.price.currency"
+                            },
+                            "plugin": {
+                                "type": "string",
+                                "description": "The plugin's name, when valid"
+                            },
+                            "version": {
+                                "type": "string",
+                                "description": "The version, when valid"
+                            }
+                        },
+                        "required": [
+                            "ok",
+                            "errors"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
             "MarkAllReadResponse": {
                 "type": "object",
                 "properties": {
@@ -51620,6 +53244,67 @@
                         "required": [
                             "routed",
                             "ignored_keys"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "PublishWorkspacePluginRequest": {
+                "type": "object",
+                "properties": {
+                    "manifest": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "description": "The plugin.json object (format whity.plugin/1). See sdk/resources/plugin-manifest.schema.json."
+                    },
+                    "notes": {
+                        "type": "string",
+                        "maxLength": 2000,
+                        "description": "What changed, kept with the version"
+                    },
+                    "confirmDestructive": {
+                        "type": "boolean",
+                        "description": "Go ahead although the change is destructive (existing values stop being served). Nothing is deleted, so a rollback serves them again."
+                    }
+                },
+                "required": [
+                    "manifest"
+                ]
+            },
+            "PublishedWorkspacePluginResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "version_id": {
+                                "type": "integer"
+                            },
+                            "plugin": {
+                                "type": "string"
+                            },
+                            "version": {
+                                "type": "string"
+                            },
+                            "hash": {
+                                "type": "string",
+                                "description": "SHA-256 of the manifest as stored"
+                            },
+                            "impact": {
+                                "$ref": "#/components/schemas/ManifestImpact"
+                            },
+                            "tests": {
+                                "$ref": "#/components/schemas/ManifestTestResults"
+                            }
+                        },
+                        "required": [
+                            "version_id",
+                            "plugin",
+                            "version",
+                            "hash",
+                            "impact"
                         ]
                     }
                 },
@@ -56178,6 +57863,147 @@
                             "received",
                             "settled"
                         ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "WorkspacePlugin": {
+                "type": "object",
+                "properties": {
+                    "slug": {
+                        "type": "string",
+                        "description": "The name in lower case, used in routes"
+                    },
+                    "plugin": {
+                        "type": "string",
+                        "description": "The plugin's name"
+                    },
+                    "version_id": {
+                        "type": "integer",
+                        "description": "The live version's id"
+                    },
+                    "version": {
+                        "type": "string",
+                        "description": "The live version"
+                    },
+                    "enabled": {
+                        "type": "boolean",
+                        "description": "Whether the plugin is switched on"
+                    },
+                    "automations_enabled": {
+                        "type": "boolean",
+                        "description": "Whether its automations are switched on"
+                    },
+                    "updated_at": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "slug",
+                    "plugin",
+                    "version_id",
+                    "version",
+                    "enabled",
+                    "automations_enabled"
+                ]
+            },
+            "WorkspacePluginListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/WorkspacePlugin"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "WorkspacePluginManifestRequest": {
+                "type": "object",
+                "properties": {
+                    "manifest": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "description": "The plugin.json object (format whity.plugin/1). See sdk/resources/plugin-manifest.schema.json."
+                    }
+                },
+                "required": [
+                    "manifest"
+                ]
+            },
+            "WorkspacePluginVersion": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "integer"
+                    },
+                    "version": {
+                        "type": "string"
+                    },
+                    "hash": {
+                        "type": "string"
+                    },
+                    "notes": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "published_by": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "acting_for": {
+                        "type": "integer",
+                        "nullable": true,
+                        "description": "The person an agent published it for"
+                    },
+                    "approved_by": {
+                        "type": "integer",
+                        "nullable": true,
+                        "description": "The person who approved an agent's proposal"
+                    },
+                    "published_at": {
+                        "type": "string"
+                    },
+                    "live": {
+                        "type": "boolean"
+                    },
+                    "manifest": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "description": "The manifest, on the single-version route only"
+                    }
+                },
+                "required": [
+                    "id",
+                    "version",
+                    "hash",
+                    "published_at"
+                ]
+            },
+            "WorkspacePluginVersionListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/WorkspacePluginVersion"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "WorkspacePluginVersionResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/WorkspacePluginVersion"
                     }
                 },
                 "required": [
