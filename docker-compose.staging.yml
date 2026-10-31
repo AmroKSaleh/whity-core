@@ -183,7 +183,7 @@ services:
   # `:?` made every plain `-f docker-compose.staging.yml` command (including
   # `config`, `ps` and a two-tier `up`) fail on a service it was never asked to
   # start. The service enforces it instead — it warns loudly at boot and
-  # refuses every POST /render with 401 until the secret is >= 32 chars.
+  # refuses every POST /render/* with 401 until the secret is >= 32 chars.
   render:
     build:
       context: .

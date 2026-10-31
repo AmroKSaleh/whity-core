@@ -207,6 +207,7 @@ export function useEditorLabels(): EditorLabels {
     changeRecord: t('blockEditor.changeRecord', 'Change record'),
     showFields: t('blockEditor.showFields', 'Show fields'),
     previewStatus: t('blockEditor.previewStatus', 'Previewing {record}: as it will print, read-only'),
+    previewEditingStatus: t('blockEditor.previewEditingStatus', 'Previewing {record}: as it will print'),
     pdf: t('blockEditor.pdf', 'PDF'),
     publish: t('blockEditor.publish', 'Publish'),
     draftSaved: t('blockEditor.draftSaved', 'Draft saved {time}'),

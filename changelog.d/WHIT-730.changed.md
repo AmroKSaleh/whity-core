@@ -1,0 +1,1 @@
+- **Back up before upgrading: migration 165 removes the old Document designer's tables.** It converts every workspace's old templates into document editor drafts first, and if any template can't be converted it stops before dropping anything and names the template. After it has run, the old rows can't be converted again (WHIT-730).

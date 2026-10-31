@@ -2,16 +2,13 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { IconExternalLink, IconMenu2, IconShieldLock } from '@tabler/icons-react';
+import { useRouter } from 'next/navigation';
+import { IconMenu2, IconShieldLock } from '@tabler/icons-react';
 import { useTranslation } from '@whity-org/features/i18n';
 import { useDateDisplay } from '@whity-org/features/datetime';
-import { collectBlockIds } from '@whity-org/ui/documents/blocks';
 import { Badge } from '@whity-org/ui/badge';
 import { Button } from '@whity-org/ui/button';
 import { ErrorState } from '@whity-org/ui/empty-state';
-import { Skeleton } from '@whity-org/ui/skeleton';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@whity-org/ui/tabs';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@whity-org/ui/tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -25,156 +22,74 @@ import { useAuth } from '@/lib/auth-context';
 import { useToast } from '@/lib/toast-context';
 import { useFetch } from '@/hooks/useFetch';
 import { useCapabilities } from '@/hooks/useCapabilities';
-import { DOCUMENTS_PUBLISH, DOCUMENTS_WRITE } from '@/lib/capabilities';
+import { DOCUMENTS_ISSUE, DOCUMENTS_PUBLISH, DOCUMENTS_WRITE } from '@/lib/capabilities';
+import { issueHref } from '@/lib/documents/issue';
 import { fetchAllPages } from '@/lib/api/fetch-all-pages';
-import { RenameDialog } from './rename-dialog';
+import { createDocumentSource } from '@/lib/documents/sources';
 import { ScopeDialog } from './scope-dialog';
 import { DeleteDialog } from './delete-dialog';
-import { UsageDialog } from './usage-dialog';
-import { PlacementText, ScopeBadge } from './audience';
-import type {
-  BlockRow,
-  BlockUsage,
-  OuOption,
-  PermissionOption,
-  PermissionSource,
-  TemplateRow,
-} from './types';
-import { duplicateRow } from './api';
+import { CopyDialog } from './copy-dialog';
+import { ScopeBadge } from './audience';
+import { ForbiddenError, editorHref, listTemplates } from './api';
+import type { OuOption, PermissionOption, PermissionSource, TemplateRow } from './types';
 
 /**
- * Templates & Blocks — the GOVERNANCE surface for the document designer's saved
- * work (the designer itself is the full-screen editor at `/admin/documents`).
+ * Document templates (A31) — the editor templates and label sheets documents
+ * are issued from, and who can see each one.
  *
- * WHAT THIS SCREEN IS FOR
- * -----------------------
- * The backend for both tables has been complete for a while and had no UI at
- * all: no way to see what exists, rename it, delete it, change who can see it,
- * or find out what a block is used by. Those are five different jobs and only
- * the last one is subtle, so it sets the shape of the whole page.
+ * Since editor M4c every template is an editor document (`document_sources`,
+ * kinds `template` and `label`): the old canvas designer's templates were
+ * converted, and are marked "Converted" here so their authors can find and
+ * check them. Templates are written and renamed in the editor (a title is draft
+ * content, E.9); this page lists them, opens them, copies them and governs who
+ * can see them.
  *
- * SCOPE IS THE SUBJECT, NOT A COLUMN
- * ----------------------------------
- * The reason this subsystem exists is that a dean's secretary should reach more
- * templates than a department head's secretary — and both of them hold the same
- * `documents:write`, so the difference is not their kind but their PLACE. That
- * fact lives in three columns (`scope`, `owner_ou_id`, `required_permission`)
- * which are individually unreadable, so the table renders all three AND a
- * plain-language "who can see this" sentence built by ./audience.ts, which the
- * scope dialog reuses live as the publisher changes the fields. A screen that
- * listed names without that would hide the only interesting thing about the data.
+ * WHO CAN SEE IT is the column worth reading. A dean's secretary and a
+ * department head's secretary hold the same permissions and still reach
+ * different templates, because of where each template is filed. That fact lives
+ * in three columns (`scope`, `owner_ou_id`, `required_permission`), so the
+ * visibility badge carries the plain-language sentence from ./audience.tsx as
+ * its tooltip, and the scope dialog shows the same sentence live.
  *
- * BLOCKS ARE POINTERS, SO USAGE COMES BEFORE EVERY DESTRUCTIVE ACTION
- * ------------------------------------------------------------------
- * A block is referenced by a `blockInstance` element — Gutenberg synced-pattern
- * semantics, so an EDIT propagates to every template using it and is never
- * refused by anything. Delete has a server-side 409 guard; edit has none and can
- * have none. So the blocks table carries a "Used by" column fetched from
- * `GET /document-blocks/{id}/usage`, and both the scope dialog and the delete
- * dialog show it before offering the action. Critically the count is the
- * SERVER's unfiltered total, not a count of templates this caller can see — see
- * the note on `blockUsage` below for why a visible-only count is worse than none.
- *
- * NOT BUILT, DELIBERATELY: user-owned templates. Personal-vs-shared scoping is
- * here because the server already has it; an ownership/sharing model (transfer,
- * share-with-person, "my templates") is a separate product decision and is out
- * of scope.
+ * Saved blocks were part of the old designer and come back in M7.
  */
 export default function DocumentTemplatesPage() {
   const { apiClient, user } = useAuth();
   const { addToast } = useToast();
+  const router = useRouter();
   const { hasPermission, permissions } = useCapabilities();
   const t = useTranslation('admin');
   const dates = useDateDisplay();
 
   const canWrite = hasPermission(DOCUMENTS_WRITE);
   const canPublish = hasPermission(DOCUMENTS_PUBLISH);
+  const canIssue = hasPermission(DOCUMENTS_ISSUE);
   const viewerProfileId = user?.id ?? null;
 
   // ── data ────────────────────────────────────────────────────────────────────
 
-  const templates = useFetch<TemplateRow[]>(async () => {
-    const response = await apiClient('/api/v1/document-templates');
-    if (response.status === 403) {
-      throw new ForbiddenError();
-    }
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      throw new Error(body?.error ?? t('documentTemplates.error.templates', 'Failed to load templates'));
-    }
-    const body = (await response.json()) as { data?: TemplateRow[] };
-    return body.data ?? [];
-  }, [apiClient]);
-
-  /**
-   * Blocks AND their usage, resolved together in one fetch.
-   *
-   * One fetch rather than two because a block list and a stale usage map would
-   * render a row's "Used by" beside another row's name for a frame, and the
-   * number is the whole safety property.
-   *
-   * WHY THE COUNT COMES FROM THE SERVER AND NOT FROM `templates`
-   * -----------------------------------------------------------
-   * Every referencing template's `data` is already in hand from the list above,
-   * so this could be computed locally for free. It would also be WRONG in the
-   * one direction that matters. The templates list is row-filtered to what the
-   * caller may see; the references are not. A department secretary who may edit
-   * an unplaced tenant-wide block would be told "used by 1 template" when nine
-   * across the faculty instance it, edit with confidence, and silently rewrite
-   * eight documents she cannot see. `/usage` answers with the unfiltered `total`
-   * and a `hidden` count precisely so that cannot happen.
-   *
-   * One request per visible block, in parallel. That is an N+1 and it is the
-   * honest one: the alternative is a local count that understates the blast
-   * radius for exactly the callers whose reach is narrowest. A bulk
-   * usage-summary endpoint is the fix if governance inventories get large; a
-   * threshold at which the column silently stops being trustworthy is not.
-   *
-   * A per-block usage failure is recorded as `null` rather than failing the whole
-   * list — the row still needs renaming and re-scoping, and the cell says the
-   * count is unavailable instead of showing a zero it did not read.
-   */
-  const blocks = useFetch<{ rows: BlockRow[]; usage: Record<number, BlockUsage | null> }>(
-    async () => {
-      const response = await apiClient('/api/v1/document-blocks');
-      if (response.status === 403) {
-        throw new ForbiddenError();
-      }
-      if (!response.ok) {
-        const body = (await response.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(body?.error ?? t('documentTemplates.error.blocks', 'Failed to load blocks'));
-      }
-      const body = (await response.json()) as { data?: BlockRow[] };
-      const rows = body.data ?? [];
-
-      const settled = await Promise.all(
-        rows.map(async (row): Promise<[number, BlockUsage | null]> => {
-          try {
-            const res = await apiClient(`/api/v1/document-blocks/${row.id}/usage`);
-            if (!res.ok) return [row.id, null];
-            const parsed = (await res.json()) as { data?: BlockUsage };
-            return [row.id, parsed.data ?? null];
-          } catch {
-            return [row.id, null];
-          }
-        })
-      );
-
-      const usage: Record<number, BlockUsage | null> = {};
-      for (const [id, value] of settled) usage[id] = value;
-      return { rows, usage };
-    },
+  const templates = useFetch<TemplateRow[]>(
+    () => listTemplates(apiClient, t('documentTemplates.error.templates', 'Failed to load templates')),
     [apiClient]
   );
 
   /**
-   * Unit names, for the placement column and the placement picker.
-   *
-   * Listing units needs `ous:read`, which this page's own gate
-   * (`documents:read`) does not imply — so a 403 here is an ORDINARY state, not
-   * a fault. When it happens, placements render as `#4` with a notice saying
-   * why, and the placement field in the scope dialog is disabled rather than
-   * offering an empty picker that would silently unfile a row.
+   * Record type names ("Invoice" rather than `invoice`). Best effort: when the
+   * catalogue cannot be read the key is shown as it is.
+   */
+  const recordTypes = useFetch<Record<string, string>>(async () => {
+    const response = await apiClient('/api/v1/document-embeds');
+    if (!response.ok) return {};
+    const body = (await response.json().catch(() => null)) as {
+      data?: { record_types?: { key: string; label: string }[] };
+    } | null;
+    return Object.fromEntries((body?.data?.record_types ?? []).map((r) => [r.key, r.label]));
+  }, [apiClient]);
+
+  /**
+   * Unit names, for the audience sentence and the placement picker. Listing
+   * units needs `ous:read`, which this page's own gate does not imply, so a 403
+   * here is an ordinary state: units show by id and placement is locked.
    */
   const ous = useFetch<OuOption[]>(async () => {
     const result = await fetchAllPages<OuOption>(apiClient, '/api/v1/ous');
@@ -185,84 +100,30 @@ export default function DocumentTemplatesPage() {
   }, [apiClient]);
 
   /**
-   * Options for the permission tag.
-   *
-   * `GET /api/v1/permissions` is gated on the `admin` ROLE — not on a permission
-   * — so a legitimate publisher holding `documents:publish` without being an
-   * admin cannot read it. That is not a reason to hide the field; it is a reason
-   * to fall back to the caller's own effective permission set, which is always
-   * readable and is the safer default anyway: tagging a row with a permission
-   * you hold yourself means you can still see what you published, which the
-   * policy does not otherwise guarantee (an author's reach is waived for
-   * placement, never for the tag).
-   *
-   * Either way the value written is the SLUG. Never an id — #992 left holes in
-   * the id range, so an id means different things on installs of different ages.
+   * Options for the permission tag: the catalogue when the caller may read it
+   * (admin role), otherwise the caller's own permissions. Either way the value
+   * written is the slug, never an id.
    */
-  const permissionOptions = useFetch<{ source: PermissionSource; names: string[] }>(
-    async () => {
-      const response = await apiClient('/api/v1/permissions?per_page=100');
-      if (response.ok) {
-        const body = (await response.json()) as { data?: PermissionOption[] };
-        const names = (body.data ?? [])
-          .map((p) => p.name)
-          .filter((n): n is string => typeof n === 'string' && n !== '');
-        if (names.length > 0) {
-          return { source: 'catalogue' as const, names: names.sort() };
-        }
-      }
-      return { source: 'own' as const, names: [...permissions].sort() };
-    },
-    [apiClient, permissions]
-  );
+  const permissionOptions = useFetch<{ source: PermissionSource; names: string[] }>(async () => {
+    const response = await apiClient('/api/v1/permissions?per_page=100');
+    if (response.ok) {
+      const body = (await response.json()) as { data?: PermissionOption[] };
+      const names = (body.data ?? []).map((p) => p.name).filter((n): n is string => typeof n === 'string' && n !== '');
+      if (names.length > 0) return { source: 'catalogue' as const, names: names.sort() };
+    }
+    return { source: 'own' as const, names: [...permissions].sort() };
+  }, [apiClient, permissions]);
 
   // ── dialog state ────────────────────────────────────────────────────────────
 
-  type Kind = 'template' | 'block';
-  const [renaming, setRenaming] = useState<{ kind: Kind; row: TemplateRow | BlockRow } | null>(null);
-  const [scoping, setScoping] = useState<{ kind: Kind; row: TemplateRow | BlockRow } | null>(null);
-  const [deleting, setDeleting] = useState<{ kind: Kind; row: TemplateRow | BlockRow } | null>(null);
-  const [inspecting, setInspecting] = useState<BlockRow | null>(null);
+  const [copying, setCopying] = useState<TemplateRow | null>(null);
+  const [scoping, setScoping] = useState<TemplateRow | null>(null);
+  const [deleting, setDeleting] = useState<TemplateRow | null>(null);
+  const [creating, setCreating] = useState(false);
 
-  const refetchAll = useCallback(() => {
-    templates.refetch();
-    blocks.refetch();
-  }, [templates, blocks]);
-
-  /**
-   * Copy a row into a new personal one.
-   *
-   * No confirmation: nothing is destroyed and the result is visible in the list
-   * immediately, so an "are you sure" here would be the kind that teaches
-   * people to dismiss the ones that matter.
-   */
-  const duplicate = useCallback(
-    async (kind: Kind, row: TemplateRow | BlockRow) => {
-      const copyName = t('documentTemplates.duplicate.name', '{name} (copy)', { name: row.name });
-      const failure = await duplicateRow(
-        apiClient,
-        kind,
-        row,
-        copyName,
-        t('documentTemplates.duplicate.failed', 'Could not duplicate.')
-      );
-      if (failure !== null) {
-        addToast(failure, 'error');
-        return;
-      }
-      // NAME THE AUDIENCE, as the designer's save does. A copy of a tenant-wide
-      // template is personal, and somebody who expected their duplicate to be
-      // where the original was needs to hear that from the success message
-      // rather than discover it when a colleague cannot find it.
-      addToast(
-        t('documentTemplates.duplicate.done', '“{name}” created, visible only to you.', {
-          name: copyName,
-        }),
-        'success'
-      );
-      refetchAll();
-    },
-    [apiClient, addToast, refetchAll, t]
+  const nameOf = useCallback(
+    (row: TemplateRow) => (row.title.trim() === '' ? t('documentTemplates.untitled', 'Untitled') : row.title),
+    [t]
   );
 
   const ouName = useCallback(
@@ -273,280 +134,85 @@ export default function DocumentTemplatesPage() {
     [ous.data]
   );
 
-  // ── shared cells ────────────────────────────────────────────────────────────
+  const createTemplate = async () => {
+    setCreating(true);
+    try {
+      const row = await createDocumentSource('template', '');
+      router.push(editorHref(row.id));
+    } catch {
+      addToast(t('documentTemplates.create.failed', 'The template wasn’t created. Try again.'), 'error');
+      setCreating(false);
+    }
+  };
 
-  /**
-   * The visibility cell: the scope badge, with the audience sentence as its
-   * tooltip. The badge alone would be a label; the tooltip is the "and why".
-   */
-  const visibilityCell = useCallback(
-    (row: TemplateRow | BlockRow) => (
-      <ScopeBadge row={row} ouName={ouName(row.owner_ou_id)} viewerProfileId={viewerProfileId} />
-    ),
-    [ouName, viewerProfileId]
-  );
+  // ── table ───────────────────────────────────────────────────────────────────
 
-  const placementCell = useCallback(
-    (row: TemplateRow | BlockRow) => <PlacementText row={row} ouName={ouName(row.owner_ou_id)} />,
-    [ouName]
-  );
+  const recordTypeNames = recordTypes.data;
 
-  const permissionCell = useCallback(
-    (row: TemplateRow | BlockRow) =>
-      row.required_permission ? (
-        <Badge variant="secondary">{row.required_permission}</Badge>
-      ) : (
-        <span className="text-muted-foreground">
-          {t('documentTemplates.table.noPermission', 'None')}
-        </span>
-      ),
-    [t]
-  );
-
-  const rowActions = useCallback(
-    (kind: Kind, row: TemplateRow | BlockRow) => (
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={t('documentTemplates.rowActions.label', 'Actions for {name}', {
-              name: row.name,
-            })}
-          >
-            <IconMenu2 size={16} />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-auto min-w-52">
-          {kind === 'block' && (
-            <DropdownMenuItem onClick={() => setInspecting(row as BlockRow)}>
-              {t('documentTemplates.rowActions.usage', 'What uses this block?')}
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuItem onClick={() => setRenaming({ kind, row })} disabled={!canWrite}>
-            {t('documentTemplates.rowActions.rename', 'Rename…')}
-          </DropdownMenuItem>
-          {/* Copying needs WRITE, not publish: the copy lands personal, which
-              is the one scope everybody with write already has. Gating it on
-              publish would stop somebody making their own version of a template
-              they can already open and edit. */}
-          <DropdownMenuItem onClick={() => void duplicate(kind, row)} disabled={!canWrite}>
-            {t('documentTemplates.rowActions.duplicate', 'Duplicate')}
-          </DropdownMenuItem>
-          {/* Every field in this dialog is a publish action server-side —
-              including placement, even on a personal row — so the whole entry is
-              gated rather than opening a dialog whose Save always 403s. */}
-          <DropdownMenuItem onClick={() => setScoping({ kind, row })} disabled={!canPublish}>
-            {t('documentTemplates.rowActions.scope', 'Change who can see this…')}
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() => setDeleting({ kind, row })}
-            disabled={!canWrite}
-            variant="destructive"
-          >
-            {t('documentTemplates.rowActions.delete', 'Delete…')}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-    ),
-    [canWrite, canPublish, t]
-  );
-
-  // ── templates tab ───────────────────────────────────────────────────────────
-
-  const templateRows = useMemo(() => {
-    const visibleBlockIds = new Set((blocks.data?.rows ?? []).map((b) => String(b.id)));
-    return (templates.data ?? []).map((row) => {
-      const referenced = collectBlockIds(row.data);
-      return {
-        ...row,
-        // Split rather than one count: an id that resolves to no VISIBLE block is
-        // NOT necessarily a deleted block — it may simply be one this caller
-        // cannot see — so it is reported as unresolved, never as broken.
-        blocksUsed: referenced.length,
-        blocksUnresolved: referenced.filter((id) => !visibleBlockIds.has(id)).length,
-      };
-    });
-  }, [templates.data, blocks.data]);
-
-  type TemplateViewRow = (typeof templateRows)[number];
-
-  const templateColumns: DataTableColumn<TemplateViewRow>[] = useMemo<
-    DataTableColumn<TemplateViewRow>[]
-  >(
+  const columns = useMemo<DataTableColumn<TemplateRow>[]>(
     () => [
       {
-        accessorKey: 'name',
-        header: t('documentTemplates.table.name', 'Name'),
+        accessorKey: 'title',
+        header: t('documentTemplates.table.title', 'Title'),
         enableSorting: true,
         enableColumnFilter: true,
         cell: (row) => (
-          <span className="font-medium">
-            {row.name}
-            {row.is_system && (
-              <Badge variant="outline" className="ms-2">
-                {t('documentTemplates.table.starter', 'Starter')}
-              </Badge>
+          <span className="flex flex-wrap items-center gap-2">
+            <Link
+              href={editorHref(row.id)}
+              dir="auto"
+              className="font-medium text-foreground underline-offset-4 hover:underline"
+            >
+              {nameOf(row)}
+            </Link>
+            {row.starter_key !== null && (
+              <Badge variant="outline">{t('documentTemplates.badge.starter', 'Whity starter')}</Badge>
+            )}
+            {row.legacy_template_id !== null && (
+              <Badge variant="outline">{t('documentTemplates.badge.converted', 'Converted')}</Badge>
             )}
           </span>
         ),
       },
       {
-        id: 'visibility',
-        header: t('documentTemplates.table.visibility', 'Visible to'),
-        enableSorting: false,
-        cell: visibilityCell,
-      },
-      {
-        id: 'placement',
-        header: t('documentTemplates.table.placement', 'Filed at'),
-        cell: placementCell,
-      },
-      {
-        id: 'permission',
-        header: t('documentTemplates.table.permission', 'Requires'),
-        cell: permissionCell,
-      },
-      {
-        id: 'blocksUsed',
-        header: t('documentTemplates.table.blocksUsed', 'Blocks used'),
+        id: 'kind',
+        header: t('documentTemplates.table.kind', 'Kind'),
         cell: (row) =>
-          row.blocksUsed === 0 ? (
-            <span className="text-muted-foreground">
-              {t('documentTemplates.table.noBlocks', 'None')}
-            </span>
+          row.kind === 'label'
+            ? t('documentTemplates.kind.label', 'Label sheet')
+            : t('documentTemplates.kind.template', 'Template'),
+      },
+      {
+        id: 'recordType',
+        header: t('documentTemplates.table.recordType', 'Record type'),
+        cell: (row) =>
+          row.record_type === null ? (
+            <span className="text-muted-foreground">{t('documentTemplates.table.noRecordType', 'None')}</span>
           ) : (
-            <span>
-              {t('documentTemplates.table.blockCount', '{count}', { count: row.blocksUsed })}
-              {row.blocksUnresolved > 0 && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Badge variant="warning" className="ms-2">
-                      {t('documentTemplates.table.unresolved', '{count} unresolved', {
-                        count: row.blocksUnresolved,
-                      })}
-                    </Badge>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {t(
-                      'documentTemplates.table.unresolvedHint',
-                      'This template points at a block that is not in your list. Either it was deleted, or it is one you cannot see — those look the same from here.'
-                    )}
-                  </TooltipContent>
-                </Tooltip>
-              )}
-            </span>
+            (recordTypeNames?.[row.record_type] ?? row.record_type)
           ),
       },
-      // #1068: the "Updated" column goes when this tenant hides dates — on
-      // both tabs, from one call. A template list is navigated by NAME; the
-      // stamp is context, and a column of em dashes under "Updated" is worse
-      // than the column not being there.
-      ...dates.dateColumns<TemplateViewRow>([
-        {
-          id: 'updated_at',
-          header: t('documentTemplates.table.updated', 'Updated'),
-          value: (row) => row.updated_at,
-          enableSorting: true,
-          className: 'text-muted-foreground',
-        },
-      ]),
-    ],
-    [t, dates, visibilityCell, placementCell, permissionCell]
-  );
-
-  // ── blocks tab ──────────────────────────────────────────────────────────────
-
-  const blockRows = blocks.data?.rows ?? [];
-  // Memoised so the `?? {}` fallback is not a fresh object on every render — it
-  // is a dependency of the column definitions below, and an unstable one would
-  // rebuild them (and every cell) on each paint.
-  const blockUsage = useMemo(() => blocks.data?.usage ?? {}, [blocks.data]);
-
-  const blockColumns: DataTableColumn<BlockRow>[] = useMemo<DataTableColumn<BlockRow>[]>(
-    () => [
       {
-        accessorKey: 'name',
-        header: t('documentTemplates.table.name', 'Name'),
-        enableSorting: true,
-        enableColumnFilter: true,
-        cell: (row) => <span className="font-medium">{row.name}</span>,
+        id: 'status',
+        header: t('documentTemplates.table.status', 'Status'),
+        cell: (row) =>
+          row.published_version === null ? (
+            <Badge variant="secondary">{t('documentTemplates.status.draft', 'Draft')}</Badge>
+          ) : (
+            <Badge variant="success">
+              {t('documentTemplates.status.published', 'Published v{version}', { version: row.published_version })}
+            </Badge>
+          ),
       },
       {
         id: 'visibility',
         header: t('documentTemplates.table.visibility', 'Visible to'),
-        cell: visibilityCell,
+        cell: (row) => (
+          <ScopeBadge row={row} ouName={ouName(row.owner_ou_id)} viewerProfileId={viewerProfileId} />
+        ),
       },
-      {
-        id: 'placement',
-        header: t('documentTemplates.table.placement', 'Filed at'),
-        cell: placementCell,
-      },
-      {
-        id: 'permission',
-        header: t('documentTemplates.table.permission', 'Requires'),
-        cell: permissionCell,
-      },
-      {
-        id: 'usedBy',
-        header: t('documentTemplates.table.usedBy', 'Used by'),
-        cell: (row) => {
-          if (blocks.loading) return <Skeleton className="h-4 w-16" />;
-          const usage = blockUsage[row.id];
-          if (usage === null || usage === undefined) {
-            return (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="cursor-help text-muted-foreground underline decoration-dotted">
-                    {t('documentTemplates.table.usageUnknown', 'Unknown')}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {t(
-                    'documentTemplates.table.usageUnknownHint',
-                    'The usage count could not be read. Treat editing or deleting this block as unsafe until it can — a blank is not a zero.'
-                  )}
-                </TooltipContent>
-              </Tooltip>
-            );
-          }
-          if (usage.total === 0) {
-            return (
-              <span className="text-muted-foreground">
-                {t('documentTemplates.table.usedByNone', 'Nothing')}
-              </span>
-            );
-          }
-          return (
-            <button
-              type="button"
-              onClick={() => setInspecting(row)}
-              className="text-start font-medium text-primary underline-offset-4 hover:underline"
-            >
-              {/* Not "{count} templates": the total counts blocks that nest
-                  this one as well (#1186), and a cell that named one kind
-                  while counting two would be wrong in exactly the cases
-                  nesting introduced. */}
-              {t('documentTemplates.table.usedByCount', '{count} uses', {
-                count: usage.total,
-              })}
-              {usage.hidden > 0 && (
-                <Badge variant="warning" className="ms-2">
-                  {t('documentTemplates.table.hiddenCount', '{count} you cannot see', {
-                    count: usage.hidden,
-                  })}
-                </Badge>
-              )}
-            </button>
-          );
-        },
-      },
-      // #1068: the "Updated" column goes when this tenant hides dates — on
-      // both tabs, from one call. A template list is navigated by NAME; the
-      // stamp is context, and a column of em dashes under "Updated" is worse
-      // than the column not being there.
-      ...dates.dateColumns<BlockRow>([
+      // The "Updated" column goes when this tenant hides dates (#1068).
+      ...dates.dateColumns<TemplateRow>([
         {
           id: 'updated_at',
           header: t('documentTemplates.table.updated', 'Updated'),
@@ -556,38 +222,67 @@ export default function DocumentTemplatesPage() {
         },
       ]),
     ],
-    [t, dates, visibilityCell, placementCell, permissionCell, blockUsage, blocks.loading]
+    [t, dates, nameOf, ouName, viewerProfileId, recordTypeNames]
+  );
+
+  const rowActions = (row: TemplateRow) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t('documentTemplates.rowActions.label', 'Actions for {name}', { name: nameOf(row) })}
+        >
+          <IconMenu2 size={16} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-auto min-w-52">
+        <DropdownMenuItem onClick={() => router.push(editorHref(row.id))}>
+          {t('documentTemplates.rowActions.open', 'Open')}
+        </DropdownMenuItem>
+        {/* Issuing opens the editor on the published version (M4c); a label
+            sheet prints labels instead, so it has no document to issue. */}
+        {row.kind === 'template' && row.published_version !== null && canIssue && (
+          <DropdownMenuItem onClick={() => router.push(issueHref(row.id))}>
+            {t('documentTemplates.rowActions.issue', 'Issue a document')}
+          </DropdownMenuItem>
+        )}
+        {/* Copying needs write, not publish: the copy lands personal, the one
+            scope everybody with write already has. */}
+        <DropdownMenuItem onClick={() => setCopying(row)} disabled={!canWrite}>
+          {t('documentTemplates.rowActions.copy', 'Use a copy…')}
+        </DropdownMenuItem>
+        {/* Every field in the scope dialog is a publish action server-side,
+            so the entry is gated rather than opening a dialog whose save 403s. */}
+        <DropdownMenuItem onClick={() => setScoping(row)} disabled={!canPublish}>
+          {t('documentTemplates.rowActions.audience', 'Who can see it…')}
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => setDeleting(row)} disabled={!canWrite} variant="destructive">
+          {t('documentTemplates.rowActions.delete', 'Delete…')}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 
   // ── render ──────────────────────────────────────────────────────────────────
 
-  const forbidden = isForbidden(templates.error) || isForbidden(blocks.error);
-  const accessDenied = forbidden ? (
-    <ErrorState
-      icon={<IconShieldLock />}
-      title={t('documentTemplates.forbidden.title', 'Access denied')}
-      description={t(
-        'documentTemplates.forbidden.description',
-        'You need the documents:read permission to manage templates and blocks.'
-      )}
-    />
-  ) : undefined;
+  const forbidden = templates.error === new ForbiddenError().message;
 
   return (
     <div className="space-y-8">
       <AdminHeader
-        title={t('documentTemplates.title', 'Templates & Blocks')}
+        title={t('documentTemplates.title', 'Document templates')}
         description={t(
-          'documentTemplates.description',
-          'Who can see each saved template and reusable block, where it is filed in the organisation, and what a block is used by. Editing a block changes every template that uses it.'
+          'documentTemplates.subtitle',
+          'The templates and label sheets documents are issued from, and who can see each one. A document is issued from the published version.'
         )}
         action={
-          <Button variant="outline" asChild className="gap-2">
-            <Link href="/admin/documents">
-              <IconExternalLink size={16} />
-              {t('documentTemplates.openDesigner', 'Open designer')}
-            </Link>
-          </Button>
+          canWrite ? (
+            <Button icon="plus" loading={creating} disabled={creating} onClick={() => void createTemplate()}>
+              {t('documentTemplates.new', 'New template')}
+            </Button>
+          ) : undefined
         }
       />
 
@@ -600,94 +295,59 @@ export default function DocumentTemplatesPage() {
         </p>
       )}
 
-      <Tabs defaultValue="templates">
-        <TabsList>
-          <TabsTrigger value="templates">
-            {t('documentTemplates.tab.templates', 'Templates')}
-          </TabsTrigger>
-          <TabsTrigger value="blocks">{t('documentTemplates.tab.blocks', 'Blocks')}</TabsTrigger>
-        </TabsList>
+      <DataTable
+        columns={columns}
+        data={templates.data ?? []}
+        getRowId={(row) => String(row.id)}
+        rowActions={rowActions}
+        isLoading={templates.loading}
+        overrideContent={
+          forbidden ? (
+            <ErrorState
+              icon={<IconShieldLock />}
+              title={t('documentTemplates.forbidden.title', 'Access denied')}
+              description={t(
+                'documentTemplates.forbidden.templates',
+                'You need the documents:read permission to see document templates.'
+              )}
+            />
+          ) : undefined
+        }
+        ariaLabel={t('documentTemplates.title', 'Document templates')}
+        enableGlobalFilter
+        globalFilterPlaceholder={t('documentTemplates.searchTemplates', 'Search templates…')}
+        emptyState={{
+          title: t('documentTemplates.empty.templates.title', 'No templates you can see'),
+          description: t(
+            'documentTemplates.empty.templates.description',
+            'Templates are filtered by where you stand in the organisation and what you hold, so an empty list can also mean there are templates filed elsewhere.'
+          ),
+        }}
+        errorState={
+          templates.error !== null && !forbidden
+            ? { title: t('documentTemplates.error.templates', 'Failed to load templates'), description: templates.error }
+            : undefined
+        }
+        pagination={{ pageSize: 25 }}
+      />
 
-        <TabsContent value="templates" className="pt-4">
-          <DataTable
-            columns={templateColumns}
-            data={templateRows}
-            getRowId={(row) => String(row.id)}
-            rowActions={(row) => rowActions('template', row)}
-            isLoading={templates.loading}
-            overrideContent={accessDenied}
-            ariaLabel={t('documentTemplates.tab.templates', 'Templates')}
-            enableGlobalFilter
-            globalFilterPlaceholder={t('documentTemplates.searchTemplates', 'Search templates…')}
-            emptyState={{
-              title: t('documentTemplates.empty.templates.title', 'No templates you can see'),
-              description: t(
-                'documentTemplates.empty.templates.description',
-                'Templates are filtered by where you stand in the organisation and what you hold, so an empty list can also mean there are templates filed elsewhere.'
-              ),
-            }}
-            errorState={
-              templates.error !== null && !forbidden
-                ? {
-                    title: t('documentTemplates.error.templates', 'Failed to load templates'),
-                    description: templates.error,
-                  }
-                : undefined
-            }
-            pagination={{ pageSize: 25 }}
-          />
-        </TabsContent>
-
-        <TabsContent value="blocks" className="pt-4">
-          <DataTable
-            columns={blockColumns}
-            data={blockRows}
-            getRowId={(row) => String(row.id)}
-            rowActions={(row) => rowActions('block', row)}
-            isLoading={blocks.loading}
-            overrideContent={accessDenied}
-            ariaLabel={t('documentTemplates.tab.blocks', 'Blocks')}
-            enableGlobalFilter
-            globalFilterPlaceholder={t('documentTemplates.searchBlocks', 'Search blocks…')}
-            emptyState={{
-              title: t('documentTemplates.empty.blocks.title', 'No blocks you can see'),
-              description: t(
-                'documentTemplates.empty.blocks.description',
-                'Blocks are scoped the same way templates are. Create one from a selection in the designer.'
-              ),
-            }}
-            errorState={
-              blocks.error !== null && !forbidden
-                ? {
-                    title: t('documentTemplates.error.blocks', 'Failed to load blocks'),
-                    description: blocks.error,
-                  }
-                : undefined
-            }
-            pagination={{ pageSize: 25 }}
-          />
-        </TabsContent>
-      </Tabs>
-
-      {renaming !== null && (
-        <RenameDialog
-          kind={renaming.kind}
-          row={renaming.row}
+      {copying !== null && (
+        <CopyDialog
+          row={copying}
+          name={nameOf(copying)}
           apiClient={apiClient}
-          addToast={addToast}
-          onClose={() => setRenaming(null)}
-          onSaved={() => {
-            setRenaming(null);
-            refetchAll();
+          onClose={() => setCopying(null)}
+          onCopied={(id) => {
+            setCopying(null);
+            router.push(editorHref(id));
           }}
         />
       )}
 
       {scoping !== null && (
         <ScopeDialog
-          kind={scoping.kind}
-          row={scoping.row}
-          usage={scoping.kind === 'block' ? (blockUsage[scoping.row.id] ?? null) : null}
+          row={scoping}
+          name={nameOf(scoping)}
           ous={ous.data ?? []}
           ousUnavailable={ous.error !== null}
           permissionNames={permissionOptions.data?.names ?? []}
@@ -698,55 +358,25 @@ export default function DocumentTemplatesPage() {
           onClose={() => setScoping(null)}
           onSaved={() => {
             setScoping(null);
-            refetchAll();
+            templates.refetch();
           }}
         />
       )}
 
       {deleting !== null && (
         <DeleteDialog
-          kind={deleting.kind}
-          row={deleting.row}
-          usage={deleting.kind === 'block' ? (blockUsage[deleting.row.id] ?? null) : null}
-          ouName={ouName(deleting.row.owner_ou_id)}
+          row={deleting}
+          name={nameOf(deleting)}
+          ouName={ouName(deleting.owner_ou_id)}
           apiClient={apiClient}
           addToast={addToast}
           onClose={() => setDeleting(null)}
           onDeleted={() => {
             setDeleting(null);
-            refetchAll();
+            templates.refetch();
           }}
-        />
-      )}
-
-      {inspecting !== null && (
-        <UsageDialog
-          block={inspecting}
-          usage={blockUsage[inspecting.id] ?? null}
-          ouName={ouName}
-          onClose={() => setInspecting(null)}
         />
       )}
     </div>
   );
 }
-
-/**
- * A 403 carried through `useFetch`, which flattens rejections to a message
- * string. Marked with a recognisable message so the page can render the
- * access-denied state instead of an error toast loop — the delegations page's
- * pattern, adapted to a fetcher that throws rather than returning a status.
- */
-const FORBIDDEN_MARKER = 'documents:read forbidden';
-
-class ForbiddenError extends Error {
-  constructor() {
-    super(FORBIDDEN_MARKER);
-  }
-}
-
-function isForbidden(error: string | null): boolean {
-  return error === FORBIDDEN_MARKER;
-}
-
-

@@ -188,6 +188,23 @@ final class ToolSurfaceTest extends TestCase
         }
     }
 
+    /**
+     * Issuing a document can't be undone (a numbered, QR-verified document;
+     * editor M4c), so an agent only ever proposes it: the three routes that
+     * issue declare `propose`, and reading documents stays `allow`.
+     */
+    public function testIssuingADocumentIsAlwaysAProposalForAnAgent(): void
+    {
+        ToolDeriver::clearCache();
+        $meta = $this->metaByName((new ToolDeriver(CoreApiSchemas::routes(), CoreApiSchemas::components(), null, static fn (string $m): null => null))->deriveTools());
+
+        foreach (['post_api_documents', 'post_api_documents_id_render', 'post_api_document_sources_id_render'] as $name) {
+            self::assertArrayHasKey($name, $meta);
+            self::assertSame('propose', $meta[$name]['dev.whity/agentPolicy'], $name);
+        }
+        self::assertSame('allow', $meta['get_api_documents']['dev.whity/agentPolicy']);
+    }
+
     // ---- the wire ----
 
     public function testMetaIsLeftOutForTheOldestProtocolVersion(): void

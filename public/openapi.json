@@ -7348,560 +7348,6 @@
                 ]
             }
         },
-        "/api/v1/document-blocks": {
-            "get": {
-                "operationId": "get_api_v1_document_blocks",
-                "summary": "List document/label blocks visible to the caller",
-                "tags": [
-                    "documents"
-                ],
-                "responses": {
-                    "200": {
-                        "description": "The blocks the caller may see (RBAC-filtered)",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/DocumentBlockListResponse"
-                                }
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Missing or invalid authentication",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "403": {
-                        "description": "Insufficient permissions",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not found",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "405": {
-                        "description": "Method not allowed",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "bearerAuth": []
-                    }
-                ]
-            },
-            "post": {
-                "operationId": "post_api_v1_document_blocks",
-                "summary": "Create a document/label block",
-                "tags": [
-                    "documents"
-                ],
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/DocumentBlockCreateRequest"
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "201": {
-                        "description": "The created block",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/DocumentBlockResponse"
-                                }
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid request body",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Missing or invalid authentication",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "403": {
-                        "description": "Publishing a shared block requires documents:publish",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not found",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "405": {
-                        "description": "Method not allowed",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation failed",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "bearerAuth": []
-                    }
-                ]
-            }
-        },
-        "/api/v1/document-blocks/{id}": {
-            "delete": {
-                "operationId": "delete_api_v1_document_blocks_id",
-                "summary": "Delete a document/label block",
-                "tags": [
-                    "documents"
-                ],
-                "parameters": [
-                    {
-                        "name": "id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "integer"
-                        }
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "Block deleted"
-                    },
-                    "401": {
-                        "description": "Missing or invalid authentication",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "403": {
-                        "description": "Insufficient permissions",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Block not found or not visible to the caller",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "405": {
-                        "description": "Method not allowed",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "409": {
-                        "description": "Cannot delete a block that is still referenced by a template",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "bearerAuth": []
-                    }
-                ]
-            },
-            "get": {
-                "operationId": "get_api_v1_document_blocks_id",
-                "summary": "Get a document/label block",
-                "tags": [
-                    "documents"
-                ],
-                "parameters": [
-                    {
-                        "name": "id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "integer"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "The block",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/DocumentBlockResponse"
-                                }
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Missing or invalid authentication",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "403": {
-                        "description": "Insufficient permissions",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Block not found or not visible to the caller",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "405": {
-                        "description": "Method not allowed",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "bearerAuth": []
-                    }
-                ]
-            },
-            "patch": {
-                "operationId": "patch_api_v1_document_blocks_id",
-                "summary": "Update a document/label block",
-                "tags": [
-                    "documents"
-                ],
-                "parameters": [
-                    {
-                        "name": "id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "integer"
-                        }
-                    }
-                ],
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/DocumentBlockUpdateRequest"
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "200": {
-                        "description": "The updated block",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/DocumentBlockResponse"
-                                }
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid request body",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Missing or invalid authentication",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "403": {
-                        "description": "Publishing a shared block requires documents:publish",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Block not found or not visible to the caller",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "405": {
-                        "description": "Method not allowed",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation failed",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "bearerAuth": []
-                    }
-                ]
-            }
-        },
-        "/api/v1/document-blocks/{id}/usage": {
-            "get": {
-                "operationId": "get_api_v1_document_blocks_id_usage",
-                "summary": "What would break if this block changed: the templates and blocks that instance it",
-                "tags": [
-                    "documents"
-                ],
-                "description": "A block is POINTER-referenced (a `blockInstance` element), so editing it propagates to everything that instances it \u2014 and unlike delete, an edit is never refused. This is the answer a client needs before offering either action. There are TWO kinds of user: `templates`, and `blocks`, since a block may contain another block. Both are row-filtered to what the caller may see; `total` counts EVERY reference of both kinds in the tenant and `hidden` is the difference, so a caller with narrow reach is told the edit reaches further than they can see instead of being quietly understated. `total > 0` means exactly that a DELETE would be refused with 409.",
-                "parameters": [
-                    {
-                        "name": "id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "integer"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "The referencing templates and blocks, plus the unfiltered total",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/DocumentBlockUsageResponse"
-                                }
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Missing or invalid authentication",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "403": {
-                        "description": "Insufficient permissions",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Block not found or not visible to the caller",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "405": {
-                        "description": "Method not allowed",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "bearerAuth": []
-                    }
-                ]
-            }
-        },
         "/api/v1/document-collections": {
             "get": {
                 "operationId": "get_api_v1_document_collections",
@@ -9568,7 +9014,7 @@
         "/api/v1/document-sources": {
             "get": {
                 "operationId": "get_api_v1_document_sources",
-                "summary": "List the editor documents visible to the caller, without their blocks",
+                "summary": "List document templates, letters, reports, notes, wiki pages and label sheets visible to the caller, without their blocks",
                 "tags": [
                     "documents"
                 ],
@@ -9927,6 +9373,238 @@
                         "bearerAuth": []
                     }
                 ]
+            },
+            "patch": {
+                "operationId": "patch_api_v1_document_sources_id",
+                "summary": "Change who can see an editor document",
+                "tags": [
+                    "documents"
+                ],
+                "description": "Its scope, the permission a reader needs and the unit it is filed at (A31). Not part of the draft: it changes without a publish. Making a document shared needs documents:publish; a value sent back unchanged is not a change.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DocumentSourceAudienceRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The document",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentSourceResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Sharing a document requires documents:publish",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/document-sources/{id}/copy": {
+            "post": {
+                "operationId": "post_api_v1_document_sources_id_copy",
+                "summary": "Use a copy of an editor document",
+                "tags": [
+                    "documents"
+                ],
+                "description": "A personal, unpublished draft of the caller's with the original's draft content and own fields, for example to start from one of Whity's starters. It does not inherit the original's audience.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DocumentSourceCopyRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The copy",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentSourceResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Document not found or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
             }
         },
         "/api/v1/document-sources/{id}/draft": {
@@ -10040,6 +9718,133 @@
                     },
                     "428": {
                         "description": "If-Match with the draft version is required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/document-sources/{id}/drafts": {
+            "post": {
+                "operationId": "post_api_v1_document_sources_id_drafts",
+                "summary": "Start a document from a template, to change before issuing it",
+                "tags": [
+                    "documents"
+                ],
+                "description": "The template's published version becomes a personal letter of the caller's, with the same record type and own fields, to change and then issue with POST /api/documents (which freezes what it says as a version). The template itself is untouched.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DocumentSourceCopyRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The draft",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentSourceResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Template not found or not visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The template has no published version yet",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Not a template, or a bad title",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -10820,11 +10625,11 @@
                         }
                     },
                     "201": {
-                        "description": "The issued document",
+                        "description": "The issued document, and whether its PDF was stored",
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/DocumentResponse"
+                                    "$ref": "#/components/schemas/DocumentCreateResponse"
                                 }
                             }
                         }
@@ -11023,20 +10828,39 @@
                 ]
             }
         },
-        "/api/v1/document-templates": {
+        "/api/v1/document-sources/{id}/versions/{version}": {
             "get": {
-                "operationId": "get_api_v1_document_templates",
-                "summary": "List document/label templates visible to the caller",
+                "operationId": "get_api_v1_document_sources_id_versions_version",
+                "summary": "What one published version says",
                 "tags": [
                     "documents"
                 ],
+                "description": "Its title, page, blocks and own fields: what a document issued from it prints.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "version",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
                 "responses": {
                     "200": {
-                        "description": "The templates the caller may see (RBAC-filtered)",
+                        "description": "The version",
                         "content": {
                             "application/json": {
                                 "schema": {
-                                    "$ref": "#/components/schemas/DocumentTemplateListResponse"
+                                    "$ref": "#/components/schemas/DocumentSourceVersionResponse"
                                 }
                             }
                         }
@@ -11062,7 +10886,7 @@
                         }
                     },
                     "404": {
-                        "description": "Not found",
+                        "description": "Document or version not found, or not visible to the caller",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -11083,514 +10907,6 @@
                     },
                     "500": {
                         "description": "Internal server error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "bearerAuth": []
-                    }
-                ]
-            },
-            "post": {
-                "operationId": "post_api_v1_document_templates",
-                "summary": "Create a document/label template",
-                "tags": [
-                    "documents"
-                ],
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/DocumentTemplateCreateRequest"
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "201": {
-                        "description": "The created template",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/DocumentTemplateResponse"
-                                }
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid request body",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Missing or invalid authentication",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "403": {
-                        "description": "Publishing a shared template requires documents:publish",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Not found",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "405": {
-                        "description": "Method not allowed",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation failed",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "bearerAuth": []
-                    }
-                ]
-            }
-        },
-        "/api/v1/document-templates/{id}": {
-            "delete": {
-                "operationId": "delete_api_v1_document_templates_id",
-                "summary": "Delete a document/label template",
-                "tags": [
-                    "documents"
-                ],
-                "parameters": [
-                    {
-                        "name": "id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "integer"
-                        }
-                    }
-                ],
-                "responses": {
-                    "204": {
-                        "description": "Template deleted"
-                    },
-                    "401": {
-                        "description": "Missing or invalid authentication",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "403": {
-                        "description": "Insufficient permissions",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Template not found or not visible to the caller",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "405": {
-                        "description": "Method not allowed",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "bearerAuth": []
-                    }
-                ]
-            },
-            "get": {
-                "operationId": "get_api_v1_document_templates_id",
-                "summary": "Get a document/label template",
-                "tags": [
-                    "documents"
-                ],
-                "parameters": [
-                    {
-                        "name": "id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "integer"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "The template",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/DocumentTemplateResponse"
-                                }
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Missing or invalid authentication",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "403": {
-                        "description": "Insufficient permissions",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Template not found or not visible to the caller",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "405": {
-                        "description": "Method not allowed",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "bearerAuth": []
-                    }
-                ]
-            },
-            "patch": {
-                "operationId": "patch_api_v1_document_templates_id",
-                "summary": "Update a document/label template",
-                "tags": [
-                    "documents"
-                ],
-                "parameters": [
-                    {
-                        "name": "id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "integer"
-                        }
-                    }
-                ],
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/DocumentTemplateUpdateRequest"
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "200": {
-                        "description": "The updated template",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/DocumentTemplateResponse"
-                                }
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid request body",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Missing or invalid authentication",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "403": {
-                        "description": "Publishing a shared template requires documents:publish",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Template not found or not visible to the caller",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "405": {
-                        "description": "Method not allowed",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation failed",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "bearerAuth": []
-                    }
-                ]
-            }
-        },
-        "/api/v1/document-templates/{id}/render": {
-            "post": {
-                "operationId": "post_api_v1_document_templates_id_render",
-                "summary": "Render a document/label template to PDF",
-                "tags": [
-                    "documents"
-                ],
-                "parameters": [
-                    {
-                        "name": "id",
-                        "in": "path",
-                        "required": true,
-                        "schema": {
-                            "type": "integer"
-                        }
-                    }
-                ],
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/DocumentRenderRequest"
-                            }
-                        }
-                    }
-                },
-                "responses": {
-                    "200": {
-                        "description": "The rendered PDF",
-                        "content": {
-                            "application/pdf": {
-                                "schema": {
-                                    "type": "string",
-                                    "format": "binary"
-                                }
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid request body",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Missing or invalid authentication",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "403": {
-                        "description": "Insufficient permissions",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Template not found or not visible to the caller",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "405": {
-                        "description": "Method not allowed",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "422": {
-                        "description": "Validation failed (bad dataRows, or a batch/size limit exceeded)",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
-                                }
-                            }
-                        }
-                    },
-                    "503": {
-                        "description": "Rendering is disabled on this instance, or the render service is unavailable",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -11917,11 +11233,11 @@
             },
             "post": {
                 "operationId": "post_api_v1_documents",
-                "summary": "Raise a document from a template, supplying values for its placeholders",
+                "summary": "Issue a document from a template, for a record and with the template's own fields",
                 "tags": [
                     "documents"
                 ],
-                "description": "The record is the deliverable and the rendered artifact is opportunistic. `documents.render_enabled` defaults to FALSE, so on a default install this returns a document with no artifact and `content_url: null` \u2014 which is a complete, routable document, not a degraded one: the values it was raised with are stored on the record, and POST /api/documents/{id}/render mints the artifact from them if the tier is later switched on. The `render` block says what happened. Sending `render: true` turns \"could not render\" into a 503 instead, for a caller who genuinely requires the bytes. A template the caller cannot SEE is a 404, never a 403, and the check is the designer's own visibility policy \u2014 creating from a gated template must not be a way to read it.",
+                "description": "The record is the deliverable and the rendered artifact is opportunistic. `documents.render_enabled` defaults to FALSE, so on a default install this returns a document with no artifact and `content_url: null` \u2014 which is a complete, routable document, not a degraded one: the values it was raised with are stored on the record, and POST /api/documents/{id}/render mints the artifact from them if the tier is later switched on. The `render` block says what happened. Sending `render: true` turns \"could not render\" into a 503 instead, for a caller who genuinely requires the bytes. The template's published version is issued, with the verification QR when the tenant has it on. A template the caller cannot SEE is a 404, never a 403, and the check is the editor's own visibility policy \u2014 creating from a gated template must not be a way to read it.",
                 "requestBody": {
                     "required": true,
                     "content": {
@@ -11933,6 +11249,16 @@
                     }
                 },
                 "responses": {
+                    "200": {
+                        "description": "The document `origin_key` already names; nothing new was issued",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentCreateResponse"
+                                }
+                            }
+                        }
+                    },
                     "201": {
                         "description": "The document, and whether an artifact was rendered for it",
                         "content": {
@@ -11974,7 +11300,7 @@
                         }
                     },
                     "404": {
-                        "description": "No such template, or it is not visible to the caller",
+                        "description": "No such template or record, or it is not visible to the caller",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -11993,8 +11319,18 @@
                             }
                         }
                     },
+                    "409": {
+                        "description": "The template has no published version yet, `origin_key` names a document from another template (`origin_key_conflict`), or a plugin refused it (`vetoed`)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
                     "422": {
-                        "description": "No template named, a bad dataRows shape, or a value supplied for a placeholder the template does not declare",
+                        "description": "No template named, not a template, a bad record, a value for a field the template does not declare, or a required field with no value (details.missing)",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -13081,6 +12417,7 @@
                 "tags": [
                     "documents"
                 ],
+                "description": "Re-renders the template version the document was issued from, with the values it printed; records and charts are read again. A document issued from the old Document designer cannot be re-rendered (409, with details.document_source_id naming its converted template to issue a new one from).",
                 "parameters": [
                     {
                         "name": "id",
@@ -13091,16 +12428,6 @@
                         }
                     }
                 ],
-                "requestBody": {
-                    "required": true,
-                    "content": {
-                        "application/json": {
-                            "schema": {
-                                "$ref": "#/components/schemas/DocumentRerenderRequest"
-                            }
-                        }
-                    }
-                },
                 "responses": {
                     "201": {
                         "description": "The document with the new artifact at the head of its history",
@@ -13108,16 +12435,6 @@
                             "application/json": {
                                 "schema": {
                                     "$ref": "#/components/schemas/DocumentResponse"
-                                }
-                            }
-                        }
-                    },
-                    "400": {
-                        "description": "Invalid request body",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "$ref": "#/components/schemas/Error"
                                 }
                             }
                         }
@@ -13163,7 +12480,7 @@
                         }
                     },
                     "409": {
-                        "description": "The template this document was issued from is no longer available",
+                        "description": "Nothing to re-render from: an old designer document, or its template is gone",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -13173,7 +12490,17 @@
                         }
                     },
                     "422": {
-                        "description": "Validation failed (bad dataRows, or a batch/size limit exceeded)",
+                        "description": "The template could not be rendered with these values",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "429": {
+                        "description": "The document render limit has been reached",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -41585,6 +40912,18 @@
                         "type": "integer",
                         "nullable": true
                     },
+                    "document_source_id": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "document_source_version": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "origin_key": {
+                        "type": "string",
+                        "nullable": true
+                    },
                     "template_name": {
                         "type": "string"
                     },
@@ -41674,284 +41013,6 @@
                     "checksum_sha256",
                     "rendered_at",
                     "content_url"
-                ]
-            },
-            "DocumentBlock": {
-                "type": "object",
-                "properties": {
-                    "id": {
-                        "type": "integer"
-                    },
-                    "tenant_id": {
-                        "type": "integer"
-                    },
-                    "name": {
-                        "type": "string"
-                    },
-                    "data": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "scope": {
-                        "type": "string",
-                        "enum": [
-                            "personal",
-                            "tenant",
-                            "global",
-                            "system"
-                        ]
-                    },
-                    "required_permission": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "is_system": {
-                        "type": "boolean"
-                    },
-                    "created_by": {
-                        "type": "integer",
-                        "nullable": true
-                    },
-                    "owner_ou_id": {
-                        "type": "integer",
-                        "nullable": true
-                    },
-                    "starter_key": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "created_at": {
-                        "type": "string"
-                    },
-                    "updated_at": {
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "id",
-                    "tenant_id",
-                    "name",
-                    "data",
-                    "scope",
-                    "is_system",
-                    "created_at",
-                    "updated_at"
-                ]
-            },
-            "DocumentBlockCreateRequest": {
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string"
-                    },
-                    "data": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "scope": {
-                        "type": "string",
-                        "enum": [
-                            "personal",
-                            "tenant",
-                            "global",
-                            "system"
-                        ]
-                    },
-                    "required_permission": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "owner_ou_id": {
-                        "type": "integer",
-                        "nullable": true
-                    }
-                },
-                "required": [
-                    "name",
-                    "data"
-                ]
-            },
-            "DocumentBlockListResponse": {
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/DocumentBlock"
-                        }
-                    }
-                },
-                "required": [
-                    "data"
-                ]
-            },
-            "DocumentBlockResponse": {
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "$ref": "#/components/schemas/DocumentBlock"
-                    }
-                },
-                "required": [
-                    "data"
-                ]
-            },
-            "DocumentBlockUpdateRequest": {
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string"
-                    },
-                    "data": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "scope": {
-                        "type": "string",
-                        "enum": [
-                            "personal",
-                            "tenant",
-                            "global",
-                            "system"
-                        ]
-                    },
-                    "required_permission": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "owner_ou_id": {
-                        "type": "integer",
-                        "nullable": true
-                    }
-                }
-            },
-            "DocumentBlockUsage": {
-                "type": "object",
-                "properties": {
-                    "block_id": {
-                        "type": "integer"
-                    },
-                    "total": {
-                        "type": "integer"
-                    },
-                    "hidden": {
-                        "type": "integer"
-                    },
-                    "templates": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "id": {
-                                    "type": "integer"
-                                },
-                                "name": {
-                                    "type": "string"
-                                },
-                                "scope": {
-                                    "type": "string",
-                                    "enum": [
-                                        "personal",
-                                        "tenant",
-                                        "global",
-                                        "system"
-                                    ]
-                                },
-                                "required_permission": {
-                                    "type": "string",
-                                    "nullable": true
-                                },
-                                "owner_ou_id": {
-                                    "type": "integer",
-                                    "nullable": true
-                                },
-                                "is_system": {
-                                    "type": "boolean"
-                                },
-                                "updated_at": {
-                                    "type": "string"
-                                }
-                            },
-                            "required": [
-                                "id",
-                                "name",
-                                "scope",
-                                "is_system",
-                                "updated_at"
-                            ]
-                        }
-                    },
-                    "blocks": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "id": {
-                                    "type": "integer"
-                                },
-                                "name": {
-                                    "type": "string"
-                                },
-                                "scope": {
-                                    "type": "string",
-                                    "enum": [
-                                        "personal",
-                                        "tenant",
-                                        "global",
-                                        "system"
-                                    ]
-                                },
-                                "required_permission": {
-                                    "type": "string",
-                                    "nullable": true
-                                },
-                                "owner_ou_id": {
-                                    "type": "integer",
-                                    "nullable": true
-                                },
-                                "is_system": {
-                                    "type": "boolean"
-                                },
-                                "updated_at": {
-                                    "type": "string"
-                                }
-                            },
-                            "required": [
-                                "id",
-                                "name",
-                                "scope",
-                                "is_system",
-                                "updated_at"
-                            ]
-                        }
-                    }
-                },
-                "required": [
-                    "block_id",
-                    "total",
-                    "hidden",
-                    "templates",
-                    "blocks"
-                ]
-            },
-            "DocumentBlockUsageResponse": {
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "$ref": "#/components/schemas/DocumentBlockUsage"
-                    }
-                },
-                "required": [
-                    "data"
                 ]
             },
             "DocumentCollection": {
@@ -42105,30 +41166,30 @@
             "DocumentCreateRequest": {
                 "type": "object",
                 "properties": {
-                    "document_template_id": {
+                    "document_source_id": {
                         "type": "integer",
-                        "description": "Template to issue the document from (see GET /api/document-templates)."
+                        "description": "The template to issue the document from (see GET /api/document-sources?kind=template): its published version is issued. A letter or report (a copy made to edit before issuing) is issued as it is now, frozen as a version."
+                    },
+                    "record": {
+                        "type": "string",
+                        "description": "The record the document is for, as `type:id`. Required when the template has a record type."
+                    },
+                    "values": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string"
+                        },
+                        "description": "Values by field path: the template's own fields (for example {\"template.reference\": \"REF-1042\"}) and any field the record left empty. At most 1000 characters each. A field the template does not offer is refused, and a value for a field the record resolved is 422 `field_conflict`: merge data can't overwrite what the record says."
                     },
                     "title": {
                         "type": "string",
                         "nullable": true,
-                        "description": "Document title; defaults from the template."
+                        "description": "Document title; defaults to the template's title and the record's name."
                     },
-                    "dataRows": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        },
-                        "description": "Values for the template's placeholders: one object per label or page, mapping placeholder key to text. A key the template does not declare is refused."
-                    },
-                    "sheet": {
-                        "type": "object",
-                        "additionalProperties": true,
+                    "origin_key": {
+                        "type": "string",
                         "nullable": true,
-                        "description": "Optional label-sheet layout for printing several labels per page; null for one per page."
+                        "description": "Your own name for what this document is, for example `order:4812:invoice` (1 to 160 letters, digits or : . _ / -). Issuing again with the same key returns the first document (200, `replayed: true`) instead of a second one; the same key for another template is 409 `origin_key_conflict`."
                     },
                     "render": {
                         "type": "boolean",
@@ -42137,7 +41198,7 @@
                     }
                 },
                 "required": [
-                    "document_template_id"
+                    "document_source_id"
                 ]
             },
             "DocumentCreateResponse": {
@@ -42145,6 +41206,10 @@
                 "properties": {
                     "data": {
                         "$ref": "#/components/schemas/Document"
+                    },
+                    "replayed": {
+                        "type": "boolean",
+                        "description": "True when `origin_key` already named this document: nothing new was issued (HTTP 200)."
                     },
                     "render": {
                         "type": "object",
@@ -42165,6 +41230,7 @@
                                     "rejected",
                                     "unavailable",
                                     "storage_unavailable",
+                                    "limit",
                                     null
                                 ]
                             }
@@ -42639,58 +41705,6 @@
                 "required": [
                     "data"
                 ]
-            },
-            "DocumentRenderRequest": {
-                "type": "object",
-                "properties": {
-                    "dataRows": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        },
-                        "description": "Values for the template's placeholders: one object per label or page, mapping placeholder key to text. Omitted or empty renders one copy with the template's sample values."
-                    },
-                    "sheet": {
-                        "type": "object",
-                        "additionalProperties": true,
-                        "nullable": true,
-                        "description": "Optional label-sheet layout for printing several labels per page; null for one per page."
-                    },
-                    "persist": {
-                        "type": "boolean",
-                        "default": false,
-                        "description": "true to record the result as a document (returns the record); false (default) returns the PDF as a preview only."
-                    },
-                    "title": {
-                        "type": "string",
-                        "nullable": true,
-                        "description": "Title of the recorded document. Used only when `persist` is true."
-                    }
-                }
-            },
-            "DocumentRerenderRequest": {
-                "type": "object",
-                "properties": {
-                    "dataRows": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
-                        },
-                        "description": "Values for the template's placeholders: one object per label or page, mapping placeholder key to text."
-                    },
-                    "sheet": {
-                        "type": "object",
-                        "additionalProperties": true,
-                        "nullable": true,
-                        "description": "Optional label-sheet layout for printing several labels per page; null for one per page."
-                    }
-                }
             },
             "DocumentResponse": {
                 "type": "object",
@@ -43183,6 +42197,16 @@
                         "type": "integer",
                         "nullable": true
                     },
+                    "starter_key": {
+                        "type": "string",
+                        "nullable": true,
+                        "description": "Which of Whity's starters this is, or null for anything a person made"
+                    },
+                    "legacy_template_id": {
+                        "type": "integer",
+                        "nullable": true,
+                        "description": "The old Document designer template this was converted from (migration 165), or null"
+                    },
                     "created_at": {
                         "type": "string"
                     },
@@ -43203,6 +42227,40 @@
                     "created_at",
                     "updated_at"
                 ]
+            },
+            "DocumentSourceAudienceRequest": {
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "enum": [
+                            "personal",
+                            "tenant",
+                            "global",
+                            "system"
+                        ],
+                        "description": "Who can see the document: `personal` (only its creator), `tenant`, `global` or `system`. Anything but personal needs documents:publish."
+                    },
+                    "required_permission": {
+                        "type": "string",
+                        "nullable": true,
+                        "description": "A permission a reader must also hold to see a shared document; null for none. Needs documents:publish."
+                    },
+                    "owner_ou_id": {
+                        "type": "integer",
+                        "nullable": true,
+                        "description": "The organizational unit the document is filed under; null files it tenant-wide. Needs documents:publish."
+                    }
+                }
+            },
+            "DocumentSourceCopyRequest": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "The copy's title, at most 255 characters; defaults to the original's."
+                    }
+                }
             },
             "DocumentSourceCreateRequest": {
                 "type": "object",
@@ -43432,7 +42490,7 @@
                     },
                     "persist": {
                         "type": "boolean",
-                        "description": "Issue the PDF as a document; its values are kept with it."
+                        "description": "Issue the published version as a document, as POST /api/documents does (201 with the document and what happened to its PDF); its values are kept with it."
                     }
                 }
             },
@@ -43481,6 +42539,57 @@
                     "data"
                 ]
             },
+            "DocumentSourceVersionResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "object",
+                        "properties": {
+                            "version": {
+                                "type": "integer"
+                            },
+                            "title": {
+                                "type": "string"
+                            },
+                            "page": {
+                                "type": "object",
+                                "nullable": true,
+                                "additionalProperties": true
+                            },
+                            "blocks": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                }
+                            },
+                            "own_fields": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/components/schemas/DocumentOwnField"
+                                }
+                            },
+                            "published_by": {
+                                "type": "integer",
+                                "nullable": true
+                            },
+                            "published_at": {
+                                "type": "string"
+                            }
+                        },
+                        "required": [
+                            "version",
+                            "title",
+                            "blocks",
+                            "own_fields",
+                            "published_at"
+                        ]
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
             "DocumentStarResponse": {
                 "type": "object",
                 "properties": {
@@ -43521,165 +42630,6 @@
                     "key",
                     "description"
                 ]
-            },
-            "DocumentTemplate": {
-                "type": "object",
-                "properties": {
-                    "id": {
-                        "type": "integer"
-                    },
-                    "tenant_id": {
-                        "type": "integer"
-                    },
-                    "name": {
-                        "type": "string"
-                    },
-                    "data": {
-                        "type": "object",
-                        "additionalProperties": true
-                    },
-                    "scope": {
-                        "type": "string",
-                        "enum": [
-                            "personal",
-                            "tenant",
-                            "global",
-                            "system"
-                        ]
-                    },
-                    "required_permission": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "is_system": {
-                        "type": "boolean"
-                    },
-                    "created_by": {
-                        "type": "integer",
-                        "nullable": true
-                    },
-                    "owner_ou_id": {
-                        "type": "integer",
-                        "nullable": true
-                    },
-                    "starter_key": {
-                        "type": "string",
-                        "nullable": true
-                    },
-                    "created_at": {
-                        "type": "string"
-                    },
-                    "updated_at": {
-                        "type": "string"
-                    }
-                },
-                "required": [
-                    "id",
-                    "tenant_id",
-                    "name",
-                    "data",
-                    "scope",
-                    "is_system",
-                    "created_at",
-                    "updated_at"
-                ]
-            },
-            "DocumentTemplateCreateRequest": {
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "Template name."
-                    },
-                    "data": {
-                        "type": "object",
-                        "additionalProperties": true,
-                        "description": "The template design as produced by the document designer (pages, elements, placeholders)."
-                    },
-                    "scope": {
-                        "type": "string",
-                        "enum": [
-                            "personal",
-                            "tenant",
-                            "global",
-                            "system"
-                        ],
-                        "description": "Who can use it: `personal` (you), `tenant`, `global` or `system`. Anything but `personal` needs documents:publish."
-                    },
-                    "required_permission": {
-                        "type": "string",
-                        "nullable": true,
-                        "description": "Permission a user must hold to use the template; null for none. Needs documents:publish."
-                    },
-                    "owner_ou_id": {
-                        "type": "integer",
-                        "nullable": true,
-                        "description": "Organizational unit the template is filed under; null files it tenant-wide. Needs documents:publish."
-                    }
-                },
-                "required": [
-                    "name",
-                    "data"
-                ]
-            },
-            "DocumentTemplateListResponse": {
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "type": "array",
-                        "items": {
-                            "$ref": "#/components/schemas/DocumentTemplate"
-                        }
-                    }
-                },
-                "required": [
-                    "data"
-                ]
-            },
-            "DocumentTemplateResponse": {
-                "type": "object",
-                "properties": {
-                    "data": {
-                        "$ref": "#/components/schemas/DocumentTemplate"
-                    }
-                },
-                "required": [
-                    "data"
-                ]
-            },
-            "DocumentTemplateUpdateRequest": {
-                "type": "object",
-                "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "New template name."
-                    },
-                    "data": {
-                        "type": "object",
-                        "additionalProperties": true,
-                        "description": "Replacement template design."
-                    },
-                    "scope": {
-                        "type": "string",
-                        "enum": [
-                            "personal",
-                            "tenant",
-                            "global",
-                            "system"
-                        ],
-                        "description": "Who can use it: `personal` (you), `tenant`, `global` or `system`. Anything but `personal` needs documents:publish."
-                    },
-                    "required_permission": {
-                        "type": "string",
-                        "nullable": true,
-                        "description": "Permission a user must hold to use the template; null for none."
-                    },
-                    "owner_ou_id": {
-                        "type": "integer",
-                        "nullable": true,
-                        "description": "Organizational unit the template is filed under; null files it tenant-wide."
-                    }
-                }
             },
             "DocumentTrailEvent": {
                 "type": "object",

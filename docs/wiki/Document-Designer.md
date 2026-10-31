@@ -1,195 +1,50 @@
-# Document & Label Designer
+# Document & Label Designer (removed)
 
-A client-side WYSIWYG designer for printable **documents and labels** — invoices,
-exam sheets, production notes, shipping/device-serial labels, and more. Route:
-`/admin/documents`. Code lives in `web/components/documents/*` and
-`web/lib/documents/*`.
+The old canvas designer at `/admin/documents` was replaced by the **document
+editor** in 0.2.20 (editor milestone M4c). Templates and label sheets are now
+written in the editor, listed on **Document templates** (`/admin/document-templates`),
+published (E.9), and printed through [Whity Render](Document-Render-Service.md)'s
+flowing and label modes. The design is in `docs/design/` (section 18, the
+decision register, `handoff/editor/`).
 
-It is print-accurate (millimetre layout), supports **multi-page** documents,
-**variable-data batch** printing (serialised labels), **N-up label sheets**,
-**reusable blocks** (Gutenberg-style synced patterns), and **starter templates**
-so a new document is never a blank white sheet. It is fully **RTL/Arabic**-aware.
+## What the upgrade does
 
----
+Migration `165_issue_documents_from_sources_and_drop_designer` runs once, for
+every workspace, when you upgrade:
 
-## Data model (`web/lib/documents/types.ts`) — version 2
+1. Each workspace gets the editor's starters (Letter, Invoice, Exam sheet,
+   Production note, Shipping labels, Certificate), if it doesn't have them.
+2. Each old template a person made or edited is copied into an editor
+   **draft** with the same title, audience (scope, permission, unit) and
+   owner. The old designer's own starters are not copied unless someone
+   edited them.
+   - A canvas is converted in **reading order**: page by page, top to bottom,
+     start to end. Text becomes headings and paragraphs, barcodes, QR codes,
+     maths and images become their blocks, a horizontal line becomes a divider.
+   - A **saved block** used in a template is placed into it where it sat.
+   - **Placeholders** (`{{ship_to}}`) become the template's own fields
+     (`template.ship_to`), with their labels and samples.
+   - **Label stock**, or a page the size of a label, becomes a label sheet.
+   - What has no block (rectangles, vertical lines, a saved block that no
+     longer exists, the running header and footer) is left out, and the copy
+     starts with a note naming it, in the template's language. Check the
+     layout, delete the note, then publish.
+3. The `document_templates` and `document_blocks` tables are dropped.
 
-```
-DocTemplate {
-  version: 2
-  name: string
-  page: PageSpec { widthMm, heightMm, marginMm, background }   // shared by all pages
-  placeholders: { key, label, sample }[]                       // drive {{tokens}} + Preview
-  pages: { id, elements: DocElement[] }[]                       // multi-page
-  sheet?: SheetSpec          // saved N-up layout
-  sequence?: SequenceConfig  // saved serial-generator settings
-}
-```
+If any template can't be converted, the migration stops **before** dropping
+anything and names the template, so nothing is lost; fix it and run the
+migration again. A re-run converts only what is new.
 
-`DocElement` is a union — `text | dynamicText | image | barcode | qr | rect |
-line | blockInstance` — sharing `ElementCommon { id, x, y, w, h, rotation, z,
-locked?, hidden?, opacity? }`. Geometry is **absolute millimetres**; the canvas
-converts with `PX_PER_MM = 96/25.4` and a CSS `transform: scale(zoom)`.
+## Documents issued from old templates
 
-`blockInstance` is a **pointer** (`{ type:'blockInstance', blockId }`) into the
-block library — documents never inline-copy block elements, so editing a block
-propagates to every instance.
+They keep their PDFs, verification codes, routes and trail. They can't be
+re-rendered: `POST /api/documents/{id}/render` answers 409 and names the
+converted template (`details.document_source_id`); issue a new document from
+it instead. Documents issued from editor templates record the template and
+published version, and a correction re-renders exactly that version.
 
-**Versioning:** `storage.ts#migrateTemplate` upgrades legacy v1 (a flat
-top-level `elements` array) to v2 (single page). `isDocTemplate` accepts both;
-persisted templates are migrated on read.
+## The verification QR
 
----
-
-## Feature map (where things live)
-
-| Area | Files |
-|------|-------|
-| Composition / state / toolbar | `document-designer.tsx` |
-| Interactive canvas (drag/resize/select, snap guides, grid, rulers, readout) | `canvas.tsx` |
-| Element content renderers (text/barcode/image/…) | `element-content.tsx`, `barcode-svg.tsx` |
-| Shared non-interactive element layer (blocks + print) | `element-layer.tsx` |
-| Palette (add elements, layers, blocks) | `palette.tsx` |
-| Inspector (element / page / data / batch / sheet tabs) | `inspector.tsx` |
-| Print/export render (all pages × rows, N-up) | `print-document.tsx` |
-| Types + presets | `lib/documents/types.ts`, `presets.ts` |
-| Local persistence + migration | `lib/documents/storage.ts` |
-| Alignment-snap geometry (pure, unit-tested) | `lib/documents/geometry.ts` |
-| Variable-data batch (serial/CSV/JSON) | `lib/documents/batch.ts`, `csv.ts` |
-| N-up label sheets | `lib/documents/sheet.ts` |
-| Reusable blocks store | `lib/documents/blocks.ts` |
-| Starter templates + starter blocks | `lib/documents/starters.ts` |
-
-### Editing
-Undo/redo (coalesced snapshots), multi-select (shift/⌘-click; group
-move/delete/nudge/clipboard), align (to the **page** for one element, to the
-**selection bounding box** for many), distribute, z-order, lock, hide, opacity,
-rotation. Precision aids: alignment snap guides (page/element/margin), a 5 mm
-grid overlay, mm rulers, and a live `W × H mm` readout — all toggleable, edit-only.
-
-### Variable data (serialised labels)
-The **Batch** tab produces one rendered copy per data row from three sources:
-a **serial/sequence generator** (prefix/start/count/step/zero-pad/suffix), a
-**CSV/TSV upload**, or **pasted CSV/JSON**. Rows layer over the placeholder
-sample data, so `{{sku}}` in a barcode/text resolves per row. Preview pages
-through rows; Print emits `rows × pages` copies.
-
-### N-up label sheets
-The **Sheet** tab tiles many labels onto one physical sheet (Avery-style:
-cols × rows, margins, gutters; presets included). Combined with a batch, rows
-flow into cells across sheets. `sheet.ts` holds the pure layout maths.
-
-### Reusable blocks (Gutenberg model)
-Select elements → **Save as block** → insert as a `blockInstance` pointer.
-**Edit block** (double-click) opens the block in the full editor; **Done**
-writes it back and **every instance updates**. **Detach** inlines an independent
-copy. Blocks have scope tiers **system / personal / tenant / global**. Built-in
-**system** starters (company header/footer) ship so the Blocks panel is never
-empty (`starters.ts#STARTER_BLOCKS`).
-
-**Blocks may contain blocks** (#1186). A letterhead holding the logo block means
-the logo is stored once and every letterhead follows it when it changes.
-
-- Resolution is `blocks.ts#flattenBlock`, which expands to leaves and returns
-  **diagnostics** alongside the elements. Three things stop an expansion — the
-  block is gone, it is an ancestor of itself, or nesting exceeds
-  `MAX_BLOCK_DEPTH` — and all three draw nothing, so elements alone cannot tell
-  "empty" from "broken". The editor shows a marker; print never does.
-- A **cycle is cut, not refused**: the branches that resolve still print. One
-  bad pointer must not blank a page.
-- Cycles are refused **at insertion** (`wouldCycle`), which is the honest moment
-  to say no. The case built by accident is indirect: A already holds B, and
-  someone drops A into B later.
-- The server resolves **transitively** (`DocumentRenderer::resolveBlocks`) — a
-  nested reference lives in the parent block's data, not the template tree, so a
-  single pass would have sent a payload missing the nested block and printed a
-  hole with no error raised.
-- Deleting is guarded on **both** holders: a template pointer
-  (`DocumentTemplateRepository::referencesBlock`) and a block pointer
-  (`DocumentBlockRepository::referencesBlock`). A block used only by another
-  block was invisible to the template scan alone.
-
-### Starters (no white sheet)
-**Start from…** offers ready, editable templates (Invoice, Exam sheet,
-Production note, Shipping label). These are the seed source the backend will use
-to seed each tenant, pre-filled with real company info.
-
----
-
-## Rendering & printing
-
-- **Canvas** (`canvas.tsx`) is interactive. **Print** uses a separate off-screen
-  `PrintDocument` that renders every page for every dataset row, tiled N-up when
-  a sheet is enabled; `document-designer.tsx` injects `@page` CSS sized to the
-  page (or sheet) and calls `window.print()`. Both paths share element rendering;
-  `blockInstance` resolves via `element-layer.tsx#BlockInstanceContent`.
-- **Security (CodeQL):** no `dangerouslySetInnerHTML`. Barcodes/QR are bwip-js
-  SVG rendered as an inert `data:` URI `<img>` (no script/fetch). Image `src` is
-  hardened to `http(s)` only via `new URL().protocol` (regex guards were not
-  accepted by CodeQL).
-- **Document mode** (#1186) does NOT go through `PrintDocument`. Its content
-  reflows and paginates, and that maths lives in the render service, so a
-  flow-mode template renders through `POST /render/flow`:
-  `DocumentRenderer` branches on `template.mode`,
-  `FlowTemplatePayload` turns the stored template into the payload, and
-  `FlowDocumentRenderer` (the same one the SDK's `FlowDocument` uses) applies
-  the tenant's ceilings and makes the call. **There is no client-side flowing
-  renderer**, so document mode needs the render container — which
-  `documents.render_enabled` leaves off by default.
-  The stored shape and the wire shape differ: a template stores
-  `flow.contents`, the service takes `frontMatter: [{kind}]`, and
-  `FlowTemplatePayload` is that seam.
-- **Server-side PDF** goes through the optional `whity_render` container
-  (`ghcr.io/<repo>/render`), which runs `PrintDocument` — *this* file, bundled
-  from source at image build time — inside headless Chromium, so an export and
-  the on-screen preview cannot be two renderers. Deploying it, pairing its tag
-  with the app's, and sizing its (substantial) memory footprint:
-  [Document-Render-Service.md](./Document-Render-Service.md) ·
-  [ADR 0012](../adr/0012-document-render-microservice.md).
-
----
-
-## RTL / Arabic
-
-Text and dynamic-text elements carry a per-text `direction` (`auto|ltr|rtl`,
-default `auto`) applied in edit, preview and print — correct for Arabic and
-mixed Arabic/Latin (e.g. a Latin serial inside Arabic). The designer **chrome**
-uses logical CSS so it mirrors under RTL; the **canvas page keeps physical mm
-coordinates** on purpose (print geometry must not mirror). See the
-`Arabic / RTL` KB entry. The server-side PDF renderer must ship Arabic fonts.
-
----
-
-## Persistence & backend contract
-
-Today templates and blocks live in **browser localStorage** behind a small seam:
-`storage.ts` (`listSaved` / `saveTemplate` / `deleteSaved`) and `blocks.ts`
-(`listBlocks` / `saveBlock` / `deleteBlock`). The durable, tenant-scoped,
-**RBAC-gated** backend store + per-tenant **seeding** + **server-side PDF** are
-specified in Tasker tasks **58cdd88a** (templates + render) and **ca1d8c03**
-(blocks). When the API lands, repoint the seam — the function signatures stay the
-same, so the designer itself is unchanged. RBAC rule: the API returns only the
-templates/blocks a user may see (server-enforced); the client filters + offers a
-permission picker at publish time.
-
----
-
-## Extending
-
-- **New element type:** add to the `DocElement` union + `ElementType`
-  (`types.ts`); a `case` in `element-content.tsx` (and the exhaustive `never`
-  guard); an add button in `palette.tsx`; a factory in `storage.ts#newElement`;
-  inspector fields in `inspector.tsx`.
-- **New starter template/block:** add a factory to `starters.ts`
-  (`STARTER_TEMPLATES` / `STARTER_BLOCKS`).
-- **New barcode symbology:** add to `BARCODE_SYMBOLOGIES` (`types.ts`) — bwip-js
-  ids.
-
-## Testing
-
-- Unit (jest): `web/__tests__/documents-*.test.ts` cover the pure libs
-  (geometry, batch, csv, sheet, storage migration).
-- E2E (Playwright, admin project): `web/e2e/document-designer.spec.ts` — mount,
-  barcode/QR render, dynamic-text interpolation, keyboard/drag, multi-page,
-  batch, sheets, blocks + edit-propagate, RTL, grid/rulers, distribute, starters.
-  Run against a live stack via `E2E_PORT=3000`.
+It is automatic (register 6.7): Whity Render prints it at the end of each
+document issued while the workspace setting `documents.qr_enabled` is on. The
+old per-template switch and the placeable QR element went with the designer.

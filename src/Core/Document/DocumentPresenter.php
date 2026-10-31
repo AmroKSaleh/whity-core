@@ -9,9 +9,9 @@ use Whity\Core\Router;
 /**
  * The wire shape of a document and its artifacts (#947 item 1).
  *
- * Shared by {@see \Whity\Api\DocumentRenderApiHandler} (which returns a
+ * Shared by {@see \Whity\Api\DocumentPublishingApiHandler} (which returns a
  * freshly-issued document) and {@see \Whity\Api\DocumentsApiHandler} (which
- * lists, shows and re-renders them), so a document serialises identically
+ * issues, lists, shows and re-renders them), so a document serialises identically
  * whichever route produced it. Two hand-rolled copies of the same envelope
  * drift, and the one the OpenAPI schema describes is only ever one of them.
  *
@@ -83,6 +83,9 @@ final class DocumentPresenter
             'id'                   => $id,
             'tenant_id'            => (int) $document['tenant_id'],
             'document_template_id' => $document['document_template_id'],
+            'document_source_id'   => $document['document_source_id'] ?? null,
+            'document_source_version' => $document['document_source_version'] ?? null,
+            'origin_key'           => $document['origin_key'] ?? null,
             'template_name'        => $document['template_name'],
             'title'                => $document['title'],
             'origin_ou_id'         => $document['origin_ou_id'],

@@ -143,7 +143,8 @@ export const DOCUMENTS_WRITE = 'documents:write';
 export const DOCUMENTS_PUBLISH = 'documents:publish';
 
 /**
- * Bringing a document into existence — `POST /api/v1/documents` (#947 item 1).
+ * Rendering (#947 item 1). Until editor M4c this also gated `POST /api/v1/documents`;
+ * that is `DOCUMENTS_ISSUE` now (below). The history:
  *
  * NO `documents:create` WAS MINTED, and that is the decision worth recording
  * where the constant lives, because the obvious-looking alternative is a
@@ -169,6 +170,15 @@ export const DOCUMENTS_PUBLISH = 'documents:publish';
  * one from the other.
  */
 export const DOCUMENTS_RENDER = 'documents:render';
+
+/**
+ * Issuing a document (editor M4c): `POST /api/v1/documents`, the correction
+ * route, QR mint and revoke, and `persist: true` on the editor's render route.
+ * Split from `documents:render`, which now means only preview, PDF export
+ * without storing, and label printing. Migration 166 grants it to every role
+ * that held render, so nobody who could issue before loses it.
+ */
+export const DOCUMENTS_ISSUE = 'documents:issue';
 
 /**
  * Document ROUTE TEMPLATES (#1027) — the reusable, branching flow designs the

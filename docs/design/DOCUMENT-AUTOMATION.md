@@ -52,7 +52,7 @@ M4c moves creation, rerender and QR onto sources and deletes the old designer. *
 2. `POST /api/documents` takes `document_source_id` (published version by default).
 3. The QR code is minted at issue time and follows only the tenant's `documents.qr_enabled` (the owner dropped the per-template switch).
 
-As agreed with the M4c session on 31 Oct 2026: M4c's `SourceDocumentIssuer` becomes `src/Core/Document/Issuing/DocumentIssuing` (migration 164 adds the source columns and drops the old designer's tables). A correction (`POST /api/documents/{id}/render`, re-rendering the pinned version with the stored values) goes through it too, firing `document.rendered` only and skipping the `origin_key` check. "Edit before issuing" is `POST /api/document-sources/{id}/drafts` (3.4), a personal letter from the template's published version.
+As agreed with the M4c session on 31 Oct 2026: M4c's `SourceDocumentIssuer` becomes `src/Core/Document/Issuing/DocumentIssuing` (migration 165 adds the source columns and drops the old designer's tables). A correction (`POST /api/documents/{id}/render`, re-rendering the pinned version with the stored values) goes through it too, firing `document.rendered` only and skipping the `origin_key` check. "Edit before issuing" is `POST /api/document-sources/{id}/drafts` (3.4), a personal letter from the template's published version.
 
 4. `DocumentIssuing` (3.1) with `origin_key`, the `documents:issue` permission and the `document.*` events, used by `POST /api/documents`, render with `persist` and the SDK's `DocumentRenderer::issue()`.
 

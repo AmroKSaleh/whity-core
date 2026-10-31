@@ -6,31 +6,26 @@ namespace Tests\Api;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\EditorTemplateFixture;
 use Tests\Support\FakeRenderServiceClient;
 use Tests\Support\SchemaFromMigrations;
-use Whity\Api\DocumentRenderApiHandler;
 use Whity\Api\DocumentsApiHandler;
 use Whity\Auth\RoleChecker;
-use Whity\Core\Document\DocumentAccessPolicy;
 use Whity\Core\Document\DocumentArtifactRepository;
 use Whity\Core\Document\DocumentArtifactStore;
-use Whity\Core\Document\DocumentBlockRepository;
 use Whity\Core\Document\DocumentCollectionRepository;
 use Whity\Core\Document\DocumentIssuer;
 use Whity\Core\Document\DocumentRepository;
-use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\DocumentVisibilityPolicy;
 use Whity\Core\Document\Organizer\CoreDocumentSubstrates;
 use Whity\Core\Document\Organizer\CoreDocumentViews;
 use Whity\Core\Document\Organizer\DocumentSubstrateRegistry;
 use Whity\Core\Document\Organizer\DocumentViewRegistry;
 use Whity\Core\Document\Organizer\PdoSchemaPresence;
-use Whity\Core\Document\Render\DocumentRenderer;
 use Whity\Core\Document\Routing\RouteEventRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\PermissionRegistry;
-use Whity\Core\Ou\OuReachResolver;
 use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
 use Whity\Core\RBAC\ResourceTypeRegistry;
 use Whity\Core\RBAC\RecordSectionResolver;
@@ -79,18 +74,18 @@ final class DocumentRecordSectionsRealEngineTest extends TestCase
 
     /** admin in tenant 1: documents:* plus permissions:read (migrations 060/109). */
     private const OWNER = 10;
-    /** documents:read + documents:read:all + documents:render, NO permissions:read. */
+    /** documents:read + documents:read:all + documents:render + documents:issue, NO permissions:read. */
     private const RENDERER = 11;
     /** documents:read + documents:read:all only — can see the document, cannot re-issue it. */
     private const READER = 12;
 
     private PDO $pdo;
     private SettingsService $settingsService;
-    private DocumentTemplateRepository $templateRepo;
+    private EditorTemplateFixture $editor;
+    private DocumentRepository $documentRepo;
     private DocumentsApiHandler $handler;
     /** The same handler MINUS the resolver and the two routing reads. */
     private DocumentsApiHandler $unwired;
-    private DocumentRenderApiHandler $renderHandler;
     private string $storageRoot;
 
     protected function setUp(): void
@@ -100,8 +95,8 @@ final class DocumentRecordSectionsRealEngineTest extends TestCase
         $db = $this->wrapSqlite($this->pdo);
 
         $this->storageRoot = sys_get_temp_dir() . '/whity-docsections-' . bin2hex(random_bytes(6));
-        $this->templateRepo = new DocumentTemplateRepository($this->pdo);
         $documentRepo = new DocumentRepository($this->pdo);
+        $this->documentRepo = $documentRepo;
         $artifactRepo = new DocumentArtifactRepository($this->pdo);
         $this->settingsService = new SettingsService(
             new GlobalSettingsRepository($this->pdo),
@@ -109,14 +104,8 @@ final class DocumentRecordSectionsRealEngineTest extends TestCase
         );
 
         $store = new DocumentArtifactStore(new LocalStorageDriver($this->storageRoot));
-        $renderer = new DocumentRenderer(
-            new DocumentBlockRepository($this->pdo),
-            $this->settingsService,
-            new FakeRenderServiceClient()
-        );
         $issuer = new DocumentIssuer($this->pdo, $documentRepo, $artifactRepo, $store);
         $roleChecker = new RoleChecker($db, new PermissionRegistry());
-        $policy = new DocumentAccessPolicy();
         $visibility = new DocumentVisibilityPolicy(
             new RouteRecipientRepository($this->pdo),
             new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())
@@ -127,34 +116,38 @@ final class DocumentRecordSectionsRealEngineTest extends TestCase
         $views = new DocumentViewRegistry($substrates);
         CoreDocumentViews::registerInto($views);
 
-        // Migration 117's template reach predicate. REQUIRED since #1004, and
-        // shared rather than per-handler: the issue path reads a template too, so
-        // withholding one filed at a unit the caller has no standing at must hold
-        // on both, or the record page becomes a way around the designer's list.
-        $ouReach = new OuReachResolver(
+        // The editor templates documents are issued from (editor M4c). The
+        // record predicate reads a template through the editor's OWN visibility
+        // (scope, permission tag and OU reach), shared with the create path, so
+        // withholding a template from a caller must hold on both, or the record
+        // page becomes a way around the editor's list.
+        $this->editor = new EditorTemplateFixture(
             $this->pdo,
-            new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())
+            $this->settingsService,
+            $roleChecker,
+            new FakeRenderServiceClient(),
+            $issuer,
+            $documentRepo,
+            $visibility,
         );
 
-        // The fifteen shared arguments, so the two handlers below differ ONLY in
-        // the three this PR adds. A hand-written second construction would let
+        // The thirteen shared arguments, so the two handlers below differ ONLY in
+        // the three #993 adds. A hand-written second construction would let
         // the "unwired" case drift into differing for some other reason.
         $shared = [
             $documentRepo,
             $artifactRepo,
             $store,
             $visibility,
-            $this->templateRepo,
-            $policy,
-            $renderer,
-            $issuer,
+            $this->editor->sources,
+            $this->editor->fields,
+            $this->editor->issuing,
             $roleChecker,
             $this->settingsService,
             $views,
             $substrates,
             new DocumentCollectionRepository($this->pdo),
             $this->pdo,
-            $ouReach,
         ];
 
         $this->handler = new DocumentsApiHandler(
@@ -166,16 +159,6 @@ final class DocumentRecordSectionsRealEngineTest extends TestCase
             ]
         );
         $this->unwired = new DocumentsApiHandler(...$shared);
-
-        $this->renderHandler = new DocumentRenderApiHandler(
-            $this->templateRepo,
-            $policy,
-            $roleChecker,
-            $this->settingsService,
-            $renderer,
-            $issuer,
-            $ouReach
-        );
 
         // Both must be on for a document to be re-issuable at all; the record
         // predicate reads exactly these two, so the happy path needs both set.
@@ -300,12 +283,12 @@ final class DocumentRecordSectionsRealEngineTest extends TestCase
         self::assertSame(RecordSectionResolver::CODE_PERMISSION, $sections['document']['denial']['code']);
         // Audience-safe prose that names no slug. The slug lives in `detail`,
         // which this caller does not hold `permissions:read` for.
-        self::assertStringNotContainsString('documents:render', $sections['document']['denial']['reason']);
+        self::assertStringNotContainsString('documents:issue', $sections['document']['denial']['reason']);
     }
 
     /**
      * A document whose template is gone is refused by the RECORD, not by a
-     * permission — even for a caller who holds `documents:render`.
+     * permission — even for a caller who holds `documents:issue`.
      *
      * This is the pair of codes earning their separation. An operator told "you
      * lack a permission" here would go looking for a grant that could not have
@@ -316,7 +299,7 @@ final class DocumentRecordSectionsRealEngineTest extends TestCase
     {
         $templateId = $this->createTemplate(self::OWNER, 'Doomed Template');
         $documentId = $this->issueFromTemplate(self::OWNER, $templateId, 'Minutes');
-        $this->templateRepo->delete($templateId, self::TENANT);
+        $this->editor->sourceRepo->delete($templateId, self::TENANT);
 
         $sections = $this->sections(self::RENDERER, $documentId);
 
@@ -325,6 +308,47 @@ final class DocumentRecordSectionsRealEngineTest extends TestCase
         // Nothing operator-grade to add: a record refusal is not fixable by a
         // grant, so there is no slug that would help anyone reading it.
         self::assertNull($sections['document']['denial']['detail']);
+    }
+
+    /**
+     * A template that still exists but is hidden from THIS caller refuses the
+     * region for them, by the record — and leaves it editable for a caller who
+     * can still see it. The verdict asks the editor's own visibility, the same
+     * question `POST /{id}/render` asks, so the two cannot disagree.
+     */
+    public function testTheDocumentRegionIsRefusedByTheRECORDWhenItsTemplateIsHidden(): void
+    {
+        $templateId = $this->createTemplate(self::OWNER, 'Board Template');
+        $documentId = $this->issueFromTemplate(self::OWNER, $templateId, 'Minutes');
+        $this->editor->sourceRepo->updateAudience($templateId, self::TENANT, ['scope' => 'personal']);
+
+        $hidden = $this->sections(self::RENDERER, $documentId);
+        self::assertSame('read-only', $hidden['document']['state']);
+        self::assertSame(RecordSectionResolver::CODE_RECORD, $hidden['document']['denial']['code']);
+
+        self::assertSame('editable', $this->sections(self::OWNER, $documentId)['document']['state'], 'its author still sees it');
+    }
+
+    /**
+     * A document from the OLD Document designer — converted, so its template
+     * is known, but issued from no published version — is not re-issuable:
+     * `POST /{id}/render` answers 409 for it, so the region must not promise
+     * otherwise.
+     */
+    public function testTheDocumentRegionIsRefusedByTheRECORDForAnOldDesignerDocument(): void
+    {
+        $converted = $this->createTemplate(self::OWNER, 'Converted Template');
+        $documentId = $this->documentRepo->create(self::TENANT, [
+            'document_source_id' => $converted,
+            'template_name' => 'Converted Template',
+            'title' => 'Minutes 2025',
+            'created_by' => self::OWNER,
+        ]);
+
+        $sections = $this->sections(self::RENDERER, $documentId);
+
+        self::assertSame('read-only', $sections['document']['state']);
+        self::assertSame(RecordSectionResolver::CODE_RECORD, $sections['document']['denial']['code']);
     }
 
     /** Rendering turned off refuses the region the same way, and for the record. */
@@ -468,14 +492,14 @@ final class DocumentRecordSectionsRealEngineTest extends TestCase
         self::assertNull($withoutPermissionsRead['document']['denial']['detail']);
 
         // The owner is admin, which holds permissions:read — but also holds
-        // documents:render, so the region is editable and has no denial at all.
+        // documents:issue, so the region is editable and has no denial at all.
         // Granting the reader `permissions:read` is what isolates the variable.
         $this->grant($this->pdo, 102, CorePermissions::PERMISSIONS_READ);
         RoleChecker::clearCache();
 
         $withPermissionsRead = $this->sections(self::READER, $documentId);
         self::assertSame(
-            "changing this requires the 'documents:render' permission",
+            "changing this requires the 'documents:issue' permission",
             $withPermissionsRead['document']['denial']['detail']
         );
     }
@@ -512,41 +536,30 @@ final class DocumentRecordSectionsRealEngineTest extends TestCase
         return $this->issueFromTemplate($actorId, $this->createTemplate($actorId, $title . ' Template'), $title);
     }
 
+    /**
+     * A document issued from the template's published version, written
+     * directly: the subject here is what a verdict says about a document's
+     * provenance, not the issue path ({@see DocumentCreateApiRealEngineTest}).
+     */
     private function issueFromTemplate(int $actorId, int $templateId, string $title): int
     {
-        TenantContext::reset();
-        TenantContext::setTenantId(self::TENANT);
-        $request = new Request(
-            'POST',
-            "/api/document-templates/{$templateId}/render",
-            [],
-            (string) json_encode(['persist' => true, 'title' => $title])
-        );
-        $request->user = (object) ['profile_id' => $actorId, 'active_tenant_id' => self::TENANT];
-
-        $response = $this->renderHandler->render($request, ['id' => (string) $templateId]);
-        self::assertSame(201, $response->getStatusCode(), 'fixture setup: the persisted render must succeed');
-
-        return (int) self::data($response)['id'];
+        return $this->documentRepo->create(self::TENANT, [
+            'document_source_id' => $templateId,
+            'document_source_version' => 1,
+            'template_name' => 'Minutes Template',
+            'title' => $title,
+            'created_by' => $actorId,
+            'variable_data' => [[]],
+        ]);
     }
 
     private function createTemplate(int $actorId, string $name): int
     {
-        return $this->templateRepo->create(self::TENANT, [
-            'name' => $name,
-            'data' => [
-                'version' => 2,
-                'page' => ['widthMm' => 210, 'heightMm' => 297, 'marginMm' => 10, 'background' => '#fff'],
-                'placeholders' => [],
-                'pages' => [['id' => 'p1', 'elements' => []]],
-            ],
-            // Tenant-scoped, so a profile other than the raiser can still READ
-            // the template — otherwise `documentIsReissuable` would be refusing
-            // on the template policy and every "editable" assertion below would
-            // be measuring the wrong gate.
-            'scope' => 'tenant',
-            'created_by' => $actorId,
-        ]);
+        // Tenant-scoped, so a profile other than the raiser can still READ the
+        // template — otherwise `documentIsReissuable` would be refusing on the
+        // template policy and every "editable" assertion below would be
+        // measuring the wrong gate.
+        return $this->editor->published(self::TENANT, $actorId, $name);
     }
 
     private function openRoute(int $documentId): int
@@ -610,6 +623,8 @@ final class DocumentRecordSectionsRealEngineTest extends TestCase
             $this->grant($pdo, $roleId, CorePermissions::DOCUMENTS_READ_ALL);
         }
         $this->grant($pdo, 101, CorePermissions::DOCUMENTS_RENDER);
+        // Issuing and correcting is documents:issue (migration 166 grants it with render).
+        $this->grant($pdo, 101, CorePermissions::DOCUMENTS_ISSUE);
 
         $pdo->exec("
             INSERT INTO profiles (id, display_name, password_hash, two_factor_enabled, two_factor_backup_codes_version, token_epoch, created_at, updated_at) VALUES

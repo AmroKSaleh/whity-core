@@ -193,7 +193,7 @@ final class TagGroupsApiHandler
      * and proceed only when the caller explicitly passes `?force=true`. A
      * forced delete is recorded in the audit log with the full blast radius.
      * This mirrors the refuse-while-dependents-exist guard already used by
-     * {@see DocumentBlocksApiHandler::delete()} and {@see OusApiHandler::delete()}.
+     * {@see OusApiHandler::delete()}.
      *
      * @param array<string, string> $params
      */

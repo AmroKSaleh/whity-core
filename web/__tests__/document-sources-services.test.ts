@@ -202,3 +202,62 @@ describe('label sheets and own fields (M4b)', () => {
     });
   });
 });
+
+describe('issuing (M4c)', () => {
+  it('loads what a published version says, with its own fields', async () => {
+    GET.mockResolvedValueOnce(
+      ok({ version: 4, title: 'Example Bakery invoice', page: { size: 'A4' }, blocks: [{ id: 'b1', type: 'paragraph' }], own_fields: [{ key: 'slot', label: 'Delivery slot' }], published_at: '2026-10-30T10:00:00Z' })
+    );
+    const content = await documentSourcesAdapter.loadVersion!('9', 4);
+    expect(GET).toHaveBeenLastCalledWith('/api/v1/document-sources/{id}/versions/{version}', { params: { path: { id: 9, version: 4 } } });
+    expect(content.title).toBe('Example Bakery invoice');
+    expect(content.blocks).toEqual([{ id: 'b1', type: 'paragraph' }]);
+    expect(content.ownFields).toEqual([{ key: 'slot', label: 'Delivery slot' }]);
+    expect(content.page).toEqual({ size: 'A4' });
+  });
+
+  it('makes a draft letter from the published version to edit before issuing', async () => {
+    POST.mockResolvedValueOnce({ data: { data: { id: 21 } }, response: new Response(null, { status: 201 }) });
+    await expect(documentSourcesAdapter.copyForIssue!('9')).resolves.toBe('21');
+    expect(POST).toHaveBeenLastCalledWith('/api/v1/document-sources/9/drafts', { body: {} });
+  });
+
+  it('issues with the record and the own fields as template.<key>', async () => {
+    POST.mockResolvedValueOnce({ data: { data: { id: 88 }, render: { attempted: false, stored: false } }, response: new Response(null, { status: 201 }) });
+    await expect(documentSourcesAdapter.issue!('9', { record: 'invoice:31', values: { slot: 'Tuesday' } })).resolves.toEqual({ ok: true, documentId: 88 });
+    expect(POST).toHaveBeenLastCalledWith('/api/v1/documents', {
+      body: { document_source_id: 9, record: 'invoice:31', values: { 'template.slot': 'Tuesday' } },
+    });
+  });
+
+  it('sends neither record nor values when there are none', async () => {
+    POST.mockResolvedValueOnce({ data: { data: { id: 88 }, render: {} }, response: new Response(null, { status: 201 }) });
+    await documentSourcesAdapter.issue!('9', { record: null, values: {} });
+    expect(POST.mock.calls.at(-1)[1].body).toEqual({ document_source_id: 9 });
+  });
+
+  it('returns a 422 with the missing paths, and a 409, as refusals', async () => {
+    POST.mockResolvedValueOnce({
+      data: undefined,
+      error: { error: 'Some required fields have no value', details: { missing: ['template.slot'] } },
+      response: new Response(null, { status: 422 }),
+    });
+    await expect(documentSourcesAdapter.issue!('9', { record: null, values: {} })).resolves.toEqual({
+      ok: false,
+      message: 'Some required fields have no value',
+      missing: ['template.slot'],
+    });
+
+    POST.mockResolvedValueOnce({ data: undefined, error: { error: 'Publish the template first' }, response: new Response(null, { status: 409 }) });
+    await expect(documentSourcesAdapter.issue!('9', { record: null, values: {} })).resolves.toEqual({
+      ok: false,
+      message: 'Publish the template first',
+      missing: [],
+    });
+  });
+
+  it('throws on anything else', async () => {
+    POST.mockResolvedValueOnce({ data: undefined, error: { error: 'Forbidden' }, response: new Response(null, { status: 403 }) });
+    await expect(documentSourcesAdapter.issue!('9', { record: null, values: {} })).rejects.toThrow('Forbidden');
+  });
+});

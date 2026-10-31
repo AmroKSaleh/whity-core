@@ -4,7 +4,7 @@
 @import "../../packages/ui/src/editor/editor.css";
 
 @source "../../packages/ui/src";
-/* The shared feature screens (the document editor screen, record pages) render here too. */
+/* The shared feature screens (the document editor screen, its issuing bar, record pages) render here too. */
 @source "../../packages/features/src";
 
 @layer base {

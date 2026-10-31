@@ -34,7 +34,7 @@ interface TenantProvisioningStep
      * Implementations MUST NOT throw: a step is a side effect of tenant
      * creation, and tenant creation must not fail with it (the same
      * write-then-swallow policy {@see \Whity\Core\Audit\AuditLogger} and
-     * {@see \Whity\Core\Document\DocumentStarterSeeder} already state).
+     * {@see \Whity\Core\Document\DocumentSourceStarterSeeder} already state).
      */
     public function provisionTenant(int $tenantId, string $tenantName): void;
 }

@@ -128,8 +128,19 @@ interface DocumentRenderer
      * instance, a document with no content — still throws, before anything
      * exists.
      *
-     * @param string $title What the document is recognised by in a list or an
-     *                      inbox. Trimmed to the platform's title length.
+     * @param string      $title     What the document is recognised by in a list or an
+     *                               inbox. Trimmed to the platform's title length.
+     * @param string|null $originKey (1.49) Your own name for what this document is,
+     *                               for example `order:4812:invoice`. Issuing again
+     *                               with the same key returns the first document
+     *                               instead of a second one, so a redelivered event
+     *                               can't issue twice.
+     *
+     * @deprecated 1.49 Use `Documents::issue()`, which issues from a template the
+     *             workspace publishes, once it ships (DOCUMENT-AUTOMATION.md
+     *             phase B). This keeps working, through the host's one issuing
+     *             service and its `document.issuing` / `document.issued` events,
+     *             and is removed in SDK 2.0.0.
      *
      * @throws RenderRejectedException    The document will not be attempted, or
      *         persisting is disabled for this tenant — both checked BEFORE
@@ -139,5 +150,5 @@ interface DocumentRenderer
      *         the record itself could not be written. Again: nothing exists
      *         when this throws.
      */
-    public function issue(FlowDocument $document, string $title): IssuedDocument;
+    public function issue(FlowDocument $document, string $title, ?string $originKey = null): IssuedDocument;
 }

@@ -11,9 +11,9 @@ use Whity\Core\Document\Render\RenderServiceUnavailableException;
 
 /**
  * A no-network double of {@see \Whity\Core\Document\Render\RenderServiceClient}
- * for {@see \Tests\Api\DocumentRenderApiHandlerRealEngineTest}: records every
- * payload it was asked to render (so a test can assert the handler built the
- * right {template, dataRows, sheet, blocks} shape and — just as importantly —
+ * for the document handler tests: records every payload it was asked to
+ * render (so a test can assert the handler built the right flowing or label
+ * payload and — just as importantly —
  * assert it was NEVER called on the feature-flag-off / RBAC / not-found
  * paths) and returns canned PDF bytes, or throws when configured to simulate
  * the render service being unreachable.
@@ -94,18 +94,9 @@ final class FakeRenderServiceClient implements RenderServiceClientInterface
         return $this->configured;
     }
 
-    public function render(array $payload): string
-    {
-        $this->calls[] = $payload;
-        $this->failIfConfigured();
-
-        return $this->pdfBytes;
-    }
-
     /**
-     * Recorded on the SAME `calls` list as the fixed-canvas mode, so a test
-     * asserting "the handler never called the render service" keeps holding
-     * when the thing under test switches modes.
+     * Recorded on `calls` with every other render, so a test can assert "the
+     * handler never called the render service" whatever it renders.
      */
     public function renderFlow(array $payload): RenderedDocument
     {

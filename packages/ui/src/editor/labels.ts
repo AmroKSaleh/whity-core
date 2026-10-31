@@ -201,6 +201,7 @@ export const EDITOR_LABELS = {
   changeRecord: "Change record",
   showFields: "Show fields",
   previewStatus: "Previewing {record}: as it will print, read-only",
+  previewEditingStatus: "Previewing {record}: as it will print",
   pdf: "PDF",
   publish: "Publish",
   draftSaved: "Draft saved {time}",

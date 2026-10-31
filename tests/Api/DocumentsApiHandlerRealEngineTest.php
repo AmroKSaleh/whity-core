@@ -6,28 +6,26 @@ namespace Tests\Api;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Support\EditorTemplateFixture;
 use Tests\Support\FakeRenderServiceClient;
 use Tests\Support\SchemaFromMigrations;
-use Whity\Api\DocumentRenderApiHandler;
 use Whity\Api\DocumentsApiHandler;
 use Whity\Auth\RoleChecker;
-use Whity\Core\Document\DocumentAccessPolicy;
 use Whity\Core\Document\DocumentArtifactRepository;
 use Whity\Core\Document\DocumentArtifactStore;
 use Whity\Core\Document\DocumentCollectionRepository;
 use Whity\Core\Document\DocumentIssuer;
-use Whity\Core\Document\DocumentBlockRepository;
 use Whity\Core\Document\DocumentRepository;
-use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\DocumentVisibilityPolicy;
 use Whity\Core\Document\Organizer\CoreDocumentSubstrates;
 use Whity\Core\Document\Organizer\CoreDocumentViews;
 use Whity\Core\Document\Organizer\DocumentSubstrateRegistry;
 use Whity\Core\Document\Organizer\DocumentViewRegistry;
 use Whity\Core\Document\Organizer\PdoSchemaPresence;
-use Whity\Core\Document\Render\DocumentRenderer;
+use Whity\Core\Document\Qr\DocumentQrScanRepository;
+use Whity\Core\Document\Qr\DocumentQrService;
+use Whity\Core\Document\Qr\DocumentQrTokenRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
-use Whity\Core\Ou\OuReachResolver;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
@@ -60,7 +58,12 @@ use Whity\Storage\LocalStorageDriver;
  *     post-filtered page would report a total the caller cannot reach.
  *  4. THE STORAGE KEY NEVER LEAVES THE SERVER, on any route.
  *
- * The render service is faked (as in {@see DocumentRenderApiHandlerRealEngineTest});
+ * And, since editor M4c, what a correction IS: the same published version of
+ * the same editor template, filled with the values the document was raised
+ * with, carrying the same verification code — and a refusal (409) for a
+ * document that cannot be corrected that way rather than a guess.
+ *
+ * The render service is faked ({@see FakeRenderServiceClient});
  * storage is a REAL {@see LocalStorageDriver} over a throwaway directory,
  * because the assertions here are about what is actually on disk and a fake
  * store would let a write that never happened pass.
@@ -78,11 +81,11 @@ final class DocumentsApiHandlerRealEngineTest extends TestCase
     private PDO $pdo;
     private FakeRenderServiceClient $fakeRender;
     private SettingsService $settingsService;
-    private DocumentTemplateRepository $templateRepo;
+    private EditorTemplateFixture $editor;
     private DocumentRepository $documentRepo;
     private DocumentArtifactRepository $artifactRepo;
+    private DocumentQrService $qr;
     private DocumentsApiHandler $handler;
-    private DocumentRenderApiHandler $renderHandler;
     private string $storageRoot;
 
     protected function setUp(): void
@@ -92,7 +95,6 @@ final class DocumentsApiHandlerRealEngineTest extends TestCase
         $db = $this->wrapSqlite($this->pdo);
 
         $this->storageRoot = sys_get_temp_dir() . '/whity-documents-' . bin2hex(random_bytes(6));
-        $this->templateRepo = new DocumentTemplateRepository($this->pdo);
         $this->documentRepo = new DocumentRepository($this->pdo);
         $this->artifactRepo = new DocumentArtifactRepository($this->pdo);
         $this->fakeRender = new FakeRenderServiceClient();
@@ -102,14 +104,33 @@ final class DocumentsApiHandlerRealEngineTest extends TestCase
         );
 
         $store = new DocumentArtifactStore(new LocalStorageDriver($this->storageRoot));
-        $renderer = new DocumentRenderer(
-            new DocumentBlockRepository($this->pdo),
-            $this->settingsService,
-            $this->fakeRender
-        );
         $issuer = new DocumentIssuer($this->pdo, $this->documentRepo, $this->artifactRepo, $store);
         $roleChecker = new RoleChecker($db, new PermissionRegistry());
-        $policy = new DocumentAccessPolicy();
+        // #947 item 3 widened the policy with two disjuncts (a route reached
+        // you, or a role was granted to you on the document), so it now takes
+        // the two repositories that answer them. Required rather than
+        // nullable: an unwired policy would silently fall back to the interim
+        // rule and hide documents from the people a route was built to reach.
+        $visibility = new DocumentVisibilityPolicy(
+            new RouteRecipientRepository($this->pdo),
+            new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())
+        );
+        $this->qr = new DocumentQrService(
+            $this->pdo,
+            new DocumentQrTokenRepository($this->pdo),
+            new DocumentQrScanRepository($this->pdo),
+            'https://docs.example.test'
+        );
+        $this->editor = new EditorTemplateFixture(
+            $this->pdo,
+            $this->settingsService,
+            $roleChecker,
+            $this->fakeRender,
+            $issuer,
+            $this->documentRepo,
+            $visibility,
+            $this->qr,
+        );
 
         // #978 added the organizer's collaborators. They are wired here the way
         // public/index.php wires them rather than stubbed, because this file's
@@ -124,41 +145,23 @@ final class DocumentsApiHandlerRealEngineTest extends TestCase
             $this->documentRepo,
             $this->artifactRepo,
             $store,
-            // #947 item 3 widened the policy with two disjuncts (a route reached
-            // you, or a role was granted to you on the document), so it now takes
-            // the two repositories that answer them. Required rather than
-            // nullable: an unwired policy would silently fall back to the interim
-            // rule and hide documents from the people a route was built to reach.
-            new DocumentVisibilityPolicy(
-                new RouteRecipientRepository($this->pdo),
-                new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())
-            ),
-            $this->templateRepo,
-            $policy,
-            $renderer,
-            $issuer,
+            $visibility,
+            $this->editor->sources,
+            $this->editor->fields,
+            $this->editor->issuing,
             $roleChecker,
             $this->settingsService,
             $views,
             $substrates,
             new DocumentCollectionRepository($this->pdo),
             $this->pdo,
-            new OuReachResolver($this->pdo, new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())),
+            qr: $this->qr,
         );
 
-        // Documents are created the way production creates them — through the
-        // render route with `persist: true` — rather than by inserting rows, so
-        // these tests exercise the real issue path end to end.
-        $this->renderHandler = new DocumentRenderApiHandler(
-            $this->templateRepo,
-            $policy,
-            $roleChecker,
-            $this->settingsService,
-            $renderer,
-            $issuer,
-            new OuReachResolver($this->pdo, new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry()))
-        );
-
+        // Documents are created the way production creates them — through
+        // `POST /api/documents` from a published editor template, with
+        // `render: true` — rather than by inserting rows, so these tests
+        // exercise the real issue path end to end.
         $this->settingsService->setGlobal(SettingsRegistry::DOCUMENTS_RENDER_ENABLED, 'true');
     }
 
@@ -402,28 +405,164 @@ final class DocumentsApiHandlerRealEngineTest extends TestCase
         self::assertNull($other['origin_ou_id']);
     }
 
+    // ── what a correction prints ─────────────────────────────────────────────
+
+    /**
+     * A correction re-renders the VERSION the document was issued from, with
+     * the VALUES it was issued with — not the template's newest version, and
+     * not whatever the template's fields would say today.
+     *
+     * The template is republished with different wording between the issue
+     * and the correction, so a correction that followed the template's
+     * published pointer instead of the document's own version goes red, and the
+     * own field is typed only at issue time, so a correction that lost the
+     * stored values prints a blank where `INV-2026-0042` belongs.
+     */
+    public function testReRenderPrintsTheSameVersionWithTheStoredValues(): void
+    {
+        $templateId = $this->editor->published(self::TENANT, self::OWNER, 'Invoice', [
+            $this->editor->para('Invoice ', $this->editor->field('template.number')),
+        ], ['own_fields' => [['key' => 'number', 'label' => 'Number']]]);
+        $documentId = $this->issueFrom(self::OWNER, $templateId, 'Invoice', ['template.number' => 'INV-2026-0042']);
+
+        $this->editor->redraft(self::TENANT, $templateId, ['blocks' => [
+            $this->editor->para('Pro forma ', $this->editor->field('template.number')),
+        ]], self::OWNER);
+        $this->editor->publish(self::TENANT, $templateId, self::OWNER);
+
+        $res = $this->call('rerender', self::OWNER, ['id' => (string) $documentId]);
+        self::assertSame(201, $res->getStatusCode(), $res->getBody());
+
+        self::assertCount(2, $this->fakeRender->flowCalls, 'one render to issue, one to correct');
+        $texts = EditorTemplateFixture::texts($this->fakeRender->flowCalls[1]);
+        self::assertContains('Invoice INV-2026-0042', $texts, 'the version it was issued from, with the values it was issued with');
+        self::assertNotContains('Pro forma INV-2026-0042', $texts, 'never the template\'s newer version');
+
+        $doc = self::data($res);
+        self::assertSame(1, $doc['document_source_version'], 'and the record still says so');
+    }
+
+    /**
+     * A correction carries the SAME verification code as the original: paper
+     * already in circulation stays valid, and the record does not grow a second
+     * code a reader would have to choose between.
+     */
+    public function testReRenderCarriesTheSameVerificationCode(): void
+    {
+        $this->settingsService->setTenant(self::TENANT, SettingsRegistry::DOCUMENTS_QR_ENABLED, 'true');
+        $documentId = $this->issue(self::OWNER, 'Certificate');
+
+        $this->call('rerender', self::OWNER, ['id' => (string) $documentId]);
+
+        self::assertCount(2, $this->fakeRender->flowCalls);
+        $first = EditorTemplateFixture::qrBlocks($this->fakeRender->flowCalls[0]);
+        $second = EditorTemplateFixture::qrBlocks($this->fakeRender->flowCalls[1]);
+        self::assertCount(1, $first);
+        self::assertSame($first, $second, 'the same URL and the same printed reference');
+        self::assertCount(1, $this->qr->history(self::TENANT, $documentId), 'no second code was minted');
+    }
+
     // ── re-render refusals ───────────────────────────────────────────────────
 
+    /**
+     * Once the template is deleted there is nothing to re-render from, and the
+     * answer is a 409 rather than a guess. What was already issued stands —
+     * the whole point of storing the output instead of re-deriving it.
+     */
     public function testReRenderIsRefusedWith409OnceTheTemplateIsGone(): void
     {
-        $templateId = $this->createTemplate(self::OWNER, 'Invoice Template');
-        $documentId = $this->issueFromTemplate(self::OWNER, $templateId, 'Invoice');
+        $templateId = $this->editor->published(self::TENANT, self::OWNER, 'Invoice Template');
+        $documentId = $this->issueFrom(self::OWNER, $templateId, 'Invoice');
 
-        $this->templateRepo->delete($templateId, self::TENANT);
+        $this->editor->sourceRepo->delete($templateId, self::TENANT);
 
         $res = $this->call('rerender', self::OWNER, ['id' => (string) $documentId]);
         self::assertSame(409, $res->getStatusCode());
+        self::assertCount(1, $this->artifactRepo->listForDocument($documentId, self::TENANT), 'nothing appended');
 
-        // The already-issued artifact is untouched by the template's removal —
-        // that is what ON DELETE SET NULL buys, and the whole point of storing
-        // the output instead of re-deriving it.
         $content = $this->call('content', self::OWNER, ['id' => (string) $documentId]);
         self::assertSame(200, $content->getStatusCode());
 
         $doc = $this->documentRepo->findById($documentId, self::TENANT);
         self::assertNotNull($doc);
-        self::assertNull($doc['document_template_id']);
         self::assertSame('Invoice Template', $doc['template_name'], 'the snapshot keeps the record legible');
+    }
+
+    /**
+     * A template the caller can no longer SEE is as gone as a deleted one: a
+     * correction must not be a way to print from a template its audience was
+     * narrowed away from.
+     */
+    public function testReRenderIsRefusedWith409WhenTheTemplateIsHiddenFromTheCaller(): void
+    {
+        $templateId = $this->editor->published(self::TENANT, self::OWNER, 'Invoice Template');
+        $documentId = $this->issueFrom(self::AUDITOR, $templateId, 'Invoice');
+
+        $this->editor->sourceRepo->updateAudience($templateId, self::TENANT, ['scope' => 'personal']);
+
+        self::assertSame(409, $this->call('rerender', self::AUDITOR, ['id' => (string) $documentId])->getStatusCode());
+        self::assertSame(201, $this->call('rerender', self::OWNER, ['id' => (string) $documentId])->getStatusCode(), 'its author still can');
+    }
+
+    /**
+     * A document from the OLD Document designer cannot be re-rendered: its
+     * template was a canvas the new renderer does not print. The 409 names the
+     * editor template it was converted to (`details.document_source_id`), so
+     * the client can offer "issue a new one from it" instead of a dead end.
+     */
+    public function testAnOldDesignerDocumentIsRefusedWithItsConvertedTemplate(): void
+    {
+        $converted = $this->editor->published(self::TENANT, self::OWNER, 'Faculty circular');
+        // Converted by migration 165: the template is known, the version never was.
+        $documentId = $this->documentRepo->create(self::TENANT, [
+            'document_source_id' => $converted,
+            'template_name' => 'Faculty circular',
+            'title' => 'Circular 7/2025',
+            'created_by' => self::OWNER,
+            'variable_data' => [['reference' => 'FAC-2025-007']],
+        ]);
+
+        $res = $this->call('rerender', self::OWNER, ['id' => (string) $documentId]);
+
+        self::assertSame(409, $res->getStatusCode());
+        self::assertSame($converted, self::decode($res)['details']['document_source_id']);
+        self::assertSame([], $this->fakeRender->calls);
+    }
+
+    /**
+     * The same refusal for a designer document whose template was never
+     * converted (only `document_template_id` survives): still a 409, and the
+     * detail says there is no converted template rather than inventing one.
+     */
+    public function testAnUnconvertedDesignerDocumentIsRefusedWithNoTemplateNamed(): void
+    {
+        $documentId = $this->documentRepo->create(self::TENANT, [
+            'template_name' => 'Old circular',
+            'title' => 'Circular 3/2024',
+            'created_by' => self::OWNER,
+        ]);
+        $this->pdo->prepare('UPDATE documents SET document_template_id = ? WHERE id = ?')->execute([41, $documentId]);
+
+        $res = $this->call('rerender', self::OWNER, ['id' => (string) $documentId]);
+
+        self::assertSame(409, $res->getStatusCode());
+        self::assertArrayHasKey('document_source_id', self::decode($res)['details']);
+        self::assertNull(self::decode($res)['details']['document_source_id']);
+    }
+
+    /**
+     * A document raised by a form or a plugin was never issued from a template
+     * at all; there is nothing to re-render and it is a 409, not a crash.
+     */
+    public function testADocumentWithNoTemplateIsRefused(): void
+    {
+        $documentId = $this->documentRepo->create(self::TENANT, [
+            'template_name' => 'Leave request',
+            'title' => 'Leave request 12',
+            'created_by' => self::OWNER,
+        ]);
+
+        self::assertSame(409, $this->call('rerender', self::OWNER, ['id' => (string) $documentId])->getStatusCode());
     }
 
     public function testReRenderIsRefusedWhenRenderingIsDisabled(): void
@@ -446,78 +585,84 @@ final class DocumentsApiHandlerRealEngineTest extends TestCase
         self::assertCount(1, $this->artifactRepo->listForDocument($documentId, self::TENANT));
     }
 
-    public function testReRenderRejectsABadDataRowsShapeWith422AndAppendsNothing(): void
+    /**
+     * A render the service refuses is a 422 and appends nothing: the document
+     * cannot be printed with those values, and retrying will not change that.
+     */
+    public function testAReRenderTheServiceRefusesIs422AndAppendsNothing(): void
     {
         $documentId = $this->issue(self::OWNER, 'Invoice');
+        $this->fakeRender->rejectWith = 'The page is too small for this content';
 
-        $res = $this->call('rerender', self::OWNER, ['id' => (string) $documentId], ['dataRows' => 'not-a-list']);
+        $res = $this->call('rerender', self::OWNER, ['id' => (string) $documentId]);
 
         self::assertSame(422, $res->getStatusCode());
         self::assertCount(1, $this->artifactRepo->listForDocument($documentId, self::TENANT));
     }
 
-    // ── helpers ──────────────────────────────────────────────────────────────
-
-    /** Issue a document the way production does: a persisted render. */
-    private function issue(int $actorId, string $title): int
+    /** An outage is a 503 — retry later — and appends nothing either. */
+    public function testAReRenderDuringAnOutageIs503AndAppendsNothing(): void
     {
-        return $this->issueFromTemplate($actorId, $this->createTemplate($actorId, $title . ' Template'), $title);
+        $documentId = $this->issue(self::OWNER, 'Invoice');
+        $this->fakeRender->throwOnRender = true;
+
+        $res = $this->call('rerender', self::OWNER, ['id' => (string) $documentId]);
+
+        self::assertSame(503, $res->getStatusCode());
+        self::assertCount(1, $this->artifactRepo->listForDocument($documentId, self::TENANT));
     }
 
-    private function issueFromTemplate(int $actorId, int $templateId, string $title): int
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    /** Issue a document the way production does, from its own template. */
+    private function issue(int $actorId, string $title): int
+    {
+        // Tenant-wide so a second profile can legitimately raise from it; the
+        // DOCUMENT's visibility is what these tests are about, and a personal
+        // template would hide it behind the template policy first.
+        return $this->issueFrom($actorId, $this->editor->published(self::TENANT, $actorId, $title . ' Template'), $title);
+    }
+
+    /**
+     * `POST /api/documents` with `render: true`, so the document is issued
+     * WITH its first artifact.
+     *
+     * @param array<string, string> $values The template's own fields.
+     */
+    private function issueFrom(int $actorId, int $templateId, string $title, array $values = []): int
     {
         TenantContext::reset();
         TenantContext::setTenantId(self::TENANT);
-        $req = new Request(
-            'POST',
-            "/api/document-templates/{$templateId}/render",
-            [],
-            (string) json_encode(['persist' => true, 'title' => $title])
-        );
+        $body = ['document_source_id' => $templateId, 'title' => $title, 'render' => true];
+        if ($values !== []) {
+            $body['values'] = $values;
+        }
+        $req = new Request('POST', '/api/documents', [], (string) json_encode($body));
         $req->user = (object) ['profile_id' => $actorId, 'active_tenant_id' => self::TENANT];
 
-        $res = $this->renderHandler->render($req, ['id' => (string) $templateId]);
-        self::assertSame(201, $res->getStatusCode(), 'fixture setup: the persisted render must succeed');
+        $res = $this->handler->create($req);
+        self::assertSame(201, $res->getStatusCode(), 'fixture setup: issuing must succeed: ' . $res->getBody());
+        self::assertTrue(self::decode($res)['render']['stored'], 'fixture setup: the first artifact must be stored');
 
         return (int) self::data($res)['id'];
     }
 
-    private function createTemplate(int $actorId, string $name): int
+    /**
+     * @param array<string, string> $params
+     */
+    private function call(string $method, int $actorId, array $params): Response
     {
-        return $this->templateRepo->create(self::TENANT, [
-            'name' => $name,
-            'data' => [
-                'version' => 2,
-                'page' => ['widthMm' => 210, 'heightMm' => 297, 'marginMm' => 10, 'background' => '#fff'],
-                'placeholders' => [],
-                'pages' => [['id' => 'p1', 'elements' => []]],
-            ],
-            // Tenant-wide so a second profile can legitimately render it; the
-            // DOCUMENT's visibility is what these tests are about, and a
-            // personal template would hide it behind the template policy first.
-            'scope' => 'tenant',
-            'created_by' => $actorId,
-        ]);
+        return $this->callAs($method, $actorId, self::TENANT, $params);
     }
 
     /**
      * @param array<string, string> $params
-     * @param array<string, mixed>  $body
      */
-    private function call(string $method, int $actorId, array $params, array $body = []): Response
-    {
-        return $this->callAs($method, $actorId, self::TENANT, $params, $body);
-    }
-
-    /**
-     * @param array<string, string> $params
-     * @param array<string, mixed>  $body
-     */
-    private function callAs(string $method, int $actorId, int $tenantId, array $params, array $body = []): Response
+    private function callAs(string $method, int $actorId, int $tenantId, array $params): Response
     {
         TenantContext::reset();
         TenantContext::setTenantId($tenantId);
-        $req = new Request('GET', '/api/documents', [], (string) json_encode($body));
+        $req = new Request('POST', '/api/documents', [], '');
         $req->user = (object) ['profile_id' => $actorId, 'active_tenant_id' => $tenantId];
 
         // Spelled out rather than dispatched dynamically: a typo in a route name

@@ -10,7 +10,6 @@ use Tests\Support\SchemaFromMigrations;
 use Whity\Api\DocumentQrApiHandler;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Document\DocumentRepository;
-use Whity\Core\Document\DocumentTemplateRepository;
 use Whity\Core\Document\DocumentVisibilityPolicy;
 use Whity\Core\Document\Qr\DocumentQrScanRepository;
 use Whity\Core\Document\Qr\DocumentQrService;
@@ -95,7 +94,6 @@ final class DocumentQrPanelRealEngineTest extends TestCase
 
         $this->handler = new DocumentQrApiHandler(
             new DocumentRepository($this->pdo),
-            new DocumentTemplateRepository($this->pdo),
             new DocumentVisibilityPolicy(
                 new RouteRecipientRepository($this->pdo),
                 new ResourceRoleAssignmentRepository($this->pdo, new ResourceTypeRegistry())

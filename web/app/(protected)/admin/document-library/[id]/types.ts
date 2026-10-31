@@ -32,6 +32,15 @@ import type { DocumentArtifact } from '../types';
 export interface DocumentRecord {
   id: number;
   template_name: string;
+  /**
+   * What it was issued from (editor M4c). A document issued from an editor
+   * template carries the template and the version issued. One issued from the
+   * old Document designer has `document_template_id`, or a source id (its
+   * converted copy) with a null version, and can't be re-rendered.
+   */
+  document_source_id?: number | null;
+  document_source_version?: number | null;
+  document_template_id?: number | null;
   title: string;
   origin_ou_id: number | null;
   created_by: number | null;

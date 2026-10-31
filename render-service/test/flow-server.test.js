@@ -7,10 +7,6 @@
  * auth, validation and the response contract, not the render. The render
  * itself is proved against real Chromium in the render-tier CI job, where the
  * resulting PDF is opened and its page numbers are checked.
- *
- * The other thing pinned here is that the FIXED-canvas route is untouched: the
- * two modes are separate endpoints backed by separate modules, and a request
- * to one must never reach the other's renderer.
  */
 
 const SECRET = 'a'.repeat(32);
@@ -19,7 +15,6 @@ describe('whity_render flow route', () => {
   let request;
   let app;
   let renderFlowToPdf;
-  let renderToPdf;
 
   const pagination = {
     pageCount: 132,
@@ -37,7 +32,6 @@ describe('whity_render flow route', () => {
     process.env.PORT = '8130';
 
     jest.doMock('../src/renderer', () => ({
-      renderToPdf: jest.fn(async () => Buffer.from('%PDF-1.4\nfixed\n%%EOF')),
       getBrowser: jest.fn(async () => ({})),
       shutdown: jest.fn(async () => {}),
     }));
@@ -54,8 +48,6 @@ describe('whity_render flow route', () => {
     ({ app } = require('../src/server'));
     // eslint-disable-next-line global-require
     ({ renderFlowToPdf } = require('../src/flow/render'));
-    // eslint-disable-next-line global-require
-    ({ renderToPdf } = require('../src/renderer'));
   });
 
   afterEach(() => {
@@ -149,7 +141,6 @@ describe('whity_render flow route', () => {
     jest.resetModules();
     process.env.RENDER_SHARED_SECRET = SECRET;
     jest.doMock('../src/renderer', () => ({
-      renderToPdf: jest.fn(),
       getBrowser: jest.fn(),
       shutdown: jest.fn(),
     }));
@@ -171,32 +162,11 @@ describe('whity_render flow route', () => {
     spy.mockRestore();
   });
 
-  test('the two modes never cross: a flow request does not reach the fixed renderer', async () => {
-    await request(app).post('/render/flow').set('X-Render-Secret', SECRET).send(payload());
-    expect(renderToPdf).not.toHaveBeenCalled();
-  });
-
-  test('the two modes never cross: a fixed request does not reach the flow renderer', async () => {
-    await request(app)
-      .post('/render')
-      .set('X-Render-Secret', SECRET)
-      .send({
-        template: {
-          page: { widthMm: 50, heightMm: 25, marginMm: 2, background: '#fff' },
-          placeholders: [],
-          pages: [{ id: 'p1', elements: [] }],
-        },
-        dataRows: [{}],
-      });
-    expect(renderFlowToPdf).not.toHaveBeenCalled();
-    expect(renderToPdf).toHaveBeenCalledTimes(1);
-  });
-
-  // A flow payload is not a template payload. Posting one to the fixed route
-  // must be refused by that route's own validator rather than half-rendered.
-  test('a flow payload posted to /render is 422', async () => {
+  // The old fixed-canvas route went with the designer it served (editor M4c).
+  // A stray caller gets a plain 404, never a render through another route.
+  test('POST /render (the removed fixed-canvas route) is 404', async () => {
     const res = await request(app).post('/render').set('X-Render-Secret', SECRET).send(payload());
-    expect(res.status).toBe(422);
-    expect(renderToPdf).not.toHaveBeenCalled();
+    expect(res.status).toBe(404);
+    expect(renderFlowToPdf).not.toHaveBeenCalled();
   });
 });

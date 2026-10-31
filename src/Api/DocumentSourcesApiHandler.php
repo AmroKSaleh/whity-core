@@ -8,6 +8,7 @@ use Whity\Auth\RoleChecker;
 use Whity\Core\Document\DocumentAccessPolicy;
 use Whity\Core\Document\DocumentSourceFileStore;
 use Whity\Core\Document\DocumentSourceRepository;
+use Whity\Core\Document\DocumentSourceVersionRepository;
 use Whity\Core\Form\FormRejectedException;
 use Whity\Core\Form\FormUploadPolicy;
 use Whity\Core\Ou\OuReachResolver;
@@ -71,6 +72,8 @@ final class DocumentSourcesApiHandler
         RoleChecker $roleChecker,
         OuReachResolver $ouReach,
         private readonly ?DocumentSourceFileStore $files = null,
+        // "Edit before issuing" copies a template's PUBLISHED version (editor M4c).
+        private readonly ?DocumentSourceVersionRepository $versions = null,
     ) {
         $this->repo = $repo;
         $this->policy = $policy;
@@ -231,6 +234,177 @@ final class DocumentSourcesApiHandler
 
         return Response::json(['data' => $this->repo->findById($id, $tenantId)])
             ->withHeaders(['ETag' => self::etag($version)]);
+    }
+
+    /**
+     * PATCH /api/document-sources/{id}: who can see it (scope,
+     * required_permission, owner_ou_id), from the Document templates page
+     * (A31). Making a document shared is a publish action, as when it is
+     * created: changing a sharing attribute into a shared state needs
+     * documents:publish. A value sent back unchanged is not a change.
+     *
+     * @param array<string, string> $params
+     */
+    public function updateAudience(Request $request, array $params): Response
+    {
+        $ctx = $this->context($request);
+        if ($ctx instanceof Response) {
+            return $ctx;
+        }
+        [$tenantId, $callerId] = $ctx;
+
+        $id = (int) ($params['id'] ?? 0);
+        $row = $this->visibleRow($id, $tenantId, $callerId);
+        if ($row === null) {
+            return Response::error('Document not found', 404);
+        }
+
+        $body = JsonBody::parsed($request);
+        $fields = [];
+        if (array_key_exists('scope', $body)) {
+            $scope = $this->normalizeScope($body['scope']);
+            if ($scope === null) {
+                return Response::error('scope must be one of: ' . implode(', ', DocumentAccessPolicy::SCOPES), 422);
+            }
+            $fields['scope'] = $scope;
+        }
+        if (array_key_exists('required_permission', $body)) {
+            $fields['required_permission'] = is_string($body['required_permission']) && trim($body['required_permission']) !== ''
+                ? trim($body['required_permission'])
+                : null;
+        }
+        if (array_key_exists('owner_ou_id', $body)) {
+            $parsed = $this->parseOwnerOu($body['owner_ou_id'], $tenantId);
+            if ($parsed instanceof Response) {
+                return $parsed;
+            }
+            $fields['owner_ou_id'] = $parsed;
+        }
+        if ($fields === []) {
+            return Response::error('Send scope, required_permission or owner_ou_id', 422);
+        }
+
+        $changes = (array_key_exists('scope', $fields) && $fields['scope'] !== $row['scope'])
+            || (array_key_exists('required_permission', $fields) && $fields['required_permission'] !== $row['required_permission'])
+            || (array_key_exists('owner_ou_id', $fields) && $fields['owner_ou_id'] !== $row['owner_ou_id']);
+        $scope = $fields['scope'] ?? $row['scope'];
+        $permission = array_key_exists('required_permission', $fields) ? $fields['required_permission'] : $row['required_permission'];
+        $ou = array_key_exists('owner_ou_id', $fields) ? $fields['owner_ou_id'] : $row['owner_ou_id'];
+        if ($changes
+            && $this->policy->needsPublish($scope, $permission, $ou)
+            && !$this->permissionResolver($callerId, $tenantId)(CorePermissions::DOCUMENTS_PUBLISH)) {
+            return Response::error('Sharing a document requires documents:publish', 403);
+        }
+
+        $this->repo->updateAudience($id, $tenantId, $fields);
+
+        return Response::json(['data' => $this->repo->findById($id, $tenantId)]);
+    }
+
+    /**
+     * POST /api/document-sources/{id}/copy: "Use a copy" (A31), most of all
+     * for Whity's starters. The copy is a personal draft of the caller's,
+     * titled as sent (or as the original), with the original's draft content
+     * and own fields; it isn't published, and it doesn't inherit an audience
+     * chosen for a different document.
+     *
+     * @param array<string, string> $params
+     */
+    public function copy(Request $request, array $params): Response
+    {
+        $ctx = $this->context($request);
+        if ($ctx instanceof Response) {
+            return $ctx;
+        }
+        [$tenantId, $callerId] = $ctx;
+
+        $row = $this->visibleRow((int) ($params['id'] ?? 0), $tenantId, $callerId);
+        if ($row === null) {
+            return Response::error('Document not found', 404);
+        }
+
+        return $this->personalCopy(
+            $tenantId,
+            $callerId,
+            $row,
+            (string) $row['kind'],
+            ['page' => $row['page'], 'blocks' => $row['blocks'], 'own_fields' => $row['own_fields'], 'title' => (string) $row['title']],
+            JsonBody::parsed($request),
+        );
+    }
+
+    /**
+     * POST /api/document-sources/{id}/drafts: "start from a template" (editor
+     * M4c, "Edit before issuing"; DOCUMENT-AUTOMATION.md 3.4). A template's
+     * PUBLISHED version becomes a one-off `letter` with the same record type
+     * and own fields, a personal draft for one person to change and issue;
+     * issuing it freezes what it says (POST /api/documents).
+     *
+     * @param array<string, string> $params
+     */
+    public function drafts(Request $request, array $params): Response
+    {
+        $ctx = $this->context($request);
+        if ($ctx instanceof Response) {
+            return $ctx;
+        }
+        [$tenantId, $callerId] = $ctx;
+
+        $row = $this->visibleRow((int) ($params['id'] ?? 0), $tenantId, $callerId);
+        if ($row === null) {
+            return Response::error('Document not found', 404);
+        }
+        if ($row['kind'] !== 'template') {
+            return Response::error('Only a template starts a document to issue', 422);
+        }
+        $published = $row['published_version'] !== null && $this->versions !== null
+            ? $this->versions->find((int) $row['id'], $tenantId, (int) $row['published_version'])
+            : null;
+        if ($published === null) {
+            return Response::error('This template has no published version yet', 409);
+        }
+
+        return $this->personalCopy(
+            $tenantId,
+            $callerId,
+            $row,
+            'letter',
+            ['page' => $published['page'], 'blocks' => $published['blocks'], 'own_fields' => $published['own_fields'], 'title' => $published['title']],
+            JsonBody::parsed($request),
+        );
+    }
+
+    /**
+     * A personal, unpublished draft of the caller's with this content.
+     *
+     * @param array<string, mixed> $row     The original.
+     * @param array{page: mixed, blocks: mixed, own_fields: mixed, title: string} $content
+     * @param array<string, mixed> $body    The request: an optional `title`.
+     */
+    private function personalCopy(int $tenantId, int $callerId, array $row, string $kind, array $content, array $body): Response
+    {
+        $title = is_string($body['title'] ?? null) && trim($body['title']) !== '' ? trim($body['title']) : $content['title'];
+        if (mb_strlen($title) > 255) {
+            return Response::error('title must be at most 255 characters', 422);
+        }
+
+        $id = $this->repo->create($tenantId, [
+            'kind'                => $kind,
+            'title'               => $title,
+            'lang'                => (string) $row['lang'],
+            'default_view'        => (string) $row['default_view'],
+            'full_width'          => $row['full_width'] === true,
+            'page'                => $content['page'],
+            'record_type'         => $row['record_type'],
+            'blocks'              => $content['blocks'],
+            'own_fields'          => $content['own_fields'] !== [] ? $content['own_fields'] : null,
+            'scope'               => DocumentAccessPolicy::SCOPE_PERSONAL,
+            'required_permission' => null,
+            'created_by'          => $callerId,
+            'owner_ou_id'         => null,
+        ]);
+
+        return Response::json(['data' => $this->repo->findById($id, $tenantId)], 201)->withHeaders(['ETag' => self::etag(1)]);
     }
 
     /**

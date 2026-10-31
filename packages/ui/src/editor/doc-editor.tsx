@@ -89,8 +89,13 @@ export interface DocEditorProps {
   accent?: string | null
   /** The letterhead's end side: the reference ("Ref INV-1042") and the date, as fields. */
   pageFields?: { reference?: FieldDef; date?: FieldDef }
-  /** E.12: preview with a record. Read-only while set. */
+  /** E.12: preview with a record. Read-only while set, unless `editWhilePreviewing`. */
   preview?: FieldPreview | null
+  /**
+   * Issuing a one-off letter (M4c): the pages stay editable while previewing,
+   * so each edit shows with the record's values as it will print.
+   */
+  editWhilePreviewing?: boolean
   /** Starts a preview (the screen asks which record) or changes the record. */
   onPreview?: () => void
   /** Show fields: leaves the preview. */
@@ -166,6 +171,7 @@ function DocEditor({
   accent,
   pageFields,
   preview = null,
+  editWhilePreviewing = false,
   onPreview,
   onClosePreview,
   publish,
@@ -175,8 +181,8 @@ function DocEditor({
 }: DocEditorProps) {
   const labels = React.useMemo(() => ({ ...EDITOR_LABELS, ...labelProp }), [labelProp])
   const mode: EditorMode = canEdit ? (modeProp === "viewing" ? "viewing" : "editing") : "viewing"
-  // E.12: the pages are read-only while previewing with a record.
-  const editable = mode === "editing" && !preview
+  // E.12: the pages are read-only while previewing with a record, except when issuing a letter (M4c).
+  const editable = mode === "editing" && (!preview || editWhilePreviewing)
   const [viewState, setViewState] = React.useState<EditorView>(doc.defaultView === "page" || doc.kind === "label" ? "page" : "continuous")
   const view: EditorView = doc.kind === "label" ? "page" : (viewProp ?? viewState)
   const setView = (v: EditorView) => {
@@ -756,7 +762,7 @@ function DocEditor({
         <span className="flex-1" />
         <span>
           {preview
-            ? fill(labels.previewStatus, { record: preview.label })
+            ? fill(editable ? labels.previewEditingStatus : labels.previewStatus, { record: preview.label })
             : fill(labels.lastEdited, { name: actorName(doc.updatedBy), time: formatTime(doc.updatedAt) })}
         </span>
       </footer>

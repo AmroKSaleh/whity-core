@@ -242,17 +242,13 @@ jobs:
               - 'package.json'
               - 'package-lock.json'
               - '.github/workflows/automated-tests.yml'
-            # ADR 0012: the render service bundles this exact source slice
-            # in from the rest of the monorepo (see
-            # render-service/scripts/build-harness.js) — a change there can
-            # break the harness bundle even without touching render-service/
-            # itself.
+            # ADR 0012: the render service is self-contained (no front-end
+            # source is bundled in since the fixed-canvas harness went in
+            # editor M4c); the only outside file its image reads is
+            # src/Core/CoreVersion.php, for /health's identity.
             render_service:
               - 'render-service/**'
-              - 'web/components/documents/**'
-              - 'web/lib/documents/**'
-              - 'packages/ui/src/documents/**'
-              - 'packages/ui/src/math-text.tsx'
+              - 'src/Core/CoreVersion.php'
               - '.github/workflows/automated-tests.yml'
             # The English catalogue is derived from the t() calls in the
             # frontend, but the guard that checks it is PHP. It therefore
@@ -1314,8 +1310,7 @@ jobs:
           cache-dependency-path: render-service/package-lock.json
 
       # A standalone Node project (own lockfile) — deliberately NOT part of the
-      # root npm workspace (it shares no runtime code with web/, only bundles
-      # web/packages/ui SOURCE in at build time; see scripts/build-harness.js).
+      # root npm workspace (it shares no code with web/ or packages/).
       - name: Install dependencies
         working-directory: render-service
         run: npm ci
@@ -1338,13 +1333,6 @@ jobs:
       - name: npm security audit
         working-directory: render-service
         run: npm audit --audit-level=high
-
-      # Bundles web/components/documents/print-document.tsx + packages/ui/src
-      # in from source — the single most likely thing to break when either
-      # side changes independently, and the cheapest to check (no Docker).
-      - name: Build the render harness bundle
-        working-directory: render-service
-        run: npm run build:harness
 
       - name: Run unit tests (Puppeteer mocked)
         working-directory: render-service
@@ -1489,29 +1477,17 @@ jobs:
         run: |
           cat > /tmp/render-payload.json <<'PAYLOAD'
           {
-            "template": {
-              "version": 2,
-              "page": { "widthMm": 100, "heightMm": 60, "marginMm": 2, "background": "#ffffff" },
-              "placeholders": [],
-              "pages": [
-                {
-                  "id": "p1",
-                  "elements": [
-                    { "id": "t1", "type": "text", "x": 2, "y": 2, "w": 96, "h": 12, "rotation": 0, "z": 1,
-                      "text": "مرحبا بالعالم",
-                      "style": { "fontSize": 18, "fontWeight": "normal", "fontStyle": "normal", "align": "center", "vAlign": "middle", "color": "#000000", "direction": "rtl" } },
-                    { "id": "m1", "type": "math", "x": 2, "y": 16, "w": 60, "h": 14, "rotation": 0, "z": 2,
-                      "expression": "E = mc^2", "block": false },
-                    { "id": "b1", "type": "barcode", "x": 2, "y": 32, "w": 60, "h": 20, "rotation": 0, "z": 3,
-                      "symbology": "code128", "value": "WC-DOCDESIGNER-1", "showText": true }
-                  ]
-                }
-              ]
-            },
-            "dataRows": [{}]
+            "direction": "rtl",
+            "page": { "preset": "a4", "margin": { "topMm": 20, "rightMm": 20, "bottomMm": 20, "leftMm": 20 } },
+            "content": [
+              { "type": "heading", "level": 1, "text": "مرحبا بالعالم" },
+              { "type": "paragraph", "text": "مخبز المثال - Example Bakery" },
+              { "type": "math", "tex": "E = mc^2" },
+              { "type": "barcode", "symbology": "code128", "value": "WHITY-RENDER-1", "showText": true }
+            ]
           }
           PAYLOAD
-          curl -fsS -X POST http://127.0.0.1:18130/render \
+          curl -fsS -X POST http://127.0.0.1:18130/render/flow \
             -H 'Content-Type: application/json' \
             -H 'X-Render-Secret: ci_render_shared_secret_min_32_chars_zz' \
             --data @/tmp/render-payload.json \
@@ -1529,6 +1505,14 @@ jobs:
           size=$(stat -c%s /tmp/render-output.pdf)
           echo "PDF size: ${size} bytes"
           test "${size}" -gt 5000
+
+          # The fixed-canvas route was removed with its designer (editor M4c).
+          legacy=$(curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:18130/render \
+            -H 'Content-Type: application/json' \
+            -H 'X-Render-Secret: ci_render_shared_secret_min_32_chars_zz' \
+            --data '{}')
+          echo "POST /render: ${legacy}"
+          test "${legacy}" -eq 404
 
       # ---------------------------------------------------------------------
       # The FLOWING render mode (#1072).

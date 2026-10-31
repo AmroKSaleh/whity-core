@@ -44,7 +44,7 @@ const createdGroupIds: string[] = [];
 
 test.describe('User groups (admin)', () => {
   /**
-   * Through `page.request`, matching `document-designer.spec.ts`: it shares the
+   * Through `page.request`: it shares the
    * page's cookie jar, so it is already the authenticated admin session, and it
    * works whatever state the failure left the page in — which a UI control does
    * not. `X-Requested-With` is required; the backend refuses
@@ -133,9 +133,8 @@ test.describe('User groups (admin)', () => {
     //
     // The open is retried rather than clicked once: Radix hands focus back to
     // the trigger after the list's post-save refetch re-renders the row, and a
-    // click landing during that hand-off is swallowed silently. Same pattern
-    // `document-designer.spec.ts` uses on its menus, and the reason this step
-    // was flaky on its first run.
+    // click landing during that hand-off is swallowed silently, which is the
+    // reason this step was flaky on its first run.
     //
     // The item click is INSIDE the retry, which is safe because it is not the
     // destructive act: it only opens a confirmation. The block therefore ends

@@ -271,7 +271,7 @@ final class ReportAssemblerTest extends TestCase
                 throw new \LogicException('These tests must not render.');
             }
 
-            public function issue(FlowDocument $document, string $title): IssuedDocument
+            public function issue(FlowDocument $document, string $title, ?string $originKey = null): IssuedDocument
             {
                 throw new \LogicException('These tests must not render.');
             }

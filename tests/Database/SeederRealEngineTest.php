@@ -7,8 +7,8 @@ namespace Whity\Tests\Database;
 use PDO;
 use PHPUnit\Framework\TestCase;
 use Tests\Support\SchemaFromMigrations;
-use Whity\Core\Document\DocumentBlockRepository;
-use Whity\Core\Document\DocumentTemplateRepository;
+use Whity\Core\Document\DocumentSourceRepository;
+use Whity\Core\Document\DocumentSourceStarterSeeder;
 use Whity\Database\Database;
 use Whity\Database\Seeder;
 
@@ -146,9 +146,9 @@ final class SeederRealEngineTest extends TestCase
      * The regression this pins is that it did not. Starters were provisioned by
      * a `tenant.created` listener registered in `public/index.php`; the seeder
      * created this tenant with a bare INSERT and never reached that file's
-     * bootstrap, so the tenant every fresh install actually opens the designer in
+     * bootstrap, so the tenant every fresh install actually opens the editor in
      * was the only one in the system with an empty library — defeating the
-     * explicit requirement that the designer never present an empty document.
+     * explicit requirement that a printed document never start from a blank page.
      *
      * ASSERTED ON THE OUTCOME, NOT ON THE MECHANISM. There is deliberately no
      * assertion here that a `tenant.created` dispatch happened, or that a step
@@ -161,35 +161,40 @@ final class SeederRealEngineTest extends TestCase
     {
         Seeder::seed($this->db);
 
-        $templates = (new DocumentTemplateRepository($this->pdo))->listForTenant($this->defaultTenantId());
+        $templates = (new DocumentSourceRepository($this->pdo))->listForTenant($this->defaultTenantId());
 
         self::assertNotSame(
             [],
             $templates,
-            'A fresh install must not open the designer on an empty library in the Default Tenant.'
+            'A fresh install must not open the editor on an empty library in the Default Tenant.'
         );
 
         // And they are the SHIPPED starters rather than some other row that
         // happens to exist: every one carries the stable `starter_key` the
-        // starter seeder writes, which is also the column #1013 made readable.
+        // starter seeder writes, and every shipped key is there.
+        $keys = [];
         foreach ($templates as $template) {
             self::assertNotNull(
                 $template['starter_key'],
                 'Every template a bare seed leaves behind must be a shipped starter.'
             );
+            $keys[] = $template['starter_key'];
+        }
+        foreach ($this->shippedStarterKeys() as $key) {
+            self::assertContains($key, $keys);
         }
     }
 
-    /** The header/footer blocks are half of "never an empty document", and arrive the same way. */
-    public function testAFreshSeedLeavesTheDefaultTenantWithItsStarterBlocks(): void
+    /**
+     * A bare seed never brings in the document demo: its templates are seeded
+     * only under --with-document-demo (see SeedCommand).
+     */
+    public function testAFreshSeedSeedsNoDemoTemplates(): void
     {
         Seeder::seed($this->db);
 
-        $blocks = (new DocumentBlockRepository($this->pdo))->listForTenant($this->defaultTenantId());
-
-        self::assertNotSame([], $blocks, 'The starter header/footer blocks must reach the Default Tenant too.');
-        foreach ($blocks as $block) {
-            self::assertNotNull($block['starter_key']);
+        foreach ((new DocumentSourceRepository($this->pdo))->listForTenant($this->defaultTenantId()) as $template) {
+            self::assertStringStartsNotWith('demo.', (string) $template['starter_key']);
         }
     }
 
@@ -197,14 +202,13 @@ final class SeederRealEngineTest extends TestCase
     public function testReSeedingDoesNotDuplicateTheStarters(): void
     {
         Seeder::seed($this->db);
-        $first = $this->designerRowCounts();
+        $first = $this->starterCount();
 
         Seeder::seed($this->db);
         Seeder::seed($this->db);
 
-        self::assertSame($first, $this->designerRowCounts());
-        self::assertGreaterThan(0, $first['document_templates']);
-        self::assertGreaterThan(0, $first['document_blocks']);
+        self::assertSame($first, $this->starterCount());
+        self::assertSame(count($this->shippedStarterKeys()), $first);
     }
 
     /**
@@ -222,19 +226,12 @@ final class SeederRealEngineTest extends TestCase
         Seeder::seed($this->db);
         $tenantId = $this->defaultTenantId();
 
-        $this->pdo->prepare('DELETE FROM document_templates WHERE tenant_id = :t')->execute([':t' => $tenantId]);
-        $this->pdo->prepare('DELETE FROM document_blocks WHERE tenant_id = :t')->execute([':t' => $tenantId]);
-        self::assertSame(
-            ['document_templates' => 0, 'document_blocks' => 0],
-            $this->designerRowCounts(),
-            'Precondition: the tenant is standing where a pre-fix install stands.'
-        );
+        $this->pdo->prepare('DELETE FROM document_sources WHERE tenant_id = :t')->execute([':t' => $tenantId]);
+        self::assertSame(0, $this->starterCount(), 'Precondition: the tenant is standing where a pre-fix install stands.');
 
         Seeder::seed($this->db);
 
-        $counts = $this->designerRowCounts();
-        self::assertGreaterThan(0, $counts['document_templates']);
-        self::assertGreaterThan(0, $counts['document_blocks']);
+        self::assertSame(count($this->shippedStarterKeys()), $this->starterCount());
     }
 
     private function defaultTenantId(): int
@@ -248,20 +245,21 @@ final class SeederRealEngineTest extends TestCase
         return (int) $row['id'];
     }
 
-    /** @return array{document_templates: int, document_blocks: int} */
-    private function designerRowCounts(): array
+    /** The editor starters in the Default Tenant. */
+    private function starterCount(): int
     {
-        $tenantId = $this->defaultTenantId();
+        $stmt = $this->pdo->prepare(
+            "SELECT count(*) FROM document_sources WHERE tenant_id = :t AND starter_key LIKE 'editor.%'"
+        );
+        $stmt->execute([':t' => $this->defaultTenantId()]);
 
-        $templates = $this->pdo->prepare('SELECT count(*) FROM document_templates WHERE tenant_id = :t');
-        $templates->execute([':t' => $tenantId]);
-        $blocks = $this->pdo->prepare('SELECT count(*) FROM document_blocks WHERE tenant_id = :t');
-        $blocks->execute([':t' => $tenantId]);
+        return (int) $stmt->fetchColumn();
+    }
 
-        return [
-            'document_templates' => (int) $templates->fetchColumn(),
-            'document_blocks'    => (int) $blocks->fetchColumn(),
-        ];
+    /** @return list<string> */
+    private function shippedStarterKeys(): array
+    {
+        return array_keys((new DocumentSourceStarterSeeder(new DocumentSourceRepository($this->pdo)))->starters());
     }
 
     /**

@@ -320,10 +320,9 @@ services:
         echo "[health-watch] service-health collector started";
         exec php public/index.php health:watch --interval=60
 
-  # Document/label designer server-side render tier (ADR 0012 / WC-docdesigner
-  # Track 2): Node + Puppeteer/headless Chromium loading the SAME React
-  # renderer the browser preview uses (print-document.tsx) so exported PDFs
-  # stay pixel-parity with the designer, not a second hand-rolled renderer.
+  # Document render tier (ADR 0012): Node + Puppeteer/headless Chromium
+  # printing the document editor's documents (POST /render/flow) and label
+  # sheets (POST /render/labels) to PDF.
   # Deliberately OPT-IN (like `cron`/`queue`/`scheduler`): render load is
   # bursty/seasonal (a whole cohort's labels exported at once) and Chromium is
   # heavy, so a minimal sovereign deploy omits this profile entirely and the

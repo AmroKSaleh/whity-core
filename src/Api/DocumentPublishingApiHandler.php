@@ -9,26 +9,29 @@ use Whity\Core\Document\DocumentIssuer;
 use Whity\Core\Document\DocumentPresenter;
 use Whity\Core\Document\DocumentSourceFileStore;
 use Whity\Core\Document\DocumentSourceVersionRepository;
+use Whity\Core\Document\Issuing\ActingAs;
+use Whity\Core\Document\Issuing\DocumentIssuing;
+use Whity\Core\Document\Issuing\IssueRequest;
 use Whity\Core\Document\Embed\DocumentEmbedRegistry;
 use Whity\Core\Document\Fields\DocumentFieldRegistry;
 use Whity\Core\Document\Print\DocumentPublishCheck;
 use Whity\Core\Document\Print\LabelCsv;
 use Whity\Core\Document\Print\LetterheadLogo;
 use Whity\Core\Document\Print\PrintLabels;
-use Whity\Core\Document\Print\WhityDocumentPrinter;
+use Whity\Core\Document\Print\SourceDocumentPrinter;
+use Whity\Core\Document\Qr\DocumentQrService;
 use Whity\Core\Document\Render\DocumentRenderRejectedException;
 use Whity\Core\Document\Render\FlowDocumentRenderer;
 use Whity\Core\Document\Render\RenderServiceUnavailableException;
-use Whity\Core\Entitlement\EntitlementRegistry;
 use Whity\Core\Entitlement\MeterService;
+use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\ScopedPermissionSet;
 use Whity\Core\Request;
 use Whity\Core\Response;
-use Whity\Core\Settings\SettingsRegistry;
 use Whity\Core\Settings\SettingsService;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Http\JsonBody;
-use Whity\Storage\StorageException;
+use Whity\Sdk\Hooks\HookVetoException;
 
 /**
  * Templates from the document editor, from draft to paper (editor M4;
@@ -50,11 +53,8 @@ use Whity\Storage\StorageException;
  */
 final class DocumentPublishingApiHandler
 {
-    /** The limits one rendered document spends, as for the designer's renders. */
-    private const RENDER_METERS = [
-        EntitlementRegistry::DOCUMENTS_RENDER_PER_DAY,
-        EntitlementRegistry::DOCUMENTS_RENDER_PER_MONTH,
-    ];
+    /** The limits one rendered document spends. */
+    private const RENDER_METERS = DocumentIssuing::RENDER_METERS;
 
     private const MAX_RECORDS = 25;
 
@@ -62,23 +62,30 @@ final class DocumentPublishingApiHandler
     private const MAX_LABEL_RECORDS = 500;
     private const MAX_LABEL_ROWS = 5000;
 
-    private PrintLabels $printLabels;
+    private SourceDocumentPrinter $print;
+
+    private ?DocumentIssuing $issuing;
 
     public function __construct(
         private readonly DocumentSourcesApiHandler $sources,
         private readonly DocumentSourceVersionRepository $versions,
         private readonly DocumentFieldRegistry $fields,
-        private readonly DocumentEmbedRegistry $embeds,
+        DocumentEmbedRegistry $embeds,
         private readonly RoleChecker $roleChecker,
-        private readonly SettingsService $settings,
+        SettingsService $settings,
         private readonly ?FlowDocumentRenderer $renderer = null,
-        private readonly ?DocumentIssuer $issuer = null,
-        private readonly ?DocumentSourceFileStore $files = null,
+        ?DocumentIssuer $issuer = null,
+        ?DocumentSourceFileStore $files = null,
         ?PrintLabels $printLabels = null,
         private readonly ?MeterService $meters = null,
-        private readonly ?LetterheadLogo $logo = null,
+        ?LetterheadLogo $logo = null,
+        ?DocumentQrService $qr = null,
+        ?DocumentIssuing $issuing = null,
     ) {
-        $this->printLabels = $printLabels ?? new PrintLabels();
+        $this->print = new SourceDocumentPrinter($fields, $embeds, $settings, $files, $printLabels, $logo);
+        $this->issuing = $issuing ?? ($issuer !== null
+            ? new DocumentIssuing($this->print, $versions, $issuer, $settings, $renderer, $qr, $meters)
+            : null);
     }
 
     public function fields(Request $request): Response
@@ -94,8 +101,8 @@ final class DocumentPublishingApiHandler
         return Response::json(['data' => [
             'record_types' => $this->fields->recordTypes(),
             'groups' => $this->fields->groups($tenantId, $type),
-            'letterhead' => $this->letterhead($tenantId),
-            'accent' => $this->accent($tenantId),
+            'letterhead' => $this->print->letterhead($tenantId),
+            'accent' => $this->print->accent($tenantId),
         ]]);
     }
 
@@ -182,6 +189,28 @@ final class DocumentPublishingApiHandler
     }
 
     /**
+     * GET /api/document-sources/{id}/versions/{version}: what a published
+     * version says (title, page, blocks, own fields), for the editor's issuing
+     * mode to show exactly what will print.
+     *
+     * @param array<string, string> $params
+     */
+    public function version(Request $request, array $params): Response
+    {
+        $found = $this->template($request, $params, false);
+        if ($found instanceof Response) {
+            return $found;
+        }
+        [$tenantId, , $row] = $found;
+        $version = $this->versions->find((int) $row['id'], $tenantId, (int) ($params['version'] ?? 0));
+        if ($version === null) {
+            return Response::error('Version not found', 404);
+        }
+
+        return Response::json(['data' => $version]);
+    }
+
+    /**
      * E.12: each field's value for one record as the caller may see it. A
      * record the caller can't see answers the same 404 as one that doesn't exist.
      *
@@ -211,8 +240,10 @@ final class DocumentPublishingApiHandler
     /**
      * The PDF of the published version (or the draft, for a preview) filled
      * for one record. Field values, records and charts are read now, for the
-     * caller, and frozen into the PDF (E.16). With `persist`, the PDF is issued
-     * as a document whose variable_data keeps the values it printed.
+     * caller, and frozen into the PDF (E.16). With `persist`, the published
+     * version is issued as a document (Issuing\DocumentIssuing), as
+     * `POST /api/documents` does: 201 with the document and what happened to
+     * its PDF.
      *
      * @param array<string, string> $params
      */
@@ -233,10 +264,15 @@ final class DocumentPublishingApiHandler
         if ($draft && $persist) {
             return Response::error('A draft can be previewed as a PDF but not issued', 422);
         }
-        if ($persist && $this->issuer === null) {
+        if ($persist && $this->issuing === null) {
             return Response::error('Issuing documents is not available on this instance', 503);
         }
+        // The route needs documents:render (a preview); issuing needs documents:issue as well.
+        if ($persist && !$this->permissions($callerId, $tenantId)(CorePermissions::DOCUMENTS_ISSUE)) {
+            return Response::error('Issuing a document requires documents:issue', 403);
+        }
 
+        $version = null;
         if ($draft) {
             $doc = ['title' => (string) $row['title'], 'page' => $row['page'], 'blocks' => $row['blocks'], 'version' => null];
         } else {
@@ -247,6 +283,7 @@ final class DocumentPublishingApiHandler
                 return Response::error('This template has no published version yet', 409);
             }
             $doc = ['title' => $published['title'], 'page' => $published['page'], 'blocks' => $published['blocks'], 'version' => $published['version']];
+            $version = $published;
         }
 
         $hasPermission = $this->permissions($callerId, $tenantId);
@@ -261,32 +298,52 @@ final class DocumentPublishingApiHandler
         }
         $values = $resolved['values'];
 
-        $sourceId = (int) $row['id'];
-        $printer = new WhityDocumentPrinter(
-            $values,
-            $this->fields->requiredPaths($tenantId, $type),
-            function (array $ref) use ($tenantId, $callerId, $hasPermission): ?array {
-                return $this->embeds->recordProvider($ref['type'])?->resolve($tenantId, $callerId, $hasPermission, $ref['id']);
-            },
-            function (string $key) use ($tenantId, $callerId, $hasPermission): ?array {
-                return $this->embeds->chartSource($key)?->load($tenantId, $callerId, $hasPermission, []);
-            },
-            fn (string $fileId): ?string => $this->imageData($tenantId, $sourceId, $fileId),
-            $this->printLabels,
-        );
+        $title = $resolved['label'] !== '' ? $doc['title'] . ' · ' . $resolved['label'] : $doc['title'];
+        if ($persist && $this->issuing !== null && $version !== null) {
+            // E.27: refuse rather than issue a document with a required field missing.
+            $actor = new ActingAs($tenantId, $callerId, $hasPermission);
+            $missing = $this->issuing->missing(new IssueRequest($row, $version, $values, $title), $actor);
+            if ($missing !== []) {
+                return Response::error('Required fields have no value for this record', 422, ['missing' => $missing]);
+            }
+            try {
+                $issued = $this->issuing->issue(new IssueRequest(
+                    source: $row,
+                    version: $version,
+                    values: $values,
+                    title: $title,
+                    recordLabel: $resolved['label'],
+                    render: true,
+                    record: $record !== null ? $record[0] . ':' . $record[1] : null,
+                ), $actor);
+            } catch (HookVetoException $e) {
+                return Response::error($e->reason(), 409, ['code' => 'vetoed', 'reason' => 'blocked_by_plugin']);
+            } catch (\Throwable $e) {
+                error_log('[DocumentPublishingApiHandler] issuing failed: ' . $e->getMessage());
 
-        // E.27: refuse rather than issue a document with a required field missing.
+                return Response::error('The document could not be created', 503);
+            }
+
+            return Response::json([
+                'data' => DocumentPresenter::document($issued['document'], $issued['artifacts']),
+                'render' => $issued['render'],
+            ], 201);
+        }
+
+        $printer = $this->print->printer($tenantId, $callerId, $hasPermission, (int) $row['id'], $values, $type);
+
+        // E.27: refuse rather than print a document with a required field missing.
         $missing = $printer->missingRequired($doc['blocks']);
         if ($missing !== []) {
             return Response::error('Required fields have no value for this record', 422, ['missing' => $missing]);
         }
 
-        $payload = $printer->payload(
-            ['title' => $doc['title'], 'lang' => (string) $row['lang'], 'page' => $doc['page'], 'blocks' => $doc['blocks']],
-            ($doc['page']['letterhead'] ?? true) === false ? null : $this->printedLetterhead($tenantId),
-            $resolved['label'] !== '' ? $resolved['label'] : null,
-            $values['today'] ?? null,
-            $this->accent($tenantId),
+        $payload = $this->print->payload(
+            $printer,
+            $tenantId,
+            ['title' => (string) $doc['title'], 'lang' => (string) $row['lang'], 'page' => $doc['page'], 'blocks' => $doc['blocks']],
+            $resolved['label'],
+            $values,
         );
 
         $metered = false;
@@ -308,30 +365,6 @@ final class DocumentPublishingApiHandler
             error_log('[DocumentPublishingApiHandler] render failed: ' . $e->getMessage());
 
             return Response::error('Document rendering is temporarily unavailable', 503);
-        }
-
-        $title = $resolved['label'] !== '' ? $doc['title'] . ' · ' . $resolved['label'] : $doc['title'];
-        if ($persist && $this->issuer !== null) {
-            try {
-                $issued = $this->issuer->issue(
-                    $tenantId,
-                    $callerId,
-                    ['name' => (string) $doc['title']],
-                    mb_substr($title, 0, 255),
-                    $pdf,
-                    'application/pdf',
-                    'pdf',
-                    // What printed, as the one data row it was raised with, so a
-                    // re-render can show it (3.7 step 5). A missing optional value printed blank.
-                    [array_map(static fn (?string $v): string => $v ?? '', $values)],
-                );
-            } catch (StorageException $e) {
-                error_log('[DocumentPublishingApiHandler] issuing failed: ' . $e->getMessage());
-
-                return Response::error('Storing the rendered document is temporarily unavailable', 503);
-            }
-
-            return Response::json(['data' => DocumentPresenter::document($issued['document'], [$issued['artifact']])], 201);
         }
 
         return new Response(200, $pdf, [
@@ -426,22 +459,10 @@ final class DocumentPublishingApiHandler
         }
 
         $sourceId = (int) $row['id'];
-        $required = $this->fields->requiredPaths($tenantId, $type);
         $labels = [];
         $missing = [];
         foreach ($rows as $n => $values) {
-            $printer = new WhityDocumentPrinter(
-                $values,
-                $required,
-                function (array $ref) use ($tenantId, $callerId, $hasPermission): ?array {
-                    return $this->embeds->recordProvider($ref['type'])?->resolve($tenantId, $callerId, $hasPermission, $ref['id']);
-                },
-                function (string $key) use ($tenantId, $callerId, $hasPermission): ?array {
-                    return $this->embeds->chartSource($key)?->load($tenantId, $callerId, $hasPermission, []);
-                },
-                fn (string $fileId): ?string => $this->imageData($tenantId, $sourceId, $fileId),
-                $this->printLabels,
-            );
+            $printer = $this->print->printer($tenantId, $callerId, $hasPermission, $sourceId, $values, $type);
             $gaps = $printer->missingRequired($doc['blocks']);
             if ($gaps !== []) {
                 $missing[] = ['label' => $n + 1, 'fields' => $gaps];
@@ -467,7 +488,7 @@ final class DocumentPublishingApiHandler
             'direction' => $row['lang'] === 'ar' ? 'rtl' : 'ltr',
             'title' => (string) $row['title'],
         ];
-        $accent = $this->accent($tenantId);
+        $accent = $this->print->accent($tenantId);
         if ($accent !== null) {
             $payload['theme'] = ['accent' => $accent];
         }
@@ -531,66 +552,6 @@ final class DocumentPublishingApiHandler
         }
 
         return $paths;
-    }
-
-    /**
-     * The tenant's letterhead as it invoices: its name, address and tax number
-     * (stage 6). The editor shows the logo itself; printedLetterhead() adds it for the PDF.
-     *
-     * @return array{name: string, lines: list<string>}
-     */
-    private function letterhead(int $tenantId): array
-    {
-        $effective = $this->settings->effective($tenantId);
-        $name = trim((string) ($effective[SettingsRegistry::BILLING_SELLER_NAME] ?? ''));
-        if ($name === '') {
-            $name = trim((string) ($effective[SettingsRegistry::SITE_NAME] ?? ''));
-        }
-        $lines = [];
-        $address = trim((string) ($effective[SettingsRegistry::BILLING_SELLER_ADDRESS] ?? ''));
-        if ($address !== '') {
-            $lines[] = preg_replace('/\s*\R\s*/', ', ', $address) ?? $address;
-        }
-        $tax = trim((string) ($effective[SettingsRegistry::BILLING_SELLER_TAX_ID] ?? ''));
-        if ($tax !== '') {
-            $lines[] = $tax;
-        }
-
-        return ['name' => $name, 'lines' => $lines];
-    }
-
-    /**
-     * The letterhead as it prints: the same name and lines, plus the tenant's
-     * logo (6.2) when it has one Whity Render can draw.
-     *
-     * @return array{name: string, lines: list<string>, logo: string|null}
-     */
-    private function printedLetterhead(int $tenantId): array
-    {
-        return $this->letterhead($tenantId) + ['logo' => $this->logo?->dataUri($tenantId)];
-    }
-
-    private function accent(int $tenantId): ?string
-    {
-        $value = trim((string) ($this->settings->effective($tenantId)[SettingsRegistry::DOCUMENTS_PRINT_COLOR] ?? ''));
-
-        return preg_match('/^#[0-9A-Fa-f]{6}$/', $value) === 1 ? $value : null;
-    }
-
-    private function imageData(int $tenantId, int $sourceId, string $fileId): ?string
-    {
-        if ($this->files === null || !ctype_digit($fileId)) {
-            return null;
-        }
-        $file = $this->files->find((int) $fileId, $sourceId, $tenantId);
-        if ($file === null || !in_array($file['content_type'], ['image/png', 'image/jpeg'], true)) {
-            return null;
-        }
-        try {
-            return 'data:' . $file['content_type'] . ';base64,' . base64_encode($this->files->bytes((string) $file['storage_key']));
-        } catch (StorageException) {
-            return null;
-        }
     }
 
     /**

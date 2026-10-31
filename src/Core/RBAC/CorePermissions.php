@@ -223,6 +223,11 @@ final class CorePermissions
     public const DOCUMENTS_WRITE = 'documents:write';
     public const DOCUMENTS_PUBLISH = 'documents:publish';
     public const DOCUMENTS_RENDER = 'documents:render';
+    // Issuing a document (editor M4c, the owner's call on 31 Oct): raising the
+    // record, its QR code and its stored PDF, and correcting it. Separate from
+    // DOCUMENTS_RENDER, which now only previews a PDF and stores nothing.
+    // Migration 166 grants it to every role that held render.
+    public const DOCUMENTS_ISSUE = 'documents:issue';
 
     // Issued DOCUMENTS, as opposed to the templates above (#947 item 1,
     // migration 109). The four permissions above are the designer's; a document
@@ -479,6 +484,7 @@ final class CorePermissions
             self::DOCUMENTS_WRITE,
             self::DOCUMENTS_PUBLISH,
             self::DOCUMENTS_RENDER,
+            self::DOCUMENTS_ISSUE,
             self::DOCUMENTS_READ_ALL,
             self::DOCUMENTS_ROUTE,
             self::SECURITY_MANAGE,

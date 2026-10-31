@@ -11,8 +11,6 @@
     "./record": "./src/record/index.ts",
     "./datetime": "./src/datetime/index.ts",
     "./roles": "./src/roles/index.ts",
-    "./document-designer": "./src/document-designer/index.ts",
-    "./document-designer/print-document": "./src/document-designer/print-document.tsx",
     "./users": "./src/users/index.ts",
     "./sync": "./src/sync/index.ts",
     "./i18n": "./src/i18n/index.ts",

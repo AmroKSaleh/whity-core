@@ -1,0 +1,1301 @@
+{
+    "templates": {
+        "invoice": {
+            "name": "Invoice",
+            "data": {
+                "version": 2,
+                "name": "Invoice",
+                "page": {
+                    "widthMm": 210,
+                    "heightMm": 297,
+                    "marginMm": 10,
+                    "background": "#ffffff"
+                },
+                "placeholders": [
+                    {
+                        "key": "company_name",
+                        "label": "Company name",
+                        "sample": "Example Bakery"
+                    },
+                    {
+                        "key": "company_contact",
+                        "label": "Company contact",
+                        "sample": "Example Bakery · info@acme.com · +1 555 0100"
+                    },
+                    {
+                        "key": "invoice_no",
+                        "label": "Invoice #",
+                        "sample": "INV-1001"
+                    },
+                    {
+                        "key": "date",
+                        "label": "Date",
+                        "sample": "2026-01-15"
+                    },
+                    {
+                        "key": "bill_to",
+                        "label": "Bill to",
+                        "sample": "Customer Name\n123 Example St\nCity"
+                    },
+                    {
+                        "key": "total",
+                        "label": "Total",
+                        "sample": "$0.00"
+                    }
+                ],
+                "pages": [
+                    {
+                        "id": "p1",
+                        "elements": [
+                            {
+                                "id": "dynamicText-s1",
+                                "type": "dynamicText",
+                                "x": 15,
+                                "y": 15,
+                                "w": 120,
+                                "h": 12,
+                                "rotation": 0,
+                                "z": 1,
+                                "template": "{{company_name}}",
+                                "style": {
+                                    "fontSize": 20,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "text-s2",
+                                "type": "text",
+                                "x": 150,
+                                "y": 15,
+                                "w": 45,
+                                "h": 12,
+                                "rotation": 0,
+                                "z": 2,
+                                "text": "INVOICE",
+                                "style": {
+                                    "fontSize": 22,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "right",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "line-s3",
+                                "type": "line",
+                                "x": 15,
+                                "y": 30,
+                                "w": 180,
+                                "h": 0.4,
+                                "rotation": 0,
+                                "z": 3,
+                                "stroke": "#333333",
+                                "strokeWidth": 0.4
+                            },
+                            {
+                                "id": "text-s4",
+                                "type": "text",
+                                "x": 15,
+                                "y": 40,
+                                "w": 30,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 4,
+                                "text": "Bill To",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "dynamicText-s5",
+                                "type": "dynamicText",
+                                "x": 15,
+                                "y": 47,
+                                "w": 95,
+                                "h": 24,
+                                "rotation": 0,
+                                "z": 5,
+                                "template": "{{bill_to}}",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "normal",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "text-s6",
+                                "type": "text",
+                                "x": 135,
+                                "y": 40,
+                                "w": 30,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 6,
+                                "text": "Invoice #",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "right",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "dynamicText-s7",
+                                "type": "dynamicText",
+                                "x": 167,
+                                "y": 40,
+                                "w": 28,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 7,
+                                "template": "{{invoice_no}}",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "normal",
+                                    "fontStyle": "normal",
+                                    "align": "right",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "text-s8",
+                                "type": "text",
+                                "x": 135,
+                                "y": 47,
+                                "w": 30,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 8,
+                                "text": "Date",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "right",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "dynamicText-s9",
+                                "type": "dynamicText",
+                                "x": 167,
+                                "y": 47,
+                                "w": 28,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 9,
+                                "template": "{{date}}",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "normal",
+                                    "fontStyle": "normal",
+                                    "align": "right",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "text-s10",
+                                "type": "text",
+                                "x": 15,
+                                "y": 78,
+                                "w": 95,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 10,
+                                "text": "Description",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "text-s11",
+                                "type": "text",
+                                "x": 115,
+                                "y": 78,
+                                "w": 30,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 11,
+                                "text": "Qty",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "right",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "text-s12",
+                                "type": "text",
+                                "x": 160,
+                                "y": 78,
+                                "w": 35,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 12,
+                                "text": "Amount",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "right",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "line-s13",
+                                "type": "line",
+                                "x": 15,
+                                "y": 85,
+                                "w": 180,
+                                "h": 0.4,
+                                "rotation": 0,
+                                "z": 13,
+                                "stroke": "#333333",
+                                "strokeWidth": 0.4
+                            },
+                            {
+                                "id": "text-s14",
+                                "type": "text",
+                                "x": 150,
+                                "y": 250,
+                                "w": 20,
+                                "h": 8,
+                                "rotation": 0,
+                                "z": 14,
+                                "text": "Total",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "right",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "dynamicText-s15",
+                                "type": "dynamicText",
+                                "x": 172,
+                                "y": 250,
+                                "w": 23,
+                                "h": 8,
+                                "rotation": 0,
+                                "z": 15,
+                                "template": "{{total}}",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "right",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "line-s16",
+                                "type": "line",
+                                "x": 15,
+                                "y": 280,
+                                "w": 180,
+                                "h": 0.4,
+                                "rotation": 0,
+                                "z": 16,
+                                "stroke": "#333333",
+                                "strokeWidth": 0.4
+                            },
+                            {
+                                "id": "dynamicText-s17",
+                                "type": "dynamicText",
+                                "x": 15,
+                                "y": 283,
+                                "w": 180,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 17,
+                                "template": "{{company_contact}}",
+                                "style": {
+                                    "fontSize": 8,
+                                    "fontWeight": "normal",
+                                    "fontStyle": "normal",
+                                    "align": "center",
+                                    "vAlign": "top",
+                                    "color": "#666666",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        "exam": {
+            "name": "Exam sheet",
+            "data": {
+                "version": 2,
+                "name": "Exam sheet",
+                "page": {
+                    "widthMm": 210,
+                    "heightMm": 297,
+                    "marginMm": 10,
+                    "background": "#ffffff"
+                },
+                "placeholders": [
+                    {
+                        "key": "exam_title",
+                        "label": "Exam title",
+                        "sample": "Midterm Examination"
+                    },
+                    {
+                        "key": "subject",
+                        "label": "Subject",
+                        "sample": "Mathematics"
+                    }
+                ],
+                "pages": [
+                    {
+                        "id": "p1",
+                        "elements": [
+                            {
+                                "id": "dynamicText-s18",
+                                "type": "dynamicText",
+                                "x": 15,
+                                "y": 15,
+                                "w": 180,
+                                "h": 12,
+                                "rotation": 0,
+                                "z": 1,
+                                "template": "{{exam_title}}",
+                                "style": {
+                                    "fontSize": 20,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "center",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "dynamicText-s19",
+                                "type": "dynamicText",
+                                "x": 15,
+                                "y": 28,
+                                "w": 180,
+                                "h": 7,
+                                "rotation": 0,
+                                "z": 2,
+                                "template": "{{subject}}",
+                                "style": {
+                                    "fontSize": 12,
+                                    "fontWeight": "normal",
+                                    "fontStyle": "normal",
+                                    "align": "center",
+                                    "vAlign": "top",
+                                    "color": "#555555",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "text-s20",
+                                "type": "text",
+                                "x": 15,
+                                "y": 42,
+                                "w": 18,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 3,
+                                "text": "Name:",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "line-s21",
+                                "type": "line",
+                                "x": 34,
+                                "y": 48,
+                                "w": 90,
+                                "h": 0.4,
+                                "rotation": 0,
+                                "z": 4,
+                                "stroke": "#333333",
+                                "strokeWidth": 0.4
+                            },
+                            {
+                                "id": "text-s22",
+                                "type": "text",
+                                "x": 135,
+                                "y": 42,
+                                "w": 14,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 5,
+                                "text": "Date:",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "line-s23",
+                                "type": "line",
+                                "x": 151,
+                                "y": 48,
+                                "w": 44,
+                                "h": 0.4,
+                                "rotation": 0,
+                                "z": 6,
+                                "stroke": "#333333",
+                                "strokeWidth": 0.4
+                            },
+                            {
+                                "id": "text-s24",
+                                "type": "text",
+                                "x": 15,
+                                "y": 52,
+                                "w": 18,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 7,
+                                "text": "Score:",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "line-s25",
+                                "type": "line",
+                                "x": 34,
+                                "y": 58,
+                                "w": 50,
+                                "h": 0.4,
+                                "rotation": 0,
+                                "z": 8,
+                                "stroke": "#333333",
+                                "strokeWidth": 0.4
+                            },
+                            {
+                                "id": "line-s26",
+                                "type": "line",
+                                "x": 15,
+                                "y": 64,
+                                "w": 180,
+                                "h": 0.4,
+                                "rotation": 0,
+                                "z": 9,
+                                "stroke": "#333333",
+                                "strokeWidth": 0.4
+                            },
+                            {
+                                "id": "text-s27",
+                                "type": "text",
+                                "x": 15,
+                                "y": 68,
+                                "w": 180,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 10,
+                                "text": "Answer all questions. Show your work clearly.",
+                                "style": {
+                                    "fontSize": 10,
+                                    "fontWeight": "normal",
+                                    "fontStyle": "italic",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "text-s28",
+                                "type": "text",
+                                "x": 15,
+                                "y": 82,
+                                "w": 10,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 11,
+                                "text": "1.",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "line-s29",
+                                "type": "line",
+                                "x": 27,
+                                "y": 92,
+                                "w": 168,
+                                "h": 0.4,
+                                "rotation": 0,
+                                "z": 12,
+                                "stroke": "#333333",
+                                "strokeWidth": 0.4
+                            },
+                            {
+                                "id": "text-s30",
+                                "type": "text",
+                                "x": 15,
+                                "y": 102,
+                                "w": 10,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 13,
+                                "text": "2.",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "line-s31",
+                                "type": "line",
+                                "x": 27,
+                                "y": 112,
+                                "w": 168,
+                                "h": 0.4,
+                                "rotation": 0,
+                                "z": 14,
+                                "stroke": "#333333",
+                                "strokeWidth": 0.4
+                            },
+                            {
+                                "id": "text-s32",
+                                "type": "text",
+                                "x": 15,
+                                "y": 122,
+                                "w": 10,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 15,
+                                "text": "3.",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "line-s33",
+                                "type": "line",
+                                "x": 27,
+                                "y": 132,
+                                "w": 168,
+                                "h": 0.4,
+                                "rotation": 0,
+                                "z": 16,
+                                "stroke": "#333333",
+                                "strokeWidth": 0.4
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        "production": {
+            "name": "Production note",
+            "data": {
+                "version": 2,
+                "name": "Production note",
+                "page": {
+                    "widthMm": 210,
+                    "heightMm": 297,
+                    "marginMm": 10,
+                    "background": "#ffffff"
+                },
+                "placeholders": [
+                    {
+                        "key": "company_name",
+                        "label": "Company name",
+                        "sample": "Example Bakery"
+                    },
+                    {
+                        "key": "order_no",
+                        "label": "Order #",
+                        "sample": "WO-5567"
+                    },
+                    {
+                        "key": "product",
+                        "label": "Product",
+                        "sample": "Widget A"
+                    },
+                    {
+                        "key": "qty",
+                        "label": "Quantity",
+                        "sample": "250"
+                    },
+                    {
+                        "key": "date",
+                        "label": "Date",
+                        "sample": "2026-01-15"
+                    }
+                ],
+                "pages": [
+                    {
+                        "id": "p1",
+                        "elements": [
+                            {
+                                "id": "dynamicText-s34",
+                                "type": "dynamicText",
+                                "x": 15,
+                                "y": 15,
+                                "w": 110,
+                                "h": 10,
+                                "rotation": 0,
+                                "z": 1,
+                                "template": "{{company_name}}",
+                                "style": {
+                                    "fontSize": 16,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "text-s35",
+                                "type": "text",
+                                "x": 120,
+                                "y": 15,
+                                "w": 75,
+                                "h": 10,
+                                "rotation": 0,
+                                "z": 2,
+                                "text": "PRODUCTION NOTE",
+                                "style": {
+                                    "fontSize": 16,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "right",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "line-s36",
+                                "type": "line",
+                                "x": 15,
+                                "y": 28,
+                                "w": 180,
+                                "h": 0.4,
+                                "rotation": 0,
+                                "z": 3,
+                                "stroke": "#333333",
+                                "strokeWidth": 0.4
+                            },
+                            {
+                                "id": "text-s37",
+                                "type": "text",
+                                "x": 15,
+                                "y": 36,
+                                "w": 28,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 4,
+                                "text": "Order #",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "dynamicText-s38",
+                                "type": "dynamicText",
+                                "x": 45,
+                                "y": 36,
+                                "w": 70,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 5,
+                                "template": "{{order_no}}",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "normal",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "text-s39",
+                                "type": "text",
+                                "x": 15,
+                                "y": 44,
+                                "w": 28,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 6,
+                                "text": "Product",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "dynamicText-s40",
+                                "type": "dynamicText",
+                                "x": 45,
+                                "y": 44,
+                                "w": 90,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 7,
+                                "template": "{{product}}",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "normal",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "text-s41",
+                                "type": "text",
+                                "x": 15,
+                                "y": 52,
+                                "w": 28,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 8,
+                                "text": "Quantity",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "dynamicText-s42",
+                                "type": "dynamicText",
+                                "x": 45,
+                                "y": 52,
+                                "w": 40,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 9,
+                                "template": "{{qty}}",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "normal",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "text-s43",
+                                "type": "text",
+                                "x": 15,
+                                "y": 60,
+                                "w": 28,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 10,
+                                "text": "Date",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "dynamicText-s44",
+                                "type": "dynamicText",
+                                "x": 45,
+                                "y": 60,
+                                "w": 40,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 11,
+                                "template": "{{date}}",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "normal",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "barcode-s45",
+                                "type": "barcode",
+                                "x": 140,
+                                "y": 34,
+                                "w": 55,
+                                "h": 22,
+                                "rotation": 0,
+                                "z": 12,
+                                "symbology": "code128",
+                                "value": "{{order_no}}",
+                                "binding": null,
+                                "showText": true
+                            },
+                            {
+                                "id": "text-s46",
+                                "type": "text",
+                                "x": 15,
+                                "y": 75,
+                                "w": 40,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 13,
+                                "text": "Notes",
+                                "style": {
+                                    "fontSize": 11,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "rect-s47",
+                                "type": "rect",
+                                "x": 15,
+                                "y": 82,
+                                "w": 180,
+                                "h": 90,
+                                "rotation": 0,
+                                "z": 14,
+                                "fill": "#ffffff",
+                                "stroke": "#999999",
+                                "strokeWidth": 0.3,
+                                "radius": 1
+                            }
+                        ]
+                    }
+                ]
+            }
+        },
+        "shipping": {
+            "name": "Shipping label",
+            "data": {
+                "version": 2,
+                "name": "Shipping label",
+                "page": {
+                    "widthMm": 101.6,
+                    "heightMm": 152.4,
+                    "marginMm": 6,
+                    "background": "#ffffff"
+                },
+                "placeholders": [
+                    {
+                        "key": "company_name",
+                        "label": "Company name",
+                        "sample": "Example Bakery"
+                    },
+                    {
+                        "key": "ship_to",
+                        "label": "Ship to",
+                        "sample": "Recipient Name\n456 Delivery Rd\nCity, ZIP"
+                    },
+                    {
+                        "key": "tracking",
+                        "label": "Tracking",
+                        "sample": "TRK-000123456"
+                    },
+                    {
+                        "key": "sku",
+                        "label": "SKU",
+                        "sample": "WID-001"
+                    }
+                ],
+                "pages": [
+                    {
+                        "id": "p1",
+                        "elements": [
+                            {
+                                "id": "dynamicText-s48",
+                                "type": "dynamicText",
+                                "x": 6,
+                                "y": 6,
+                                "w": 90,
+                                "h": 8,
+                                "rotation": 0,
+                                "z": 1,
+                                "template": "{{company_name}}",
+                                "style": {
+                                    "fontSize": 12,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "line-s49",
+                                "type": "line",
+                                "x": 6,
+                                "y": 16,
+                                "w": 90,
+                                "h": 0.4,
+                                "rotation": 0,
+                                "z": 2,
+                                "stroke": "#333333",
+                                "strokeWidth": 0.4
+                            },
+                            {
+                                "id": "text-s50",
+                                "type": "text",
+                                "x": 6,
+                                "y": 20,
+                                "w": 40,
+                                "h": 5,
+                                "rotation": 0,
+                                "z": 3,
+                                "text": "SHIP TO:",
+                                "style": {
+                                    "fontSize": 8,
+                                    "fontWeight": "bold",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#555555",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "dynamicText-s51",
+                                "type": "dynamicText",
+                                "x": 6,
+                                "y": 26,
+                                "w": 90,
+                                "h": 28,
+                                "rotation": 0,
+                                "z": 4,
+                                "template": "{{ship_to}}",
+                                "style": {
+                                    "fontSize": 12,
+                                    "fontWeight": "normal",
+                                    "fontStyle": "normal",
+                                    "align": "left",
+                                    "vAlign": "top",
+                                    "color": "#111111",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            },
+                            {
+                                "id": "barcode-s52",
+                                "type": "barcode",
+                                "x": 6,
+                                "y": 60,
+                                "w": 90,
+                                "h": 26,
+                                "rotation": 0,
+                                "z": 5,
+                                "symbology": "code128",
+                                "value": "{{tracking}}",
+                                "binding": null,
+                                "showText": true
+                            },
+                            {
+                                "id": "dynamicText-s53",
+                                "type": "dynamicText",
+                                "x": 6,
+                                "y": 132,
+                                "w": 90,
+                                "h": 6,
+                                "rotation": 0,
+                                "z": 6,
+                                "template": "{{sku}}",
+                                "style": {
+                                    "fontSize": 8,
+                                    "fontWeight": "normal",
+                                    "fontStyle": "normal",
+                                    "align": "center",
+                                    "vAlign": "top",
+                                    "color": "#666666",
+                                    "direction": "auto",
+                                    "lineHeight": 1.2,
+                                    "letterSpacing": 0
+                                }
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    },
+    "blocks": {
+        "sys-header": {
+            "name": "Company header",
+            "elements": [
+                {
+                    "id": "dynamicText-s54",
+                    "type": "dynamicText",
+                    "x": 0,
+                    "y": 0,
+                    "w": 120,
+                    "h": 10,
+                    "rotation": 0,
+                    "z": 1,
+                    "template": "{{company_name}}",
+                    "style": {
+                        "fontSize": 18,
+                        "fontWeight": "bold",
+                        "fontStyle": "normal",
+                        "align": "left",
+                        "vAlign": "top",
+                        "color": "#111111",
+                        "direction": "auto",
+                        "lineHeight": 1.2,
+                        "letterSpacing": 0
+                    }
+                },
+                {
+                    "id": "text-s55",
+                    "type": "text",
+                    "x": 0,
+                    "y": 11,
+                    "w": 180,
+                    "h": 5,
+                    "rotation": 0,
+                    "z": 2,
+                    "text": "Address line · City · Country",
+                    "style": {
+                        "fontSize": 8,
+                        "fontWeight": "normal",
+                        "fontStyle": "normal",
+                        "align": "left",
+                        "vAlign": "top",
+                        "color": "#666666",
+                        "direction": "auto",
+                        "lineHeight": 1.2,
+                        "letterSpacing": 0
+                    }
+                },
+                {
+                    "id": "line-s56",
+                    "type": "line",
+                    "x": 0,
+                    "y": 20,
+                    "w": 180,
+                    "h": 0.4,
+                    "rotation": 0,
+                    "z": 3,
+                    "stroke": "#333333",
+                    "strokeWidth": 0.4
+                }
+            ]
+        },
+        "sys-footer": {
+            "name": "Company footer",
+            "elements": [
+                {
+                    "id": "line-s57",
+                    "type": "line",
+                    "x": 0,
+                    "y": 0,
+                    "w": 180,
+                    "h": 0.4,
+                    "rotation": 0,
+                    "z": 1,
+                    "stroke": "#333333",
+                    "strokeWidth": 0.4
+                },
+                {
+                    "id": "dynamicText-s58",
+                    "type": "dynamicText",
+                    "x": 0,
+                    "y": 2,
+                    "w": 180,
+                    "h": 6,
+                    "rotation": 0,
+                    "z": 2,
+                    "template": "{{company_name}} · contact@example.com · +1 555 0100",
+                    "style": {
+                        "fontSize": 8,
+                        "fontWeight": "normal",
+                        "fontStyle": "normal",
+                        "align": "center",
+                        "vAlign": "top",
+                        "color": "#666666",
+                        "direction": "auto",
+                        "lineHeight": 1.2,
+                        "letterSpacing": 0
+                    }
+                }
+            ]
+        }
+    }
+}

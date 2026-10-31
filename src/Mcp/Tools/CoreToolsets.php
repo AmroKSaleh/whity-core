@@ -57,7 +57,7 @@ final class CoreToolsets
         'core.documents' => [
             'title'       => 'Documents',
             'titleAr'     => 'المستندات',
-            'description' => 'Issued documents, templates, blocks, collections, circulation routes and reports.',
+            'description' => 'Issued documents, templates and label sheets, collections, circulation routes and reports.',
         ],
         'core.forms' => [
             'title'       => 'Forms',
@@ -164,7 +164,8 @@ final class CoreToolsets
     public const ALWAYS_ON = [
         'get_api_me_inbox',
         'get_api_documents_id',
-        'get_api_document_templates',
+        // The editor's templates (editor M4c replaced /api/document-templates).
+        'get_api_document_sources',
         'get_api_search',
     ];
 

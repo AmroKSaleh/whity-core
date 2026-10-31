@@ -1,7 +1,14 @@
 import type { Block, DocumentKind, PublishBlocker, WhityDocument } from '@whity-org/ui/editor/contract';
 import type { FieldGroup } from '@whity-org/ui/editor/fields';
 import type { EditorServices, FieldPreview, RecordView, UploadedFile } from '@whity-org/ui/editor/services';
-import type { DocumentEditorAdapter, LoadedDocument, SaveResult, TemplateSetup } from '@whity-org/features/document-editor';
+import type {
+  DocumentEditorAdapter,
+  IssueResult,
+  LoadedDocument,
+  SaveResult,
+  TemplateSetup,
+  VersionContent,
+} from '@whity-org/features/document-editor';
 import { api } from '@/lib/api/client';
 import type { components } from '@/lib/api/schema';
 
@@ -63,6 +70,8 @@ export async function createDocumentSource(kind: DocumentKind, title: string): P
 }
 
 type FileResponse = components['schemas']['DocumentSourceFileResponse'];
+/** `POST /document-sources/{id}/drafts` (M4c), typed by hand until the client is regenerated. */
+type DraftsPost = (url: string, options: { body: { title?: string } }) => Promise<{ data?: { data: Row }; response: Response }>;
 type RecordResponse = components['schemas']['DocumentEmbedRecordResponse']['data'];
 
 /**
@@ -219,6 +228,52 @@ export const documentSourcesAdapter: DocumentEditorAdapter = {
       count: Number(response.headers.get('X-Labels-Count') ?? 0),
       clipped: Number(response.headers.get('X-Labels-Clipped') ?? 0),
     };
+  },
+
+  async loadVersion(id, version): Promise<VersionContent> {
+    const { data, response } = await api.GET('/api/v1/document-sources/{id}/versions/{version}', {
+      params: { path: { id: Number(id), version } },
+    });
+    if (data === undefined) throw new Error(`Failed to load the published version (${response.status})`);
+    const v = data.data;
+    return {
+      title: v.title,
+      blocks: (v.blocks ?? []) as unknown as Block[],
+      ...pageOf(v.page as Row['page']),
+      ownFields: v.own_fields?.length ? v.own_fields : undefined,
+    };
+  },
+
+  async copyForIssue(id): Promise<string> {
+    // "Edit before issuing": a personal letter made from the template's
+    // published version. Recast until the regenerated client carries the route.
+    const post = api.POST as unknown as DraftsPost;
+    const { data, response } = await post(`/api/v1/document-sources/${Number(id)}/drafts`, { body: {} });
+    if (data === undefined) throw new Error(`Failed to make a draft to edit (${response.status})`);
+    return String(data.data.id);
+  },
+
+  async issue(id, request): Promise<IssueResult> {
+    const values = Object.fromEntries(Object.entries(request.values).map(([key, value]) => [`template.${key}`, value]));
+    const { data, error, response } = await api.POST('/api/v1/documents', {
+      body: {
+        document_source_id: Number(id),
+        ...(request.record ? { record: request.record } : {}),
+        ...(Object.keys(values).length ? { values } : {}),
+      },
+    });
+    if (data !== undefined) return { ok: true, documentId: data.data.id };
+    // A refusal the person can act on comes back in the server's words (E.27).
+    const body = error as { error?: unknown; details?: { missing?: unknown } } | undefined;
+    if (response.status === 422 || response.status === 409) {
+      const missing = Array.isArray(body?.details?.missing) ? body.details.missing.filter((m): m is string => typeof m === 'string') : [];
+      return {
+        ok: false,
+        message: typeof body?.error === 'string' ? body.error : `The document wasn't issued (${response.status})`,
+        missing,
+      };
+    }
+    throw new Error(typeof body?.error === 'string' ? body.error : `Failed to issue the document (${response.status})`);
   },
 
   async load(id: string): Promise<LoadedDocument> {

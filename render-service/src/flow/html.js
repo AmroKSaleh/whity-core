@@ -4,15 +4,11 @@
  * Turns a normalised flow document (see ./document.js) into the ONE HTML page
  * headless Chromium is handed (#1072, first half).
  *
- * Deliberately plain, server-generated HTML rather than a React bundle: the
- * fixed-canvas mode's harness (harness/entry.tsx + scripts/build-harness.js)
- * exists to keep exported output pixel-identical to the on-screen designer
- * preview, because that mode renders a design someone drew. A flowing
- * document has no on-screen designer to be identical to, so bundling it
- * through the same pipeline would buy nothing and would put a second consumer
- * on the harness build — the single most fragile part of this service. This
- * mode therefore shares no code path, no bundle and no CSS with the
- * fixed-canvas one; the only thing they share is the Chromium instance.
+ * Deliberately plain, server-generated HTML rather than a React bundle: a
+ * flowing document has no on-screen canvas to be pixel-identical to, so a
+ * bundled renderer would buy nothing and would make the image depend on a
+ * front-end build. (The old fixed-canvas designer's React harness, which did
+ * exist for that reason, was removed in editor M4c.)
  *
  * Two things in here are load-bearing and easy to get quietly wrong:
  *
@@ -55,10 +51,9 @@ const DEFAULT_FONT_STACK =
 const { escapeHtml, isolateForeignRuns } = require('./bidi');
 const { QR_SIZE_MM, MAX_FIELD_BOXES, MAX_ANSWER_LINES, BARCODE_SYMBOLOGIES } = require('./document');
 
-/* Already a dependency of this service for the fixed-canvas mode's barcode
- * element; the flowing mode draws its verification code with the same encoder
- * so two modes of one product cannot print two different barcodes for one
- * token. */
+/* The one barcode encoder in this service: the verification code and every
+ * barcode block are drawn with it, so one product cannot print two different
+ * barcodes for one token. */
 const bwipjs = require('bwip-js');
 const katex = require('katex');
 

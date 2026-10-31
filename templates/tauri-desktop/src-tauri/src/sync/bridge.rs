@@ -58,8 +58,8 @@ pub struct BridgeResource {
 /// causes are different and only one is ours:
 ///
 /// 1. **Local leg — a path bug here.** The URL is `php_host_base +
-///    base_path`, and plugins register under `/api` (`/api/persons`,
-///    `/api/document-templates`). With `base_path: "/persons"` the request
+///    base_path`, and plugins register under `/api` (`/api/persons`). With
+///    `base_path: "/persons"` the request
 ///    goes to `http://127.0.0.1:PORT/persons` → 404. Verified against the
 ///    running offline host: `/persons` 404s, `/api/persons?updatedSince=0`
 ///    returns a proper `{data, cursor, hasMore}` feed.

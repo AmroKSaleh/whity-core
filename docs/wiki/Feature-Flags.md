@@ -75,10 +75,11 @@ it belongs.
 
 ## The canonical worked example: `documents.render_enabled`
 
-The document/label designer's server-side render tier
-(`POST /api/document-templates/{id}/render`) is the reference pattern every
-flag in this codebase should mirror. Read `src/Api/DocumentRenderApiHandler.php`
-alongside this section.
+The documents' server-side render tier (`POST /api/document-sources/{id}/render`,
+`POST /api/documents`) is the reference pattern every flag in this codebase
+should mirror. Read `src/Core/Document/Render/FlowDocumentRenderer.php`
+(`isEnabled()`) and `src/Api/DocumentPublishingApiHandler.php` alongside this
+section.
 
 1. **Registry entry** (`SettingsRegistry.php`): a constant
    (`DOCUMENTS_RENDER_ENABLED = 'documents.render_enabled'`), a `'false'`
@@ -110,12 +111,11 @@ alongside this section.
    any other work — a disabled instance never touches the database for this
    route, let alone calls the external render service. The error is a clean,
    generic 503 (never a raw exception, never a downstream stack trace).
-3. **Tests** (`tests/Api/DocumentRenderApiHandlerRealEngineTest.php`): a
+3. **Tests** (`tests/Api/DocumentPublishingApiHandlerRealEngineTest.php`): a
    real-engine test proves the flag-off path returns 503 **and** that the
    downstream service was never invoked (via a fake client's call log,
-   `testFeatureFlagOffReturns503AndNeverCallsRenderService`), and that the
-   happy path works once the flag is set to `'true'`
-   (`enableRendering()` helper).
+   `testRenderingOffIsA503AndNeverCallsTheRenderService`), and that the
+   happy path works once the flag is set to `'true'` (set in `setUp()`).
 
 Every other flag in this codebase — `mcp.enabled`, `auth.sso_enabled`,
 `plugins.store_enabled`, etc. — follows the same shape: **check the flag
@@ -170,7 +170,7 @@ also asserts the disabled path never reaches the expensive/external part.**
    - Add a real-engine test on the handler that gates the feature, proving:
      the disabled path returns the clean error **and never reaches the
      expensive/external call** (assert on a fake/stub's call log, like
-     `DocumentRenderApiHandlerRealEngineTest`), and the enabled path still
+     `DocumentPublishingApiHandlerRealEngineTest`), and the enabled path still
      works.
 6. **Nothing else.** No migration, no new table, no OpenAPI schema change
    (unless the feature's own request/response shape changes), no frontend
@@ -199,7 +199,7 @@ write; if you got a `200`, you were on the global surface.
 | `auth.registration_approval_required` | `true` | yes | When signup is open, whether a new membership lands `invited` (pending admin approval) instead of active | Lets an operator open signup while still gating activation |
 | `auth.sso_enabled` | `true` | yes | Master kill-switch for federated sign-in (`SsoAuthHandler::start/callback`), instance-wide, on top of per-tenant IdP configuration | Instantly disable SSO (e.g. an IdP incident) without deleting configured providers |
 | `plugins.store_enabled` | `true` | yes | Master kill-switch for the plugin marketplace — `POST /api/plugins/install-from-store` and `GET /api/plugins/store/catalog` (`InstallFromStoreApiHandler`) — on top of the `plugins.store_allowed_hosts` allowlist | A sovereign/compliance-sensitive deployment may want the whole external-network-calling integration off, without losing its configured trusted-host list |
-| `documents.render_enabled` | `false` | yes | Whether `POST /api/document-templates/{id}/render` calls the separate `whity_render` headless-Chromium Docker service (`DocumentRenderApiHandler`) | A whole extra Chromium-bearing container most sovereign deploys never run |
+| `documents.render_enabled` | `false` | yes | Whether the document routes (`POST /api/document-sources/{id}/render`, `/print-labels`, `POST /api/documents`) call the separate `whity_render` headless-Chromium Docker service (`FlowDocumentRenderer`) | A whole extra Chromium-bearing container most sovereign deploys never run |
 
 `plugins.store_enabled` and `plugins.store_allowed_hosts` work together, not
 redundantly: the allowlist is the **SSRF control** (which hosts, if any, may

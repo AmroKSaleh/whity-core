@@ -15,7 +15,7 @@ declare(strict_types=1);
  *
  * Four had accumulated: `register.spec.ts` (added 2026-07-06),
  * `verify-email.spec.ts` (07-08), `role-record-sections.spec.ts` (08-23) and
- * `document-create.spec.ts` (08-24). Eleven tests. `git log -S` over the
+ * `document-create.spec.ts` (08-24; wired with editor M4c). Eleven tests. `git log -S` over the
  * config shows not one commit has ever mentioned any of them. They had
  * executed zero times.
  *
@@ -60,7 +60,7 @@ declare(strict_types=1);
  */
 const TOLERATED = [
     // Each entry says what the spec covers, because "never wired" alone invites
-    // the assumption that it is dead. It is not: all four target pages exist and
+    // the assumption that it is dead. It is not: every target page exists and
     // every test reads as live coverage of a current surface. The first draft of
     // this list guessed that the two July files predated the identity cutover and
     // were probably stale — /register and /verify-email both still exist, so that
@@ -68,7 +68,6 @@ const TOLERATED = [
     'register.spec.ts' => 'WHIT-638: unwired since 2026-07-06. Covers /register — client-side validation and workspace creation. The page exists.',
     'verify-email.spec.ts' => 'WHIT-638: unwired since 2026-07-08. Covers /verify-email — invalid-token handling and an enumeration-safe resend. The page exists, and the enumeration property is security-relevant.',
     'role-record-sections.spec.ts' => 'WHIT-638: unwired since 2026-08-23. Covers the tenant-owned vs global base role editability asymmetry the instruction set documents (WC-110/WC-222).',
-    'document-create.spec.ts' => 'WHIT-638: unwired since 2026-08-24. Covers the organizer New-document picker being filled from real templates.',
 ];
 
 $root = dirname(__DIR__);

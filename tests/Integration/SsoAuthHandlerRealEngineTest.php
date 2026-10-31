@@ -614,10 +614,10 @@ final class SsoAuthHandlerRealEngineTest extends TestCase
         self::assertNotSame((string) $this->tenantId, (string) $rows[0]['tenant_id']);
         self::assertNotSame('0', (string) $rows[0]['tenant_id']);
         // The workspace went through the tenant provisioner, so it has the
-        // starters every tenant gets.
+        // editor starters every tenant gets (DocumentSourceStarterSeeder).
         self::assertGreaterThan(
             0,
-            (int) $this->col('SELECT COUNT(*) FROM document_templates WHERE tenant_id = ' . (int) $rows[0]['tenant_id'])
+            (int) $this->col('SELECT COUNT(*) FROM document_sources WHERE starter_key IS NOT NULL AND tenant_id = ' . (int) $rows[0]['tenant_id'])
         );
     }
 
