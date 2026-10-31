@@ -1,6 +1,6 @@
 # Whity Builder: a paid, no-code plugin builder (vision and design)
 
-Status: **design approved in principle; the owner answered questions 1-9 on 31 Oct 2026** (section 7). Questions 10 and 11 are open. Nothing here is built, and no implementation PR opens until the owner approves the plan. Written 31 Oct 2026 against `origin/develop` at `0b3e2d4e`.
+Status: **fully decided; the owner answered all 11 questions on 31 Oct 2026** (section 7). Nothing here is built, and no implementation starts until the owner says to build. Written 31 Oct 2026 against `origin/develop` at `0b3e2d4e`.
 
 The owner's ask: "creating plugins and changing how whity works now is technical and hard... i want a future with a paid whity-builder a no-code plugin building tool with mcp to let users and theirs ai customize their company logic on the fly".
 
@@ -274,7 +274,7 @@ The agent never publishes or rolls back by itself, matching the rule that agents
 
 - **The resulting plugin's own operations** (create an order, confirm it) are derived from its generic record routes like any plugin's, in toolset `<pluginKey>`, visibility `discoverable`, and reached through `search_operations` and `call_operation`, not listed directly. A manifest may mark **at most one** operation `always-on`; it must be read-only, and it is listed only after a tenant admin enables it. The validator refuses anything else (visibility values are `always-on`, `discoverable` and `off`). Each action carries an `agentPolicy` from the manifest (`allow`, `refuse`, `suggest-only` or `propose`, WHIT-753), so "only a person may confirm an order" is one line. An agent write with no declared policy defaults to `propose` once `agent_proposals` exists.
 - **Core's manifest-version routes** (validate, diff, preview, test, publish, activate; P7) derive into the core toolset `core.plugins`, `discoverable`, with an explicit `agentPolicy: propose` on publish and activate. Any MCP client can use them; this is the free, open side.
-- **The builder's own tools** (`builder_describe`, `builder_draft_change`, and the rest of the loop above) form the toolset `whity-builder`, marked `requiresEntitlement`. Search finds them like any other toolset, and only for a workspace that holds the builder entitlement. The split endpoint `/mcp/whity-builder` is optional and runs in the same search-and-call mode. Plugin splits never appear in the public AI catalogue. The handlers forward to the hosted service, which adds drafts, history, change operations and plain-language impact on top of core's routes. Proposed shape: a small closed connector plugin under the ADR 0014 plugin exception contributes the toolset; core itself gains no builder code (question 10).
+- **The builder's own tools** (`builder_describe`, `builder_draft_change`, and the rest of the loop above) form the toolset `whity-builder`, marked `requiresEntitlement`. Search finds them like any other toolset, and only for a workspace that holds the builder entitlement. The split endpoint `/mcp/whity-builder` is optional and runs in the same search-and-call mode. Plugin splits never appear in the public AI catalogue. The handlers forward to the hosted service, which adds drafts, history, change operations and plain-language impact on top of core's routes. Decided (owner, 31 Oct 2026): a small closed connector plugin under the ADR 0014 plugin exception, installed with the paid connection, contributes the toolset behind the builder entitlement and calls builder.whity.dev; core carries no builder code.
 
 Tool names keep to `[A-Za-z0-9_-]{1,64}`, as that design requires. That design (commit 554c9f26) also treats the tool catalogue as per tenant: budgets are evaluated for the caller's tenant, the catalogue signature includes a hash of that tenant's manifest-plugin tools so a publish notifies only that tenant's clients, and a manifest plugin's split endpoint `/mcp/<pluginKey>` exists only for its own tenant (404 elsewhere).
 
@@ -284,10 +284,11 @@ Tool names keep to `[A-Za-z0-9_-]{1,64}`, as that design requires. That design (
 - **A manifest may set a ceiling per action** (`agentPolicy`): `propose` means always Ask first even if the grant says Allowed; `refuse` means never for agents. Without one, the grant decides. Core's manifest `publish` and `activate` routes carry `propose` as a fixed ceiling.
 - **Ask first is enforced on the server.** The call becomes a stored proposal holding the operation, its arguments, the diff, the permissions used and the undo window. A person approves, edits or declines, and approval executes it for the granting person in the proposal's tenant.
 - **Every write records its actor** in the same four actor columns core uses: a person, an agent for a person, or the system. An automation run (2.5, WHIT-763) writes `actor_kind` system, or agent for person when an agent's call started it, with the person who caused the event recorded beside it.
-- **Undo.** Each write operation declares an undo window in the manifest (default proposed: 30 minutes for record changes, none for sent webhooks and issued documents, which are compensated, not undone). Undo shows on the toast and stays on the activity item for that window. Publishing a manifest version is undone by rollback (2.7), which has no time limit.
+- **Undo** (decided, owner, 31 Oct 2026). Each write operation has an undo window: **30 minutes by default for record changes**, and a manifest may set a different window per action. Sent webhooks and issued documents have **no undo** (they are compensated, not undone), and **an operation with no undo is always Ask first for agents**, whatever the grant says. Undo shows on the toast and stays on the activity item for the window. Publishing a manifest version is undone by rollback (2.7), which has no time limit.
 - **Building is always Ask first for agents.** `builder_propose_publish` and `builder_propose_rollback` can never be set to Allowed: a person approves every change to company logic.
+- **Grant defaults and proposals** (from the MCP design, decided): a new grant starts with reads Allowed and writes Ask first; a proposal expires after 7 days and only the granting person can approve it; no agent credentials are issued until proposals exist (agent_proposals, section 12 item 10).
 
-Anything here the register doesn't already decide (the default undo windows per kind of builder write) is proposed for the owner to confirm, not decided (question 11).
+These rules are decided; the register's 7.5a and 7.5c and the MCP tool-surface design (5.11) are their source.
 
 ### 2.7 Versions, drafts, preview and tests
 
@@ -436,7 +437,7 @@ Phases A and B are the minimum that delivers the owner's sentence: users and the
 - **Automation storms.** Mitigation: depth guard, caps, quotas, traces, and a per-plugin off switch.
 - **Lock-in perception.** Mitigation: core runs everything, export is always available, a lapsed subscription changes nothing at runtime.
 
-## 7. Owner's answers (31 Oct 2026) and open questions
+## 7. Owner's answers (31 Oct 2026)
 
 | # | Question | Answer |
 | --- | --- | --- |
@@ -449,8 +450,9 @@ Phases A and B are the minimum that delivers the owner's sentence: users and the
 | 7 | Name, repository, host | **Whity Builder** (no hyphen, like Whity ID, Whity Pay and Whity Render). Private repo `whity-org/whity-builder`, at builder.whity.dev. |
 | 8 | One manifest | Yes: M7's plugin manifest and block registry are this manifest; code plugins are encouraged to use `plugin.json`. |
 | 9 | Pricing meters | **All four**: per workspace, per published plugin, per AI usage, per seat, each switchable per plan (3.1). `[plan name]` and `[price]` stay open. |
+| 10 | How the `whity-builder` toolset reaches core's MCP | A small **closed connector plugin** (ADR 0014 exception), installed with the paid connection, registers the `whity-builder` toolset behind the builder entitlement and calls builder.whity.dev. Core carries no builder code. |
+| 11 | Default undo windows | **30 minutes** for record changes; none for sent webhooks and issued documents, which are therefore always Ask first for agents. Operations with no undo are always Ask first. A plugin may set a different window per action. |
 
-Still open:
+Related agent decisions from the MCP design apply here too: grants start with reads Allowed and writes Ask first, proposals expire after 7 days and only the granting person approves them, and no agent credentials are issued until proposals exist.
 
-10. **How the `whity-builder` toolset reaches core's MCP catalogue.** Proposed: a small closed connector plugin (ADR 0014 exception) that contributes the toolset and forwards calls to the hosted service, installed when a workspace connects the builder. The alternative is a generic "remote toolset" mechanism in core, which is new core surface.
-11. **Default undo windows** for builder writes (2.6): proposed 30 minutes for record changes, none for sent webhooks and issued documents.
+The design is fully decided. Implementation waits for the owner to say build.
