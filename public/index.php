@@ -3404,6 +3404,16 @@ $documentsHandler = new \Whity\Api\DocumentsApiHandler(
     // WHIT-742: `slot` in the body names the template through the workspace's bindings.
     $templateSlotRegistry
 );
+// The one issuing path (WHIT-742), registered for plugin code and automations
+// running in a request; BaseCommand registers the same for queue:work and
+// events:relay (WorkerDocumentIssuing). POST /api/documents uses the same class.
+\Whity\register_service(\Whity\Core\Document\Issuing\TemplateIssuing::class, new \Whity\Core\Document\Issuing\TemplateIssuing(
+    $documentIssuing,
+    $documentFieldRegistry,
+    $settingsService,
+    static fn (int $id, int $tenantId, int $profileId): ?array => $documentSourcesHandler->visibleRow($id, $tenantId, $profileId),
+    $templateSlotRegistry,
+));
 $documentQrHandler = new \Whity\Api\DocumentQrApiHandler(
     $documentRepository,
     $documentVisibilityPolicy,

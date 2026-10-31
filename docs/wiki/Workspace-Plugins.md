@@ -240,7 +240,24 @@ The list shows only the slots of switched-on plugins, each with its binding and,
 | `slot_unbound` | Nothing is bound to it |
 | `slot_misfit` | The bound template no longer fits; `reason` says why |
 
-Not yet: code plugins declaring slots through the SDK (`PluginDocumentsInterface`), the `Documents` service for plugins and automations, starters, and the `issue_document` automation step (WHIT-795).
+**From code and the worker.** Core issues through one service, `Whity\Core\Document\Issuing\TemplateIssuing`, registered in both entry points: `public/index.php`, and the CLI kernel that `queue:work` and `events:relay` run in. `issue(ActingAs, IssueInput)` takes a slot or a template id, the record (`CakeOrders.order:12`), values, a title, an origin key and `render`. It returns the issued document, or throws `DocumentIssueRefused` with a stable `reason`, the HTTP `status` the REST route answers with, and `details`, having written nothing:
+
+| `reason` | Why |
+| --- | --- |
+| `slot_unavailable`, `slot_unbound`, `slot_misfit` | As in the table above |
+| `template_not_found` | The template is gone, or the actor can't see it |
+| `template_unpublished` | It has no published version |
+| `record_not_found` | The record is gone, or the actor can't read it |
+| `missing_fields` | Required fields have no value (`details.missing`) |
+| `field_conflict` | A value would overwrite a field the record resolved |
+| `vetoed` | A `document.issuing` listener refused it |
+| `origin_key_conflict` | The origin key names a document from another template |
+| `render_unavailable`, `persist_unavailable` | `render: true` where this instance can't render or store |
+| `invalid_request` | A malformed slot, id, record, values or origin key |
+
+The same origin key returns the first document (`replayed: true`), so a retried automation step never issues twice. In the worker, the render service, storage and QR parts are built on the first issue, and each issue reads the workspace's plugins afresh.
+
+Not yet: code plugins declaring slots through the SDK (`PluginDocumentsInterface`) and the SDK's `Documents` facade, starters, the background-issuing allow-list, and the `issue_document` automation step (WHIT-795).
 
 ## Tables (migration 164)
 
