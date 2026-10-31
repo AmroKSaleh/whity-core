@@ -332,12 +332,13 @@ final class RecordTypeValidator
     }
 
     /**
-     * A valid expression whose `field` references are this record type's fields.
+     * A valid expression whose `field` references are this record type's
+     * fields. Shared with {@see AutomationValidator}.
      *
      * @param list<string> $fieldNames
      * @param list<string> $errors
      */
-    private static function checkExpression(mixed $expression, string $path, array $fieldNames, array &$errors): void
+    public static function checkExpression(mixed $expression, string $path, array $fieldNames, array &$errors): void
     {
         foreach (Expression::validate($expression)['errors'] as $error) {
             $errors[] = "{$path}: {$error}";

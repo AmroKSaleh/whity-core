@@ -84,10 +84,81 @@ A refusal is a `422` issue with the rule's English `message`, its Arabic `messag
 
 Not yet: MCP operations, undo, a per-workspace OpenAPI view, filters on fields, record limits as entitlements, the schema-change classifier, trash and restore, and record types as document field providers. Each is a follow-up task.
 
+## Automations (SDK 1.53, migration 175)
+
+A workspace plugin declares `automations`: what it does by itself when its records change. Each one has a label, a trigger, an optional `when` [expression](./Manifest-Expressions.md) over the record, and a list of steps.
+
+```json
+"automations": {
+  "confirmation": {
+    "label": { "en": "Tell the bakers", "ar": "إبلاغ الخبازين" },
+    "on": "order.moved.confirmed",
+    "when": { ">": [{ "field": "weight_kg" }, 0] },
+    "steps": [
+      { "set_fields": { "values": { "confirmed_on": { "today": [] } } } },
+      { "create_record": { "type": "task", "values": { "title": { "field": "customer" } }, "link": "order" } },
+      { "notify": { "role": "baker", "message": { "en": "New order for {{pickup_on}}", "ar": "طلب جديد ليوم {{pickup_on}}" } } }
+    ]
+  }
+}
+```
+
+**Triggers:**
+
+- `<type>.created`
+- `<type>.changed`
+- `<type>.changed.<field>` (that field's value changed)
+- `<type>.moved`
+- `<type>.moved.<state>` (moved into that state)
+
+**Steps:**
+
+| Step | What it does |
+| --- | --- |
+| `set_fields` | Writes fields of the triggering record. Values are expressions over it. |
+| `create_record` | Creates a record of this plugin. `link` names a field of the new record that points back. |
+| `move` | Makes one of the record's declared moves. |
+| `notify` | Notifies a role the manifest declares, or the person in a person field, with an English and Arabic message. `{{field}}` in the message is replaced by the field's value. Only people who can read the record type are told, up to 50 of them. |
+
+`issue_document`, `send_webhook`, `ask_approval`, `wait` and `call_action` are refused by name until the host runs them. Schedules, dates, forms, webhooks and buttons as triggers come later too.
+
+**How a run works:**
+
+- **Never in the request.** The write that matches a trigger records a queued run in `plugin_automation_runs` and enqueues `core.plugin_automation.run`, in the write's own transaction. The queue worker runs the steps.
+- **Who acts.** The plugin, for the person who caused the event. A step may use a permission only if the plugin declares it and that person still holds it at run time. Every run today has such a person. A run without one is refused its writes until scheduled triggers bring a policy for "the plugin acting alone".
+- **Notify is the plugin's to send.** A person whose write starts a run doesn't need any permission for the notify step. The message goes only to holders of the role who can read the record type.
+- **One write path.** Steps write through `RecordWriter`, the path the record routes use, so rules, the lifecycle and the audit trail all apply. Audit entries add `actor_kind: automation`, the automation, the run id and `on_behalf_of`.
+- **Exactly once per step.** Each step commits with its trace entry. Before a step runs, the trace is re-read under a row lock, so a retried run skips what is done, and two workers holding the same run take turns. A run whose automation was republished with different content since it was queued stops with `automation_changed`.
+- **No lost updates.** An update or a move reads the record locked in its transaction, so an automation and a person writing at the same moment can't overwrite each other unseen. The runs a write starts commit with it: if they can't be recorded, the write fails too.
+- **Failure.** A refused step fails the run with the reason in its trace, and the run isn't retried. An unexpected error rolls the step back and the queue retries it.
+
+**Guards:** a run stopped by a guard is recorded with its reason.
+
+- **Depth.** A write made by a run starts runs one level deeper, and a run deeper than 3 is stopped with `depth_limit`.
+- **Budget.** Every run in a chain counts against the chain's first run, at most 100 in all (`run_budget`). Depth alone would let one write multiply into thousands of runs before it stopped them.
+- **Fan-out.** At most 10 runs per write (`fan_out_limit`).
+- **One record per stop.** A guard records one stopped run per write, not one for each automation it held back.
+- **Sizes.** At most 50 automations per manifest and 20 steps per automation.
+- **Conditions.** A `when` that can't be evaluated is stopped as `condition_error`.
+
+**The off switch.** A plugin's automations can be switched off without switching off the plugin. While they are off, writes start no runs, and a run already queued stops with `automations_off`.
+
+| Route (served under `/api/v1`) | Permission |
+| --- | --- |
+| `GET /api/workspace-plugins/{plugin}/automation-runs?before=&limit=` | `plugins:read` |
+| `GET /api/workspace-plugins/{plugin}/automation-runs/{id}` | `plugins:read` |
+| `PUT /api/workspace-plugins/{plugin}/automations` `{"enabled": bool}` | `plugins:enable` to switch on, `plugins:disable` to switch off |
+
+`plugins:read` alone doesn't show a run. Its trace carries record values, so it is shown only to someone who can also read its record type and the types its steps create.
+
+A run reads as its trigger (event, record, depth, the person), its status (`queued`, `running`, `done`, `failed`, `stopped`) and reason, and its trace. The trace has one entry per step it reached: `step`, `kind`, `status`, `reason`, `input`, `outcome` and `at`.
+
+Not yet: per-workspace run quotas as entitlements, the four actor columns on audit rows, traces over MCP, undo windows on steps, and marking a run failed when its job is dead-lettered (it stays `running`). These are in WHIT-795 and WHIT-792.
+
 ## Tables (migration 164)
 
 - `plugin_manifest_versions`: immutable published versions, with hash, publisher, the person acted for, and the approver.
 - `tenant_plugins`: the live version for each plugin, and whether it is switched on.
 - `tenant_plugin_permissions`: the slugs each workspace's plugins declare.
 
-All three are tenant-owned, and every query binds `tenant_id`. `plugin_records` (migration 168) is tenant-owned too.
+All three are tenant-owned, and every query binds `tenant_id`. `plugin_records` (migration 168) and `plugin_automation_runs` (migration 175) are tenant-owned too. Migration 175 also adds `tenant_plugins.automations_enabled`.

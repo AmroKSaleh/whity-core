@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.52).
+ * SDK identity (v1.53).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -851,13 +851,23 @@ namespace Whity\Sdk;
  *
  * Additive. A descriptor that already broke a budget (a name with a dot or
  * over 64 characters, a description over 500 characters) is now refused at
- * load; no plugin in this repository does.)
+ * load; no plugin in this repository does.) ->
+ * 1.53 (AUTOMATIONS: `plugin.json` gains `automations`, what a workspace
+ * plugin does by itself when its records change. A trigger names a record
+ * type and an event (created, changed, a field changed, moved, moved into a
+ * state); an optional `when` expression; and steps from a closed catalogue
+ * (set fields, create a record, move, notify a role or a person field).
+ * Checked by {@see Manifest\AutomationValidator}, which refuses the designed
+ * steps this host doesn't run yet by name; {@see Manifest\PluginManifest::automations()}
+ * reads them (WHIT-763).
+ *
+ * Purely additive.)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.52.0';
+    public const VERSION = '1.53.0';
 
     /**
      * Static identity only — never instantiated.

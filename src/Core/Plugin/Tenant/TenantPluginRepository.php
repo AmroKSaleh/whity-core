@@ -6,6 +6,7 @@ namespace Whity\Core\Plugin\Tenant;
 
 use PDO;
 use Throwable;
+use Whity\Core\Db\DbBool;
 
 /**
  * Data access for a workspace's own plugins (Whity Builder, WHIT-760;
@@ -192,6 +193,39 @@ final class TenantPluginRepository
         $stmt->execute();
 
         return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Switch a workspace plugin's automations off or on (WHIT-763). The plugin
+     * keeps serving its screens and records either way.
+     */
+    public function setAutomationsEnabled(int $tenantId, string $pluginKey, bool $enabled): bool
+    {
+        $stmt = $this->db->prepare(
+            'UPDATE tenant_plugins SET automations_enabled = :enabled, updated_at = CURRENT_TIMESTAMP
+              WHERE tenant_id = :tenant_id AND plugin_key = :plugin_key'
+        );
+        $stmt->bindValue(':enabled', $enabled, PDO::PARAM_BOOL);
+        $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+        $stmt->bindValue(':plugin_key', $pluginKey);
+        $stmt->execute();
+
+        return $stmt->rowCount() > 0;
+    }
+
+    /** Whether a workspace plugin is switched on and its automations are too. */
+    public function automationsEnabled(int $tenantId, string $pluginKey): bool
+    {
+        $stmt = $this->db->prepare(
+            'SELECT enabled, automations_enabled FROM tenant_plugins
+              WHERE tenant_id = :tenant_id AND plugin_key = :plugin_key'
+        );
+        $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+        $stmt->bindValue(':plugin_key', $pluginKey);
+        $stmt->execute();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) && DbBool::of($row['enabled']) && DbBool::of($row['automations_enabled']);
     }
 
     /**

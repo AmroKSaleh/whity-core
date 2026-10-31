@@ -89,6 +89,7 @@ final class CoreTables
         'tenant_plugin_permissions' => '164_create_tenant_plugin_manifests.php',
         'plugin_records' => '168_create_plugin_records.php',
         'agent_proposals' => '176_create_agent_proposals.php',
+        'plugin_automation_runs' => '175_create_plugin_automation_runs.php',
         'document_sources' => '160_create_document_sources.php',
         'documents' => '108_create_documents.php',
         'domain_events' => '066_create_domain_events.php',

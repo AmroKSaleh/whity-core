@@ -43,6 +43,7 @@ final class ManifestValidator
     /** @var list<string> */
     public const TOP_LEVEL_KEYS = [
         'manifest', 'plugin', 'requires', 'permissions', 'roles', 'screens', 'tables', 'dataTypes', 'limits', 'records',
+        'automations',
     ];
 
     private const NAME_PATTERN = '/^[A-Za-z][A-Za-z0-9_]{0,63}$/';
@@ -96,6 +97,15 @@ final class ManifestValidator
         RecordTypeValidator::check(
             $manifest['records'] ?? null,
             $permissions,
+            static function (mixed $label, string $path, int $max, bool $required, array &$errs): void {
+                self::checkLabel($label, $path, $max, $required, $errs);
+            },
+            $errors,
+        );
+        AutomationValidator::check(
+            $manifest['automations'] ?? null,
+            $manifest['records'] ?? null,
+            is_array($manifest['roles'] ?? null) ? array_map('strval', array_keys($manifest['roles'])) : [],
             static function (mixed $label, string $path, int $max, bool $required, array &$errs): void {
                 self::checkLabel($label, $path, $max, $required, $errs);
             },

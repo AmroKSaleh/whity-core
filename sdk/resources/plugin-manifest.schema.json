@@ -372,6 +372,166 @@
           }
         }
       }
+    },
+    "automations": {
+      "description": "What a workspace plugin does by itself when its records change (SDK 1.53). Runs in the background, as the plugin acting for the person who caused the change.",
+      "type": "object",
+      "maxProperties": 50,
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]{0,63}$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "label",
+          "on",
+          "steps"
+        ],
+        "properties": {
+          "label": {
+            "$ref": "#/$defs/label"
+          },
+          "on": {
+            "type": "string",
+            "description": "<record type>.created, .changed, .changed.<field>, .moved or .moved.<state>.",
+            "pattern": "^[a-z][a-z0-9_]{0,63}\\.(created|changed|moved)(\\.[a-z][a-z0-9_]{0,63})?$"
+          },
+          "when": {
+            "description": "An expression over the triggering record; the automation runs only when it holds."
+          },
+          "steps": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "set_fields"
+                  ],
+                  "description": "Set fields on the triggering record, through its rules.",
+                  "properties": {
+                    "set_fields": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "values"
+                      ],
+                      "properties": {
+                        "values": {
+                          "type": "object",
+                          "description": "Field name to an expression over the triggering record.",
+                          "propertyNames": {
+                            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "create_record"
+                  ],
+                  "description": "Create a record of this plugin.",
+                  "properties": {
+                    "create_record": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "type"
+                      ],
+                      "properties": {
+                        "type": {
+                          "type": "string"
+                        },
+                        "values": {
+                          "type": "object",
+                          "description": "Field name to an expression over the triggering record.",
+                          "propertyNames": {
+                            "pattern": "^[a-z][a-z0-9_]{0,63}$"
+                          }
+                        },
+                        "link": {
+                          "type": "string",
+                          "description": "A field of the new record that links back to the triggering one."
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "move"
+                  ],
+                  "description": "Move the triggering record.",
+                  "properties": {
+                    "move": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "move"
+                      ],
+                      "properties": {
+                        "move": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "notify"
+                  ],
+                  "description": "Notify a role the manifest declares, or the person in a person field.",
+                  "properties": {
+                    "notify": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "message"
+                      ],
+                      "properties": {
+                        "role": {
+                          "type": "string"
+                        },
+                        "person": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "$ref": "#/$defs/label"
+                        }
+                      },
+                      "oneOf": [
+                        {
+                          "required": [
+                            "role"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "person"
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {
