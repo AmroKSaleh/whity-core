@@ -106,7 +106,9 @@ final class McpToolBudgetTest extends TestCase
             $alwaysOn[] = $byName[$name];
         }
 
-        self::assertCount(5, $alwaysOn);
+        // Four derived operations plus init_session (WHIT-794): five always-on.
+        self::assertCount(4, $alwaysOn);
+        $alwaysOn[] = DiscoveryTools::initDefinition();
         $bytes = strlen((string) json_encode($alwaysOn));
         self::assertLessThanOrEqual(self::MAX_ALWAYS_ON_BYTES, $bytes, "The always-on tools are {$bytes} bytes");
     }
@@ -117,7 +119,7 @@ final class McpToolBudgetTest extends TestCase
         self::assertLessThanOrEqual(self::MAX_DISCOVERY_BYTES, $discovery, "The discovery tools are {$discovery} bytes");
 
         $alwaysOn = array_values(array_filter($this->exposed, static fn (array $t): bool => CoreToolsets::isAlwaysOn((string) $t['name'])));
-        $total    = strlen((string) json_encode([...$alwaysOn, ...DiscoveryTools::definitions()]));
+        $total    = strlen((string) json_encode([DiscoveryTools::initDefinition(), ...$alwaysOn, ...DiscoveryTools::definitions()]));
         self::assertLessThanOrEqual(self::MAX_DEFAULT_LIST_BYTES, $total, "A bare connection's list is {$total} bytes");
     }
 }

@@ -70,14 +70,14 @@ final class ListModesTest extends TestCase
     public function testTheBareEndpointIsSearchAndCallAndFullKeepsTheOldList(): void
     {
         // WHIT-750 (owner decision 2): ToolSurfaceRequest::BARE_MODE.
-        self::assertSame(['get_api_me', 'search_operations', 'call_operation'], $this->names('/mcp'));
-        self::assertSame(['get_api_me', 'search_operations', 'call_operation'], $this->names('/mcp?tools=nonsense'));
-        self::assertSame(['get_api_me', 'get_api_forms', 'get_api_ous'], $this->names('/mcp?tools=full'));
+        self::assertSame(['init_session', 'search_operations', 'call_operation'], $this->names('/mcp'));
+        self::assertSame(['init_session', 'search_operations', 'call_operation'], $this->names('/mcp?tools=nonsense'));
+        self::assertSame(['get_api_forms', 'get_api_me', 'get_api_ous'], $this->names('/mcp?tools=full'));
     }
 
     public function testDefaultModeListsTheAlwaysOnToolsThenDiscovery(): void
     {
-        self::assertSame(['get_api_me', 'search_operations', 'call_operation'], $this->names('/mcp?tools=default'));
+        self::assertSame(['init_session', 'search_operations', 'call_operation'], $this->names('/mcp?tools=default'));
         self::assertSame(['search_operations', 'call_operation'], $this->names('/mcp?tools=discover'));
     }
 
@@ -85,7 +85,7 @@ final class ListModesTest extends TestCase
     {
         self::assertSame(['get_api_forms'], $this->names('/mcp?tools=full&toolsets=core.forms'));
         self::assertSame(['get_api_forms', 'get_api_ous'], $this->names('/mcp?tools=full&toolsets=core.forms,core.people'));
-        self::assertSame(['search_operations', 'call_operation'], $this->names('/mcp?toolsets=core.forms'));
+        self::assertSame(['init_session', 'search_operations', 'call_operation'], $this->names('/mcp?toolsets=core.forms'));
 
         $search = $this->rpc('/mcp?tools=discover&toolsets=core.forms', 'tools/call', ['name' => 'search_operations', 'arguments' => ['query' => 'api']]);
         self::assertSame(['get_api_forms'], array_column(json_decode($search['result']['content'][0]['text'], true)['matches'], 'operationId'));
@@ -99,7 +99,7 @@ final class ListModesTest extends TestCase
     {
         $result = $this->rpc('/mcp?tools=full', 'tools/list', ['_meta' => [ToolSurfaceRequest::META_KEY => ['mode' => 'full', 'toolsets' => ['core.forms']]]]);
 
-        self::assertSame(['get_api_me', 'get_api_forms', 'get_api_ous'], array_column($result['result']['tools'], 'name'));
+        self::assertSame(['get_api_forms', 'get_api_me', 'get_api_ous'], array_column($result['result']['tools'], 'name'));
     }
 
     public function testTheQueryIsParsedStrictly(): void

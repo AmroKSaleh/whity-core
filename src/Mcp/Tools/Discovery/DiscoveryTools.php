@@ -47,6 +47,9 @@ final class DiscoveryTools
     public const SEARCH = 'search_operations';
     public const CALL   = 'call_operation';
 
+    /** WHIT-794: the briefing a model reads first. Always-on in the search-and-call list. */
+    public const INIT   = 'init_session';
+
     /** WHIT-707 names, callable but unlisted for one minor release. */
     public const LEGACY_SEARCH   = 'search_tools';
     public const LEGACY_DESCRIBE = 'describe_tool';
@@ -71,6 +74,7 @@ final class DiscoveryTools
         private readonly ToolsListHandler $toolsList,
         private readonly ToolsCallHandler $toolsCall,
         private readonly TokenValidator $tokenValidator,
+        private readonly SessionBriefing $briefing = new SessionBriefing(),
     ) {}
 
     /** The tools/list handler for `?tools=discover`: the two tools only. */
@@ -99,7 +103,7 @@ final class DiscoveryTools
             /** @param array<string, mixed>|null $params */
             public function __invoke(?array $params, ?string $bearerToken): mixed
             {
-                return ['tools' => [...$this->discovery->alwaysOnTools($params, $bearerToken), ...DiscoveryTools::definitions()]];
+                return ['tools' => [DiscoveryTools::initDefinition(), ...$this->discovery->alwaysOnTools($params, $bearerToken), ...DiscoveryTools::definitions()]];
             }
         };
     }
@@ -145,6 +149,28 @@ final class DiscoveryTools
                 return $this->discovery->call($params, $bearerToken);
             }
         };
+    }
+
+    /**
+     * `init_session` (WHIT-794): first in the search-and-call list, read-only.
+     *
+     * @return array<string, mixed>
+     */
+    public static function initDefinition(): array
+    {
+        return [
+            'name'        => self::INIT,
+            'description' => 'Call this first. Says who you act as and in which workspace, which areas you can reach, '
+                . 'what needs a person\'s approval, how to work here and your limits. Read-only.',
+            'inputSchema' => [
+                'type'       => 'object',
+                'properties' => [
+                    'language' => ['type' => 'string', 'enum' => ['en', 'ar'], 'description' => 'Language of the briefing (default en).'],
+                ],
+                'additionalProperties' => false,
+            ],
+            'annotations' => ['title' => 'Start a session', 'readOnlyHint' => true, 'openWorldHint' => false],
+        ];
     }
 
     /**
@@ -208,6 +234,7 @@ final class DiscoveryTools
         $surface   = ToolSurfaceRequest::fromParams($params);
 
         return match ($name) {
+            self::INIT            => $this->initSession($arguments, $bearerToken, $surface),
             self::SEARCH          => $this->search($arguments, $bearerToken, $surface),
             self::CALL            => $this->callThrough(self::str($arguments, 'operationId'), $arguments, $bearerToken),
             // WHIT-707 names, for clients that remember them.
@@ -309,7 +336,7 @@ final class DiscoveryTools
         if ($operationId === '') {
             return self::error('call_operation needs the operationId to call; find one with search_operations.');
         }
-        if (in_array($operationId, [self::SEARCH, self::CALL, self::LEGACY_SEARCH, self::LEGACY_DESCRIBE, self::LEGACY_CALL], true)) {
+        if (in_array($operationId, [self::INIT, self::SEARCH, self::CALL, self::LEGACY_SEARCH, self::LEGACY_DESCRIBE, self::LEGACY_CALL], true)) {
             return self::error("{$operationId} is one of the search tools; call it directly.");
         }
         $toolArguments = is_array($arguments['arguments'] ?? null) ? $arguments['arguments'] : [];
@@ -328,6 +355,24 @@ final class DiscoveryTools
             }
             throw $e;
         }
+    }
+
+    /**
+     * WHIT-794: the session briefing, from exactly the tools this caller can
+     * reach within this request's selection.
+     *
+     * @param array<string, mixed> $arguments
+     * @return array<string, mixed>
+     */
+    private function initSession(array $arguments, ?string $bearerToken, ToolSurfaceRequest $surface): array
+    {
+        $principal = $bearerToken !== null ? $this->tokenValidator->validateBearerForMcp($bearerToken) : null;
+        if ($principal === null) {
+            throw new McpException(ErrorCode::UNAUTHENTICATED, 'Unauthenticated');
+        }
+        $language = self::str($arguments, 'language') === 'ar' ? 'ar' : 'en';
+
+        return self::result($this->briefing->brief($principal, $this->visibleTools($bearerToken, $surface), $language));
     }
 
     /** @return list<array<string, mixed>> */

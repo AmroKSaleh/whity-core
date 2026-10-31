@@ -4633,7 +4633,25 @@ $mcpOAuthVerifier = \Whity\Mcp\Auth\OAuth\OAuthAccessTokenVerifier::fromEnv(
 if ($mcpOAuthVerifier !== null) {
     $tokenValidator->acceptOAuthAccessTokens($mcpOAuthVerifier);
 }
-$mcpDiscovery = new DiscoveryTools($mcpToolsListHandler, $mcpToolsCallHandler, $tokenValidator);
+// WHIT-794: init_session's briefing names the caller and the workspace.
+$mcpBriefingPdo = $db->getPdo();
+$mcpDiscovery = new DiscoveryTools(
+    $mcpToolsListHandler,
+    $mcpToolsCallHandler,
+    $tokenValidator,
+    new \Whity\Mcp\Tools\Discovery\SessionBriefing(
+        static function (int $profileId, int $tenantId) use ($mcpBriefingPdo): array {
+            $name = $mcpBriefingPdo->prepare('SELECT display_name FROM profiles WHERE id = :id');
+            $name->execute([':id' => $profileId]);
+            $workspace = $mcpBriefingPdo->prepare('SELECT name FROM tenants WHERE id = :id');
+            $workspace->execute([':id' => $tenantId]);
+            $display = trim((string) $name->fetchColumn());
+            $tenant  = trim((string) $workspace->fetchColumn());
+            return ['name' => $display !== '' ? $display : null, 'workspace' => $tenant !== '' ? $tenant : null];
+        },
+        $mcpRateLimiter->limits(),
+    ),
+);
 $mcpTransportHandler = new McpTransportHandler(
     new Dispatcher($mcpHandlers, $tokenValidator, $mcpRateLimiter, $tenantMcpEnabled, $mcpListChangedNotifier, $mcpRecordTokenUse),
     enabled: $mcpServerEnabled,
@@ -4657,9 +4675,9 @@ $mcpTransportHandler = new McpTransportHandler(
     // the always-on set does, so it announces no list_changed either.
     defaultDispatcher: new Dispatcher(
         array_merge($mcpHandlers, [
-            'initialize' => new InitializeHandler(listChanged: false),
+            'initialize' => new InitializeHandler(listChanged: false, instructions: \Whity\Mcp\Tools\Discovery\SessionBriefing::instructions()),
             'server/discover' => new DiscoverHandler(
-                'A few everyday tools are listed directly. Everything else is reached through search_operations: search for what you need, search again with its operationId to see its arguments, then call_operation. Add ?tools=full to the URL for the full list.',
+                \Whity\Mcp\Tools\Discovery\SessionBriefing::instructions() . ' A few everyday tools are listed directly. Add ?tools=full to the URL for every operation as its own tool.',
             ),
             'tools/list' => $mcpDiscovery->defaultListHandler(),
             'tools/call' => $mcpDiscovery->callHandler(),
