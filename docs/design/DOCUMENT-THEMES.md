@@ -258,7 +258,9 @@ What plugins can't do in v1: add token keys, ship CSS, ship fonts. There is no f
 - Page view stays white in dark mode (E.11) and uses `accent`. The continuous sheet follows the app theme and uses `accentOnDark` on dark.
 - Changing the theme in document settings is a draft change: it bumps `draft_version` and is undoable.
 
-### 8.2 Whity Render
+### 8.2 The open renderer and Whity Render
+
+Both take the same payload (owner, Q9). The changes below are made in the open renderer in `render-service/`; Whity Render, the paid hosted upgrade, keeps the same contract.
 
 - The container gets the token fonts from `@whity-org/tokens` (Noto Sans, Noto Sans Arabic, Readex Pro 600 Latin and Arabic, Geist Mono) as `@font-face` with local file URLs, replacing the Debian font stack, and `flow.css` takes its sizes from the generated document tokens (phase 1). This is the fix for 6.5 and E.33 in print, and it's needed with or without themes.
 - The payload's `theme` grows from `{accent}` to the resolved theme's render keys: `accent`, `accentUse`, `titleFace`, `scale`, plus `logo` (data URI or an internal URL with the render secret) and letterhead lines through the existing letterhead block. `THEME_KEYS` becomes an enum-checked list; `muted`, `line` and `tint` are no longer accepted from callers (they become base tokens).
