@@ -208,6 +208,15 @@ final class AuthoredToolRegistry implements HostWiredService
             if ($tool['annotations'] !== null) {
                 $object['annotations'] = $tool['annotations'];
             }
+            // WHIT-747: the plugin's own toolset. The descriptor keys that let a
+            // plugin choose a sub-toolset, visibility and agent policy arrive with
+            // SDK 1.47 (WHIT-752); until then every authored tool is reached
+            // through search and leaves agents to the scope grant.
+            $object['_meta'] = ToolSurface::meta(
+                CoreToolsets::pluginToolsetIdForClass($tool['plugin']),
+                ToolSurface::VISIBILITY_DISCOVERABLE,
+                ToolSurface::AGENT_ALLOW,
+            );
             $out[] = $object;
         }
 
