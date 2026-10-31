@@ -29,7 +29,7 @@ The owner's problem: "too many mcp tools in one create a disaster... and not all
 | Authored by plugins | `sdk/src/PluginMcpToolsInterface.php` (SDK 1.43), `src/Mcp/Tools/AuthoredToolRegistry.php` | Descriptor: `name`, `description`, `inputSchema`, `handler`, plus `requiredPermission` / `requiredRole` / `open: true` (fail closed), `annotations` (1.45). The handler gets `McpToolContext` (tenant, profile; 1.46). Derived names win collisions. `suppressesDerivedMcpTools()` drops the plugin's own derived routes. |
 | Discovery mode | `src/Mcp/Tools/Discovery/DiscoveryTools.php` (WHIT-707) | `/mcp?tools=discover` lists three tools: `search_tools`, `describe_tool` and `call_tool`. Search and describe read the same filtered list as `tools/list`; `call_tool` goes through the real `ToolsCallHandler`. A real tool called by its own name still works. |
 
-Plugins have no per-tenant switch. A loaded plugin's routes, and so its tools, exist for every tenant; permissions alone decide who sees them.
+Plugins have no per-tenant switch today. A loaded plugin's routes, and so its tools, exist for every tenant; permissions alone decide who sees them. That changes with tenant-scoped manifest plugins from the Whity-Builder design (`WHITY-BUILDER.md`, WHIT-760): their derived tools join `tools/list` and `tools/call` per request, for one tenant only. This design therefore treats the catalogue as per tenant wherever it matters (§5.6, §5.10, §5.13).
 
 ### 2.2 How access applies, list versus call
 
@@ -118,7 +118,7 @@ A toolset has:
 | `requiresEntitlement` | Optional `EntitlementRegistry` key. Tenants without it don't see the toolset's tools, in any mode or split (§5.13). For paid slices such as Whity-Builder. |
 | `split` | Optional, plugins: whether a sub-toolset gets its own endpoint (§5.13). A root toolset always does. |
 
-**Core toolsets** are a curated map in a new `src/Mcp/Tools/CoreToolsets.php`, about 15 entries, merging the 40 OpenAPI tags into areas a person would name: `core.me`, `core.people` (users, roles, ous, groups, memberships), `core.documents` (documents, templates, blocks, collections, routes), `core.forms`, `core.convening`, `core.inbox` (inbox and notifications), `core.taxonomy` (tags, data types), `core.time`, `core.settings` (settings, branding, languages, translations), `core.billing` (plans, subscriptions, entitlements, licensing), `core.security` (auth providers, SSO, security, 2FA recovery, audit), `core.platform` (platform-ops, tenants, instance, plugins). A derived core tool takes its toolset from its route's first tag through that map. `RouteCatalogueCompletenessTest` gains a check that every exposed core route maps to a toolset.
+**Core toolsets** are a curated map in a new `src/Mcp/Tools/CoreToolsets.php`, about 15 entries, merging the 40 OpenAPI tags into areas a person would name: `core.me`, `core.people` (users, roles, ous, groups, memberships), `core.documents` (documents, templates, blocks, collections, routes), `core.forms`, `core.convening`, `core.inbox` (inbox and notifications), `core.taxonomy` (tags, data types), `core.time`, `core.settings` (settings, branding, languages, translations), `core.billing` (plans, subscriptions, entitlements, licensing), `core.security` (auth providers, SSO, security, 2FA recovery, audit), `core.plugins` (plugin management and the manifest-version routes from the Whity-Builder design, WHIT-764), `core.platform` (platform-ops, tenants, instance). A derived core tool takes its toolset from its route's first tag through that map. `RouteCatalogueCompletenessTest` gains a check that every exposed core route maps to a toolset.
 
 **Plugin toolsets.** A plugin's derived tools default to toolset `<pluginKey>`. Authored tools name one explicitly or get the same default.
 
@@ -185,6 +185,8 @@ No `enable_toolset` / `disable_toolset` tool (rejected, §7).
 | `tools=default` list | ≤ 30 tools and ≤ 24 KB encoded (about 6k tokens) | Core alone: CI test (`McpToolBudgetTest`, core default ≤ 20 tools). At runtime: if plugins push past the cap, plugin default-visibility tools are dropped from the list (they are still searchable), in plugin-key order, with one warning per worker. |
 | Toolset description | ≤ 160 characters | Refused at declaration. |
 | `tools=full` | no cap | Back-compat. The admin MCP page shows the estimated size per role. |
+
+All runtime budgets are evaluated per request, for the caller's tenant, so a tenant-scoped manifest plugin counts against its own tenant's default list and nobody else's.
 
 Operators can change the two list caps through config (`MCP_DEFAULT_LIST_MAX_TOOLS`, `MCP_DEFAULT_LIST_MAX_BYTES`). Plugins can't.
 
@@ -261,6 +263,7 @@ Clients that don't know the keys ignore them, as the spec requires. The admin pa
 
 - No new notifications. Mode and toolsets are per request, so changing them changes the URL or token, not a cached list.
 - `CatalogSignature` keeps hashing the unfiltered catalogue, now including each tool's toolset and visibility, so moving a tool between visibility levels announces a change to legacy clients.
+- Tenant-scoped manifest plugins (WHIT-760) make the catalogue differ per tenant. The signature becomes the instance catalogue's signature plus a hash of that tenant's manifest-plugin tools, so publishing a manifest in one tenant notifies only that tenant's clients.
 - **A side benefit:** a client in `tools=default` mode barely changes when a plugin is installed, because new plugin tools are `discoverable`. Its prompt cache stays warm.
 - `ttlMs` stays at 60 seconds.
 
@@ -324,6 +327,8 @@ A split's tools are its toolsets' tools, filtered by exposure, the token (scope 
 - `GET /api/mcp/splits` (authenticated): the splits the caller can reach in their tenant, with URL, title, description, tool count and estimated size. The connect wizard and admin page read it. This is the main path, because what a split contains depends on the caller.
 - `search_tools` with an empty query on `/mcp` (§5.5) includes each toolset's split URL, so an agent can tell a person "connect `/mcp/billing` for this".
 - `/.well-known/ai-catalog.json` lists the core splits' Server Cards and is public, as SEP-2127 intends. Plugin splits are listed there only when the operator turns it on (`MCP_PUBLIC_PLUGIN_SPLITS`), because a public list of installed plugins is information an operator may not want to publish. Server Cards never list tools (SEP-2127 excludes primitives), so nothing per-user leaks.
+
+A tenant-scoped manifest plugin's split exists only for its tenant and answers 404 for every other tenant.
 
 **How plugins register a split.** Through `PluginMcpToolsetsInterface` (§5.7). The root toolset is a split automatically; a sub-toolset adds `'split' => true`; either may add `'requiresEntitlement' => '<key>'`. A plugin has no route to register and no handler to write: the host serves the endpoint. Builder-made plugins (the Whity-Builder design) get their models' and actions' tools under their own plugin key, and a split, through the same path.
 
