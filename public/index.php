@@ -2057,12 +2057,20 @@ $tenantPluginVersionsHandler = new \Whity\Api\TenantPluginVersionsApiHandler(
         $auditLogger
     ),
     new \Whity\Core\Plugin\Tenant\ManifestImpact($tenantRecordRepository),
+    // The publish check: a version's own tests, through a writer with no
+    // audit and no automations, in a transaction that is always rolled back.
+    new \Whity\Core\Plugin\Tenant\ManifestTestRunner(
+        $db->getPdo(),
+        $tenantRecordRepository,
+        new \Whity\Core\Plugin\Tenant\RecordWriter($db->getPdo(), $tenantRecordRepository, $roleChecker)
+    ),
     $auditLogger
 );
 $router->register('GET', '/api/workspace-plugins', [$tenantPluginVersionsHandler, 'list'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_READ);
 $router->register('POST', '/api/workspace-plugins', [$tenantPluginVersionsHandler, 'publish'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_PUBLISH);
 $router->register('POST', '/api/workspace-plugins/validate', [$tenantPluginVersionsHandler, 'validate'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_BUILD);
 $router->register('POST', '/api/workspace-plugins/impact', [$tenantPluginVersionsHandler, 'impact'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_BUILD);
+$router->register('POST', '/api/workspace-plugins/test', [$tenantPluginVersionsHandler, 'test'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_BUILD);
 $router->register('GET', '/api/workspace-plugins/{plugin:[a-z][a-z0-9_]*}/versions', [$tenantPluginVersionsHandler, 'versions'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_READ);
 $router->register('GET', '/api/workspace-plugins/{plugin:[a-z][a-z0-9_]*}/versions/{id:\d+}', [$tenantPluginVersionsHandler, 'version'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_READ);
 $router->register('POST', '/api/workspace-plugins/{plugin:[a-z][a-z0-9_]*}/versions/{id:\d+}/activate', [$tenantPluginVersionsHandler, 'activate'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_PUBLISH);
