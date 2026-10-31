@@ -30,6 +30,8 @@ final class SourceDocumentPrinter
         private readonly SettingsService $settings,
         private readonly ?DocumentSourceFileStore $files = null,
         ?PrintLabels $printLabels = null,
+        // The tenant's logo, for the PDF's letterhead (6.2, WHIT-734).
+        private readonly ?LetterheadLogo $logo = null,
     ) {
         $this->printLabels = $printLabels ?? new PrintLabels();
     }
@@ -67,7 +69,7 @@ final class SourceDocumentPrinter
 
         return $printer->payload(
             ['title' => $doc['title'], 'lang' => $doc['lang'], 'page' => $page, 'blocks' => $doc['blocks']],
-            ($page['letterhead'] ?? true) === false ? null : $this->letterhead($tenantId),
+            ($page['letterhead'] ?? true) === false ? null : $this->printedLetterhead($tenantId),
             $recordLabel !== null && $recordLabel !== '' ? $recordLabel : null,
             $values['today'] ?? null,
             $this->accent($tenantId),
@@ -106,6 +108,18 @@ final class SourceDocumentPrinter
         }
 
         return ['name' => $name, 'lines' => $lines];
+    }
+
+    /**
+     * The letterhead as it prints: the same name and lines, plus the tenant's
+     * logo (6.2) when it has one Whity Render can draw. The editor shows the
+     * logo itself.
+     *
+     * @return array{name: string, lines: list<string>, logo: string|null}
+     */
+    public function printedLetterhead(int $tenantId): array
+    {
+        return $this->letterhead($tenantId) + ['logo' => $this->logo?->dataUri($tenantId)];
     }
 
     private function imageData(int $tenantId, int $sourceId, string $fileId): ?string

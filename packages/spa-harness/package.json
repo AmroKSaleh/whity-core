@@ -13,7 +13,7 @@
     "@whity-org/features": "file:../features",
     "@whity-org/tokens": "file:../tokens",
     "@whity-org/ui": "file:../ui",
-    "@tabler/icons-react": "^3.49.0",
+    "@tabler/icons-react": "^3.50.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },

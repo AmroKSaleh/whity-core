@@ -20,6 +20,10 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 - **`Whity\Sdk\Render\DocumentRenderer::issue()` (plugin SDK 1.47).** Use `Documents::issue()`, which issues from a template the workspace publishes, once it ships. Until then `issue()` keeps working through the issuing service and takes an optional origin key. It is removed in SDK 2.0.0.
 
+### Fixed
+
+- **Printed documents now carry the tenant logo in the letterhead.** The editor's page view showed the logo, but the PDF from Whity Render printed the name alone (stage 6, decision 6.2: logo, address and tax number at the start side). The wide logo is used, else the square one. A logo Whity Render can't draw, or one over its 512 KiB image limit, is left out and the name prints alone, so the render never fails because of it.
+
 ## [0.2.19] - 2026-10-29
 
 ### Fixed

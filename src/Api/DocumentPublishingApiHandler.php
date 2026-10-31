@@ -16,6 +16,7 @@ use Whity\Core\Document\Embed\DocumentEmbedRegistry;
 use Whity\Core\Document\Fields\DocumentFieldRegistry;
 use Whity\Core\Document\Print\DocumentPublishCheck;
 use Whity\Core\Document\Print\LabelCsv;
+use Whity\Core\Document\Print\LetterheadLogo;
 use Whity\Core\Document\Print\PrintLabels;
 use Whity\Core\Document\Print\SourceDocumentPrinter;
 use Whity\Core\Document\Qr\DocumentQrService;
@@ -77,10 +78,11 @@ final class DocumentPublishingApiHandler
         ?DocumentSourceFileStore $files = null,
         ?PrintLabels $printLabels = null,
         private readonly ?MeterService $meters = null,
+        ?LetterheadLogo $logo = null,
         ?DocumentQrService $qr = null,
         ?DocumentIssuing $issuing = null,
     ) {
-        $this->print = new SourceDocumentPrinter($fields, $embeds, $settings, $files, $printLabels);
+        $this->print = new SourceDocumentPrinter($fields, $embeds, $settings, $files, $printLabels, $logo);
         $this->issuing = $issuing ?? ($issuer !== null
             ? new DocumentIssuing($this->print, $versions, $issuer, $settings, $renderer, $qr, $meters)
             : null);
@@ -239,7 +241,7 @@ final class DocumentPublishingApiHandler
      * The PDF of the published version (or the draft, for a preview) filled
      * for one record. Field values, records and charts are read now, for the
      * caller, and frozen into the PDF (E.16). With `persist`, the published
-     * version is issued as a document (IssuingDocumentIssuing), as
+     * version is issued as a document (Issuing\DocumentIssuing), as
      * `POST /api/documents` does: 201 with the document and what happened to
      * its PDF.
      *

@@ -26,6 +26,7 @@ use Whity\Core\Document\Fields\CompanyFieldProvider;
 use Whity\Core\Document\Fields\DocumentFieldRegistry;
 use Whity\Core\Document\Fields\IssuedDocumentFieldProvider;
 use Whity\Core\Document\Fields\TodayFieldProvider;
+use Whity\Core\Document\Print\LetterheadLogo;
 use Whity\Core\Document\Render\FlowDocumentRenderer;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
 use Whity\Core\Ou\OuReachResolver;
@@ -41,6 +42,7 @@ use Whity\Core\Tenant\TenantContext;
 use Whity\Database\Database;
 use Whity\Sdk\Http\Response;
 use Whity\Storage\LocalStorageDriver;
+use Whity\Storage\StorageKey;
 
 /**
  * Real-engine tests for {@see DocumentPublishingApiHandler} (editor M4):
@@ -116,6 +118,7 @@ final class DocumentPublishingApiHandlerRealEngineTest extends TestCase
             new FlowDocumentRenderer($this->settings, $this->render),
             new DocumentIssuer($this->pdo, $documents, new DocumentArtifactRepository($this->pdo), new DocumentArtifactStore(new LocalStorageDriver($this->storageRoot))),
             $files,
+            logo: new LetterheadLogo($this->settings, new LocalStorageDriver($this->storageRoot)),
         );
     }
 
@@ -314,6 +317,7 @@ final class DocumentPublishingApiHandlerRealEngineTest extends TestCase
         self::assertSame('letterhead', $payload['content'][0]['type']);
         self::assertSame('Example Bakery', $payload['content'][0]['start']['name']);
         self::assertSame(['0123456'], $payload['content'][0]['start']['lines']);
+        self::assertArrayNotHasKey('image', $payload['content'][0]['start'], 'no logo uploaded, so the name prints alone');
         self::assertSame(2, $payload['header']['fromPage'], 'the running header starts on page 2');
         self::assertSame('Dear Payment reminder, from Example Bakery', $payload['content'][1]['text'], 'fields are values, never chips');
         self::assertSame(['type' => 'barcode', 'symbology' => 'code128', 'value' => (string) $doc, 'showText' => true], $payload['content'][2]);
@@ -325,7 +329,28 @@ final class DocumentPublishingApiHandlerRealEngineTest extends TestCase
         self::assertSame(422, $this->renderPdf(self::OWNER, $id, ['record' => 'document:' . $doc, 'draft' => true, 'persist' => true])->getStatusCode());
     }
 
-    public function testARequiredFieldWithNoValueRefusesTheRender(): void
+    public function testTheTenantLogoPrintsOnTheLetterhead(): void
+    {
+        // Stage 6 (6.2): the logo sits at the start side of the letterhead, in the PDF as in the page view.
+        $this->settings->setTenant(self::TENANT, SettingsRegistry::BILLING_SELLER_NAME, 'Example Bakery');
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="10"/>';
+        $key = StorageKey::build(self::TENANT, 'branding', 'logo_wide-0a1b2c3d.svg');
+        (new LocalStorageDriver($this->storageRoot))->put($key, $svg);
+        $this->settings->setTenantAsset(self::TENANT, SettingsRegistry::BRANDING_LOGO_WIDE, $key);
+        $id = $this->template(self::OWNER, [$this->para('Hello')]);
+        $doc = $this->issue(self::OWNER, 'Payment reminder');
+        $this->publish(self::OWNER, $id, '"1"');
+
+        $res = $this->renderPdf(self::OWNER, $id, ['record' => 'document:' . $doc]);
+        self::assertSame(200, $res->getStatusCode(), $res->getBody());
+
+        $start = $this->render->flowCalls[0]['content'][0]['start'];
+        self::assertSame('Example Bakery', $start['name']);
+        self::assertSame('data:image/svg+xml;base64,' . base64_encode($svg), $start['image']['src']);
+        self::assertSame('Example Bakery', $start['image']['alt']);
+    }
+
+        public function testARequiredFieldWithNoValueRefusesTheRender(): void
     {
         $id = $this->template(self::OWNER, [$this->para('Tax no. ', $this->field('company.tax_number'))]);
         $this->publish(self::OWNER, $id, '"1"');

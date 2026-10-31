@@ -3056,12 +3056,15 @@ $documentQrService = new \Whity\Core\Document\Qr\DocumentQrService(
 // issuer serve the editor's own render route, POST /api/documents and a
 // correction, so a template prints the same way from all three, with the
 // verification code (above) minted against the document's id.
+// The tenant's logo for the printed letterhead (6.2, WHIT-734).
+$letterheadLogo = new \Whity\Core\Document\Print\LetterheadLogo($settingsService, $storageDriver);
 $sourceDocumentPrinter = new \Whity\Core\Document\Print\SourceDocumentPrinter(
     $documentFieldRegistry,
     $documentEmbedRegistry,
     $settingsService,
     new \Whity\Core\Document\DocumentSourceFileStore($storageDriver, $db->getPdo()),
     new \Whity\Core\Document\Print\PrintLabels($serverLabels),
+    $letterheadLogo,
 );
 $documentIssuing = new \Whity\Core\Document\Issuing\DocumentIssuing(
     $sourceDocumentPrinter,
@@ -3088,6 +3091,7 @@ $documentPublishingHandler = new \Whity\Api\DocumentPublishingApiHandler(
     new \Whity\Core\Document\DocumentSourceFileStore($storageDriver, $db->getPdo()),
     new \Whity\Core\Document\Print\PrintLabels($serverLabels),
     $documentRenderMeters,
+    $letterheadLogo,
     $documentQrService,
     $documentIssuing,
 );
