@@ -70,6 +70,8 @@
         "blockEditor.blockerSuggestion": "اقتراح واحد مفتوح",
         "blockEditor.blockerSuggestions": "اقتراحات مفتوحة: {n}",
         "blockEditor.blockerSuggestionsHint": "اقبلها أو ارفضها أولًا.",
+        "blockEditor.blockerTheme": "يستخدم هذا المستند نسقًا غير موجود في مساحة العمل: {ref}",
+        "blockEditor.blockerThemeHint": "اختر نسقًا آخر أو استعِده.",
         "blockEditor.bold": "غامق",
         "blockEditor.calloutImportant": "مهم",
         "blockEditor.calloutNote": "ملاحظة",

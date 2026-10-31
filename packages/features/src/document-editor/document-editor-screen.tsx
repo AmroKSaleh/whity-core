@@ -4,8 +4,9 @@ import * as React from 'react';
 
 import { Button } from '@whity-org/ui/button';
 import { DocEditor, type SaveState } from '@whity-org/ui/editor/doc-editor';
-import type { DocumentKind, EditorMode, WhityDocument } from '@whity-org/ui/editor/contract';
+import type { DocumentKind, EditorMode, ResolvedDocumentTheme, WhityDocument } from '@whity-org/ui/editor/contract';
 import type { FieldDef } from '@whity-org/ui/editor/fields';
+import { themedLetterhead } from '@whity-org/ui/editor/page-view';
 import type { EditorServices, FieldPreview } from '@whity-org/ui/editor/services';
 import { useTranslation } from '../i18n';
 import { useEditorLabels } from './editor-labels';
@@ -86,6 +87,8 @@ export function DocumentEditorScreen({
   const [loadCount, setLoadCount] = React.useState(0);
   const [services, setServices] = React.useState<EditorServices | undefined>(undefined);
   const [template, setTemplate] = React.useState<TemplateSetup | null>(null);
+  // E.44: the draft's theme (or, issuing from a template, the published version's frozen one).
+  const [theme, setTheme] = React.useState<ResolvedDocumentTheme | null>(null);
   const [preview, setPreview] = React.useState<FieldPreview | null>(null);
   const [previewRecord, setPreviewRecord] = React.useState<string | null>(null);
   const [pickerFor, setPickerFor] = React.useState<'preview' | 'pdf' | null>(null);
@@ -118,16 +121,20 @@ export function DocumentEditorScreen({
       .load(id)
       .then(async (loaded) => {
         let document = loaded.document;
+        let resolved = loaded.resolvedTheme ?? null;
         // Issuing from a template issues its published version, so that is what shows.
         if (issuingMode && document.kind === 'template' && adapter.loadVersion) {
           if (document.publishedVersion == null) {
             if (live) setNotPublished(true);
           } else {
-            const content = await adapter.loadVersion(id, document.publishedVersion);
+            const { resolvedTheme: frozen, ...content } = await adapter.loadVersion(id, document.publishedVersion);
             document = { ...document, ...content, status: 'published' };
+            // It prints with the theme it was published with (E.44).
+            if (frozen) resolved = frozen;
           }
         }
         if (!live) return;
+        setTheme(resolved);
         version.current = loaded.version;
         conflictRef.current = false;
         setConflict(false);
@@ -183,6 +190,8 @@ export function DocumentEditorScreen({
       retryDelay.current = RETRY_FIRST_MS;
       if (result.ok) {
         version.current = result.version;
+        // The saved row's theme: a change of theme or of the workspace shows at once.
+        if (result.resolvedTheme) setTheme(result.resolvedTheme);
         setSave({ state: 'saved', at: time(new Date()) });
       } else {
         conflictRef.current = true;
@@ -342,6 +351,12 @@ export function DocumentEditorScreen({
     return { reference, date: all.find((f) => f.path === 'today') };
   }, [template, recordType]);
 
+  // The letterhead the theme asks for: its lines in its order, and its logo (E.44, stage 6.2).
+  const letterhead = React.useMemo(
+    () => (template ? themedLetterhead(template.letterhead, theme?.tokens, template.letterheadParts, template.logos) : undefined),
+    [template, theme]
+  );
+
   if (loadError) {
     return (
       <div role="alert" className="grid h-full place-items-center p-6 text-center">
@@ -420,11 +435,11 @@ export function DocumentEditorScreen({
           onCommandPalette={onCommandPalette}
           labels={labels}
           services={services}
+          theme={theme?.tokens ?? null}
           {...(printed && template
             ? {
                 fields: template.fields,
-                letterhead: template.letterhead,
-                accent: template.accent,
+                letterhead,
                 pageFields,
                 preview: shownPreview,
                 // Issuing a letter: edit with the record's values showing (M4c).

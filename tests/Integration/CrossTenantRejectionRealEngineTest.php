@@ -2548,6 +2548,37 @@ final class CrossTenantRejectionRealEngineTest extends TestCase
         self::assertSame(['cakeorders:read'], $hiddenFromB, "a slug B's own plugins also declare is not hidden from B");
     }
 
+    // ==================== document themes (editor M4d) ====================
+    //
+    // document_themes (migration 170): a workspace's own document themes, by
+    // key. Every read and write binds tenant_id, so the same key in two
+    // workspaces names two unrelated themes.
+
+    public function testDocumentThemesAreTenantScoped(): void
+    {
+        $repo = new \Whity\Core\Document\Theme\DocumentThemeRepository($this->pdo);
+        $repo->create(self::TENANT_A, 'house', 'House A', 'الدار أ', null, ['accent' => '#b74c05'], 0);
+        $repo->create(self::TENANT_B, 'house', 'House B', 'الدار ب', null, ['accent' => '#1f6f43'], 0);
+
+        self::assertSame(['House A'], array_column($repo->list(self::TENANT_A), 'name'));
+        self::assertSame('#1f6f43', $repo->find(self::TENANT_B, 'house')['tokens']['accent'] ?? null);
+        self::assertSame([], $repo->usage(self::TENANT_B, 'tenant.house')['drafts']);
+    }
+
+    public function testTenantCannotChangeArchiveOrDeleteForeignDocumentTheme(): void
+    {
+        $repo = new \Whity\Core\Document\Theme\DocumentThemeRepository($this->pdo);
+        $repo->create(self::TENANT_A, 'house', 'House A', 'الدار أ', null, ['accent' => '#b74c05'], 0);
+
+        self::assertNull($repo->update(self::TENANT_B, 'house', 1, ['name' => 'Taken'], 0), 'a foreign update touches zero rows');
+        self::assertNull($repo->setArchived(self::TENANT_B, 'house', true, 0));
+        self::assertFalse($repo->delete(self::TENANT_B, 'house'));
+        $a = $repo->find(self::TENANT_A, 'house');
+        self::assertNotNull($a);
+        self::assertSame('House A', $a['name']);
+        self::assertNull($a['archived_at'], "Tenant A's theme is untouched");
+    }
+
     // ==================== invitations (WHIT-417) ====================
     //
     // An invitation belongs to the tenant that issued it and carries that

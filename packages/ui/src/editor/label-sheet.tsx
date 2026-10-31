@@ -8,8 +8,9 @@ import { Input } from "../input"
 import { Popover, PopoverContent, PopoverTrigger } from "../popover"
 import { ToggleGroup } from "../toggle-group"
 import { cn } from "../utils"
-import type { LabelGrid } from "./contract"
+import type { LabelGrid, ResolvedThemeTokens } from "./contract"
 import { fill, type EditorLabels } from "./labels"
+import { themeStyle } from "./page-view"
 
 /** 96 dpi, as the page view (EditorPageView). */
 const PX_PER_MM = 96 / 25.4
@@ -75,7 +76,7 @@ export function LabelSheetView({
   grid,
   sheet,
   zoom,
-  accent,
+  theme,
   labels,
   onOverflow,
   children,
@@ -84,7 +85,8 @@ export function LabelSheetView({
   grid: LabelGrid
   sheet: SheetSize
   zoom: number
-  accent?: string | null
+  /** The document's resolved theme: the print colour, and the headings with `title-and-headings`. */
+  theme?: ResolvedThemeTokens | null
   labels: EditorLabels
   onOverflow?: (overflow: boolean) => void
   children: React.ReactNode
@@ -139,11 +141,10 @@ export function LabelSheetView({
     height: grid.size.heightMm * PX_PER_MM,
     padding: LABEL_PAD,
   })
-  const accentStyle = accent ? ({ "--doc-accent": accent } as React.CSSProperties) : undefined
 
   return (
     <div className="wy-pv" style={{ zoom, width: w } as React.CSSProperties}>
-      <div className="wy-pv__stack wy-ls light" style={{ ...accentStyle, width: w, height: h }}>
+      <div className="wy-pv__stack wy-ls light" data-accent-use={theme?.accentUse} style={{ ...themeStyle(theme), width: w, height: h }}>
         <div className="wy-pv__page" style={{ top: 0, width: w, height: h }} aria-hidden="true" />
         {cells.map((_, i) =>
           i === 0 ? (

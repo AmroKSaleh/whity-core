@@ -7,6 +7,7 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view"
 
 import { TenantLogo } from "../tenant-logo"
 import { cn } from "../utils"
+import type { LetterheadLine, ResolvedThemeTokens } from "./contract"
 import { fill, type EditorLabels } from "./labels"
 
 /**
@@ -20,9 +21,81 @@ const RUN_HEADER = 44
 export interface Letterhead {
   /** The tenant's logo, framed; without one, its initials on the print colour. */
   logo?: string | null
+  /**
+   * E.44: how the logo shows. `square` (the default) frames it, `wide` shows a
+   * wordmark unframed, `none` prints the name without a mark.
+   */
+  logoShape?: "square" | "wide" | "none"
   name: string
   /** Address, tax number, phone and email lines at the start side. */
   lines: string[]
+}
+
+/** Every workspace line a theme can put in the letterhead, by its theme name; null when not set. */
+export type LetterheadParts = Record<LetterheadLine, string | null>
+
+/** The workspace's uploaded logos (branding); null when one isn't uploaded. */
+export interface BrandLogos {
+  wide: string | null
+  square: string | null
+}
+
+/**
+ * The letterhead a theme asks for (E.44, stage 6.2): the lines its
+ * `letterhead.lines` names, in that order, from `parts`; and the logo its
+ * `letterhead.logo` chooses, falling back to the other shape when that one
+ * isn't uploaded (and to the initials when neither is). Without a theme, or
+ * without the parts, the letterhead stays as `base` has it.
+ */
+export function themedLetterhead(
+  base: Letterhead,
+  theme: Pick<ResolvedThemeTokens, "letterhead"> | null | undefined,
+  parts?: LetterheadParts | null,
+  logos?: BrandLogos | null
+): Letterhead {
+  if (!theme) return base
+  const { logo, lines } = theme.letterhead
+  const picked =
+    logo === "none"
+      ? { logo: null, logoShape: "none" as const }
+      : logo === "wide"
+        ? logos?.wide
+          ? { logo: logos.wide, logoShape: "wide" as const }
+          : { logo: logos?.square ?? null, logoShape: "square" as const }
+        : logos?.square
+          ? { logo: logos.square, logoShape: "square" as const }
+          : logos?.wide
+            ? { logo: logos.wide, logoShape: "wide" as const }
+            : { logo: null, logoShape: "square" as const }
+  return {
+    ...base,
+    ...(logos || logo === "none" ? picked : {}),
+    lines: parts ? lines.map((key) => parts[key]).filter((line): line is string => !!line && line.trim() !== "") : base.lines,
+  }
+}
+
+/**
+ * The theme's colours as the `--doc-*` variables the page view and sheet read
+ * (E.11): `--doc-accent` on paper, `--doc-accent-on-dark` for the continuous
+ * sheet's title in dark mode.
+ */
+export function themeStyle(theme: ResolvedThemeTokens | null | undefined): React.CSSProperties | undefined {
+  if (!theme) return undefined
+  return { "--doc-accent": theme.accent, "--doc-accent-on-dark": theme.accentOnDark } as React.CSSProperties
+}
+
+/** The letterhead's mark at `size`, as the theme's logo shape asks. */
+function LetterheadMark({ letterhead, size, showName }: { letterhead: Letterhead; size: number; showName?: boolean }) {
+  if (letterhead.logoShape === "none") return showName ? <span className="text-sm font-semibold text-foreground">{letterhead.name}</span> : <span />
+  return (
+    <TenantLogo
+      name={letterhead.name}
+      src={letterhead.logo}
+      size={size}
+      showName={showName}
+      shape={letterhead.logoShape === "wide" ? "wide" : "square"}
+    />
+  )
 }
 
 /* ------------------------------------------------------- Page breaks */
@@ -183,7 +256,7 @@ function PageView({
   reference,
   date,
   footerRef,
-  accent,
+  theme,
   zoom,
   showMargins = false,
   labels,
@@ -198,8 +271,8 @@ function PageView({
   date?: React.ReactNode
   /** Beside "Page x of y" in the footer: the document's reference. */
   footerRef?: string
-  /** The tenant's print colour, `--doc-accent`. */
-  accent?: string | null
+  /** The document's resolved theme: the print colour and where it's used (E.44, E.45). */
+  theme?: ResolvedThemeTokens | null
   /** 0.5 to 1.25. */
   zoom: number
   showMargins?: boolean
@@ -211,10 +284,13 @@ function PageView({
   const pages = usePagination(editor, column, true)
   React.useEffect(() => onPages?.(pages), [pages, onPages])
 
-  const accentStyle = accent ? ({ "--doc-accent": accent } as React.CSSProperties) : undefined
   return (
     <div className="wy-pv" style={{ zoom } as React.CSSProperties}>
-      <div className="wy-pv__stack light" style={{ ...accentStyle, height: pages * PAGE.height + (pages - 1) * PAGE.gap }}>
+      <div
+        className="wy-pv__stack light"
+        data-accent-use={theme?.accentUse}
+        style={{ ...themeStyle(theme), height: pages * PAGE.height + (pages - 1) * PAGE.gap }}
+      >
         {Array.from({ length: pages }, (_, i) => (
           <div
             key={i}
@@ -225,7 +301,7 @@ function PageView({
             <div className="wy-pv__margin" />
             {i > 0 && (
               <div className="wy-pv__run">
-                {letterhead ? <TenantLogo name={letterhead.name} src={letterhead.logo} size={20} showName={false} /> : <span />}
+                {letterhead ? <LetterheadMark letterhead={letterhead} size={20} showName={false} /> : <span />}
                 <span>{fill(labels.pageContinued, { title: title || labels.untitled })}</span>
               </div>
             )}
@@ -243,7 +319,7 @@ function PageView({
             <div className="wy-pv__lh">
               {letterhead ? (
                 <div className="grid content-start gap-1.5">
-                  <TenantLogo name={letterhead.name} src={letterhead.logo} size={32} />
+                  <LetterheadMark letterhead={letterhead} size={32} showName />
                   {letterhead.lines.map((line, i) => (
                     <span key={i} dir="auto">
                       {line}

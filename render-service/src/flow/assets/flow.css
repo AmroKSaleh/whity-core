@@ -811,6 +811,17 @@ body {
   color: var(--flow-ink);
 }
 
+/*
+ * E.45: with the theme's accentUse = title-and-headings, the document's own
+ * headings take the print colour too. The editor's H1-H3 print as levels 2-4
+ * (level 1 is the title style), so those are the ones coloured.
+ */
+.flow-accent-headings .flow-heading-2,
+.flow-accent-headings .flow-heading-3,
+.flow-accent-headings .flow-heading-4 {
+  color: var(--flow-title, var(--flow-ink));
+}
+
 /* The document's title, in the tenant's print colour (stage 6). */
 .flow-letterhead-title {
   font-family: var(--flow-display);

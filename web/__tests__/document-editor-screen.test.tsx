@@ -7,7 +7,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 
 import { DocumentEditorScreen, type DocumentEditorAdapter, type SaveResult } from '@whity-org/features/document-editor';
 import { SAMPLE_DOCUMENT } from '@whity-org/ui/editor/sample';
-import type { WhityDocument } from '@whity-org/ui/editor/contract';
+import type { ResolvedDocumentTheme, WhityDocument } from '@whity-org/ui/editor/contract';
 
 let lastOnChange: ((doc: WhityDocument) => void) | null = null;
 let lastServices: unknown = 'not rendered';
@@ -142,7 +142,6 @@ describe('templates (M4, the Document designer)', () => {
       { group: 'Today', items: [{ path: 'today', label: 'Today' }] },
     ],
     letterhead: { name: 'Example Bakery', lines: [] },
-    accent: null,
   };
 
   function templateAdapter() {
@@ -180,6 +179,79 @@ describe('templates (M4, the Document designer)', () => {
     expect((lastProps.publish as { publishedVersion: number }).publishedVersion).toBe(3);
   });
 
+  describe('the document theme (M4d, E.44)', () => {
+    const THEME: ResolvedDocumentTheme = {
+      ref: 'tenant.workspace',
+      version: 2,
+      hash: 'h1',
+      tokens: { accent: '#B74C05', accentOnDark: '#F0A070', accentUse: 'title-and-headings', letterhead: { logo: 'wide', lines: ['phone', 'address', 'email'] } },
+      sources: {},
+      adjustments: [],
+    };
+    const THEMED_SETUP = {
+      ...SETUP,
+      letterhead: { name: 'Example Bakery', lines: ['Mecca Street 112, Amman', 'Tax no. 0123456'] },
+      letterheadParts: { address: 'Mecca Street 112, Amman', taxId: 'Tax no. 0123456', phone: '+962 6 555 0101', email: null },
+      logos: { wide: null, square: '/branding/square.png' },
+    };
+
+    it('hands the editor the theme tokens, and the letterhead the theme names from the parts', async () => {
+      const { a } = templateAdapter();
+      a.load = jest.fn(async () => ({ document: TEMPLATE, version: 4, resolvedTheme: THEME }));
+      a.loadTemplate = jest.fn(async () => THEMED_SETUP);
+      await mount(a);
+
+      expect(lastProps.theme).toEqual(THEME.tokens);
+      expect(lastProps).not.toHaveProperty('accent');
+      // The theme's lines in its order; the email isn't set, so it's left out. Wide falls back to square.
+      expect(lastProps.letterhead).toEqual({
+        name: 'Example Bakery',
+        lines: ['+962 6 555 0101', 'Mecca Street 112, Amman'],
+        logo: '/branding/square.png',
+        logoShape: 'square',
+      });
+    });
+
+    it('takes the new theme from the save response', async () => {
+      const { a } = templateAdapter();
+      a.load = jest.fn(async () => ({ document: TEMPLATE, version: 4, resolvedTheme: THEME }));
+      a.loadTemplate = jest.fn(async () => THEMED_SETUP);
+      const next: ResolvedDocumentTheme = { ...THEME, hash: 'h2', tokens: { ...THEME.tokens, accent: '#0961BB', accentUse: 'title', letterhead: { logo: 'none', lines: ['taxId'] } } };
+      a.save = jest.fn(async () => ({ ok: true as const, version: 5, updatedAt: 'now', resolvedTheme: next }));
+      await mount(a);
+
+      act(() => lastOnChange?.({ ...TEMPLATE, title: 'Payment reminder' }));
+      await act(async () => {
+        jest.advanceTimersByTime(800);
+      });
+      expect(a.save).toHaveBeenCalled();
+      expect(lastProps.theme).toEqual(next.tokens);
+      expect(lastProps.letterhead).toEqual({ name: 'Example Bakery', lines: ['Tax no. 0123456'], logo: null, logoShape: 'none' });
+    });
+
+    it('a save without a theme keeps the one it has', async () => {
+      const { a } = templateAdapter();
+      a.load = jest.fn(async () => ({ document: TEMPLATE, version: 4, resolvedTheme: THEME }));
+      await mount(a);
+
+      act(() => lastOnChange?.({ ...TEMPLATE, title: 'Payment reminder' }));
+      await act(async () => {
+        jest.advanceTimersByTime(800);
+      });
+      expect(a.save).toHaveBeenCalled();
+      expect(lastProps.theme).toEqual(THEME.tokens);
+    });
+
+    it('without a theme the letterhead is the default one', async () => {
+      const { a } = templateAdapter();
+      a.loadTemplate = jest.fn(async () => THEMED_SETUP);
+      await mount(a);
+
+      expect(lastProps.theme).toBeNull();
+      expect(lastProps.letterhead).toBe(THEMED_SETUP.letterhead);
+    });
+  });
+
   it('a note has no fields or Publish', async () => {
     const { a } = templateAdapter();
     a.load = jest.fn(async () => ({ document: SAMPLE_DOCUMENT, version: 4 }));
@@ -212,7 +284,6 @@ describe('issuing mode (M4c)', () => {
   const SETUP = {
     fields: [{ group: 'Invoice', items: [{ path: 'invoice.number', label: 'Invoice number', required: true }] }],
     letterhead: { name: 'Example Bakery', lines: [] },
-    accent: null,
   };
 
   function issueAdapter(document: WhityDocument) {
@@ -267,6 +338,25 @@ describe('issuing mode (M4c)', () => {
       jest.advanceTimersByTime(2000);
     });
     expect(a.save).not.toHaveBeenCalled();
+  });
+
+  it('on a template prints with the theme frozen in the published version, not the draft’s', async () => {
+    const draft: ResolvedDocumentTheme = {
+      ref: 'tenant.autumn',
+      version: 3,
+      hash: 'draft',
+      tokens: { accent: '#0961BB', accentOnDark: '#7FB2F0', accentUse: 'title', letterhead: { logo: 'square', lines: ['address'] } },
+      sources: {},
+      adjustments: [],
+    };
+    const frozen: ResolvedDocumentTheme = { ...draft, ref: 'tenant.workspace', hash: 'frozen', tokens: { ...draft.tokens, accent: '#B74C05' } };
+    const { a } = issueAdapter(TEMPLATE);
+    a.load = jest.fn(async () => ({ document: TEMPLATE, version: 4, resolvedTheme: draft }));
+    const version = a.loadVersion!;
+    a.loadVersion = jest.fn(async (id: string, v: number) => ({ ...(await version(id, v)), resolvedTheme: frozen }));
+    await mountIssue(a);
+
+    expect(lastProps.theme).toEqual(frozen.tokens);
   });
 
   it('issues for the record with the own fields typed, which also show in the preview, then goes to the document', async () => {

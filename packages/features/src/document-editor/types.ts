@@ -1,6 +1,6 @@
-import type { LabelPrintSource, PublishBlocker, WhityDocument } from '@whity-org/ui/editor/contract';
+import type { LabelPrintSource, PublishBlocker, ResolvedDocumentTheme, WhityDocument } from '@whity-org/ui/editor/contract';
 import type { FieldGroup } from '@whity-org/ui/editor/fields';
-import type { Letterhead } from '@whity-org/ui/editor/page-view';
+import type { BrandLogos, Letterhead, LetterheadParts } from '@whity-org/ui/editor/page-view';
 import type { EditorServices, FieldPreview } from '@whity-org/ui/editor/services';
 
 /** A document as the server keeps it: the contract's document plus its draft version. */
@@ -8,6 +8,8 @@ export interface LoadedDocument {
   document: WhityDocument;
   /** The draft version this copy is at (the server's ETag). */
   version: number;
+  /** E.44: the theme the draft resolves to (the print colour and letterhead); absent when the server sends none. */
+  resolvedTheme?: ResolvedDocumentTheme | null;
 }
 
 /** What a save sends: the fields of the document the editor changes. */
@@ -15,7 +17,8 @@ export type DraftPatch = Pick<WhityDocument, 'title' | 'blocks'> &
   Partial<Pick<WhityDocument, 'lang' | 'defaultView' | 'fullWidth' | 'page' | 'labels' | 'ownFields'>>;
 
 export type SaveResult =
-  | { ok: true; version: number; updatedAt: string }
+  /** `resolvedTheme`: the saved draft's theme, when the server returns the row. */
+  | { ok: true; version: number; updatedAt: string; resolvedTheme?: ResolvedDocumentTheme | null }
   /** Someone saved in between; nothing was written. */
   | { ok: false; conflict: true; currentVersion: number };
 
@@ -33,8 +36,8 @@ export interface DocumentEditorAdapter {
    */
   loadServices?(id: string): Promise<EditorServices>;
   /**
-   * Templates (M4): the fields the record type offers, the tenant's
-   * letterhead and print colour. Without it, a template edits like any
+   * Templates (M4): the fields the record type offers and the tenant's
+   * letterhead lines and logos; the document's theme picks among them (E.44). Without it, a template edits like any
    * document, without fields, preview or Publish.
    */
   loadTemplate?(recordType: string | null): Promise<TemplateSetup>;
@@ -70,7 +73,10 @@ export interface DocumentEditorAdapter {
 
 /** What one published version holds: what a document issued from it prints. */
 export type VersionContent = Pick<WhityDocument, 'title' | 'blocks'> &
-  Partial<Pick<WhityDocument, 'page' | 'labels' | 'ownFields'>>;
+  Partial<Pick<WhityDocument, 'page' | 'labels' | 'ownFields'>> & {
+    /** E.44: the theme frozen when the version was published, which its documents print with. */
+    resolvedTheme?: ResolvedDocumentTheme | null;
+  };
 
 /** What issuing sends: the record, and the values of the template's own fields by key. */
 export interface IssueRequest {
@@ -93,8 +99,12 @@ export interface LabelPrintResult {
 
 export interface TemplateSetup {
   fields: FieldGroup[];
+  /** The tenant's name and its default letterhead lines, for a document without a theme. */
   letterhead: Letterhead;
-  accent: string | null;
+  /** Every letterhead line by its theme name; the theme's `letterhead.lines` picks and orders them. */
+  letterheadParts?: LetterheadParts;
+  /** The tenant's uploaded logos; the theme's `letterhead.logo` picks one. */
+  logos?: BrandLogos;
 }
 
 export interface RecordChoice {

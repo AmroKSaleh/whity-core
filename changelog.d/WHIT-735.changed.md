@@ -1,0 +1,2 @@
+- **The print colour is now the workspace theme.** Migration 173 moves a workspace's `documents.print_color` into a workspace theme named `workspace` and makes it the default, so documents print as before. Without a print colour, documents take the workspace main colour, darkened if it can't be read on white (WHIT-735).
+- **`GET /api/document-fields` no longer returns `accent`.** The editor reads the print colour from the document's `resolvedTheme`, and the fields response adds `letterhead_parts` (WHIT-735).

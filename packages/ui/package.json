@@ -52,6 +52,7 @@
     "./editor/field-picker": "./src/editor/field-picker.tsx",
     "./editor/fields": "./src/editor/fields.ts",
     "./editor/gutter": "./src/editor/gutter.tsx",
+    "./editor/label-sheet": "./src/editor/label-sheet.tsx",
     "./editor/labels": "./src/editor/labels.ts",
     "./editor/link-tools": "./src/editor/link-tools.tsx",
     "./editor/node-views": "./src/editor/node-views.tsx",

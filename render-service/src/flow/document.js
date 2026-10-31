@@ -91,8 +91,15 @@ const BARCODE_SYMBOLOGIES = { code128: 'code128', ean13: 'ean13', code39: 'code3
 const MAX_BARCODE_VALUE_LENGTH = 80;
 const MAX_MATH_LENGTH = 2000;
 
-/** The colours a caller may theme, each a CSS custom property `--flow-<key>`. */
-const THEME_KEYS = ['ink', 'muted', 'accent', 'line', 'tint'];
+/**
+ * What a caller may theme (document themes, E.44): the print colour, written
+ * as the custom property `--flow-accent`, and where it goes (E.45). The rest
+ * of a document's look is the register's and is not the caller's to change,
+ * so the greys and rules (ink, muted, line, tint) are no longer accepted.
+ */
+const THEME_KEYS = ['accent', 'accentUse'];
+const THEME_COLOURS = ['accent'];
+const ACCENT_USES = ['title', 'title-and-headings'];
 const HEX_COLOUR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
 const RUNNING_SLOTS = ['start', 'center', 'end'];
@@ -701,11 +708,17 @@ function validateFlowPayload(payload) {
 
   if (payload.theme !== undefined) {
     if (!isPlainObject(payload.theme)) {
-      return '"theme" must be an object of colours';
+      return '"theme" must be an object such as { "accent": "#b74c05" }';
     }
     for (const [key, value] of Object.entries(payload.theme)) {
       if (!THEME_KEYS.includes(key)) {
-        return `"theme.${key}" is not a theme colour; use ${THEME_KEYS.join(', ')}`;
+        return `"theme.${key}" is not a theme key; use ${THEME_KEYS.join(', ')}`;
+      }
+      if (key === 'accentUse') {
+        if (!ACCENT_USES.includes(value)) {
+          return `"theme.accentUse" must be one of ${ACCENT_USES.join(', ')}`;
+        }
+        continue;
       }
       // Hex only: the value is written into a stylesheet, and a colour NAME
       // is one short step from a value that closes the rule.
@@ -909,13 +922,16 @@ function normaliseFlowDocument(payload) {
   };
 }
 
-/** Only the known keys, only valid hex: what reaches the stylesheet. */
+/** Only the known keys, only valid values: what reaches the stylesheet. */
 function normaliseTheme(theme) {
   const out = {};
-  for (const key of THEME_KEYS) {
+  for (const key of THEME_COLOURS) {
     if (typeof theme[key] === 'string' && HEX_COLOUR.test(theme[key])) {
       out[key] = theme[key];
     }
+  }
+  if (out.accent && theme.accentUse === 'title-and-headings') {
+    out.accentUse = 'title-and-headings';
   }
   return Object.keys(out).length > 0 ? out : null;
 }
@@ -962,6 +978,7 @@ module.exports = {
   asFiniteNumber,
   HEX_COLOUR,
   THEME_KEYS,
+  THEME_COLOURS,
   normaliseFlowDocument,
   resolvePage,
   PAGE_PRESETS,
