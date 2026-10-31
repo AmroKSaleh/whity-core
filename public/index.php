@@ -4576,7 +4576,16 @@ $mcpListChangedNotifier = new ListChangedNotifier(
 $authoredMcpTools = new AuthoredToolRegistry();
 $mcpToolsListHandler = new ToolsListHandler($toolDeriver, $roleChecker, $tokenValidator, $authoredMcpTools);
 $mcpServerEnabled = (bool) filter_var($_ENV['MCP_ENABLED'] ?? 'false', FILTER_VALIDATE_BOOLEAN);
-$mcpToolsCallHandler = new ToolsCallHandler($toolDeriver, $router, $roleChecker, $tokenValidator, auditLogger: $auditLogger, authoredTools: $authoredMcpTools);
+// WHIT-784: an agent's Ask-first call is stored for its person to approve.
+$agentProposals = new \Whity\Core\Agent\AgentProposalRepository($db->getPdo());
+$mcpToolsCallHandler = new ToolsCallHandler($toolDeriver, $router, $roleChecker, $tokenValidator, auditLogger: $auditLogger, authoredTools: $authoredMcpTools, proposals: $agentProposals);
+// The approvals inbox: the person an agent acts for approves, edits or
+// declines what it asked to do. Session-gated and never on the MCP surface:
+// an agent must not be able to approve its own proposal.
+$agentProposalsHandler = new \Whity\Api\AgentProposalsApiHandler($agentProposals, $mcpToolsCallHandler, $auditLogger);
+$router->register('GET',  '/api/me/agent-proposals',                    [$agentProposalsHandler, 'list'],    null);
+$router->register('POST', '/api/me/agent-proposals/{id:\d+}/approve',  [$agentProposalsHandler, 'approve'], null);
+$router->register('POST', '/api/me/agent-proposals/{id:\d+}/decline',  [$agentProposalsHandler, 'decline'], null);
 $mcpHandlers = [
     'initialize'              => new InitializeHandler(listChanged: true),
     // WHIT-708: required of every 2026-07-28 server.

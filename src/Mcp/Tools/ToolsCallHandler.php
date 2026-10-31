@@ -17,6 +17,7 @@ use Throwable;
 use Whity\Mcp\JsonRpc\McpException;
 use Whity\Mcp\JsonRpc\MethodHandler;
 use Whity\Core\Request;
+use Whity\Core\Agent\AgentProposalRepository;
 use Whity\Mcp\Auth\AgentScopeGrant;
 use Whity\Mcp\Auth\McpScope;
 
@@ -54,7 +55,24 @@ final class ToolsCallHandler implements MethodHandler
         // SDK 1.43. Optional, so an installation with no tool-authoring plugin
         // behaves exactly as before and no existing construction site changes.
         private readonly ?AuthoredToolRegistry  $authoredTools = null,
+        // WHIT-784: where an agent's Ask-first call is stored for its person
+        // to approve. Null: Ask first is refused, as before proposals existed.
+        private readonly ?AgentProposalRepository $proposals = null,
     ) {}
+
+    /**
+     * Run a call a person approved (WHIT-784). Every check runs again for the
+     * agent and its granting person, in the proposal's tenant; only the Ask-first
+     * stop is passed, because the approval is that question answered. Off is
+     * still refused: a grant changed since the agent asked wins.
+     *
+     * @param array<string, mixed> $arguments
+     * @throws McpException
+     */
+    public function runApproved(McpPrincipal $principal, string $toolName, array $arguments): mixed
+    {
+        return $this->run($principal, $toolName, $arguments, true);
+    }
 
     /**
      * Run a HAND-AUTHORED tool (SDK 1.43).
@@ -246,6 +264,15 @@ final class ToolsCallHandler implements MethodHandler
             throw new McpException(ErrorCode::UNAUTHENTICATED, 'Unauthenticated');
         }
 
+        return $this->run($principal, $toolName, $arguments, false);
+    }
+
+    /**
+     * @param array<string, mixed> $arguments
+     * @throws McpException
+     */
+    private function run(McpPrincipal $principal, string $toolName, array $arguments, bool $approved): mixed
+    {
         // Route the AI principal into AuditContext so that any hook-fired audit
         // entries (e.g. user.created by a mutation tool) also capture the MCP
         // actor rather than null.
@@ -271,7 +298,10 @@ final class ToolsCallHandler implements MethodHandler
             if ($authored !== null) {
                 try {
                     $this->assertInTokenToolsets($principal, $this->authoredTools?->toolsetOf($toolName));
-                    $this->assertAgentMayRun($principal, $this->authoredTool($toolName), $authored);
+                    $proposal = $this->assertAgentMayRun($principal, $toolName, $arguments, $this->authoredTool($toolName), $authored, $approved);
+                    if ($proposal !== null) {
+                        return $proposal;
+                    }
                     return $this->executeAuthored($toolName, $arguments, $authored, $principal);
                 } finally {
                     $this->auditLogger?->record('mcp.tools.call', [
@@ -300,7 +330,10 @@ final class ToolsCallHandler implements MethodHandler
         // outcome (RBAC denial, handler error, or success).
         try {
             $this->assertInTokenToolsets($principal, $this->toolDeriver->toolsetOf($toolName));
-            $this->assertAgentMayRun($principal, $this->toolDeriver->toolFor($toolName) ?? [], $this->toolDeriver->buildAccessMap()[$toolName] ?? []);
+            $proposal = $this->assertAgentMayRun($principal, $toolName, $arguments, $this->toolDeriver->toolFor($toolName) ?? [], $this->toolDeriver->buildAccessMap()[$toolName] ?? [], $approved);
+            if ($proposal !== null) {
+                return $proposal;
+            }
             return $this->executeResolved($toolName, $arguments, $declaration, $principal);
         } finally {
             $this->auditLogger?->record('mcp.tools.call', [
@@ -340,28 +373,72 @@ final class ToolsCallHandler implements MethodHandler
     }
 
     /**
-     * WHIT-753: what an agent's scope grant lets it do with this tool. Off is
-     * refused. Ask first would store a proposal for the granting person to
-     * approve; until agent proposals exist (WHIT-784) it is refused too, and
-     * no agent credential is issued in the meantime (owner decision 12), so
-     * this only ever answers a credential that should not exist yet.
+     * WHIT-753, WHIT-784: what an agent's scope grant lets it do with this
+     * tool. Off is refused. Ask first is not executed: it is stored as a
+     * proposal for the granting person, and the proposal is the call's result.
+     * Returns that result, or null when the call may run now.
      *
+     * Checked only after every other gate (exposure, token toolsets), and
+     * before RBAC runs in the execution path, which approval repeats.
+     *
+     * @param array<string, mixed> $arguments
      * @param array<string, mixed> $tool
      * @param array<string, mixed> $access
+     * @return array<string, mixed>|null
      * @throws McpException
      */
-    private function assertAgentMayRun(McpPrincipal $principal, array $tool, array $access): void
+    private function assertAgentMayRun(McpPrincipal $principal, string $toolName, array $arguments, array $tool, array $access, bool $approved): ?array
     {
         if (!AgentScopeGrant::appliesTo($principal)) {
-            return;
+            return null;
         }
         $mode = ToolsListHandler::agentModeFor($tool, $access, $principal);
         if ($mode === AgentScopeGrant::OFF) {
             throw new McpException(ErrorCode::FORBIDDEN, 'This agent is not granted this operation.');
         }
-        if ($mode === AgentScopeGrant::ASK) {
-            throw new McpException(ErrorCode::FORBIDDEN, 'This operation needs a person to approve it, and approvals are not available yet.');
+        if ($mode === AgentScopeGrant::ALLOW || $approved) {
+            return null;
         }
+        if ($this->proposals === null) {
+            throw new McpException(ErrorCode::FORBIDDEN, 'This operation needs a person to approve it, and approvals are not available here.');
+        }
+
+        // The schema is checked now, so a person is never asked to approve a
+        // call that could not run.
+        $schema  = is_array($tool['inputSchema'] ?? null) ? $tool['inputSchema'] : ['type' => 'object'];
+        $invalid = $this->validateArguments($toolName, $schema, $arguments);
+        if ($invalid !== null) {
+            return $invalid;
+        }
+
+        $permission = is_string($access['requiredPermission'] ?? null) ? $access['requiredPermission'] : null;
+        $summary    = is_string($tool['description'] ?? null) && $tool['description'] !== '' ? $tool['description'] : $toolName;
+        $id = $this->proposals->create(
+            $principal->tenantId,
+            $principal->jti,
+            $principal->userId,
+            $toolName,
+            $arguments,
+            array_values(array_filter($principal->scope, 'is_string')),
+            $permission !== null ? [$permission] : [],
+            $summary,
+        );
+
+        return [
+            'content' => [[
+                'type' => 'text',
+                'text' => (string) json_encode([
+                    'proposal' => [
+                        'id'          => $id,
+                        'status'      => AgentProposalRepository::WAITING,
+                        'summary'     => $summary,
+                        'permissions' => $permission !== null ? [$permission] : [],
+                        'expiresInDays' => intdiv(AgentProposalRepository::LIFETIME_SECONDS, 86400),
+                    ],
+                    'message' => 'Not done yet: this needs the person you act for to approve it. They will see it in their approvals.',
+                ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            ]],
+        ];
     }
 
     /**

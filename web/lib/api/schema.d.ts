@@ -2948,6 +2948,63 @@ export interface paths {
         patch: operations["patch_api_v1_me"];
         trace?: never;
     };
+    "/api/v1/me/agent-proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** What agents acting for you are waiting for you to approve, and what you decided */
+        get: operations["get_api_v1_me_agent_proposals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/agent-proposals/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve an agent's proposal and run it for you
+         * @description Runs the operation as your delegate, after checking again that you and the agent may. Edit the arguments by sending them. Runs once, however many times it is approved.
+         */
+        post: operations["post_api_v1_me_agent_proposals_id_approve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/agent-proposals/{id}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Decline an agent's proposal
+         * @description Nothing runs. The agent can ask again.
+         */
+        post: operations["post_api_v1_me_agent_proposals_id_decline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me/audit-logs": {
         parameters: {
             query?: never;
@@ -5828,6 +5885,31 @@ export interface components {
             window_months?: number | null;
             promotion_id?: number | null;
             is_active?: boolean | null;
+        };
+        AgentProposal: {
+            id: number;
+            /** @enum {string} */
+            status: "waiting" | "approved" | "declined" | "expired" | "undone";
+            tool: string;
+            summary: string;
+            arguments: {
+                [key: string]: unknown;
+            };
+            /** @description What would change, when the operation can preview it */
+            diff: unknown;
+            permissions: string[];
+            undoWindowSeconds: number | null;
+            /** @description What the operation answered when it ran */
+            result: unknown;
+            decidedAt: string | null;
+            expiresAt: string;
+            createdAt: string;
+        };
+        AgentProposalListResponse: {
+            data: components["schemas"]["AgentProposal"][];
+        };
+        AgentProposalResponse: {
+            data: components["schemas"]["AgentProposal"];
         };
         ApprovalStatusResponse: {
             data: {
@@ -25892,6 +25974,246 @@ export interface operations {
                 };
             };
             /** @description Email already exists in the tenant, or this account signs in through an identity provider and has no local password */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_me_agent_proposals: {
+        parameters: {
+            query?: {
+                /** @description waiting, approved, declined, expired or undone; all when omitted */
+                status?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Your proposals, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentProposalListResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_me_agent_proposals_id_approve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ID of the proposal. */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Edited arguments to run with instead of the agent's (optional). */
+                    arguments?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description The proposal after the decision */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentProposalResponse"];
+                };
+            };
+            /** @description Invalid request body */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such proposal made on your behalf */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The proposal is no longer waiting (decided or expired) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    post_api_v1_me_agent_proposals_id_decline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description ID of the proposal. */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The proposal after the decision */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentProposalResponse"];
+                };
+            };
+            /** @description Missing or invalid authentication */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Insufficient permissions */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such proposal made on your behalf */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The proposal is no longer waiting (decided or expired) */
             409: {
                 headers: {
                     [name: string]: unknown;
