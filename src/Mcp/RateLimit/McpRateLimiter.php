@@ -41,6 +41,12 @@ final class McpRateLimiter
      *
      * @throws McpRateLimitException when the tenant or principal limit is hit.
      */
+    /** @return array{perMinute: int, tenantPerMinute: int} what a caller may spend, for the session briefing (WHIT-794) */
+    public function limits(): array
+    {
+        return ['perMinute' => $this->principalLimit, 'tenantPerMinute' => $this->tenantLimit];
+    }
+
     public function checkAndRecord(int $tenantId, int $userId): void
     {
         $tenantCount = $this->store->increment(

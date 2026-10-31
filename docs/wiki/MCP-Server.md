@@ -146,7 +146,7 @@ Call `ToolDeriver::clearCache()` after registering plugin routes to ensure the n
 
 ## Search and call (the default since WHIT-750)
 
-Core alone derives over 300 operations, about 150 KB of definitions every agent would load before doing anything, and every plugin adds more. Several clients handle far fewer, and agents pick tools less reliably past about 50 (WHIT-707). So a client connecting to **`/mcp`** gets a handful of everyday read-only tools (who am I, my inbox, get a document, list templates, search records) plus two tools that reach everything else:
+Core alone derives over 300 operations, about 150 KB of definitions every agent would load before doing anything, and every plugin adds more. Several clients handle far fewer, and agents pick tools less reliably past about 50 (WHIT-707). So a client connecting to **`/mcp`** gets `init_session` (WHIT-794: call it first; it briefs the model on who it acts as, which areas it can reach, what needs a person's approval, how to work here and its limits, built from the same filter as `tools/list`), a handful of everyday read-only tools (my inbox, get a document, list templates, search records), and two tools that reach everything else:
 
 | Tool | Does |
 |---|---|
