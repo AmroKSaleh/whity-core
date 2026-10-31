@@ -6,6 +6,10 @@ uses tag-based releases (see the `v*` tags in the repository).
 
 ## [Unreleased]
 
+### Added
+
+- **Plugins can declare themselves in `plugin.json` (plugin SDK 1.47).** Permissions, roles, `blocks` screens, owned tables, data types and limits can now live in a JSON manifest (format `whity.plugin/1`) instead of PHP methods. A plugin class that extends `Whity\Sdk\Manifest\ManifestPlugin` and has an empty body reads the file next to it, and the host registers what it declares exactly as it registers PHP declarations. The manifest is checked as a whole: a role may grant only permissions the manifest declares, a screen must be gated by one, a data type must live in a declared tenant table, every label needs English and Arabic, and unknown keys are refused. An invalid manifest stops the whole plugin from loading, so it never half-loads. Routes, hooks and migrations stay in PHP, in the same class. Editing `plugin.json` now triggers a plugin reload like editing PHP does. This is the first piece of Whity Builder's core runtime (WHIT-758).
+
 ### Fixed
 
 - **Printed documents now carry the tenant logo in the letterhead.** The editor's page view showed the logo, but the PDF from Whity Render printed the name alone (stage 6, decision 6.2: logo, address and tax number at the start side). The wide logo is used, else the square one. A logo Whity Render can't draw, or one over its 512 KiB image limit, is left out and the name prints alone, so the render never fails because of it.
