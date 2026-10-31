@@ -7,7 +7,7 @@ namespace Whity\Api;
 use Throwable;
 use Whity\Auth\RoleChecker;
 use Whity\Core\Audit\AuditLogger;
-use Whity\Core\Plugin\Tenant\RecordValues;
+use Whity\Core\Plugin\Tenant\RecordRules;
 use Whity\Core\Plugin\Tenant\TenantManifestHost;
 use Whity\Core\Plugin\Tenant\TenantRecordRepository;
 use Whity\Core\Request;
@@ -89,12 +89,13 @@ final class TenantRecordsApiHandler
     {
         return $this->guard($request, $params, 'create', function (array $ctx) use ($request): Response {
             $body = JsonBody::parsed($request);
-            $checked = $this->checkValues($ctx, $body, false);
+            $state = $ctx['decl']['lifecycle']['initial'] ?? null;
+            $state = is_string($state) ? $state : null;
+            $checked = $this->prepare($ctx, $body, null, $state);
             if ($checked['issues'] !== []) {
                 return Response::json(['issues' => $checked['issues']], 422);
             }
-            $state = $ctx['decl']['lifecycle']['initial'] ?? null;
-            $id = $this->records->create($ctx['tenant'], $ctx['plugin'], $ctx['type'], is_string($state) ? $state : null, $checked['values'], $ctx['profile']);
+            $id = $this->records->create($ctx['tenant'], $ctx['plugin'], $ctx['type'], $state, $checked['data'], $ctx['profile']);
             $this->record(self::AUDIT_CREATED, $ctx, $id);
             $row = $this->records->find($ctx['tenant'], $ctx['plugin'], $ctx['type'], $id);
 
@@ -117,13 +118,12 @@ final class TenantRecordsApiHandler
                 return self::notFound();
             }
             $body = JsonBody::parsed($request);
-            $checked = $this->checkValues($ctx, $body, true);
+            $checked = $this->prepare($ctx, $body, ['state' => $row['state'], 'data' => $row['data']], $row['state']);
             if ($checked['issues'] !== []) {
                 return Response::json(['issues' => $checked['issues']], 422);
             }
-            $data = array_merge($row['data'], $checked['values']);
-            $this->records->update($ctx['tenant'], $ctx['plugin'], $ctx['type'], (int) $id, $data, null, $ctx['profile']);
-            $this->record(self::AUDIT_UPDATED, $ctx, (int) $id, ['fields' => array_keys($checked['values'])]);
+            $this->records->update($ctx['tenant'], $ctx['plugin'], $ctx['type'], (int) $id, $checked['data'], null, $ctx['profile']);
+            $this->record(self::AUDIT_UPDATED, $ctx, (int) $id, ['fields' => array_keys($body)]);
 
             return Response::json(['data' => self::present((array) $this->records->find($ctx['tenant'], $ctx['plugin'], $ctx['type'], (int) $id))]);
         });
@@ -157,6 +157,10 @@ final class TenantRecordsApiHandler
                     'error' => 'This move isn\'t available from the record\'s state',
                     'details' => ['reason' => 'move_not_available', 'state' => $row['state'], 'from' => $from],
                 ], 409);
+            }
+            $issues = RecordRules::checkMove($ctx['decl'], $row['data'], (string) $declared['to'], $this->roles($ctx), gmdate('Y-m-d'), gmdate('Y-m-d\TH:i:s\Z'));
+            if ($issues !== []) {
+                return Response::json(['issues' => $issues], 422);
             }
             $this->records->update($ctx['tenant'], $ctx['plugin'], $ctx['type'], (int) $id, $row['data'], (string) $declared['to'], $ctx['profile']);
             $this->record(self::AUDIT_MOVED, $ctx, (int) $id, ['move' => $move, 'from' => $row['state'], 'to' => $declared['to']]);
@@ -243,26 +247,39 @@ final class TenantRecordsApiHandler
     }
 
     /**
-     * Field checks, plus: links to records must point at records of the
-     * linked type in this workspace.
+     * The record type's rules ({@see RecordRules}), plus: links to records must
+     * point at records of the linked type in this workspace.
      *
-     * @param array{tenant: int, plugin: string, decl: array<string, mixed>} $ctx
+     * Today is the UTC date for now; the workspace time zone comes with the
+     * temporal spine (WHIT-586).
+     *
+     * @param array{tenant: int, profile: int, plugin: string, decl: array<string, mixed>} $ctx
      * @param array<mixed> $body
-     * @return array{values: array<string, mixed>, issues: list<array{severity: string, message: string, column: string}>}
+     * @param array{state: ?string, data: array<string, mixed>}|null $existing
+     * @return array{data: array<string, mixed>, issues: list<array<string, string>>}
      */
-    private function checkValues(array $ctx, array $body, bool $partial): array
+    private function prepare(array $ctx, array $body, ?array $existing, ?string $state): array
     {
+        $checked = RecordRules::prepare($ctx['decl'], $body, $existing, $state, $this->roles($ctx), gmdate('Y-m-d'), gmdate('Y-m-d\TH:i:s\Z'));
         /** @var array<string, array<string, mixed>> $fields */
         $fields = $ctx['decl']['fields'] ?? [];
-        $checked = RecordValues::check($fields, $body, $partial);
-        foreach ($checked['values'] as $name => $value) {
+        foreach ($body as $name => $value) {
             if (($fields[$name]['type'] ?? null) === 'record' && is_int($value)
                 && !$this->records->allExist($ctx['tenant'], $ctx['plugin'], (string) $fields[$name]['record'], [$value])) {
-                $checked['issues'][] = ['severity' => 'error', 'message' => 'No such record', 'column' => $name];
+                $checked['issues'][] = ['severity' => 'error', 'message' => 'No such record', 'messageAr' => 'لا يوجد سجل كهذا', 'column' => (string) $name];
             }
         }
 
         return $checked;
+    }
+
+    /**
+     * @param array{tenant: int, profile: int} $ctx
+     * @return list<string>
+     */
+    private function roles(array $ctx): array
+    {
+        return array_values($this->roleChecker->getEffectiveRolesForProfile($ctx['profile'], $ctx['tenant']));
     }
 
     /**

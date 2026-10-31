@@ -121,10 +121,27 @@ final class RecordTypeValidatorTest extends TestCase
             $m['records']['order']['lifecycle']['initial'] = 'new';
             return $m;
         }, 'records.order.lifecycle.initial'];
-        yield 'unknown key on a field' => [static function (array $m): array {
-            $m['records']['order']['fields']['customer']['default'] = 'x';
+        yield 'a rule referring to an unknown field' => [static function (array $m): array {
+            $m['records']['order']['rules'] = [['require' => ['>' => [['field' => 'deposit'], 0]], 'message' => ['en' => 'x', 'ar' => 'س']]];
             return $m;
-        }, 'records.order.fields.customer.default: unknown key'];
+        }, 'records.order.rules[0].require: refers to "deposit"'];
+        yield 'a rule that is not a valid expression' => [static function (array $m): array {
+            $m['records']['order']['rules'] = [['require' => ['eval' => ['x']], 'message' => ['en' => 'x', 'ar' => 'س']]];
+            return $m;
+        }, 'records.order.rules[0].require: $: unknown operator "eval"'];
+        yield 'a rule without an Arabic message' => [static function (array $m): array {
+            $m['records']['order']['rules'] = [['require' => true, 'message' => ['en' => 'x']]];
+            return $m;
+        }, 'records.order.rules[0].message.ar: required'];
+        yield 'a computed field that is also required' => [static function (array $m): array {
+            $m['records']['order']['fields']['price']['computed'] = 100;
+            $m['records']['order']['fields']['price']['required'] = true;
+            return $m;
+        }, 'records.order.fields.price.computed: a computed field has no default'];
+        yield 'unknown key on a field' => [static function (array $m): array {
+            $m['records']['order']['fields']['customer']['placeholder'] = 'x';
+            return $m;
+        }, 'records.order.fields.customer.placeholder: unknown key'];
     }
 
     /**
