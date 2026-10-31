@@ -39,7 +39,7 @@ Domain logic ships as **plugins** dropped into `/plugins/` — discovered, loade
 - **Operational safety** — graceful worker recycling on a configurable memory ceiling, `/api/health` endpoint reporting worker/memory/DB status (200 healthy, 503 degraded).
 - **Design system** — OKLCH design tokens (light + dark, white-label-overridable per tenant) generated from a single source to CSS, JSON, and Dart; shadcn/Radix component library on Tailwind v4.
 - **OpenAPI** — schema generated from the routing layer for client/type generation.
-- **Tested** — 7,800+ PHPUnit tests (run against both SQLite and real PostgreSQL in CI), 2,300+ Jest component tests, 187 Playwright E2E tests, PHPStan at max level, and a set of standalone CI guards for tenant isolation, driver-dependent boolean reads, undeclared foreign keys, generated-artifact drift and i18n catalogue drift.
+- **Tested** — 8,500+ PHPUnit tests (run against both SQLite and real PostgreSQL in CI), 2,300+ Jest component tests, 187 Playwright E2E tests, PHPStan at max level, and a set of standalone CI guards for tenant isolation, driver-dependent boolean reads, undeclared foreign keys, generated-artifact drift and i18n catalogue drift.
 
 ## Architecture
 
