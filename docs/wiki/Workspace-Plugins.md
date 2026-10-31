@@ -72,6 +72,16 @@ A workspace plugin declares record types under `records` in its manifest: typed 
 - Screens' `/api/x/...` paths are served versioned (`/api/v1/x/...`), as installed plugins' blocks are.
 - An installed `ManifestPlugin` refuses `records`; an installed plugin keeps its records in its own `tables` and `dataTypes`.
 
+**Rules (SDK 1.51).** A record type may declare `rules`, and a field `default`, `computed` and `lockedWhen`, all in the [expression language](./Manifest-Expressions.md). They hold on every write through `RecordRules`:
+
+1. `default` fills a field a create left out.
+2. Values are checked against the declaration.
+3. `lockedWhen` is evaluated on the record as it is; while it holds, the field can't change.
+4. `computed` is recalculated on the record as it will be, and can't be written by the caller.
+5. Each rule's `require` must hold on the record as it will be, `when` its condition does. A move is checked with the record in its new state.
+
+A refusal is a `422` issue with the rule's English `message`, its Arabic `messageAr`, and its `field` as the column. An expression that can't be evaluated on the values refuses the write. Rules see the record, its state, the actor's role names and the date (UTC for now).
+
 Not yet: MCP operations, undo, a per-workspace OpenAPI view, filters on fields, record limits as entitlements, the schema-change classifier, trash and restore, and record types as document field providers. Each is a follow-up task.
 
 ## Tables (migration 164)

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Whity\Sdk\Manifest;
 
+use Whity\Sdk\Expression\Expression;
+
 /**
  * The `records` section of `plugin.json` (SDK 1.50, WHIT-761): record types a
  * plugin keeps in the host's shared record store instead of its own tables.
@@ -85,7 +87,7 @@ final class RecordTypeValidator
                 $errors[] = "{$path}: must be an object";
                 continue;
             }
-            self::onlyKeys($type, ['label', 'titleField', 'fields', 'lifecycle', 'permissions'], $path, $errors);
+            self::onlyKeys($type, ['label', 'titleField', 'fields', 'lifecycle', 'permissions', 'rules'], $path, $errors);
             $label($type['label'] ?? null, "{$path}.label", 200, true, $errors);
 
             $fields = $type['fields'] ?? null;
@@ -121,6 +123,22 @@ final class RecordTypeValidator
             if (isset($type['lifecycle'])) {
                 self::checkLifecycle($type['lifecycle'], "{$path}.lifecycle", $permissions, $label, $errors);
             }
+
+            $fieldNames = array_map('strval', array_keys($fields));
+            foreach ($fields as $fieldName => $field) {
+                if (!is_array($field)) {
+                    continue;
+                }
+                foreach (['computed', 'default', 'lockedWhen'] as $key) {
+                    if (array_key_exists($key, $field)) {
+                        self::checkExpression($field[$key], "{$path}.fields.{$fieldName}.{$key}", $fieldNames, $errors);
+                    }
+                }
+                if (isset($field['computed']) && (isset($field['default']) || ($field['required'] ?? false) === true)) {
+                    $errors[] = "{$path}.fields.{$fieldName}.computed: a computed field has no default and isn't required; it is always calculated";
+                }
+            }
+            self::checkRules($type['rules'] ?? null, "{$path}.rules", $fieldNames, $label, $errors);
         }
     }
 
@@ -141,7 +159,7 @@ final class RecordTypeValidator
             $errors[] = "{$path}: must be an object";
             return;
         }
-        self::onlyKeys($field, ['type', 'label', 'required', 'options', 'min', 'max', 'maxLength', 'currency', 'record'], $path, $errors);
+        self::onlyKeys($field, ['type', 'label', 'required', 'options', 'min', 'max', 'maxLength', 'currency', 'record', 'computed', 'default', 'lockedWhen'], $path, $errors);
         $type = $field['type'] ?? null;
         if (!in_array($type, self::FIELD_TYPES, true)) {
             $errors[] = "{$path}.type: one of " . implode(', ', self::FIELD_TYPES);
@@ -270,6 +288,86 @@ final class RecordTypeValidator
             }
             $label($move['label'] ?? null, "{$movePath}.label", 200, true, $errors);
         }
+    }
+
+    /**
+     * Rules refuse a write: `require` must hold, when `when` does (or always).
+     *
+     * @param list<string> $fieldNames
+     * @param callable(mixed, string, int, bool, list<string>&): void $label
+     * @param list<string> $errors
+     */
+    private static function checkRules(mixed $rules, string $path, array $fieldNames, callable $label, array &$errors): void
+    {
+        if ($rules === null) {
+            return;
+        }
+        if (!is_array($rules) || !array_is_list($rules)) {
+            $errors[] = "{$path}: must be a list";
+            return;
+        }
+        if (count($rules) > 100) {
+            $errors[] = "{$path}: at most 100";
+        }
+        foreach ($rules as $i => $rule) {
+            $rulePath = "{$path}[{$i}]";
+            if (!is_array($rule)) {
+                $errors[] = "{$rulePath}: must be an object";
+                continue;
+            }
+            self::onlyKeys($rule, ['when', 'require', 'message', 'field'], $rulePath, $errors);
+            if (!array_key_exists('require', $rule)) {
+                $errors[] = "{$rulePath}.require: required, an expression that must hold";
+            } else {
+                self::checkExpression($rule['require'], "{$rulePath}.require", $fieldNames, $errors);
+            }
+            if (array_key_exists('when', $rule)) {
+                self::checkExpression($rule['when'], "{$rulePath}.when", $fieldNames, $errors);
+            }
+            if (isset($rule['field']) && (!is_string($rule['field']) || !in_array($rule['field'], $fieldNames, true))) {
+                $errors[] = "{$rulePath}.field: must name one of this record type's fields";
+            }
+            $label($rule['message'] ?? null, "{$rulePath}.message", 500, true, $errors);
+        }
+    }
+
+    /**
+     * A valid expression whose `field` references are this record type's fields.
+     *
+     * @param list<string> $fieldNames
+     * @param list<string> $errors
+     */
+    private static function checkExpression(mixed $expression, string $path, array $fieldNames, array &$errors): void
+    {
+        foreach (Expression::validate($expression)['errors'] as $error) {
+            $errors[] = "{$path}: {$error}";
+        }
+        foreach (self::fieldRefs($expression) as $ref) {
+            if (!in_array($ref, $fieldNames, true)) {
+                $errors[] = "{$path}: refers to \"{$ref}\", which isn't a field of this record type";
+            }
+        }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private static function fieldRefs(mixed $node): array
+    {
+        if (!is_array($node)) {
+            return [];
+        }
+        $refs = [];
+        if (!array_is_list($node) && count($node) === 1 && array_key_first($node) === 'field') {
+            $arg = $node['field'];
+            $name = is_array($arg) ? ($arg[0] ?? null) : $arg;
+            return is_string($name) ? [$name] : [];
+        }
+        foreach ($node as $child) {
+            $refs = [...$refs, ...self::fieldRefs($child)];
+        }
+
+        return $refs;
     }
 
     /**
