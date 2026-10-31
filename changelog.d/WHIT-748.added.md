@@ -1,0 +1,1 @@
+- **MCP list modes.** `/mcp?tools=default` lists a handful of everyday read-only tools plus the discovery tools, which reach everything else. `/mcp?tools=full` is the full list, and `?toolsets=core.forms,acme.*` limits what is listed and searched. The bare `/mcp` still returns the full list; it switches to search and call with WHIT-750 (WHIT-748).

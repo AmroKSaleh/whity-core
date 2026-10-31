@@ -42,7 +42,15 @@ final class ToolsListHandler implements MethodHandler
             ? $this->tokenValidator->validateBearerForMcp($bearerToken)
             : null;
 
-        return ['tools' => $this->listFor($principal, TenantContext::getTenantId())];
+        // WHIT-748: `?toolsets=` narrows what is shown. Presentation only;
+        // the token's own toolsets (applied in listFor) are what restrict.
+        $surface = ToolSurfaceRequest::fromParams($params);
+        $tools   = array_values(array_filter(
+            $this->listFor($principal, TenantContext::getTenantId()),
+            static fn (array $tool): bool => $surface->selectsTool($tool),
+        ));
+
+        return ['tools' => $tools];
     }
 
     /**

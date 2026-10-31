@@ -26,6 +26,10 @@
  * make sense with a brand (the running head's heavier rule and its accent).
  */
 html {
+  /* Document titles are Readex Pro 600 (3.1, E.35), falling back to the body
+   * face where the font isn't installed. Codes are Geist Mono (3.4). */
+  --flow-display: 'Readex Pro', var(--flow-font);
+  --flow-mono: 'Geist Mono', 'DejaVu Sans Mono', 'Liberation Mono', monospace;
   --flow-ink: #111111;
   --flow-muted: #444444;
   --flow-accent: transparent;
@@ -40,8 +44,10 @@ body {
   margin: 0;
   padding: 0;
   font-family: var(--flow-font);
-  font-size: 10.5pt;
-  line-height: 1.55;
+  /* Stage 6 (6.5) and E.33: the body is 9.5pt at line height 1.5, 1.7 in
+   * Arabic (3.6); the same --doc-text-print-body as the editor's page view. */
+  font-size: 9.5pt;
+  line-height: 1.5;
   color: var(--flow-ink);
   background: #ffffff;
   -webkit-font-smoothing: antialiased;
@@ -209,7 +215,7 @@ body {
 .flow-heading {
   margin: 0 0 2.5mm;
   font-weight: 600;
-  line-height: 1.35;
+  line-height: 1.25;
   break-after: avoid;
 }
 
@@ -217,18 +223,23 @@ body {
   margin-top: 2mm;
 }
 
+/* Level 1 is the document's own title (the editor's H1-H3 print as 2-4):
+ * Readex Pro 600 at 22pt (6.5). The headings under it are 14, 12 and 10.5pt
+ * (E.33). */
 .flow-heading-1 {
-  font-size: 16pt;
+  font-family: var(--flow-display);
+  font-size: 22pt;
+  line-height: 1.15;
   margin-top: 0;
 }
 
 .flow-heading-2 {
-  font-size: 13pt;
+  font-size: 14pt;
   margin-top: 5mm;
 }
 
 .flow-heading-3 {
-  font-size: 11.5pt;
+  font-size: 12pt;
   margin-top: 4mm;
 }
 
@@ -341,7 +352,7 @@ body {
   margin-top: 1.5mm;
   /* Monospace so the groups of a reference are countable by eye and an O
    * cannot be read as a 0 by somebody typing it into the verification page. */
-  font-family: 'DejaVu Sans Mono', 'Liberation Mono', monospace;
+  font-family: var(--flow-mono);
   font-size: 9pt;
   letter-spacing: 0.4pt;
   color: #333333;
@@ -492,7 +503,7 @@ body {
 }
 
 .flow-running-subtext {
-  font-size: 8pt;
+  font-size: 8.5pt; /* the 11px floor (3.5a): labels are 8.5pt (6.5) */
 }
 
 .flow-running-badge {
@@ -508,7 +519,7 @@ body {
 }
 
 .flow-running-badge-label {
-  font-size: 6.5pt;
+  font-size: 8.5pt; /* the 11px floor (3.5a): labels are 8.5pt (6.5) */
   color: var(--flow-muted);
 }
 
@@ -576,7 +587,7 @@ body {
 }
 
 .flow-fact-label {
-  font-size: 7.5pt;
+  font-size: 8.5pt; /* the 11px floor (3.5a): labels are 8.5pt (6.5) */
   color: var(--flow-muted);
 }
 
@@ -602,7 +613,7 @@ body {
 }
 
 .flow-field-label {
-  font-size: 8pt;
+  font-size: 8.5pt; /* the 11px floor (3.5a): labels are 8.5pt (6.5) */
   color: var(--flow-muted);
 }
 
@@ -671,7 +682,7 @@ body {
   padding: 0.2mm 2.5mm;
   border: 0.3mm solid var(--flow-line);
   border-radius: 9mm;
-  font-size: 8pt;
+  font-size: 8.5pt; /* the 11px floor (3.5a): labels are 8.5pt (6.5) */
   white-space: nowrap;
 }
 
@@ -705,13 +716,13 @@ body {
   height: 5.5mm;
   border: 0.35mm solid var(--flow-ink);
   border-radius: 50%;
-  font-size: 8pt;
+  font-size: 8.5pt; /* the 11px floor (3.5a): labels are 8.5pt (6.5) */
   font-weight: 600;
 }
 
 .flow-question-note {
   margin-top: 1mm;
-  font-size: 8pt;
+  font-size: 8.5pt; /* the 11px floor (3.5a): labels are 8.5pt (6.5) */
   color: var(--flow-muted);
 }
 
@@ -754,7 +765,7 @@ body {
 }
 
 .flow-barcode-text {
-  font-family: var(--flow-mono, monospace);
+  font-family: var(--flow-mono);
   font-size: 8.5pt;
   direction: ltr;
 }
@@ -802,10 +813,13 @@ body {
 
 /* The document's title, in the tenant's print colour (stage 6). */
 .flow-letterhead-title {
+  font-family: var(--flow-display);
   font-size: 22pt;
   font-weight: 600;
   line-height: 1.15;
-  color: var(--flow-accent);
+  /* The print colour when the caller sends one (6.3), else ink: the accent's
+   * own default is transparent, which would print no title at all. */
+  color: var(--flow-title, var(--flow-ink));
 }
 
 .flow-letterhead-end .flow-letterhead-line:first-of-type {
@@ -833,4 +847,14 @@ body {
 strong,
 b {
   font-weight: 600;
+}
+
+/* Arabic needs the taller line heights of 3.6: 1.7 for text, 1.5 for titles. */
+html[dir='rtl'],
+html[dir='rtl'] body {
+  line-height: 1.7;
+}
+
+html[dir='rtl'] .flow-heading {
+  line-height: 1.5;
 }

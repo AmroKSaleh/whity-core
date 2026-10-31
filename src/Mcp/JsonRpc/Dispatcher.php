@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Whity\Mcp\JsonRpc;
 
 use Whity\Auth\TokenValidator;
+use Whity\Mcp\Tools\ToolSurfaceRequest;
 use Whity\Core\Tenant\TenantContext;
 use Whity\Mcp\Auth\McpPrincipal;
 use Whity\Mcp\Auth\McpScope;
@@ -68,6 +69,14 @@ final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSou
      * instead of being told the lists changed. Reset alongside the client key.
      */
     private bool $notifySuppressed = false;
+
+    /**
+     * Internal header the transport uses to hand the request's tool-surface
+     * selection to the dispatcher (WHIT-748). Set by
+     * {@see \Whity\Mcp\Transport\McpTransportHandler} from the URL, after any
+     * client header of the same name is discarded.
+     */
+    public const TOOL_SURFACE_HEADER = 'x-whity-tool-surface';
 
     /**
      * @param array<string, MethodHandler>    $handlers          Keyed by method name.
@@ -307,6 +316,15 @@ final class Dispatcher implements McpRequestHandlerInterface, McpNotificationSou
         $params ??= [];
         $meta = is_array($params['_meta'] ?? null) ? $params['_meta'] : [];
         $meta[McpProtocol::META_VERSION] = $version;
+        // WHIT-748: which tool list the URL asked for, as the transport read
+        // it. Always overwritten: a client cannot choose it through _meta.
+        $surface = $this->headers[self::TOOL_SURFACE_HEADER] ?? null;
+        $decoded = is_string($surface) ? json_decode($surface, true) : null;
+        if (is_array($decoded)) {
+            $meta[ToolSurfaceRequest::META_KEY] = $decoded;
+        } else {
+            unset($meta[ToolSurfaceRequest::META_KEY]);
+        }
         $params['_meta'] = $meta;
 
         try {
