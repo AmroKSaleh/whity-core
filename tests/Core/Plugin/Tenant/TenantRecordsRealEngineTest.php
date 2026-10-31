@@ -19,6 +19,7 @@ use Whity\Core\i18n\TranslationRepository;
 use Whity\Core\Plugin\Tenant\TenantManifestHost;
 use Whity\Core\Plugin\Tenant\TenantManifestPublisher;
 use Whity\Core\Plugin\Tenant\TenantPluginRepository;
+use Whity\Core\Plugin\Tenant\RecordWriter;
 use Whity\Core\Plugin\Tenant\TenantRecordRepository;
 use Whity\Core\PluginLoader;
 use Whity\Core\PluginRoleSeeder;
@@ -223,7 +224,8 @@ final class TenantRecordsRealEngineTest extends TestCase
         $roleChecker->method('hasPermissionForProfile')
             ->willReturnCallback(static fn (int $u, string $p, int $t): bool => in_array($p, $granted, true));
         $this->host->resetRequest();
-        $handler = new TenantRecordsApiHandler($this->host, new TenantRecordRepository($this->pdo), $roleChecker);
+        $records = new TenantRecordRepository($this->pdo);
+        $handler = new TenantRecordsApiHandler($this->host, $records, $roleChecker, new RecordWriter($this->pdo, $records, $roleChecker));
         $request = new Request($method === 'list' || $method === 'get' ? 'GET' : 'POST', '/api/x/cakeorders/order', [], $body === null ? '' : (string) json_encode($body));
         $request->user = (object) ['profile_id' => 7];
 

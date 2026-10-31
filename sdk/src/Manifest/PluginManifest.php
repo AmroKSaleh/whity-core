@@ -257,6 +257,18 @@ final class PluginManifest
         return $this->map('records');
     }
 
+    /**
+     * Automations (SDK 1.53), as declared: what the plugin does by itself
+     * when its records change. The host runs them in the background.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    public function automations(): array
+    {
+        /** @var array<string, array<string, mixed>> */
+        return $this->map('automations');
+    }
+
     /** @return array<string, mixed> */
     private function plugin(): array
     {

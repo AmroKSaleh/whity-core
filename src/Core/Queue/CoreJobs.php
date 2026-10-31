@@ -98,6 +98,11 @@ final class CoreJobs
                 false
             );
 
+            // Whity Builder (WHIT-763): runs a workspace plugin's automation
+            // run in the background. Internal: the record write path enqueues
+            // it, never a public caller.
+            \Whity\Core\Plugin\Tenant\Automation\AutomationJobs::register($registry, $pdo, $transports, $logger);
+
             // #billing — the two scheduled runs. INTERNAL, both of them, and
             // registered without the submittable flag deliberately: one issues
             // invoices (so it spends the number sequence and puts debts in

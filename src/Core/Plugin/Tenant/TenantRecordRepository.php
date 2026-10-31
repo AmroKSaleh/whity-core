@@ -46,12 +46,18 @@ final class TenantRecordRepository
         return array_map([self::class, 'row'], $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
-    /** @return array<string, mixed>|null */
-    public function find(int $tenantId, string $pluginKey, string $type, int $id): ?array
+    /**
+     * One record. `$forUpdate` locks the row until the caller's transaction
+     * ends, so a read-modify-write can't overwrite a concurrent change.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function find(int $tenantId, string $pluginKey, string $type, int $id, bool $forUpdate = false): ?array
     {
+        $lock = $forUpdate && $this->db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'pgsql' ? ' FOR UPDATE' : '';
         $stmt = $this->db->prepare(
             'SELECT id, state, data, created_at, updated_at FROM plugin_records
-              WHERE id = :id AND tenant_id = :tenant_id AND plugin_key = :plugin_key AND record_type = :record_type'
+              WHERE id = :id AND tenant_id = :tenant_id AND plugin_key = :plugin_key AND record_type = :record_type' . $lock
         );
         $stmt->execute([':id' => $id, ':tenant_id' => $tenantId, ':plugin_key' => $pluginKey, ':record_type' => $type]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);

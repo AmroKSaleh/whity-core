@@ -6,8 +6,8 @@ namespace Whity\Api;
 
 use Throwable;
 use Whity\Auth\RoleChecker;
-use Whity\Core\Audit\AuditLogger;
-use Whity\Core\Plugin\Tenant\RecordRules;
+use Whity\Core\Plugin\Tenant\RecordActor;
+use Whity\Core\Plugin\Tenant\RecordWriter;
 use Whity\Core\Plugin\Tenant\TenantManifestHost;
 use Whity\Core\Plugin\Tenant\TenantRecordRepository;
 use Whity\Core\Request;
@@ -30,19 +30,22 @@ use Whity\Sdk\PluginNamespace;
  *
  * An unknown plugin, record type or record answers 404 whether it doesn't
  * exist or belongs to another workspace, so ids can't be probed.
+ *
+ * Writes go through {@see RecordWriter}, the path automations write through
+ * too, so rules, audit and automation triggers are the same for both.
  */
 final class TenantRecordsApiHandler
 {
-    public const AUDIT_CREATED = 'tenant_record.created';
-    public const AUDIT_UPDATED = 'tenant_record.updated';
-    public const AUDIT_MOVED = 'tenant_record.moved';
-    public const AUDIT_DELETED = 'tenant_record.deleted';
+    public const AUDIT_CREATED = RecordWriter::AUDIT_CREATED;
+    public const AUDIT_UPDATED = RecordWriter::AUDIT_UPDATED;
+    public const AUDIT_MOVED = RecordWriter::AUDIT_MOVED;
+    public const AUDIT_DELETED = RecordWriter::AUDIT_DELETED;
 
     public function __construct(
         private readonly TenantManifestHost $host,
         private readonly TenantRecordRepository $records,
         private readonly RoleChecker $roleChecker,
-        private readonly ?AuditLogger $audit = null,
+        private readonly RecordWriter $writer,
     ) {
     }
 
@@ -88,15 +91,11 @@ final class TenantRecordsApiHandler
     public function create(Request $request, array $params = []): Response
     {
         return $this->guard($request, $params, 'create', function (array $ctx) use ($request): Response {
-            $body = JsonBody::parsed($request);
-            $state = $ctx['decl']['lifecycle']['initial'] ?? null;
-            $state = is_string($state) ? $state : null;
-            $checked = $this->prepare($ctx, $body, null, $state);
-            if ($checked['issues'] !== []) {
-                return Response::json(['issues' => $checked['issues']], 422);
+            $result = $this->writer->create($ctx['tenant'], $ctx['manifest'], $ctx['type'], JsonBody::parsed($request), RecordActor::person($ctx['profile']));
+            if (!$result['ok']) {
+                return Response::json(['issues' => $result['issues']], 422);
             }
-            $id = $this->records->create($ctx['tenant'], $ctx['plugin'], $ctx['type'], $state, $checked['data'], $ctx['profile']);
-            $this->record(self::AUDIT_CREATED, $ctx, $id);
+            $id = $result['id'];
             $row = $this->records->find($ctx['tenant'], $ctx['plugin'], $ctx['type'], $id);
 
             return Response::json(['data' => $row === null ? ['id' => $id] : self::present($row)], 201);
@@ -113,17 +112,10 @@ final class TenantRecordsApiHandler
         $id = (string) ($params['id'] ?? '0');
 
         return $this->guard($request, $params, 'edit', function (array $ctx) use ($request, $id): Response {
-            $row = $this->records->find($ctx['tenant'], $ctx['plugin'], $ctx['type'], (int) $id);
-            if ($row === null) {
-                return self::notFound();
+            $result = $this->writer->update($ctx['tenant'], $ctx['manifest'], $ctx['type'], (int) $id, JsonBody::parsed($request), RecordActor::person($ctx['profile']));
+            if (!$result['ok']) {
+                return $result['reason'] === 'issues' ? Response::json(['issues' => $result['issues']], 422) : self::notFound();
             }
-            $body = JsonBody::parsed($request);
-            $checked = $this->prepare($ctx, $body, ['state' => $row['state'], 'data' => $row['data']], $row['state']);
-            if ($checked['issues'] !== []) {
-                return Response::json(['issues' => $checked['issues']], 422);
-            }
-            $this->records->update($ctx['tenant'], $ctx['plugin'], $ctx['type'], (int) $id, $checked['data'], null, $ctx['profile']);
-            $this->record(self::AUDIT_UPDATED, $ctx, (int) $id, ['fields' => array_keys($body)]);
 
             return Response::json(['data' => self::present((array) $this->records->find($ctx['tenant'], $ctx['plugin'], $ctx['type'], (int) $id))]);
         });
@@ -147,23 +139,17 @@ final class TenantRecordsApiHandler
             if (!$this->roleChecker->hasPermissionForProfile($ctx['profile'], (string) $declared['permission'], $ctx['tenant'])) {
                 return Response::json(['error' => 'Insufficient permissions', 'details' => ['reason' => 'insufficient_permissions', 'required' => $declared['permission']]], 403);
             }
-            $row = $this->records->find($ctx['tenant'], $ctx['plugin'], $ctx['type'], (int) $id);
-            if ($row === null) {
-                return self::notFound();
+            $result = $this->writer->move($ctx['tenant'], $ctx['manifest'], $ctx['type'], (int) $id, $move, RecordActor::person($ctx['profile']));
+            if (!$result['ok']) {
+                return match ($result['reason']) {
+                    'issues' => Response::json(['issues' => $result['issues']], 422),
+                    'move_not_available' => Response::json([
+                        'error' => 'This move isn\'t available from the record\'s state',
+                        'details' => ['reason' => 'move_not_available', 'state' => $result['state'], 'from' => $result['from']],
+                    ], 409),
+                    default => self::notFound(),
+                };
             }
-            $from = is_string($declared['from']) ? [$declared['from']] : (array) $declared['from'];
-            if (!in_array($row['state'], $from, true)) {
-                return Response::json([
-                    'error' => 'This move isn\'t available from the record\'s state',
-                    'details' => ['reason' => 'move_not_available', 'state' => $row['state'], 'from' => $from],
-                ], 409);
-            }
-            $issues = RecordRules::checkMove($ctx['decl'], $row['data'], (string) $declared['to'], $this->roles($ctx), gmdate('Y-m-d'), gmdate('Y-m-d\TH:i:s\Z'));
-            if ($issues !== []) {
-                return Response::json(['issues' => $issues], 422);
-            }
-            $this->records->update($ctx['tenant'], $ctx['plugin'], $ctx['type'], (int) $id, $row['data'], (string) $declared['to'], $ctx['profile']);
-            $this->record(self::AUDIT_MOVED, $ctx, (int) $id, ['move' => $move, 'from' => $row['state'], 'to' => $declared['to']]);
 
             return Response::json(['data' => self::present((array) $this->records->find($ctx['tenant'], $ctx['plugin'], $ctx['type'], (int) $id))]);
         });
@@ -179,10 +165,9 @@ final class TenantRecordsApiHandler
         $id = (string) ($params['id'] ?? '0');
 
         return $this->guard($request, $params, 'delete', function (array $ctx) use ($id): Response {
-            if (!$this->records->delete($ctx['tenant'], $ctx['plugin'], $ctx['type'], (int) $id)) {
+            if (!$this->writer->delete($ctx['tenant'], $ctx['manifest'], $ctx['type'], (int) $id, RecordActor::person($ctx['profile']))) {
                 return self::notFound();
             }
-            $this->record(self::AUDIT_DELETED, $ctx, (int) $id);
 
             return new Response(204, '');
         });
@@ -244,57 +229,6 @@ final class TenantRecordsApiHandler
 
             return Response::error('The record could not be processed', 500);
         }
-    }
-
-    /**
-     * The record type's rules ({@see RecordRules}), plus: links to records must
-     * point at records of the linked type in this workspace.
-     *
-     * Today is the UTC date for now; the workspace time zone comes with the
-     * temporal spine (WHIT-586).
-     *
-     * @param array{tenant: int, profile: int, plugin: string, decl: array<string, mixed>} $ctx
-     * @param array<mixed> $body
-     * @param array{state: ?string, data: array<string, mixed>}|null $existing
-     * @return array{data: array<string, mixed>, issues: list<array<string, string>>}
-     */
-    private function prepare(array $ctx, array $body, ?array $existing, ?string $state): array
-    {
-        $checked = RecordRules::prepare($ctx['decl'], $body, $existing, $state, $this->roles($ctx), gmdate('Y-m-d'), gmdate('Y-m-d\TH:i:s\Z'));
-        /** @var array<string, array<string, mixed>> $fields */
-        $fields = $ctx['decl']['fields'] ?? [];
-        foreach ($body as $name => $value) {
-            if (($fields[$name]['type'] ?? null) === 'record' && is_int($value)
-                && !$this->records->allExist($ctx['tenant'], $ctx['plugin'], (string) $fields[$name]['record'], [$value])) {
-                $checked['issues'][] = ['severity' => 'error', 'message' => 'No such record', 'messageAr' => 'لا يوجد سجل كهذا', 'column' => (string) $name];
-            }
-        }
-
-        return $checked;
-    }
-
-    /**
-     * @param array{tenant: int, profile: int} $ctx
-     * @return list<string>
-     */
-    private function roles(array $ctx): array
-    {
-        return array_values($this->roleChecker->getEffectiveRolesForProfile($ctx['profile'], $ctx['tenant']));
-    }
-
-    /**
-     * @param array{tenant: int, profile: int, plugin: string, type: string} $ctx
-     * @param array<string, mixed> $metadata
-     */
-    private function record(string $action, array $ctx, int $id, array $metadata = []): void
-    {
-        $this->audit?->record($action, [
-            'tenant_id' => $ctx['tenant'],
-            'actor_user_id' => $ctx['profile'],
-            'target_type' => 'tenant_record',
-            'target_id' => $id,
-            'metadata' => ['plugin' => $ctx['plugin'], 'record_type' => $ctx['type']] + $metadata,
-        ]);
     }
 
     /**

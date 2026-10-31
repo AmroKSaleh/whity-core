@@ -2004,11 +2004,23 @@ $router->register('GET', '/api/frontend/features', [$frontendFeaturesHandler, 'l
 // gates each action are read from the workspace's live manifest per request, so
 // the routes carry no route-level permission; the handler checks the declared
 // one through RoleChecker and answers 404 for anything not this workspace's.
+//
+// Every write goes through the RecordWriter, which also starts the plugin's
+// automations (WHIT-763): it records a queued run and enqueues the job in the
+// write's transaction; the steps run in the queue worker, never here.
+$tenantRecordRepository = new \Whity\Core\Plugin\Tenant\TenantRecordRepository($db->getPdo());
+$automationRunRepository = new \Whity\Core\Plugin\Tenant\Automation\AutomationRunRepository($db->getPdo());
 $tenantRecordsHandler = new \Whity\Api\TenantRecordsApiHandler(
     $tenantManifestHost,
-    new \Whity\Core\Plugin\Tenant\TenantRecordRepository($db->getPdo()),
+    $tenantRecordRepository,
     $roleChecker,
-    $auditLogger
+    new \Whity\Core\Plugin\Tenant\RecordWriter(
+        $db->getPdo(),
+        $tenantRecordRepository,
+        $roleChecker,
+        $auditLogger,
+        new \Whity\Core\Plugin\Tenant\Automation\AutomationTriggers($automationRunRepository, $tenantPluginRepository, $queueService)
+    )
 );
 $router->register('GET', '/api/x/{plugin:[a-z][a-z0-9_]*}/{type:[a-z][a-z0-9_]*}', [$tenantRecordsHandler, 'list'], null);
 $router->register('POST', '/api/x/{plugin:[a-z][a-z0-9_]*}/{type:[a-z][a-z0-9_]*}', [$tenantRecordsHandler, 'create'], null);
@@ -2016,6 +2028,20 @@ $router->register('GET', '/api/x/{plugin:[a-z][a-z0-9_]*}/{type:[a-z][a-z0-9_]*}
 $router->register('PATCH', '/api/x/{plugin:[a-z][a-z0-9_]*}/{type:[a-z][a-z0-9_]*}/{id:\d+}', [$tenantRecordsHandler, 'update'], null);
 $router->register('DELETE', '/api/x/{plugin:[a-z][a-z0-9_]*}/{type:[a-z][a-z0-9_]*}/{id:\d+}', [$tenantRecordsHandler, 'delete'], null);
 $router->register('POST', '/api/x/{plugin:[a-z][a-z0-9_]*}/{type:[a-z][a-z0-9_]*}/{id:\d+}/moves/{move:[a-z][a-z0-9_]*}', [$tenantRecordsHandler, 'move'], null);
+
+// A workspace plugin's automation run traces and its automations switch
+// (WHIT-763). Reading traces is plugins:read; the switch checks plugins:enable
+// or plugins:disable in the handler, by direction.
+$tenantAutomationsHandler = new \Whity\Api\TenantAutomationsApiHandler(
+    $tenantManifestHost,
+    $tenantPluginRepository,
+    $automationRunRepository,
+    $roleChecker,
+    $auditLogger
+);
+$router->register('GET', '/api/workspace-plugins/{plugin:[a-z][a-z0-9_]*}/automation-runs', [$tenantAutomationsHandler, 'runs'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_READ);
+$router->register('GET', '/api/workspace-plugins/{plugin:[a-z][a-z0-9_]*}/automation-runs/{id:\d+}', [$tenantAutomationsHandler, 'run'], null, null, \Whity\Core\RBAC\CorePermissions::PLUGINS_READ);
+$router->register('PUT', '/api/workspace-plugins/{plugin:[a-z][a-z0-9_]*}/automations', [$tenantAutomationsHandler, 'switch'], null);
 
 // Health monitoring endpoint (WC-4). Registered UNVERSIONED so load-balancer
 // probes that target GET /api/health never break regardless of the API version.

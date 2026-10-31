@@ -13,6 +13,7 @@ use Whity\Auth\RoleChecker;
 use Whity\Core\Plugin\Tenant\TenantManifestHost;
 use Whity\Core\Plugin\Tenant\TenantManifestPublisher;
 use Whity\Core\Plugin\Tenant\TenantPluginRepository;
+use Whity\Core\Plugin\Tenant\RecordWriter;
 use Whity\Core\Plugin\Tenant\TenantRecordRepository;
 use Whity\Core\PluginRoleSeeder;
 use Whity\Core\RBAC\PermissionRegistry;
@@ -146,7 +147,8 @@ final class RecordRulesRealEngineTest extends TestCase
             ->willReturnCallback(static fn (int $u, string $p, int $t): bool => in_array($p, self::ALL, true));
         $roleChecker->method('getEffectiveRolesForProfile')->willReturn(['shop_manager']);
         $this->host->resetRequest();
-        $handler = new TenantRecordsApiHandler($this->host, new TenantRecordRepository($this->pdo), $roleChecker);
+        $records = new TenantRecordRepository($this->pdo);
+        $handler = new TenantRecordsApiHandler($this->host, $records, $roleChecker, new RecordWriter($this->pdo, $records, $roleChecker));
         $request = new Request('POST', '/api/x/cakeorders/order', [], $body === null ? '' : (string) json_encode($body));
         $request->user = (object) ['profile_id' => 7];
 

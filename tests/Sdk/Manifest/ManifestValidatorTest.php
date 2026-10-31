@@ -102,10 +102,10 @@ final class ManifestValidatorTest extends TestCase
         ];
         yield 'unknown top-level section' => [
             static function (array $m): array {
-                $m['automations'] = [];
+                $m['workflows'] = [];
                 return $m;
             },
-            'automations: unknown key',
+            'workflows: unknown key',
         ];
         yield 'misspelt nested key' => [
             static function (array $m): array {
