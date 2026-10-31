@@ -37,7 +37,7 @@ A document theme decides how a document looks in the editor's page view, in the 
 | Branding | `BrandingService`, keys `branding_logo_wide`, `branding_logo_square`, `site_name` | Logo reaches the editor's letterhead through `TenantLogo`, not the PDF. |
 | Mail colour | `mail.brand_color` | Separate, out of scope. |
 
-There is no core setting for the tenant's main colour; `09-white-label.md` describes one (`Whity.tenantTheme`, 2.8) that isn't built in the backend.
+When this was written there was no core setting for the tenant's main colour. It has since shipped ahead of M4d (section 4.5).
 
 ### 1.3 Tokens
 
@@ -65,7 +65,7 @@ PLAN.md has no theme milestone. Themes touch M4 (print, letterhead), M7 (plugin 
 | --- | --- | --- | --- |
 | 0 · Letterhead logo | The tenant logo reaches the PDF letterhead (6.2) | **Done**: whity-org/whity-core#1440 (WHIT-734), ships in 0.2.20 | `DocumentPublishingApiHandler::letterhead()`, `WhityDocumentPrinter` |
 | 1 · Document tokens | A `document` group in `base.json` (screen and print scales, E.33 and 6.5); the editor uses it; Whity Render embeds the token fonts and the same values | Now, beside M4c | Low: `base.json`, generator, `editor.css`, `render-service/`. The logo fix touches `DocumentPublishingApiHandler::letterhead()`, so land it after M4c or hand it to M4c. |
-| 2 · Theme model and API (M4d) | Table, resolver, publish freezing, routes, OpenAPI, MCP, permission, `print_color` migration, the workspace main colour, accent on headings (E.45) | Right after M4c (PLAN.md M4d) | `public/index.php`, `CoreApiSchemas.php`, `openapi.json`, `schema.d.ts`, `DocumentPublishingApiHandler.php`, migration numbering (after M4c's) |
+| 2 · Theme model and API (M4d) | Table, resolver, publish freezing, routes, OpenAPI, MCP, permission, `print_color` migration, the main colour as default accent (the colour itself shipped early, 4.5), accent on headings (E.45) | Right after M4c (PLAN.md M4d) | `public/index.php`, `CoreApiSchemas.php`, `openapi.json`, `schema.d.ts`, `DocumentPublishingApiHandler.php`, migration numbering (after M4c's) |
 | 3 · UI | Theme picker in document settings; a Document themes screen under workspace settings | After phase 2; designs commissioned first | Needs design cards first (CLAUDE.md: compare with screenshots) |
 | 4 · SDK | `PluginDocumentThemesInterface`, loader validation, sandbox `init` tokens | With M7 (plugin blocks), same SDK release | `PluginLoader.php`, `sdk/` |
 | 5 · Type options | Title face (E.46) and large print (E.47) | With M8 | Font pairs dropped (owner, 31 Oct 2026; a later idea) |
@@ -173,11 +173,11 @@ Stored as a new `theme` JSONB column on `document_sources` and `document_source_
 
 ### 4.5 Workspace main colour (2.8)
 
-Approved by the owner on 31 Oct 2026: the one main colour of `09-white-label.md` is stored server-side as part of M4d.
+Approved by the owner on 31 Oct 2026: the one main colour of `09-white-label.md` is stored server-side. It shipped ahead of M4d, so M4d only adds the last point below.
 
-- Setting `branding.main_color` (tenant-overridable, `#rrggbb` or `oklch()`), set with `settings:write` on the branding screen (TplAdminBranding).
-- A PHP port of `Whity.tenantTheme(colour, mode)` derives the set from it (2.8a contrast, 2.8b derivation, each value overridable) and serves it through `GET /api/theme`, so the app shell themes from it. A plugin's `PluginThemeInterface` override still applies on top, as today.
-- The document accent defaults to the main colour when the workspace theme doesn't set `accent`.
+- **Shipped (#1446, WHIT-789):** setting `branding_main_color` (tenant-overridable, `#rrggbb` only; empty means Whity Blue). `Whity\Core\Branding\TenantTheme::derive()` is the PHP port of `Whity.tenantTheme(colour, mode)` (2.8a contrast, 2.8b derivation; the derived values aren't individually overridable). `GET /api/v1/branding` returns it as `mainColor` plus `theme { light, dark }`, and the root layout applies that set before any `PluginThemeInterface` override, which still wins as before. `GET /api/theme` is unchanged.
+- **Shipped (#1461):** the colour field on the branding screen (TplAdminBranding), written with `settings:write` through `PATCH /api/v1/settings` (or `/settings/global` for the platform default).
+- **M4d:** the document accent defaults to the effective main colour when the workspace theme doesn't set `accent`, adjusted to 4.5:1 on white with the same `TenantTheme` code.
 - `mail.brand_color` stays separate for now.
 
 ## 5. REST API and OpenAPI
