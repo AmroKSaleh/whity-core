@@ -10923,6 +10923,230 @@
                 ]
             }
         },
+        "/api/v1/document-template-slots": {
+            "get": {
+                "operationId": "get_api_v1_document_template_slots",
+                "summary": "List the template slots of the workspace's plugins, with what is bound to each",
+                "tags": [
+                    "documents"
+                ],
+                "description": "A slot is a named place a plugin needs a template, such as its invoice. Only switched-on plugins' slots are listed. The ETag names the whole binding set; send it as If-Match when binding.",
+                "responses": {
+                    "200": {
+                        "description": "The slots",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentTemplateSlotListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Tenant context is required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/document-template-slots/{key}": {
+            "put": {
+                "operationId": "put_api_v1_document_template_slots_key",
+                "summary": "Bind a template to a slot, or unbind it",
+                "tags": [
+                    "documents"
+                ],
+                "description": "The template must be published, shared with the workspace, of a kind the slot takes and for the slot's record type; otherwise 422 with a `code` saying which. If-Match with the ETag from the list is required: 428 without it, 409 `stale` when the bindings changed.",
+                "parameters": [
+                    {
+                        "name": "key",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DocumentTemplateSlotBindRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The slot with its binding; the ETag names the new binding set",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentTemplateSlotResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request body",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "No such slot (or its plugin is off), or no such template visible to the caller",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The bindings changed since the ETag was read (`stale`)",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "The template doesn't fit the slot (`kind_mismatch`, `record_type_mismatch`, `personal_template`, `unpublished`), or the system tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "428": {
+                        "description": "If-Match is required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/document-themes": {
             "get": {
                 "operationId": "get_api_v1_document_themes",
@@ -12416,7 +12640,7 @@
                         }
                     },
                     "409": {
-                        "description": "The template has no published version yet, `origin_key` names a document from another template (`origin_key_conflict`), or a plugin refused it (`vetoed`)",
+                        "description": "The template has no published version yet, `origin_key` names a document from another template (`origin_key_conflict`), a plugin refused it (`vetoed`), or the slot can't be issued from (`slot_unavailable`, `slot_unbound`, `slot_misfit`)",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -42742,7 +42966,11 @@
                 "properties": {
                     "document_source_id": {
                         "type": "integer",
-                        "description": "The template to issue the document from (see GET /api/document-sources?kind=template): its published version is issued. A letter or report (a copy made to edit before issuing) is issued as it is now, frozen as a version."
+                        "description": "The template to issue the document from (see GET /api/document-sources?kind=template): its published version is issued. A letter or report (a copy made to edit before issuing) is issued as it is now, frozen as a version. Send this or `slot`."
+                    },
+                    "slot": {
+                        "type": "string",
+                        "description": "A template slot key such as `bakery.order_confirmation` (GET /api/document-template-slots): the template the workspace bound to it is issued, so a plugin needn't know which one. Send this or `document_source_id`. 409 `slot_unavailable` when its plugin is off, `slot_unbound` when nothing is bound, `slot_misfit` when the bound template no longer fits."
                     },
                     "record": {
                         "type": "string",
@@ -42770,10 +42998,7 @@
                         "nullable": true,
                         "description": "Omit to render when this server can; true to require a rendered file (503 if rendering is unavailable); false to record without rendering."
                     }
-                },
-                "required": [
-                    "document_source_id"
-                ]
+                }
             },
             "DocumentCreateResponse": {
                 "type": "object",
@@ -44324,6 +44549,136 @@
                 "required": [
                     "key",
                     "description"
+                ]
+            },
+            "DocumentTemplateSlot": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "`<plugin>.<slot>`, as a plugin names it when it issues"
+                    },
+                    "plugin": {
+                        "type": "string",
+                        "description": "The plugin that declares the slot"
+                    },
+                    "label": {
+                        "type": "string"
+                    },
+                    "labelAr": {
+                        "type": "string"
+                    },
+                    "recordType": {
+                        "type": "string",
+                        "description": "The field record type the slot's documents are for; a bound template must have the same one"
+                    },
+                    "kinds": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "template",
+                                "label"
+                            ]
+                        },
+                        "description": "Which document kinds can fill it"
+                    },
+                    "starter": {
+                        "type": "string",
+                        "nullable": true,
+                        "description": "The plugin's starter for the slot, once starters are seeded (WHIT-687)"
+                    },
+                    "binding": {
+                        "type": "object",
+                        "properties": {
+                            "template_id": {
+                                "type": "integer"
+                            },
+                            "title": {
+                                "type": "string",
+                                "nullable": true,
+                                "description": "Null when the template is gone or hidden from the caller"
+                            },
+                            "published_version": {
+                                "type": "integer",
+                                "nullable": true
+                            },
+                            "problem": {
+                                "type": "object",
+                                "properties": {
+                                    "code": {
+                                        "type": "string",
+                                        "description": "`kind_mismatch`, `record_type_mismatch`, `personal_template`, `unpublished` or `template_missing`"
+                                    },
+                                    "message": {
+                                        "type": "string"
+                                    }
+                                },
+                                "required": [
+                                    "code",
+                                    "message"
+                                ],
+                                "nullable": true,
+                                "description": "Why the bound template can't be issued from now; null when it fits"
+                            }
+                        },
+                        "required": [
+                            "template_id",
+                            "title",
+                            "published_version",
+                            "problem"
+                        ],
+                        "nullable": true,
+                        "description": "The template bound to the slot, or null"
+                    }
+                },
+                "required": [
+                    "key",
+                    "plugin",
+                    "label",
+                    "labelAr",
+                    "recordType",
+                    "kinds",
+                    "starter",
+                    "binding"
+                ]
+            },
+            "DocumentTemplateSlotBindRequest": {
+                "type": "object",
+                "properties": {
+                    "template_id": {
+                        "type": "integer",
+                        "nullable": true,
+                        "description": "The published, workspace-shared template to bind, of a kind the slot takes and for its record type; null unbinds the slot"
+                    }
+                },
+                "required": [
+                    "template_id"
+                ]
+            },
+            "DocumentTemplateSlotListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DocumentTemplateSlot"
+                        }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "DocumentTemplateSlotResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/DocumentTemplateSlot"
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "DocumentTheme": {

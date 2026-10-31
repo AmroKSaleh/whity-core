@@ -6,6 +6,7 @@ namespace Whity\Core\Settings;
 
 use DateTimeZone;
 use Whity\Core\Document\Routing\RouteQuorum;
+use Whity\Core\Document\Slots\SlotBindings;
 use Whity\Core\Document\Theme\DocumentThemeRef;
 use Whity\Core\Identity\InvitationService;
 
@@ -358,6 +359,11 @@ final class SettingsRegistry
     // Per-kind defaults over DOCUMENTS_THEME: a JSON object of document kind
     // => theme ref, e.g. {"label":"tenant.labels"}. Empty for none.
     public const DOCUMENTS_THEME_BY_KIND = 'documents.theme_by_kind';
+    // The workspace's template slot bindings (WHIT-742, DOCUMENT-AUTOMATION
+    // 3.2): a JSON object of slot key => template id. Written only through
+    // PUT /api/document-template-slots/{key} (documents:publish), which checks
+    // the template fits the slot; the settings PATCH refuses it. Empty for none.
+    public const DOCUMENTS_SLOT_BINDINGS = 'documents.slot_bindings';
 
     // Render batch limits (ADR 0012): per-tenant-overridable ceilings so an
     // operator can tune them without a code deploy, "no hardcoded values" per
@@ -999,6 +1005,7 @@ final class SettingsRegistry
         self::DOCUMENTS_RENDER_ENABLED => 'false',
         self::DOCUMENTS_THEME => 'whity.standard',
         self::DOCUMENTS_THEME_BY_KIND => '',
+        self::DOCUMENTS_SLOT_BINDINGS => '',
         self::DOCUMENTS_RENDER_MAX_ROWS => '500',
         self::DOCUMENTS_RENDER_MAX_PAGES => '2000',
         // 2 MiB.
@@ -1381,6 +1388,7 @@ final class SettingsRegistry
             self::MAIL_BRAND_COLOR => self::validateHexColor($value),
             self::DOCUMENTS_THEME => DocumentThemeRef::isValid($value) ? null : self::DOCUMENTS_THEME . ' must be a theme ref such as whity.standard or tenant.<key>.',
             self::DOCUMENTS_THEME_BY_KIND => $value === '' ? null : DocumentThemeRef::validateByKind($value),
+            self::DOCUMENTS_SLOT_BINDINGS => SlotBindings::validate($value),
             self::MAIL_SMTP_HOST,
             self::MAIL_SMTP_USERNAME,
             self::MAIL_FROM_NAME,

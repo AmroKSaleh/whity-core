@@ -26,6 +26,9 @@ use Whity\Core\Document\Qr\DocumentQrScanRepository;
 use Whity\Core\Document\Qr\DocumentQrService;
 use Whity\Core\Document\Qr\DocumentQrTokenRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
+use Whity\Core\Document\Slots\SlotBindings;
+use Whity\Core\Document\Slots\TemplateSlot;
+use Whity\Core\Document\Slots\TemplateSlotRegistry;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
@@ -106,6 +109,7 @@ final class DocumentCreateApiRealEngineTest extends TestCase
     private DocumentArtifactRepository $artifacts;
     private DocumentQrService $qr;
     private DocumentsApiHandler $handler;
+    private TemplateSlotRegistry $slots;
     private string $storageRoot;
 
     protected function setUp(): void
@@ -169,6 +173,7 @@ final class DocumentCreateApiRealEngineTest extends TestCase
             new DocumentCollectionRepository($this->pdo),
             $this->pdo,
             qr: $this->qr,
+            slots: $this->slots = new TemplateSlotRegistry(),
         );
 
         // DELIBERATELY NOT TOUCHED HERE. `documents.render_enabled` defaults to
@@ -1001,6 +1006,74 @@ final class DocumentCreateApiRealEngineTest extends TestCase
         self::assertSame(409, $vetoed->getStatusCode());
         self::assertSame('Example Bakery issues circulars on Mondays only', self::decode($vetoed)['error']);
         self::assertSame($before, $this->countDocuments(), 'nothing written');
+    }
+
+    // ── template slots (WHIT-742) ─────────────────────────────────────────────
+
+    /**
+     * A plugin names its slot and the workspace's binding decides the
+     * template: the document is issued from the bound template's published
+     * version, exactly as naming the template would.
+     */
+    public function testASlotIssuesFromTheTemplateTheWorkspaceBoundToIt(): void
+    {
+        $about = $this->seedDocument(self::RAISER, 'Order 4812');
+        $templateId = $this->slotTemplate();
+        $this->bindSlot($templateId);
+
+        $res = $this->create(self::RAISER, ['slot' => 'Courier.receipt', 'record' => 'document:' . $about, 'render' => false]);
+
+        self::assertSame(201, $res->getStatusCode(), $res->getBody());
+        self::assertSame($templateId, self::data($res)['document_source_id']);
+    }
+
+    public function testASlotThatCantBeIssuedFromSaysWhyAndWritesNothing(): void
+    {
+        $about = $this->seedDocument(self::RAISER, 'Order 4812');
+        $body = ['slot' => 'Courier.receipt', 'record' => 'document:' . $about];
+
+        $unknown = $this->create(self::RAISER, $body);
+        self::assertSame(409, $unknown->getStatusCode());
+        self::assertSame('slot_unavailable', self::decode($unknown)['details']['code'] ?? null, $unknown->getBody());
+        self::assertSame('Courier', self::decode($unknown)['details']['plugin'] ?? null);
+
+        $this->registerSlot();
+        $unbound = $this->create(self::RAISER, $body);
+        self::assertSame(409, $unbound->getStatusCode());
+        self::assertSame('slot_unbound', self::decode($unbound)['details']['code'] ?? null);
+
+        // Bound while it fitted, then made personal: refused, not issued from.
+        $templateId = $this->slotTemplate();
+        $this->bindSlot($templateId);
+        $this->pdo->exec("UPDATE document_sources SET scope = 'personal' WHERE id = {$templateId}");
+        $misfit = $this->create(self::RAISER, $body);
+        self::assertSame(409, $misfit->getStatusCode());
+        self::assertSame('slot_misfit', self::decode($misfit)['details']['code'] ?? null);
+        self::assertSame('personal_template', self::decode($misfit)['details']['reason'] ?? null);
+
+        self::assertSame(422, $this->create(self::RAISER, $body + ['document_source_id' => $templateId])->getStatusCode(), 'slot or template, not both');
+        self::assertSame(1, $this->countDocuments(), 'only the seeded document');
+    }
+
+    private function registerSlot(): void
+    {
+        $this->slots->register('Courier', [
+            new TemplateSlot('Courier.receipt', 'Courier', ['en' => 'Receipt', 'ar' => 'إيصال'], 'document'),
+        ]);
+    }
+
+    private function slotTemplate(): int
+    {
+        $this->registerSlot();
+
+        return $this->editor->published(self::TENANT, self::RAISER, 'Receipt', [
+            $this->editor->para('Receipt'),
+        ], ['record_type' => 'document', 'scope' => 'tenant']);
+    }
+
+    private function bindSlot(int $templateId): void
+    {
+        $this->settings->setTenant(self::TENANT, SettingsRegistry::DOCUMENTS_SLOT_BINDINGS, SlotBindings::encode(['Courier.receipt' => $templateId]));
     }
 
     public function testANumericStringTemplateIdIsAccepted(): void

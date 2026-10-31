@@ -200,6 +200,24 @@ final class TenantRecordRepository
     }
 
     /**
+     * The name a `person` field prints with (WHIT-742): the profile's display
+     * name, only while that person is a member of this workspace.
+     */
+    public function memberName(int $tenantId, int $profileId): ?string
+    {
+        $stmt = $this->db->prepare(
+            'SELECT p.display_name FROM profiles p
+               JOIN memberships m ON m.profile_id = p.id AND m.tenant_id = :tenant_id
+              WHERE p.id = :profile_id
+              LIMIT 1'
+        );
+        $stmt->execute([':tenant_id' => $tenantId, ':profile_id' => $profileId]);
+        $name = $stmt->fetchColumn();
+
+        return is_string($name) && $name !== '' ? $name : null;
+    }
+
+    /**
      * @param array<string, mixed> $row
      * @return array<string, mixed>
      */

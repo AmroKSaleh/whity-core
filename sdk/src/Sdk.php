@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Whity\Sdk;
 
 /**
- * SDK identity (v1.53).
+ * SDK identity (v1.55).
  *
  * {@see self::VERSION} is the version a host application evaluates plugin
  * SDK-constraints against ({@see PluginRequirementsInterface::getSdkConstraint()}).
@@ -861,13 +861,22 @@ namespace Whity\Sdk;
  * steps this host doesn't run yet by name; {@see Manifest\PluginManifest::automations()}
  * reads them (WHIT-763).
  *
+ * Purely additive.) ->
+ * 1.55 (TEMPLATE SLOTS: `plugin.json` gains `documents.slots`, the named
+ * places a workspace plugin needs a document template. Each has a label, a
+ * record type of the manifest's own and the document kinds that can fill
+ * it. The host addresses it as `<plugin>.<slot>`, a
+ * workspace binds one of its published templates to it, and issuing names
+ * the slot. Checked by {@see Manifest\DocumentSlotValidator};
+ * {@see Manifest\PluginManifest::documentSlots()} reads them (WHIT-742).
+ *
  * Purely additive.)
  * Breaking changes require a new major version.
  */
 final class Sdk
 {
     /** The SDK contract version shipped by this package. */
-    public const VERSION = '1.53.0';
+    public const VERSION = '1.55.0';
 
     /**
      * Static identity only — never instantiated.

@@ -187,6 +187,13 @@ final class DocumentSourcesApiHandler
             return Response::error('Sharing a document requires documents:publish', 403);
         }
 
+        // A workspace plugin's record type is `<plugin>.<type>`, up to 129
+        // characters; the column holds 160 (migration 178, WHIT-742).
+        $recordType = $body['record_type'] ?? null;
+        if ($recordType !== null && (!is_string($recordType) || $recordType === '' || strlen($recordType) > 160)) {
+            return Response::error("'record_type' must be a record type of at most 160 characters", 422);
+        }
+
         // E.7: templates and anything Whity Render prints open in the page view;
         // notes and wiki pages open continuous.
         $defaultView = $fields['default_view'] ?? (in_array($kind, ['note', 'wiki'], true) ? 'continuous' : 'page');
@@ -198,7 +205,7 @@ final class DocumentSourcesApiHandler
             'default_view'        => $defaultView,
             'full_width'          => $fields['full_width'] ?? false,
             'page'                => $fields['page'] ?? null,
-            'record_type'         => is_string($body['record_type'] ?? null) ? $body['record_type'] : null,
+            'record_type'         => $recordType,
             'blocks'              => $fields['blocks'] ?? [],
             'own_fields'          => $fields['own_fields'] ?? null,
             'scope'               => $scope,

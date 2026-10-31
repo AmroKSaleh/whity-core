@@ -242,9 +242,12 @@ final class SdkPackageContractTest extends TestCase
     public function testSdkVersionIsOneEightForInteractiveBlocks(): void
     {
         $this->assertSame(
-            '1.53.0',
+            '1.55.0',
             \Whity\Sdk\Sdk::VERSION,
-            'SDK 1.53 ADDS AUTOMATIONS: plugin.json gains automations, a trigger on a record type event, '
+            'SDK 1.55 ADDS TEMPLATE SLOTS: plugin.json gains documents.slots, the named places a workspace '
+            . 'plugin needs a document template, each for one of its record types; a workspace binds a '
+            . 'published template to it and issuing names the slot (WHIT-742). Purely additive. '
+            . 'SDK 1.53 ADDS AUTOMATIONS: plugin.json gains automations, a trigger on a record type event, '
             . 'an optional when expression and steps from a closed catalogue (set fields, create a record, '
             . 'move, notify); designed steps the host does not run yet are refused by name (WHIT-763). '
             . 'Purely additive. '

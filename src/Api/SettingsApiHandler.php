@@ -123,6 +123,18 @@ final class SettingsApiHandler
     ];
 
     /**
+     * Keys this PATCH never writes, with the route that does: their values
+     * are checked against other data on the way in (a slot binding must name
+     * a published template that fits the slot, WHIT-742), which a plain
+     * settings write would skip.
+     *
+     * @var array<string, string>
+     */
+    private const WRITTEN_ELSEWHERE = [
+        SettingsRegistry::DOCUMENTS_SLOT_BINDINGS => 'PUT /api/v1/document-template-slots/{key}',
+    ];
+
+    /**
      * The catalogue key for a tab.
      *
      * The id is the slug, with one adjustment: three ids are hyphenated
@@ -300,6 +312,10 @@ final class SettingsApiHandler
         // settings:write: the workspace's default document themes are set by
         // whoever manages its themes (documents:themes, editor M4d).
         $settings = JsonBody::parsed($request)['settings'] ?? null;
+        $elsewhere = self::writtenElsewhere($settings);
+        if ($elsewhere !== null) {
+            return $elsewhere;
+        }
         foreach (is_array($settings) ? array_keys($settings) : [] as $key) {
             $required = self::KEY_PERMISSIONS[$key] ?? null;
             if ($required !== null && !$this->roleChecker->hasPermissionForProfile($userId, $required, $tenantId)) {
@@ -318,6 +334,19 @@ final class SettingsApiHandler
             // Per-tenant path: reject global-only governance keys (managed globally).
             allowGlobalOnly: false
         );
+    }
+
+    /** A 422 naming the route for a key this PATCH doesn't write, or null. */
+    private static function writtenElsewhere(mixed $settings): ?Response
+    {
+        foreach (is_array($settings) ? array_keys($settings) : [] as $key) {
+            $route = self::WRITTEN_ELSEWHERE[$key] ?? null;
+            if ($route !== null) {
+                return Response::error("{$key} is set with {$route}", 422, ['setting' => $key, 'route' => $route]);
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -359,6 +388,10 @@ final class SettingsApiHandler
         $context = $this->authorize($request, CorePermissions::SETTINGS_MANAGE, systemTenantOnly: true);
         if ($context instanceof Response) {
             return $context;
+        }
+        $elsewhere = self::writtenElsewhere(JsonBody::parsed($request)['settings'] ?? null);
+        if ($elsewhere !== null) {
+            return $elsewhere;
         }
 
         return $this->applyWrites(
