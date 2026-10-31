@@ -4603,15 +4603,27 @@ $mcpRecordTokenUse = static function (\Whity\Mcp\Auth\McpPrincipal $principal) u
 $mcpProtectedResource = ProtectedResource::fromEnv(McpConnectHandler::endpointFor((string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: '')));
 // ...and accept the access tokens it issues, mapped to a profile through the
 // SSO links (external_identities) and checked against a live membership.
+$mcpOAuthJwks = new \Whity\Auth\Oidc\JwksProvider(
+    static fn(string $uri): array => (new \Whity\Core\Http\HttpFetcher())->getJson($uri) ?? [],
+    minRefreshSeconds: 60,
+);
 $mcpOAuthVerifier = \Whity\Mcp\Auth\OAuth\OAuthAccessTokenVerifier::fromEnv(
     $mcpProtectedResource,
     new \Whity\Core\Http\HttpFetcher(),
-    new \Whity\Auth\Oidc\JwksProvider(
-        static fn(string $uri): array => (new \Whity\Core\Http\HttpFetcher())->getJson($uri) ?? [],
-        minRefreshSeconds: 60,
-    ),
+    $mcpOAuthJwks,
     $db->getPdo(),
 );
+// WHIT-802: the authorization server asks which workspaces a person belongs to,
+// for its consent screen, with an assertion signed by the same key. No RBAC:
+// the issuer's key is the authorisation. 404 while OAuth is off.
+$mcpOAuthWorkspacesHandler = \Whity\Mcp\Auth\OAuth\OAuthWorkspacesHandler::fromEnv(
+    $mcpProtectedResource,
+    (string) ($_ENV['APP_URL'] ?? getenv('APP_URL') ?: ''),
+    new \Whity\Core\Http\HttpFetcher(),
+    $mcpOAuthJwks,
+    $db->getPdo(),
+);
+$router->register('GET', '/api/oauth/workspaces', [$mcpOAuthWorkspacesHandler, 'list']);
 if ($mcpOAuthVerifier !== null) {
     $tokenValidator->acceptOAuthAccessTokens($mcpOAuthVerifier);
 }

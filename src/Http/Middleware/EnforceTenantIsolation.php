@@ -178,6 +178,10 @@ class EnforceTenantIsolation
         // names no tenant and holds nothing tenant-specific.
         '/.well-known/oauth-protected-resource',
         '/.well-known/oauth-protected-resource/mcp',
+        // WHIT-802: the OAuth authorization server's workspace lookup. Called
+        // server to server BEFORE any tenant is chosen (choosing one is what it
+        // is for); the handler verifies the issuer-signed assertion itself.
+        '/api/v1/oauth/workspaces',
         // i18n: public endpoints for language/translation discovery. Clients must
         // fetch available languages and translations before auth is possible
         // (to render the UI in the correct language during login). The settings

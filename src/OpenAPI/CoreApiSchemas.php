@@ -552,6 +552,37 @@ final class CoreApiSchemas
             ],
         ];
 
+        // GET /api/oauth/workspaces  — OAuthWorkspacesHandler::list() (WHIT-802)
+        // Machine to machine: the OAuth authorization server (MCP_OAUTH_ISSUER)
+        // asks which workspaces a person belongs to, for its consent screen.
+        // Authorised by an assertion signed with the issuer's published key, not
+        // by a session or RBAC, so it carries no bearerAuth marker. Kept off the
+        // MCP surface explicitly: an agent has no use for it.
+        $oauthWorkspacesRoute = [
+            'method' => 'GET',
+            'path' => '/api/oauth/workspaces',
+            'requiredRole' => null,
+            'requiredPermission' => null,
+            'schema' => [
+                'summary' => 'List the workspaces of a person, for the consent screen of the OAuth authorization server',
+                'description' => 'Called by the authorization server configured as MCP_OAUTH_ISSUER, with '
+                    . '`Authorization: Bearer <assertion>`: a JWT signed with a key from the JWKS of the issuer '
+                    . '(asymmetric only), header `typ` `whity-workspaces+jwt`, `iss` the issuer, `aud` exactly '
+                    . 'APP_URL + /api/v1/oauth/workspaces, `exp` at most 120 seconds after `iat`, and `sub` the '
+                    . 'person at the issuer. The person is found through their global single sign-on link. Only '
+                    . 'active memberships are listed, never the system workspace, in workspace id order. An '
+                    . 'unlinked subject is `linked: false` with no workspaces. 404 while OAuth is off.',
+                'tags' => ['auth'],
+                'mcp' => ['expose' => false],
+                'responses' => [
+                    200 => self::jsonResponse('Whether the subject is linked, and its active workspaces', 'OAuthWorkspacesResponse'),
+                    401 => self::errorResponse('Missing, invalid or expired assertion'),
+                    404 => self::errorResponse('OAuth is not configured on this instance'),
+                    429 => self::errorResponse('Too many requests'),
+                ],
+            ],
+        ];
+
         return [
             $loginRoute,
             $login2faRoute,
@@ -567,6 +598,7 @@ final class CoreApiSchemas
             $disableRoute,
             $regenerateCodesRoute,
             $statusRoute,
+            $oauthWorkspacesRoute,
         ];
     }
 
@@ -3827,6 +3859,17 @@ final class CoreApiSchemas
             'LogoutResponse' => self::object([
                 'status' => self::str(),
             ], ['status']),
+
+            // GET /api/oauth/workspaces — 200 response (OAuthWorkspacesHandler::list, WHIT-802)
+            'OAuthWorkspace' => self::object([
+                'id' => self::int(),
+                'name' => self::str(),
+                'slug' => self::str(true),
+            ], ['id', 'name', 'slug']),
+            'OAuthWorkspacesResponse' => self::object([
+                'linked' => self::bool(),
+                'workspaces' => ['type' => 'array', 'items' => SchemaBuilder::ref('OAuthWorkspace')],
+            ], ['linked', 'workspaces']),
 
             // POST /api/auth/2fa/setup — 200 response (TwoFactorHandler::setup)
             'TwoFaSetupResponse' => self::object([

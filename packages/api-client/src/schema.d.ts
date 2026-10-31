@@ -3643,6 +3643,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/oauth/workspaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the workspaces of a person, for the consent screen of the OAuth authorization server
+         * @description Called by the authorization server configured as MCP_OAUTH_ISSUER, with `Authorization: Bearer <assertion>`: a JWT signed with a key from the JWKS of the issuer (asymmetric only), header `typ` `whity-workspaces+jwt`, `iss` the issuer, `aud` exactly APP_URL + /api/v1/oauth/workspaces, `exp` at most 120 seconds after `iat`, and `sub` the person at the issuer. The person is found through their global single sign-on link. Only active memberships are listed, never the system workspace, in workspace id order. An unlinked subject is `linked: false` with no workspaces. 404 while OAuth is off.
+         */
+        get: operations["get_api_v1_oauth_workspaces"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ou-types": {
         parameters: {
             query?: never;
@@ -8079,6 +8099,15 @@ export interface components {
         NotificationPreferencesUpdateRequest: {
             /** @description Entries of `{type, channel, enabled}` to set for the signed-in user. Transactional notification types cannot be turned off. */
             preferences: components["schemas"]["NotificationPreferenceEntry"][];
+        };
+        OAuthWorkspace: {
+            id: number;
+            name: string;
+            slug: string | null;
+        };
+        OAuthWorkspacesResponse: {
+            linked: boolean;
+            workspaces: components["schemas"]["OAuthWorkspace"][];
         };
         OpenApiDocumentResponse: {
             [key: string]: unknown;
@@ -29027,6 +29056,71 @@ export interface operations {
             };
             /** @description Validation failed */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    get_api_v1_oauth_workspaces: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Whether the subject is linked, and its active workspaces */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthWorkspacesResponse"];
+                };
+            };
+            /** @description Missing, invalid or expired assertion */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description OAuth is not configured on this instance */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Method not allowed */
+            405: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Too many requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

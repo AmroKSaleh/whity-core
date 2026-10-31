@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Whity\Mcp\Auth\OAuth;
 
-use Firebase\JWT\JWK;
-use Firebase\JWT\JWT;
 use PDO;
 use Whity\Auth\ActiveTenantMembershipGuard;
 use Whity\Auth\Oidc\JwksProvider;
@@ -23,15 +21,10 @@ use Whity\Mcp\Auth\McpScope;
  * MCP token produces, so RBAC, scope, the tenant switch, rate limits and audit
  * all apply unchanged.
  *
- * Verification (firebase/php-jwt, the library the SSO path already uses):
- *   - the token's unverified `iss` must be the configured issuer, checked first
- *     so a stray bearer never costs a network fetch;
- *   - signature against the issuer's JWKS, found through its RFC 8414 or OIDC
- *     metadata (whose `issuer` must match) and cached with key-rotation refresh.
- *     Only asymmetric keys are used: a symmetric (`oct`) key in a JWKS would let
- *     anyone holding it mint tokens, so it is dropped;
- *   - `exp` required, `iss` exact, and `aud` must name this MCP endpoint
- *     (RFC 8707). A token minted for another resource is not accepted here.
+ * Verification is {@see IssuerJwtVerifier}'s: signature against the issuer's
+ * published asymmetric key, `exp` required, `iss` exact, and `aud` must name
+ * this MCP endpoint (RFC 8707). A token minted for another resource is not
+ * accepted here.
  *
  * Who the token is: `(iss, sub)` through the GLOBAL-trust namespace of
  * `external_identities`, the links single sign-on already keeps. The issuer is
@@ -50,30 +43,26 @@ use Whity\Mcp\Auth\McpScope;
  * sign in) and throws {@see OAuthTokenRefusedException} for one that is valid
  * but unusable (a 403 with a message, since signing in again would not help).
  *
- * Instance state is the discovered JWKS location only, configuration that is
- * the same for every request: FrankenPHP worker-safe.
+ * Instance state is configuration that is the same for every request:
+ * FrankenPHP worker-safe.
  */
 final class OAuthAccessTokenVerifier
 {
     public const DEFAULT_TENANT_CLAIM = 'tenant_id';
 
-    /** firebase/php-jwt clock-skew tolerance, the same as JwtParser's. */
-    private const LEEWAY_SECONDS = 30;
-
-    /** Key types that are public keys. `oct` (a shared secret) is not one. */
-    private const ASYMMETRIC_KEY_TYPES = ['RSA', 'EC', 'OKP'];
-
-    private ?string $discoveredJwksUri = null;
+    private readonly IssuerJwtVerifier $jwt;
 
     public function __construct(
         private readonly string $issuer,
         private readonly string $resource,
-        private readonly HttpClient $http,
-        private readonly JwksProvider $jwks,
+        HttpClient $http,
+        JwksProvider $jwks,
         private readonly PDO $db,
-        private readonly ?string $jwksUri = null,
+        ?string $jwksUri = null,
         private readonly string $tenantClaim = self::DEFAULT_TENANT_CLAIM,
-    ) {}
+    ) {
+        $this->jwt = new IssuerJwtVerifier($issuer, $http, $jwks, $jwksUri);
+    }
 
     /**
      * Built when {@see ProtectedResource} is on, from MCP_OAUTH_JWKS_URI
@@ -102,17 +91,7 @@ final class OAuthAccessTokenVerifier
      */
     public function verify(string $token): ?McpPrincipal
     {
-        $segments = explode('.', $token);
-        if (count($segments) !== 3) {
-            return null;
-        }
-        $header  = self::decodeSegment($segments[0]);
-        $payload = self::decodeSegment($segments[1]);
-        if ($header === null || $payload === null || ($payload['iss'] ?? null) !== $this->issuer) {
-            return null;
-        }
-
-        $claims = $this->verifiedClaims($token, is_string($header['kid'] ?? null) ? $header['kid'] : null);
+        $claims = $this->jwt->verify($token, $this->resource);
         if ($claims === null) {
             return null;
         }
@@ -155,46 +134,6 @@ final class OAuthAccessTokenVerifier
             // it can never collide with an MCP token's jti.
             jti: 'oauth:' . (is_string($jti) && $jti !== '' ? $jti : substr(hash('sha256', $token), 0, 32)),
         );
-    }
-
-    /**
-     * Signature and the registered claims, or null.
-     *
-     * @return array<string, mixed>|null
-     */
-    private function verifiedClaims(string $token, ?string $kid): ?array
-    {
-        $jwksUri = $this->jwksUri ?? $this->discoverJwksUri();
-        if ($jwksUri === null) {
-            return null;
-        }
-
-        JWT::$leeway = self::LEEWAY_SECONDS;
-        try {
-            $keys = self::asymmetricKeys($this->jwks->getForKid($jwksUri, $kid));
-            if ($keys === []) {
-                return null;
-            }
-            // Each Key carries its JWKS entry's own algorithm, and JWT::decode
-            // refuses a token whose `alg` differs from its key's, so the token
-            // cannot choose `none` or a symmetric algorithm for itself.
-            $decoded = JWT::decode($token, JWK::parseKeySet(['keys' => $keys], 'RS256'));
-        } catch (\Throwable) {
-            return null;
-        }
-
-        /** @var array<string, mixed>|null $claims */
-        $claims = json_decode((string) json_encode($decoded), true);
-        if (!is_array($claims) || !isset($claims['exp']) || ($claims['iss'] ?? null) !== $this->issuer) {
-            return null;
-        }
-
-        $aud = $claims['aud'] ?? null;
-        if (!in_array($this->resource, is_array($aud) ? $aud : [$aud], true)) {
-            return null;
-        }
-
-        return $claims;
     }
 
     /**
@@ -249,79 +188,6 @@ final class OAuthAccessTokenVerifier
         $granted = is_string($raw) ? preg_split('/\s+/', trim($raw)) : (is_array($raw) ? $raw : []);
         $granted = array_filter((array) $granted, 'is_string');
         return array_values(array_intersect(McpScope::CAPABILITIES, $granted));
-    }
-
-    /**
-     * The JWKS location from the issuer's metadata: RFC 8414 first, then OIDC
-     * discovery. Not cached on failure, so a server that was briefly down is
-     * tried again on the next request.
-     */
-    private function discoverJwksUri(): ?string
-    {
-        if ($this->discoveredJwksUri !== null) {
-            return $this->discoveredJwksUri;
-        }
-        foreach ($this->metadataUrls() as $url) {
-            try {
-                $doc = $this->http->getJson($url);
-            } catch (\Throwable) {
-                $doc = null;
-            }
-            if (
-                is_array($doc)
-                && ($doc['issuer'] ?? null) === $this->issuer
-                && is_string($doc['jwks_uri'] ?? null)
-                && str_starts_with(strtolower($doc['jwks_uri']), 'https://')
-            ) {
-                return $this->discoveredJwksUri = $doc['jwks_uri'];
-            }
-        }
-        return null;
-    }
-
-    /** @return list<string> */
-    private function metadataUrls(): array
-    {
-        $parts  = parse_url($this->issuer);
-        $origin = ($parts['scheme'] ?? 'https') . '://' . ($parts['host'] ?? '')
-            . (isset($parts['port']) ? ':' . $parts['port'] : '');
-        $path   = rtrim((string) ($parts['path'] ?? ''), '/');
-        return [
-            // RFC 8414 §3.1: the well-known segment goes before the issuer's path.
-            $origin . '/.well-known/oauth-authorization-server' . $path,
-            $this->issuer . '/.well-known/openid-configuration',
-        ];
-    }
-
-    /**
-     * @param array<string, mixed> $jwks
-     * @return list<array<string, mixed>>
-     */
-    private static function asymmetricKeys(array $jwks): array
-    {
-        $keys = [];
-        foreach (is_array($jwks['keys'] ?? null) ? $jwks['keys'] : [] as $key) {
-            if (
-                is_array($key)
-                && in_array($key['kty'] ?? null, self::ASYMMETRIC_KEY_TYPES, true)
-                && !(isset($key['alg']) && is_string($key['alg']) && (str_starts_with(strtoupper($key['alg']), 'HS') || strtolower($key['alg']) === 'none'))
-                && ($key['use'] ?? 'sig') === 'sig'
-            ) {
-                $keys[] = $key;
-            }
-        }
-        return $keys;
-    }
-
-    /** @return array<string, mixed>|null */
-    private static function decodeSegment(string $segment): ?array
-    {
-        $json = base64_decode(strtr($segment, '-_', '+/'), true);
-        if ($json === false) {
-            return null;
-        }
-        $decoded = json_decode($json, true);
-        return is_array($decoded) ? $decoded : null;
     }
 
     private static function env(string $name): ?string
