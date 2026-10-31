@@ -179,7 +179,7 @@ final class TenantOwnedTables
         'document_source_versions' => '162_create_document_source_versions.php',
         // Whity Builder (WHIT-760): a workspace's own plugins as published
         // manifest versions, the live pointer, and the permission slugs they
-        // declare (migration 165).
+        // declare (migration 164).
         'plugin_manifest_versions' => '164_create_tenant_plugin_manifests.php',
         'tenant_plugins' => '164_create_tenant_plugin_manifests.php',
         'tenant_plugin_permissions' => '164_create_tenant_plugin_manifests.php',
