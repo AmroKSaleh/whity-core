@@ -39,6 +39,7 @@
         "sidebar.group.workspace": "Workspace",
         "sidebar.item.aiPrincipals": "AI Principals",
         "sidebar.item.approvalGating": "Approval Gating",
+        "sidebar.item.approvals": "Approvals",
         "sidebar.item.auditLogs": "Audit Logs",
         "sidebar.item.dashboard": "Dashboard",
         "sidebar.item.delegations": "Delegations",

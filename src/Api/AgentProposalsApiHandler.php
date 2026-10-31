@@ -60,7 +60,10 @@ final class AgentProposalsApiHandler
             AgentProposalRepository::EXPIRED, AgentProposalRepository::UNDONE,
         ], true) ? $status : null;
 
-        return Response::json(['data' => array_map(self::present(...), $this->proposals->listFor($tenantId, $profileId, $status))], 200);
+        $rows  = $this->proposals->listFor($tenantId, $profileId, $status);
+        $names = $this->proposals->agentNames($tenantId, array_map(static fn (array $row): string => (string) $row['agent_principal_id'], $rows));
+
+        return Response::json(['data' => array_map(static fn (array $row): array => self::present($row, $names), $rows)], 200);
     }
 
     /** @param array<string, string> $params */
@@ -113,7 +116,7 @@ final class AgentProposalsApiHandler
         ]);
 
         $fresh = $this->proposals->find($id, $tenantId);
-        return Response::json(['data' => $fresh !== null ? self::present($fresh) : null], 200);
+        return Response::json(['data' => $fresh !== null ? self::present($fresh, $this->proposals->agentNames($tenantId, [(string) $fresh['agent_principal_id']])) : null], 200);
     }
 
     /** @param array<string, string> $params */
@@ -141,7 +144,7 @@ final class AgentProposalsApiHandler
         ]);
 
         $fresh = $this->proposals->find($id, $tenantId);
-        return Response::json(['data' => $fresh !== null ? self::present($fresh) : null], 200);
+        return Response::json(['data' => $fresh !== null ? self::present($fresh, $this->proposals->agentNames($tenantId, [(string) $fresh['agent_principal_id']])) : null], 200);
     }
 
     /** @return array{0: int, 1: int}|Response */
@@ -161,13 +164,18 @@ final class AgentProposalsApiHandler
      * stay server-side; the card needs what will happen, not how the token
      * is built.
      *
-     * @param array<string, mixed> $proposal
+     * The agent is named by what its credential was called ("Billing
+     * assistant"), never by its id (15-agents.md, Words).
+     *
+     * @param array<string, mixed>  $proposal
+     * @param array<string, string> $agentNames principal id => credential name
      * @return array<string, mixed>
      */
-    private static function present(array $proposal): array
+    private static function present(array $proposal, array $agentNames = []): array
     {
         return [
             'id'                => $proposal['id'],
+            'agent'             => ['name' => $agentNames[(string) $proposal['agent_principal_id']] ?? null],
             'status'            => $proposal['status'],
             'tool'              => $proposal['tool'],
             'summary'           => $proposal['summary'],

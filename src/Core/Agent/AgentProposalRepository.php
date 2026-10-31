@@ -111,6 +111,39 @@ final class AgentProposalRepository
     }
 
     /**
+     * The names people gave the agent credentials that asked, by principal id
+     * (the credential's jti): what the approvals card calls the agent ("Billing
+     * assistant"). A revoked or renamed credential keeps whatever name its row
+     * holds; one that no longer exists is simply absent.
+     *
+     * @param list<string> $principalIds
+     * @return array<string, string>
+     */
+    public function agentNames(int $tenantId, array $principalIds): array
+    {
+        $principalIds = array_values(array_unique(array_filter($principalIds, static fn ($id): bool => $id !== '')));
+        if ($principalIds === []) {
+            return [];
+        }
+
+        $placeholders = implode(', ', array_map(static fn (int $i): string => ':jti' . $i, array_keys($principalIds)));
+        $stmt = $this->db->prepare(
+            'SELECT jti, name FROM mcp_tokens WHERE tenant_id = :tenant_id AND jti IN (' . $placeholders . ')'
+        );
+        $stmt->bindValue(':tenant_id', $tenantId, PDO::PARAM_INT);
+        foreach ($principalIds as $i => $id) {
+            $stmt->bindValue(':jti' . $i, $id, PDO::PARAM_STR);
+        }
+        $stmt->execute();
+
+        $names = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $names[(string) $row['jti']] = (string) $row['name'];
+        }
+        return $names;
+    }
+
+    /**
      * Move a waiting, unexpired proposal of $profileId's to $status, recording
      * who decided and, for an edit, the new arguments. True only for the one
      * caller that made the move.

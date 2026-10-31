@@ -862,7 +862,7 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         // `records`: this is a surface a person opens about THEIR OWN work, like
         // the inbox above it, where the entries in `records` are things somebody
         // administers on behalf of the tenant.
-        'order' => 3,
+        'order' => 4,
         // Mirrors GET /api/v1/me/form-submissions, gated forms:submit rather than
         // forms:read — the rows already name exactly one person, so requiring the
         // tenant-wide read permission would hide this from precisely the people
@@ -1057,6 +1057,18 @@ $hookManager->listen('navigation.register', function ($data, $context) {
         // awaiting you": routing is one registered source of possibly several,
         // and #947 refused it a surface of its own precisely so this entry never
         // has to become one entry per source.
+    ];
+    $items[] = [
+        'id' => 'approvals',
+        'label' => 'Approvals',
+        'href' => '/admin/approvals',
+        'icon' => 'rubber-stamp',
+        'group' => 'overview',
+        'order' => 3,
+        // WHIT-809. Ungated like the Inbox: it lists the proposals agents made
+        // on the CALLER's behalf (GET /api/me/agent-proposals), and only the
+        // granting person may decide them, so there is nobody a permission
+        // could usefully keep out.
     ];
     $items[] = [
         'id' => 'document-library',

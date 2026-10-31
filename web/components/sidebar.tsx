@@ -23,6 +23,7 @@ import {
   IconMoon,
 } from '@tabler/icons-react';
 import { useState, useCallback, useEffect, useMemo } from 'react';
+import { WAITING_CHANGED_EVENT } from '@/lib/waiting-changed';
 import type { Icon } from '@tabler/icons-react';
 
 /**
@@ -179,12 +180,21 @@ function TenantSwitcher({ memberships, activeTenantId, collapsed }: TenantSwitch
 /**
  * How many things wait for the person, by nav item id: the Inbox's open items,
  * summed over its sources (`GET /api/me/inbox/sources` carries each source's
- * open count for exactly this badge). Re-read on every page change, so acting
+ * open count for exactly this badge), and the agent proposals waiting for
+ * their approval (`GET /api/me/agent-proposals?status=waiting`). Re-read on every page change, so acting
  * on an item and moving on updates the count. A failed read shows no count
  * rather than a wrong one.
  */
 function useWaitingCounts(pathname: string | null): Record<string, number> {
   const [counts, setCounts] = useState<Record<string, number>>({});
+  // A page that just changed what waits (Approvals after a decision) says so
+  // with WAITING_CHANGED_EVENT, so the count follows without a navigation.
+  const [nudge, setNudge] = useState(0);
+  useEffect(() => {
+    const onChanged = () => setNudge((n) => n + 1);
+    window.addEventListener(WAITING_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(WAITING_CHANGED_EVENT, onChanged);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -199,12 +209,22 @@ function useWaitingCounts(pathname: string | null): Record<string, number> {
       } catch {
         inbox = 0;
       }
-      if (!cancelled) setCounts((prev) => ({ ...prev, inbox }));
+      let approvals = 0;
+      try {
+        const response = await fetch('/api/v1/me/agent-proposals?status=waiting', { credentials: 'include' });
+        if (response.ok) {
+          const body = (await response.json()) as { data?: unknown[] };
+          approvals = body.data?.length ?? 0;
+        }
+      } catch {
+        approvals = 0;
+      }
+      if (!cancelled) setCounts((prev) => ({ ...prev, inbox, approvals }));
     })();
     return () => {
       cancelled = true;
     };
-  }, [pathname]);
+  }, [pathname, nudge]);
 
   return counts;
 }
@@ -280,6 +300,7 @@ export function Sidebar() {
     () => ({
       dashboard: t('sidebar.item.dashboard', 'Dashboard'),
       inbox: t('sidebar.item.inbox', 'Inbox'),
+      approvals: t('sidebar.item.approvals', 'Approvals'),
       users: t('sidebar.item.users', 'Users'),
       roles: t('sidebar.item.roles', 'Roles'),
       ous: t('sidebar.item.ous', 'Organizational Units'),
