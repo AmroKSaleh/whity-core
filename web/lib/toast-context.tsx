@@ -4,16 +4,26 @@ import { createContext, useContext, useState, useCallback, type ReactNode } from
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info';
 
+/**
+ * A button on the toast, e.g. Undo (register 7.5c: undo is an action, not an
+ * apology). Pressing it runs `onClick` and dismisses the toast.
+ */
+export interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
 export interface Toast {
   id: string;
   message: string;
   type: ToastType;
   duration?: number;
+  action?: ToastAction;
 }
 
 interface ToastContextType {
   toasts: Toast[];
-  addToast: (message: string, type: ToastType, duration?: number) => void;
+  addToast: (message: string, type: ToastType, duration?: number, action?: ToastAction) => void;
   removeToast: (id: string) => void;
 }
 
@@ -27,9 +37,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addToast = useCallback(
-    (message: string, type: ToastType, duration = 3000) => {
+    (message: string, type: ToastType, duration = 3000, action?: ToastAction) => {
       const id = Math.random().toString(36).substring(2, 9);
-      const toast: Toast = { id, message, type, duration };
+      const toast: Toast = { id, message, type, duration, action };
 
       setToasts((prev) => [...prev, toast]);
 
