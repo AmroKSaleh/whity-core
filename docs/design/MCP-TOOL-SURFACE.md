@@ -13,7 +13,7 @@ The owner's problem: "too many mcp tools in one create a disaster... and not all
 - **`?tools=full` keeps the old list** for clients that want it. The switch is called out in the release notes.
 - **Toolsets.** Every operation belongs to one toolset: `core.<area>` for core, `<pluginKey>[.<sub>]` for a plugin. Toolsets organise search results, token scope and splits. They never grant access.
 - **Token toolsets are enforced.** A token whose scope names toolsets (`toolset:core.documents`) can only find and call operations in them. A call outside them is refused, not just hidden.
-- **Plugins.** A plugin may ask for at most one always-on tool, and it shows only after a tenant admin enables it. Descriptions are capped at 500 characters. Everything else a plugin offers is reached through search. SDK 1.47 adds `toolset`, `visibility` and `agentPolicy` to tool descriptors, and an optional `PluginMcpToolsetsInterface`.
+- **Plugins.** A plugin may ask for at most one always-on tool, and it shows only after a tenant admin enables it. Descriptions are capped at 500 characters. Everything else a plugin offers is reached through search. The next SDK minor (1.48 or later; editor M4c takes 1.47) adds `toolset`, `visibility`, `agentPolicy` and `undo` to tool descriptors, and an optional `PluginMcpToolsetsInterface`.
 - **Agents follow the register's model (§5.11).** An agent is an AI principal (`ai-agent`) acting for the person who granted it. Each permission is Off, Ask first or Allowed for it, never beyond that person's own RBAC. Ask first is real on the server: the call stores a proposal (operation, arguments, diff, permissions, undo window), and approval executes it for the granting person. Undo works for the operation's window. Every write records its actor: person, agent for person, or system. Routes can cap agents with `agentPolicy` (`propose`, `suggest-only`, `refuse`). A person's own client acts as that person.
 - **Splits are optional.** `/mcp/<split>` serves one core area or one plugin as its own MCP server, also in search-and-call mode. It is for narrow clients and hard boundaries. The connect wizard recommends the single `/mcp`.
 
@@ -206,9 +206,9 @@ No `enable_toolset` tool (§7).
 | Toolset description | ≤ 160 characters | Refused at declaration. |
 | `?tools=full` | no cap | Opt-in. The admin page shows the estimated size per role. |
 
-### 5.7 Plugin SDK (1.47, additive)
+### 5.7 Plugin SDK (next free minor, additive)
 
-1.47 is the next SDK minor. The document designs also add SDK interfaces, so the number goes to whichever ships first.
+Editor M4c takes SDK 1.47.0. This change takes the next free minor when it merges (1.48.0 or later), and so does Whity-Builder's manifest work, in merge order.
 
 **Authored tool descriptor, new optional keys** (`PluginMcpToolsInterface`, unchanged interface):
 
@@ -223,6 +223,7 @@ No `enable_toolset` tool (§7).
     'toolset'            => 'theme-creator.palettes', // NEW: under the plugin's own key; default '<pluginKey>'
     'visibility'         => 'discoverable',           // NEW: 'always-on' | 'discoverable'; default 'discoverable'
     'agentPolicy'        => 'allow',                  // NEW (§5.11): 'allow' | 'refuse' | 'suggest-only' | 'propose'
+    'undo'               => ['windowSeconds' => 1800, 'operation' => 'acme_restore_thing'], // NEW (§5.11): optional; omitted = no undo, so Ask first for agents
 ]
 ```
 
@@ -255,6 +256,7 @@ interface PluginMcpToolsetsInterface
         'visibility'  => 'discoverable', // optional; 'always-on' only for core picks and one per plugin
         'toolset'     => 'core.forms',   // optional; core default from the tag map; plugin default '<pluginKey>'
         'agentPolicy' => 'allow',        // optional (§5.11)
+        'undo'        => ['windowSeconds' => 1800, 'operation' => 'post_api_things_id_restore'], // optional (§5.11)
     ],
 ],
 ```
@@ -314,7 +316,7 @@ The effective mode is the stricter of the grant and the ceiling. People's own cl
 
 **Undo (register 7.5c).**
 
-- An operation may declare an undo window and an inverse: an undo operation, or a handler that reverses it from the stored result. Example: send email, 30 minutes.
+- An operation may declare an undo window and an inverse with the `undo` key: `windowSeconds`, plus `operation` (the operationId that reverses it) or, for authored tools, `handler` (a callable that reverses it from the stored result). Example: send email, 30 minutes. The same key is used on route schemas, authored descriptors and Whity-Builder manifests.
 - After an agent's Allowed call, or an approved proposal, the result carries `undo: {token, until}`. The activity item shows Undo until then. Undo runs the inverse with actor "person" (the one who clicked) and marks the proposal `undone`.
 - **No undo means Ask first (decided).** An operation with no undo window is always Ask first for agents, even when the grant says Allowed. The register keeps confirmation for what can't be undone.
 
@@ -452,7 +454,7 @@ Taskaat, project WHIT, section "Plugins, SDK & API" (WHIT-755 is in "Docs & Ops"
 | WHIT-749 token toolsets | `toolset:` scope entries, enforced in list, search and call; ADR-0006 amendment | WHIT-747 |
 | WHIT-750 search and call | `search_operations` (query, toolset, operationId describe, table of contents, Arabic), `call_operation`, old names as unlisted aliases, `McpSearchEvalTest` | WHIT-748, WHIT-749 |
 | WHIT-751 budgets in CI | `McpToolBudgetTest`: names, descriptions, summaries, schema size, always-on and search-and-call sizes | WHIT-747 |
-| WHIT-752 SDK 1.47 | descriptor `toolset` / `visibility` / `agentPolicy`, `PluginMcpToolsetsInterface`, name prefix, one always-on read-only tool, loader enforcement, docs, conformance checks | WHIT-747 |
+| WHIT-752 SDK (next free minor, 1.48+) | descriptor `toolset` / `visibility` / `agentPolicy`, `PluginMcpToolsetsInterface`, name prefix, one always-on read-only tool, loader enforcement, docs, conformance checks | WHIT-747 |
 | WHIT-753 AI principals and scope grant | `ai-agent` principal (Whity tokens and Whity ID agent clients), per-permission Off / Ask first / Allowed with the decided defaults (handoff item 11), never above the granting person, `agentPolicy` ceilings at the route, mode in search, actor columns and actor context on every write. No `ai-agent` credentials issued until WHIT-784 ships. | WHIT-746 |
 | WHIT-784 agent proposals and undo | `agent_proposals` (handoff item 10): store on Ask first, preview diffs, approve, edit or decline (approval executes for the granting person in the row's tenant), expiry, idempotent approval; undo windows and inverses (7.5c) | WHIT-753 |
 | WHIT-754 admin and wizard | admin MCP page (toolset, visibility, policy, sizes, enabling plugin always-on tools); wizard recommends `/mcp`, optional toolsets and splits | WHIT-748, WHIT-749 |
