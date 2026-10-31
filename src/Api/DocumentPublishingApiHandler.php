@@ -102,7 +102,7 @@ final class DocumentPublishingApiHandler
         $type = is_string($type) && $type !== '' ? $type : null;
 
         return Response::json(['data' => [
-            'record_types' => $this->fields->recordTypes(),
+            'record_types' => $this->fields->recordTypes($tenantId),
             'groups' => $this->fields->groups($tenantId, $type),
             // The name and default lines, and every line by its theme name, so
             // the editor shows the lines the document's theme lists. The print
@@ -121,7 +121,7 @@ final class DocumentPublishingApiHandler
         [$tenantId, $callerId] = $ctx;
         $q = self::query($request);
         $type = (string) ($q['recordType'] ?? '');
-        if (!$this->fields->has($type)) {
+        if (!$this->fields->has($type, $tenantId)) {
             return Response::error('Unknown record type', 404);
         }
 

@@ -24,6 +24,8 @@ use Whity\Core\Document\Qr\DocumentQrPolicy;
 use Whity\Core\Document\Qr\DocumentQrService;
 use Whity\Core\Document\Routing\RouteEventRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
+use Whity\Core\Document\Slots\SlotBindings;
+use Whity\Core\Document\Slots\TemplateSlotRegistry;
 use Whity\Core\Document\Issuing\ActingAs;
 use Whity\Core\Document\Issuing\DocumentIssuing;
 use Whity\Core\Document\Issuing\DocumentOriginKeyConflictException;
@@ -210,6 +212,9 @@ final class DocumentsApiHandler
         // because a host without this collaborator has no switch to turn on in
         // its documents UI either.
         private readonly ?DocumentQrService $qr = null,
+        // ── WHIT-742: issuing by template slot ───────────────────────────────
+        // Without it, `slot` in the body is refused and callers name a template.
+        private readonly ?TemplateSlotRegistry $slots = null,
     ) {
     }
 
@@ -255,20 +260,33 @@ final class DocumentsApiHandler
 
         $body = JsonBody::parsed($request);
 
-        $sourceId = $body['document_source_id'] ?? null;
-        // A string id is accepted: JSON from a form-driven client routinely
-        // carries numbers as strings.
-        if (is_string($sourceId) && ctype_digit($sourceId)) {
-            $sourceId = (int) $sourceId;
-        }
-        if (!is_int($sourceId) || $sourceId <= 0) {
-            return Response::error("'document_source_id' must be the id of a template to issue this document from", 422);
-        }
+        // A plugin names its slot (WHIT-742) and the workspace decides which
+        // template fills it; anyone else names the template.
+        $slotKey = $body['slot'] ?? null;
+        if ($slotKey !== null) {
+            if (array_key_exists('document_source_id', $body)) {
+                return Response::error("Send 'slot' or 'document_source_id', not both", 422);
+            }
+            $source = $this->slotSource($slotKey, $tenantId, $callerId);
+            if ($source instanceof Response) {
+                return $source;
+            }
+        } else {
+            $sourceId = $body['document_source_id'] ?? null;
+            // A string id is accepted: JSON from a form-driven client routinely
+            // carries numbers as strings.
+            if (is_string($sourceId) && ctype_digit($sourceId)) {
+                $sourceId = (int) $sourceId;
+            }
+            if (!is_int($sourceId) || $sourceId <= 0) {
+                return Response::error("'document_source_id' must be the id of a template to issue this document from, or send 'slot'", 422);
+            }
 
-        // 404 rather than 403 on a miss: a 403 would confirm the template exists.
-        $source = $this->sources->visibleRow($sourceId, $tenantId, $callerId);
-        if ($source === null) {
-            return Response::error('Template not found', 404);
+            // 404 rather than 403 on a miss: a 403 would confirm the template exists.
+            $source = $this->sources->visibleRow($sourceId, $tenantId, $callerId);
+            if ($source === null) {
+                return Response::error('Template not found', 404);
+            }
         }
         if ($source['kind'] === 'template') {
             $version = $this->issuing->published($tenantId, $source);
@@ -369,6 +387,51 @@ final class DocumentsApiHandler
     }
 
     /**
+     * The template bound to a slot, as the caller may see it, or why it
+     * can't be issued from (WHIT-742, DOCUMENT-AUTOMATION.md 3.2). A slot
+     * whose plugin is off, or that nothing fills, is a 409 the plugin can show;
+     * a bound template that no longer fits (unpublished, made personal, a
+     * different record type) is a 409 naming why, not a silent fallback.
+     *
+     * @return array<string, mixed>|Response
+     */
+    private function slotSource(mixed $key, int $tenantId, int $callerId): array|Response
+    {
+        if (!is_string($key) || $key === '') {
+            return Response::error("'slot' must be a slot key such as bakery.order_confirmation", 422);
+        }
+        $slot = $this->slots?->find($tenantId, $key);
+        if ($slot === null) {
+            $plugin = strstr($key, '.', true);
+
+            return Response::error('This slot is unknown here, or its plugin is off', 409, [
+                'code' => 'slot_unavailable',
+                'plugin' => $plugin !== false ? $plugin : $key,
+            ]);
+        }
+        $effective = $this->settings->effective($tenantId);
+        $templateId = SlotBindings::parse((string) ($effective[SettingsRegistry::DOCUMENTS_SLOT_BINDINGS] ?? ''))[$slot->key] ?? null;
+        if ($templateId === null) {
+            return Response::error('No template is bound to this slot yet', 409, ['code' => 'slot_unbound', 'slot' => $slot->key]);
+        }
+        // 404 rather than 403 on a miss: a 403 would confirm the template exists.
+        $source = $this->sources->visibleRow($templateId, $tenantId, $callerId);
+        if ($source === null) {
+            return Response::error('Template not found', 404);
+        }
+        $problem = DocumentTemplateSlotsApiHandler::misfit($slot, $source);
+        if ($problem !== null) {
+            return Response::error('The template bound to this slot no longer fits it: ' . $problem['message'], 409, [
+                'code' => 'slot_misfit',
+                'slot' => $slot->key,
+                'reason' => $problem['code'],
+            ]);
+        }
+
+        return $source;
+    }
+
+    /**
      * The values a request filled, or why they are refused (merge data,
      * DOCUMENT-AUTOMATION.md 3.3). A value may fill a template's own field
      * (`template.<key>`) or a field the record left empty; a value for a field
@@ -430,13 +493,14 @@ final class DocumentsApiHandler
     }
 
     /**
-     * "type:id" as [type, id], or null.
+     * "type:id" as [type, id], or null. A workspace plugin's type keeps its
+     * plugin's casing and can be 129 characters (`CakeOrders.order`, WHIT-742).
      *
      * @return array{0: string, 1: string}|null
      */
     private static function parseRecord(mixed $value): ?array
     {
-        if (!is_string($value) || preg_match('/^([a-z0-9._-]{1,64}):([A-Za-z0-9._-]{1,64})$/', $value, $m) !== 1) {
+        if (!is_string($value) || preg_match('/^([A-Za-z0-9._-]{1,160}):([A-Za-z0-9._-]{1,64})$/', $value, $m) !== 1) {
             return null;
         }
 

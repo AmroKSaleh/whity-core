@@ -145,7 +145,8 @@ final class SettingsApiRealEngineTest extends TestCase
         // 36 since editor M4d: documents.theme and documents.theme_by_kind for print_color.
         // 37 since WHIT-754: mcp.always_on_plugin_tools, each workspace's plugin
         // tools turned on as always-on for MCP clients.
-        self::assertCount(37, $data['registry']);
+        // 38 since WHIT-742: documents.slot_bindings (read here, written by the slots route).
+        self::assertCount(38, $data['registry']);
         self::assertArrayNotHasKey('auth.self_registration_enabled', $data['effective']);
         self::assertSame([], $data['overridden']);
     }
@@ -232,6 +233,30 @@ final class SettingsApiRealEngineTest extends TestCase
             $this->req('PATCH', '/api/settings', ['settings' => ['documents.theme' => 'tenant.house']], self::USER_FULL)
         );
         self::assertSame(200, $allowed->getStatusCode(), $allowed->getBody());
+    }
+
+    /**
+     * The slot bindings are written only by PUT /api/document-template-slots,
+     * which checks the template fits the slot (WHIT-742); a settings write would
+     * skip that, so both PATCH routes refuse the key and name the route.
+     */
+    public function testSlotBindingsAreNotWrittenThroughTheSettingsPatch(): void
+    {
+        $body = ['settings' => ['documents.slot_bindings' => '{"CakeOrders.order_confirmation":1}']];
+
+        TenantContext::setTenantId(self::TENANT_A);
+        $tenant = $this->handler->patch($this->req('PATCH', '/api/settings', $body, self::USER_FULL));
+        self::assertSame(422, $tenant->getStatusCode());
+        self::assertSame('PUT /api/v1/document-template-slots/{key}', $this->decode($tenant)['details']['route'] ?? null, $tenant->getBody());
+    }
+
+    public function testSlotBindingsAreNotWrittenThroughTheGlobalSettingsPatchEither(): void
+    {
+        $body = ['settings' => ['documents.slot_bindings' => '{"CakeOrders.order_confirmation":1}']];
+
+        TenantContext::setTenantId(self::SYSTEM_TENANT);
+        $global = $this->handler->patchGlobal($this->req('PATCH', '/api/settings/global', $body, self::USER_FULL, self::SYSTEM_TENANT));
+        self::assertSame(422, $global->getStatusCode());
     }
 
     public function testPatchSettingsRejectsInvalidTimezoneWith422AndFieldDetail(): void

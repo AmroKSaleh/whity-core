@@ -281,6 +281,22 @@ final class PluginManifest
         return array_values($this->data['tests'] ?? []);
     }
 
+    /**
+     * Template slots (SDK 1.55), as declared under `documents.slots`: the
+     * named places this plugin needs a document template, keyed by local name.
+     * The host addresses each as `<plugin name>.<key>`.
+     *
+     * @return array<string, array{label: array{en: string, ar: string}, record: string, kinds?: list<string>}>
+     */
+    public function documentSlots(): array
+    {
+        $documents = $this->map('documents');
+        $slots = $documents['slots'] ?? [];
+
+        /** @var array<string, array{label: array{en: string, ar: string}, record: string, kinds?: list<string>}> */
+        return is_array($slots) ? $slots : [];
+    }
+
     /** @return array<string, mixed> */
     private function plugin(): array
     {

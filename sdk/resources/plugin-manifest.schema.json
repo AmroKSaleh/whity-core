@@ -620,6 +620,50 @@
           }
         ]
       }
+    },
+    "documents": {
+      "description": "Template slots (SDK 1.55): the named places this plugin needs a document template. The host addresses each as <plugin name>.<slot>, and a workspace binds a published template to it.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "slots": {
+          "type": "object",
+          "maxProperties": 50,
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]{0,39}$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "label",
+              "record"
+            ],
+            "properties": {
+              "label": {
+                "$ref": "#/$defs/label"
+              },
+              "record": {
+                "type": "string",
+                "description": "One of this manifest's record types; the slot's documents are filled from it.",
+                "pattern": "^[a-z][a-z0-9_]{0,63}$"
+              },
+              "kinds": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "enum": [
+                    "template",
+                    "label"
+                  ]
+                },
+                "description": "Which document kinds can fill the slot. Default: template."
+              }
+            }
+          }
+        }
+      }
     }
   },
   "$defs": {

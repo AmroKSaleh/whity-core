@@ -199,6 +199,49 @@ A run reads as its trigger (event, record, depth, the person), its status (`queu
 
 Not yet: per-workspace run quotas as entitlements, the four actor columns on audit rows, traces over MCP, undo windows on steps, and marking a run failed when its job is dead-lettered (it stays `running`). These are in WHIT-795 and WHIT-792.
 
+## Template slots (SDK 1.55, WHIT-742)
+
+A slot is a named place the plugin needs a document template, such as its order confirmation. The plugin names the slot; each workspace decides which of its templates fills it, and can swap it without touching the plugin.
+
+```json
+"documents": {
+  "slots": {
+    "order_confirmation": {
+      "label": { "en": "Order confirmation", "ar": "تأكيد الطلب" },
+      "record": "order",
+      "kinds": ["template"]
+    }
+  }
+}
+```
+
+- **Key.** The host addresses the slot as `<plugin name>.<slot>`, for example `CakeOrders.order_confirmation`, the same as a code plugin's slots.
+- **`record`** must be one of the manifest's own record types. The slot's documents are for that record type, which the document field registry knows as `<plugin name>.<record>`.
+- **`kinds`** says which document kinds can fill it: `template` (the default) or `label`.
+- **No starter yet.** Starters come with WHIT-687; until then an unbound slot has no template, and issuing from it is a 409 `slot_unbound`.
+- At most 50 slots per manifest.
+
+**Templates for its records.** In a workspace where the plugin is on, each of its record types is a document record type, `<plugin name>.<type>` (`CakeOrders.order`), so the editor offers it when a template is written. A record is addressed as `CakeOrders.order:12`. Its fields are `record.<field>`, read with the record type's `permissions.read`, and print as a reader sees them: money in major units with its currency (`18.000 JOD`), dates as `5 November 2026`, choices by their label in the reader's language, a person by name (members of the workspace only), a linked record by its title field, and Yes or No. An empty field is empty on the page.
+
+**Binding.** Bindings are the tenant setting `documents.slot_bindings` (slot key to template id). They're written only through the slots route, which checks the template fits; the settings PATCH refuses the key. A template fits when it is published, shared with the workspace (not personal), of a kind the slot takes and for the slot's record type.
+
+| Route (served under `/api/v1`) | Permission |
+| --- | --- |
+| `GET /api/document-template-slots` | `documents:read` |
+| `PUT /api/document-template-slots/{key}` `{"template_id": 42}`, or `null` to unbind | `documents:publish`, with If-Match |
+
+The list shows only the slots of switched-on plugins, each with its binding and, when the bound template no longer fits, the `problem`. Its ETag names the whole binding set: a PUT without If-Match is 428, and one made against an older set is 409 `stale`.
+
+**Issuing.** `POST /api/documents` takes `slot` in place of `document_source_id` and issues the bound template's published version, with the same record, values, origin key and permission checks. It's a 409 when the slot can't be issued from:
+
+| `code` | Why |
+| --- | --- |
+| `slot_unavailable` | No such slot here, or its plugin is off (`plugin` names it) |
+| `slot_unbound` | Nothing is bound to it |
+| `slot_misfit` | The bound template no longer fits; `reason` says why |
+
+Not yet: code plugins declaring slots through the SDK (`PluginDocumentsInterface`), the `Documents` service for plugins and automations, starters, and the `issue_document` automation step (WHIT-795).
+
 ## Tables (migration 164)
 
 - `plugin_manifest_versions`: immutable published versions, with hash, publisher, the person acted for, and the approver.

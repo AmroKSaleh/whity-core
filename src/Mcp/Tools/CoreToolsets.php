@@ -62,6 +62,12 @@ final class CoreToolsets
             'titleAr'     => 'المستندات',
             'description' => 'Issued documents, templates and label sheets, collections, circulation routes and reports.',
         ],
+        // Sub-toolset: its routes name it in CoreApiSchemas::documentTemplateSlotRoutes().
+        'core.documents.automation' => [
+            'title'       => 'Document automation',
+            'titleAr'     => 'أتمتة المستندات',
+            'description' => "Template slots: the places the workspace's plugins issue documents from, and which template fills each.",
+        ],
         // Sub-toolset: its routes name it in CoreApiSchemas::documentThemeRoutes().
         'core.documents.themes' => [
             'title'       => 'Document themes',

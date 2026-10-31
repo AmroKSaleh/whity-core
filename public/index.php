@@ -2977,6 +2977,19 @@ $router->register('DELETE', '/api/document-themes/{ref:[a-z0-9_]{1,40}\.[a-z0-9_
 $router->register('GET',    '/api/document-themes/{ref:[a-z0-9_]{1,40}\.[a-z0-9_]{1,40}}/usage',   [$documentThemesHandler, 'usage'],   null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('POST',   '/api/document-themes/{ref:[a-z0-9_]{1,40}\.[a-z0-9_]{1,40}}/archive', [$documentThemesHandler, 'archive'], null, null, CorePermissions::DOCUMENTS_THEMES);
 $router->register('POST',   '/api/document-themes/{ref:[a-z0-9_]{1,40}\.[a-z0-9_]{1,40}}/restore', [$documentThemesHandler, 'restore'], null, null, CorePermissions::DOCUMENTS_THEMES);
+// Template slots (WHIT-742): the named places plugins need a template, from
+// each workspace's switched-on plugins (`documents.slots` in plugin.json).
+// A workspace binds its published templates to them, and a plugin issues by
+// slot (POST /api/documents with `slot`).
+$templateSlotRegistry = new \Whity\Core\Document\Slots\TemplateSlotRegistry(
+    static fn (int $tenantId): array => $tenantManifestHost->manifestsFor($tenantId)
+);
+\Whity\register_service(\Whity\Core\Document\Slots\TemplateSlotRegistry::class, $templateSlotRegistry);
+// Template slots and the workspace's bindings (WHIT-742, DOCUMENT-AUTOMATION
+// 3.2): listed with documents:read, bound with documents:publish.
+$documentTemplateSlotsHandler = new \Whity\Api\DocumentTemplateSlotsApiHandler($templateSlotRegistry, $settingsService, $documentSourcesHandler);
+$router->register('GET',    '/api/document-template-slots',             [$documentTemplateSlotsHandler, 'list'], null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('PUT',    '/api/document-template-slots/{key:[A-Za-z][A-Za-z0-9_]{0,63}\.[a-z][a-z0-9_]{0,39}}', [$documentTemplateSlotsHandler, 'bind'], null, null, CorePermissions::DOCUMENTS_PUBLISH);
 // Editor M4c (A31): who can see it, and "Use a copy". Sharing is checked again
 // in the handler (documents:publish), as on create.
 $router->register('PATCH',  '/api/document-sources/{id:\d+}',       [$documentSourcesHandler, 'updateAudience'], null, null, CorePermissions::DOCUMENTS_WRITE);
@@ -3131,6 +3144,18 @@ $documentFieldLabels = new \Whity\Core\Document\Fields\FieldLabels($serverLabels
 $documentFieldRegistry->add(new \Whity\Core\Document\Fields\IssuedDocumentFieldProvider($documentRepository, $documentVisibilityPolicy, $documentFieldLabels));
 $documentFieldRegistry->add(new \Whity\Core\Document\Fields\CompanyFieldProvider($settingsService, $documentFieldLabels));
 $documentFieldRegistry->add(new \Whity\Core\Document\Fields\TodayFieldProvider($documentFieldLabels));
+// WHIT-742: each workspace plugin's record types, in the workspaces where
+// the plugin is published and on (`CakeOrders.order`), so a template can be
+// written for them and a slot can be issued from them.
+$documentFieldRegistry->addTenantSource(
+    static fn (int $tenantId): array => \Whity\Core\Document\Fields\TenantRecordFieldProvider::forManifests(
+        $tenantManifestHost->manifestsFor($tenantId),
+        $tenantRecordRepository,
+        $documentFieldLabels,
+        static fn (): string => $languageRegistry->getCurrentLanguageCode(),
+        static fn (int $tenant, int $profileId): ?string => $tenantRecordRepository->memberName($tenant, $profileId),
+    )
+);
 \Whity\register_service(\Whity\Core\Document\Fields\DocumentFieldRegistry::class, $documentFieldRegistry);
 // 13a-nonies-quinquies. QR VERIFICATION ON DOCUMENTS (#1036). A code printed on
 // a document that anybody can scan to confirm it is genuine, and that a
@@ -3375,7 +3400,9 @@ $documentsHandler = new \Whity\Api\DocumentsApiHandler(
     // #1036: minting the verification code at CREATE time, before the render, so
     // the first artifact can carry it — which is only possible because create()
     // commits the record first. Also the `qr` record-page region's predicate.
-    $documentQrService
+    $documentQrService,
+    // WHIT-742: `slot` in the body names the template through the workspace's bindings.
+    $templateSlotRegistry
 );
 $documentQrHandler = new \Whity\Api\DocumentQrApiHandler(
     $documentRepository,
@@ -4860,7 +4887,7 @@ if ($isWorker) {
         // are gated behind development/DEBUG. Decision is computed once per
         // iteration and captured by the request closure below.
         $logLifecycle = WorkerRuntime::shouldLogLifecycle($_ENV);
-        $keepRunning = \frankenphp_handle_request(static function () use ($kernel, $hookManager, $pluginLoader, $db, $logLifecycle, $securityHeaders, $errorTracker, $tenantManifestHost) {
+        $keepRunning = \frankenphp_handle_request(static function () use ($kernel, $hookManager, $pluginLoader, $db, $logLifecycle, $securityHeaders, $errorTracker, $tenantManifestHost, $documentFieldRegistry) {
             try {
                 // Dispatch request start hook
                 if ($logLifecycle) {
@@ -4959,6 +4986,8 @@ if ($isWorker) {
                 RoleChecker::clearCache();
                 // WHIT-760: the workspace-plugin reads are per request too.
                 $tenantManifestHost->resetRequest();
+                // WHIT-742: and the workspace record types the field registry read from them.
+                $documentFieldRegistry->resetRequest();
                 // DB session hygiene (WC-21/PR #84): after the response is sent,
                 // roll back any dangling transaction and DISCARD ALL session-local
                 // state on the shared worker connection so nothing request-specific
@@ -5076,6 +5105,7 @@ if ($isWorker) {
         // cache must not outlive the request that filled it.
         RoleChecker::clearCache();
         $tenantManifestHost->resetRequest();
+        $documentFieldRegistry->resetRequest();
     }
 }
 

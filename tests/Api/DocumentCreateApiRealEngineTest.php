@@ -6,6 +6,7 @@ namespace Tests\Api;
 
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Tests\Sdk\Manifest\DocumentSlotValidatorTest;
 use Tests\Support\EditorTemplateFixture;
 use Tests\Support\FakeRenderServiceClient;
 use Tests\Support\SchemaFromMigrations;
@@ -26,6 +27,11 @@ use Whity\Core\Document\Qr\DocumentQrScanRepository;
 use Whity\Core\Document\Qr\DocumentQrService;
 use Whity\Core\Document\Qr\DocumentQrTokenRepository;
 use Whity\Core\Document\Routing\RouteRecipientRepository;
+use Whity\Core\Document\Fields\TenantRecordFieldProvider;
+use Whity\Core\Document\Slots\SlotBindings;
+use Whity\Core\Document\Slots\TemplateSlot;
+use Whity\Core\Document\Slots\TemplateSlotRegistry;
+use Whity\Core\Plugin\Tenant\TenantRecordRepository;
 use Whity\Core\RBAC\CorePermissions;
 use Whity\Core\RBAC\PermissionRegistry;
 use Whity\Core\RBAC\ResourceRoleAssignmentRepository;
@@ -40,6 +46,7 @@ use Whity\Database\Database;
 use Whity\Sdk\Hooks\Events;
 use Whity\Sdk\Hooks\HookVetoException;
 use Whity\Sdk\Http\Response;
+use Whity\Sdk\Manifest\PluginManifest;
 use Whity\Storage\LocalStorageDriver;
 
 /**
@@ -106,6 +113,9 @@ final class DocumentCreateApiRealEngineTest extends TestCase
     private DocumentArtifactRepository $artifacts;
     private DocumentQrService $qr;
     private DocumentsApiHandler $handler;
+    private TemplateSlotRegistry $slots;
+    /** @var \Closure(): DocumentsApiHandler */
+    private \Closure $rebuild;
     private string $storageRoot;
 
     protected function setUp(): void
@@ -154,7 +164,8 @@ final class DocumentCreateApiRealEngineTest extends TestCase
         $views = new DocumentViewRegistry($substrates);
         CoreDocumentViews::registerInto($views);
 
-        $this->handler = new DocumentsApiHandler(
+        $this->slots = new TemplateSlotRegistry();
+        $this->rebuild = fn (): DocumentsApiHandler => new DocumentsApiHandler(
             $this->documents,
             $this->artifacts,
             $store,
@@ -169,7 +180,9 @@ final class DocumentCreateApiRealEngineTest extends TestCase
             new DocumentCollectionRepository($this->pdo),
             $this->pdo,
             qr: $this->qr,
+            slots: $this->slots,
         );
+        $this->rebuildHandler();
 
         // DELIBERATELY NOT TOUCHED HERE. `documents.render_enabled` defaults to
         // false and the default is the case most installs are in, so it is the
@@ -1001,6 +1014,115 @@ final class DocumentCreateApiRealEngineTest extends TestCase
         self::assertSame(409, $vetoed->getStatusCode());
         self::assertSame('Example Bakery issues circulars on Mondays only', self::decode($vetoed)['error']);
         self::assertSame($before, $this->countDocuments(), 'nothing written');
+    }
+
+    // ── template slots (WHIT-742) ─────────────────────────────────────────────
+
+    /**
+     * A plugin names its slot and the workspace's binding decides the
+     * template: the document is issued from the bound template's published
+     * version, exactly as naming the template would.
+     */
+    public function testASlotIssuesFromTheTemplateTheWorkspaceBoundToIt(): void
+    {
+        $about = $this->seedDocument(self::RAISER, 'Order 4812');
+        $templateId = $this->slotTemplate();
+        $this->bindSlot($templateId);
+
+        $res = $this->create(self::RAISER, ['slot' => 'Courier.receipt', 'record' => 'document:' . $about, 'render' => false]);
+
+        self::assertSame(201, $res->getStatusCode(), $res->getBody());
+        self::assertSame($templateId, self::data($res)['document_source_id']);
+    }
+
+    public function testASlotThatCantBeIssuedFromSaysWhyAndWritesNothing(): void
+    {
+        $about = $this->seedDocument(self::RAISER, 'Order 4812');
+        $body = ['slot' => 'Courier.receipt', 'record' => 'document:' . $about];
+
+        $unknown = $this->create(self::RAISER, $body);
+        self::assertSame(409, $unknown->getStatusCode());
+        self::assertSame('slot_unavailable', self::decode($unknown)['details']['code'] ?? null, $unknown->getBody());
+        self::assertSame('Courier', self::decode($unknown)['details']['plugin'] ?? null);
+
+        $this->registerSlot();
+        $unbound = $this->create(self::RAISER, $body);
+        self::assertSame(409, $unbound->getStatusCode());
+        self::assertSame('slot_unbound', self::decode($unbound)['details']['code'] ?? null);
+
+        // Bound while it fitted, then made personal: refused, not issued from.
+        $templateId = $this->slotTemplate();
+        $this->bindSlot($templateId);
+        $this->pdo->exec("UPDATE document_sources SET scope = 'personal' WHERE id = {$templateId}");
+        $misfit = $this->create(self::RAISER, $body);
+        self::assertSame(409, $misfit->getStatusCode());
+        self::assertSame('slot_misfit', self::decode($misfit)['details']['code'] ?? null);
+        self::assertSame('personal_template', self::decode($misfit)['details']['reason'] ?? null);
+
+        self::assertSame(422, $this->create(self::RAISER, $body + ['document_source_id' => $templateId])->getStatusCode(), 'slot or template, not both');
+        self::assertSame(1, $this->countDocuments(), 'only the seeded document');
+    }
+
+    /**
+     * The whole path Builder's automations take: a workspace plugin's slot,
+     * bound to a template for its own record type, issued for one of its
+     * records (`CakeOrders.order:12`), with the record's values printed.
+     */
+    public function testAWorkspacePluginsSlotIssuesForOneOfItsRecords(): void
+    {
+        $manifest = PluginManifest::fromArray(DocumentSlotValidatorTest::manifest());
+        $records = new TenantRecordRepository($this->pdo);
+        $this->editor->fields->addTenantSource(static fn (int $tenantId): array => $tenantId === self::TENANT
+            ? TenantRecordFieldProvider::forManifests([$manifest], $records)
+            : []);
+        $this->slots = new TemplateSlotRegistry(static fn (int $tenantId): array => $tenantId === self::TENANT ? [$manifest] : []);
+        $this->rebuildHandler();
+        $order = $records->create(self::TENANT, 'CakeOrders', 'order', 'draft', ['customer' => 'Example Bakery', 'pickup_on' => '2026-11-05', 'price' => 18000], self::RAISER);
+        $templateId = $this->editor->published(self::TENANT, self::RAISER, 'Order confirmation', [
+            $this->editor->para('For ', $this->editor->field('record.customer'), ', ', $this->editor->field('record.price')),
+        ], ['record_type' => 'CakeOrders.order', 'scope' => 'tenant']);
+        $this->settings->setTenant(self::TENANT, SettingsRegistry::DOCUMENTS_SLOT_BINDINGS, SlotBindings::encode(['CakeOrders.order_confirmation' => $templateId]));
+        $this->grantTo(self::RAISER, 'cakeorders:read');
+
+        $res = $this->create(self::RAISER, ['slot' => 'CakeOrders.order_confirmation', 'record' => 'CakeOrders.order:' . $order, 'render' => false]);
+
+        self::assertSame(201, $res->getStatusCode(), $res->getBody());
+        $values = $this->storedValues(self::data($res)['id']);
+        self::assertSame('Example Bakery', $values['record.customer'] ?? null);
+        self::assertSame('18.000 JOD', $values['record.price'] ?? null);
+    }
+
+    private function rebuildHandler(): void
+    {
+        $this->handler = ($this->rebuild)();
+    }
+
+    private function grantTo(int $profileId, string $permission): void
+    {
+        self::assertSame(self::RAISER, $profileId, 'the raiser holds role 1');
+        $this->grant($this->pdo, 1, $permission);
+        RoleChecker::clearCache();
+    }
+
+    private function registerSlot(): void
+    {
+        $this->slots->register('Courier', [
+            new TemplateSlot('Courier.receipt', 'Courier', ['en' => 'Receipt', 'ar' => 'إيصال'], 'document'),
+        ]);
+    }
+
+    private function slotTemplate(): int
+    {
+        $this->registerSlot();
+
+        return $this->editor->published(self::TENANT, self::RAISER, 'Receipt', [
+            $this->editor->para('Receipt'),
+        ], ['record_type' => 'document', 'scope' => 'tenant']);
+    }
+
+    private function bindSlot(int $templateId): void
+    {
+        $this->settings->setTenant(self::TENANT, SettingsRegistry::DOCUMENTS_SLOT_BINDINGS, SlotBindings::encode(['Courier.receipt' => $templateId]));
     }
 
     public function testANumericStringTemplateIdIsAccepted(): void
