@@ -1,6 +1,6 @@
 # Document themes: design (grounding pass)
 
-Status: **proposal for owner review** (WHIT-731). Sibling: `DOCUMENT-AUTOMATION.md` (WHIT-740), plugins creating and rendering documents from templates. Nothing here is built, and no implementation PR opens until the owner approves this document and the register additions in section 9. Written 31 Oct 2026 against `origin/develop` at `0b3e2d4e` (M4b merged; M4c branch has no commits yet).
+Status: **in owner review** (WHIT-731). Q1 approved on 31 Oct 2026 (closed token set, four-layer inheritance, publish freezing; E.44 added to the register); the other questions are open. Sibling: `DOCUMENT-AUTOMATION.md` (WHIT-740), plugins creating and rendering documents from templates. Nothing here is built, and no implementation PR opens until the owner approves this document and the register additions in section 9. Written 31 Oct 2026 against `origin/develop` at `0b3e2d4e` (M4b merged; M4c branch has no commits yet).
 
 A document theme decides how a document looks in the editor's page view, in the continuous sheet and in the PDF Whity Render makes. This document proposes how tenants, people and plugins customise that look, through the API and the plugin SDK, without breaking the decision register.
 
@@ -12,6 +12,7 @@ A document theme decides how a document looks in the editor's page view, in the 
 - **Published means frozen.** Publishing a template stores its resolved theme with the version, as synced saved blocks are pinned (E.38). Changing a theme reaches printed documents only when a person republishes.
 - **`documents.print_color` moves into the workspace's default theme** and the setting is removed (no-legacy rule).
 - **Plugins** declare themes through a new SDK interface, `PluginDocumentThemesInterface`. The existing `PluginThemeInterface` (app colours over `GET /api/theme`) is unrelated and stays as it is.
+- **Whity Render is a closed, paid service** (owner, 31 Oct 2026). Core owns the theme model and sends the resolved theme in the render payload; the font and print-size work (phase 1, WHIT-733) lands in the Whity Render service, wherever its code lives after the split. The editor's page view stays in the open core.
 - **Sequencing:** the token and Whity Render type work (phase 1) can start now; the model and API (phase 2) wait for M4c to merge, because both touch `public/index.php`, `CoreApiSchemas.php` and `DocumentPublishingApiHandler.php`.
 
 ## 1. What exists today
@@ -195,9 +196,9 @@ Components: `DocumentTheme`, `DocumentThemeInput`, `DocumentThemePatch`, `Docume
 ## 6. MCP and agents
 
 - Read routes (`list`, `schema`, `get`, `usage`, `resolve`) are derived tools as usual, annotated read-only.
-- Write routes refuse agent principals, the same rule as `PUT …/draft` (E.4: agents never change anything directly). The derived tools still exist for people's own MCP clients acting as themselves.
-- Mechanism: the declarative `agentPolicy` (`allow` · `refuse` · `suggest-only` · `propose`) and `toolset` keys proposed by the MCP tool-surface design, set on the route schema and enforced at the route for any agent principal, so REST and MCP behave the same. Theme reads sit in a `core.documents.themes` toolset (visibility `discoverable`); theme writes are `refuse` now and the document's theme becomes `suggest-only` with M6. `agentPolicy` relies on the `agent` flag on tokens, which the owner approved with `MCP-TOOL-SURFACE.md` on 31 Oct 2026. Undeclared agent writes stay `allow` until `agent_proposals` exists, so these explicit declarations are what protect the theme routes. On the bare `/mcp`, agents reach these operations through `search_operations` and `call_operation` (which show each operation's `agentPolicy`), not as listed tools.
-- For agents, a document's theme changes through a suggestion: a new patch type `set-theme` (`{ ref?, overrides? }`) in IMPLEMENTATION-NOTES 3.3, created by an authored tool `document_suggest_theme` in M6. Changing a workspace theme by an agent goes through `agent_proposals` (section 12 item 10) once that exists; until then it isn't offered.
+- Agents act and people approve (owner direction, 31 Oct 2026): each agent permission is Off, Ask first or Allowed; Ask first creates a server-side proposal with a diff and an undo window, and every write records its actor. Workspace and personal theme writes follow that: `agentPolicy: propose`. A document's theme is document content, so agents only suggest it (E.4): `suggest-only`. People's own MCP clients acting as themselves call the routes directly.
+- Mechanism: the declarative `agentPolicy` (`allow` · `refuse` · `suggest-only` · `propose`) and `toolset` keys proposed by the MCP tool-surface design, set on the route schema and enforced at the route for any agent principal, so REST and MCP behave the same. Theme reads sit in a `core.documents.themes` toolset (visibility `discoverable`); theme writes are `propose` (refused until `agent_proposals` exists) and the document's theme is `suggest-only` (refused until M6's suggestions exist). `agentPolicy` relies on the `agent` flag on tokens, which the owner approved with `MCP-TOOL-SURFACE.md` on 31 Oct 2026. Undeclared agent writes stay `allow` until `agent_proposals` exists, so these explicit declarations are what protect the theme routes. On the bare `/mcp`, agents reach these operations through `search_operations` and `call_operation` (which show each operation's `agentPolicy`), not as listed tools.
+- For agents, a document's theme changes through a suggestion: a new patch type `set-theme` (`{ ref?, overrides? }`) in IMPLEMENTATION-NOTES 3.3, created by an authored tool `document_suggest_theme` in M6. Changing a workspace theme by an agent goes through `agent_proposals` (section 12 item 10), with the theme diff and an undo window that restores the previous version; until that exists it isn't offered.
 
 ## 7. Plugin SDK
 
@@ -295,7 +296,7 @@ Theming is part of the free core. A plugin can put its own themes behind its own
 
 ## 12. Questions for the owner
 
-1. Approve E.44 and the theme model (closed tokens, four-layer inheritance, publish freezing)?
+1. ~~Approve E.44 and the theme model (closed tokens, four-layer inheritance, publish freezing)?~~ **Approved 31 Oct 2026.**
 2. T.1–T.4: which options go into v1? (Recommendations: T.1 no, T.2 yes, T.3 with M8, T.4 yes.)
 3. Personal themes: keep them (personal documents only), or drop them from v1?
 4. Where do themes sit in PLAN.md: phase 2 as "M4d" after M4c, SDK with M7, type options with M8?
@@ -303,3 +304,4 @@ Theming is part of the free core. A plugin can put its own themes behind its own
 6. The logo in the PDF letterhead (6.2) is missing today: fix it in phase 1 as its own small PR, or fold it into M4c?
 7. Should the workspace main colour (2.8, `Whity.tenantTheme`) be built in the backend as part of this work, so `accent` defaults to it, or stay separate?
 8. Cards: phase 3 needs a theme picker and a Document themes screen designed (extending TplAdminBranding?). Commission them before phase 3 starts?
+9. With Whity Render closed and paid, what does a free core install print with? The page view in the editor works without it; the PDF doesn't. This decides whether WHIT-733 is core or Whity Render work.
