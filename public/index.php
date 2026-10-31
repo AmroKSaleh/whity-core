@@ -2863,6 +2863,10 @@ $ouReachResolver = new \Whity\Core\Ou\OuReachResolver($db->getPdo(), $resourceRo
 // as the WhityDocument contract's JSON. Same visibility as the designer rows
 // above (DocumentAccessPolicy). Saving the draft is optimistic: PUT .../draft
 // needs If-Match with the version it edited, and a stale one gets 409.
+// The workspace's document themes (editor M4d, E.44, migration 170) and the
+// resolver the editor and printing share, so the page view and the PDF agree.
+$documentThemeRepository = new \Whity\Core\Document\Theme\DocumentThemeRepository($db->getPdo());
+$documentThemeResolver = new \Whity\Core\Document\Theme\DocumentThemeResolver($settingsService, $documentThemeRepository);
 $documentSourcesHandler = new \Whity\Api\DocumentSourcesApiHandler(
     new \Whity\Core\Document\DocumentSourceRepository($db->getPdo()),
     $documentAccessPolicy,
@@ -2871,13 +2875,32 @@ $documentSourcesHandler = new \Whity\Api\DocumentSourcesApiHandler(
     // Images and files placed in the documents (editor M3, migration 161),
     // in the tenant's own storage.
     new \Whity\Core\Document\DocumentSourceFileStore($storageDriver, $db->getPdo()),
-    new \Whity\Core\Document\DocumentSourceVersionRepository($db->getPdo())
+    new \Whity\Core\Document\DocumentSourceVersionRepository($db->getPdo()),
+    $documentThemeResolver,
 );
 $router->register('GET',    '/api/document-sources',                [$documentSourcesHandler, 'list'],      null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('POST',   '/api/document-sources',                [$documentSourcesHandler, 'create'],    null, null, CorePermissions::DOCUMENTS_WRITE);
 $router->register('GET',    '/api/document-sources/{id:\d+}',       [$documentSourcesHandler, 'show'],      null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('PUT',    '/api/document-sources/{id:\d+}/draft', [$documentSourcesHandler, 'saveDraft'], null, null, CorePermissions::DOCUMENTS_WRITE);
 $router->register('DELETE', '/api/document-sources/{id:\d+}',       [$documentSourcesHandler, 'delete'],    null, null, CorePermissions::DOCUMENTS_WRITE);
+
+// Document themes (editor M4d, E.44, DOCUMENT-THEMES.md 5): reads with
+// documents:read, the workspace's own themes managed with documents:themes.
+// A theme is addressed by its ref: whity.standard or tenant.<key>.
+$documentThemesHandler = new \Whity\Api\DocumentThemesApiHandler($documentThemeRepository, $documentThemeResolver, $settingsService);
+// Each path is written out, not built from a variable: the OpenAPI catalogue
+// tests read these registrations as literals and match them against
+// CoreApiSchemas::documentThemeRoutes().
+$router->register('GET',    '/api/document-themes',                      [$documentThemesHandler, 'list'],    null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('GET',    '/api/document-themes/schema',               [$documentThemesHandler, 'schema'],  null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('POST',   '/api/document-themes/resolve',              [$documentThemesHandler, 'resolve'], null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('POST',   '/api/document-themes',                      [$documentThemesHandler, 'create'],  null, null, CorePermissions::DOCUMENTS_THEMES);
+$router->register('GET',    '/api/document-themes/{ref:[a-z0-9_]{1,40}\.[a-z0-9_]{1,40}}',         [$documentThemesHandler, 'show'],    null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('PATCH',  '/api/document-themes/{ref:[a-z0-9_]{1,40}\.[a-z0-9_]{1,40}}',         [$documentThemesHandler, 'update'],  null, null, CorePermissions::DOCUMENTS_THEMES);
+$router->register('DELETE', '/api/document-themes/{ref:[a-z0-9_]{1,40}\.[a-z0-9_]{1,40}}',         [$documentThemesHandler, 'delete'],  null, null, CorePermissions::DOCUMENTS_THEMES);
+$router->register('GET',    '/api/document-themes/{ref:[a-z0-9_]{1,40}\.[a-z0-9_]{1,40}}/usage',   [$documentThemesHandler, 'usage'],   null, null, CorePermissions::DOCUMENTS_READ);
+$router->register('POST',   '/api/document-themes/{ref:[a-z0-9_]{1,40}\.[a-z0-9_]{1,40}}/archive', [$documentThemesHandler, 'archive'], null, null, CorePermissions::DOCUMENTS_THEMES);
+$router->register('POST',   '/api/document-themes/{ref:[a-z0-9_]{1,40}\.[a-z0-9_]{1,40}}/restore', [$documentThemesHandler, 'restore'], null, null, CorePermissions::DOCUMENTS_THEMES);
 // Editor M4c (A31): who can see it, and "Use a copy". Sharing is checked again
 // in the handler (documents:publish), as on create.
 $router->register('PATCH',  '/api/document-sources/{id:\d+}',       [$documentSourcesHandler, 'updateAudience'], null, null, CorePermissions::DOCUMENTS_WRITE);
@@ -3074,6 +3097,7 @@ $sourceDocumentPrinter = new \Whity\Core\Document\Print\SourceDocumentPrinter(
     new \Whity\Core\Document\DocumentSourceFileStore($storageDriver, $db->getPdo()),
     new \Whity\Core\Document\Print\PrintLabels($serverLabels),
     $letterheadLogo,
+    $documentThemeRepository,
 );
 $documentIssuing = new \Whity\Core\Document\Issuing\DocumentIssuing(
     $sourceDocumentPrinter,
@@ -3103,6 +3127,7 @@ $documentPublishingHandler = new \Whity\Api\DocumentPublishingApiHandler(
     $letterheadLogo,
     $documentQrService,
     $documentIssuing,
+    $documentThemeRepository,
 );
 $router->register('GET',  '/api/document-fields',                         [$documentPublishingHandler, 'fields'],       null, null, CorePermissions::DOCUMENTS_READ);
 $router->register('GET',  '/api/document-fields/records',                 [$documentPublishingHandler, 'records'],      null, null, CorePermissions::DOCUMENTS_READ);

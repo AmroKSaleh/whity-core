@@ -9,6 +9,9 @@ use Whity\Core\Document\DocumentAccessPolicy;
 use Whity\Core\Document\DocumentSourceFileStore;
 use Whity\Core\Document\DocumentSourceRepository;
 use Whity\Core\Document\DocumentSourceVersionRepository;
+use Whity\Core\Document\Theme\DocumentThemeRef;
+use Whity\Core\Document\Theme\DocumentThemeResolver;
+use Whity\Core\Document\Theme\DocumentThemeTokens;
 use Whity\Core\Form\FormRejectedException;
 use Whity\Core\Form\FormUploadPolicy;
 use Whity\Core\Ou\OuReachResolver;
@@ -74,6 +77,8 @@ final class DocumentSourcesApiHandler
         private readonly ?DocumentSourceFileStore $files = null,
         // "Edit before issuing" copies a template's PUBLISHED version (editor M4c).
         private readonly ?DocumentSourceVersionRepository $versions = null,
+        // The theme a document shows with (editor M4d), served as resolvedTheme.
+        private readonly ?DocumentThemeResolver $themes = null,
     ) {
         $this->repo = $repo;
         $this->policy = $policy;
@@ -120,7 +125,28 @@ final class DocumentSourcesApiHandler
             return Response::error('Document not found', 404);
         }
 
-        return Response::json(['data' => $row])->withHeaders(['ETag' => self::etag($row['draft_version'])]);
+        return Response::json(['data' => $this->withResolvedTheme($tenantId, $row)])
+            ->withHeaders(['ETag' => self::etag($row['draft_version'])]);
+    }
+
+    /**
+     * The document with the theme it shows with now (editor M4d): its own
+     * `{ ref, overrides }` resolved over the workspace defaults. The editor
+     * reads its print colour and letterhead from this, and Whity Render prints
+     * a draft preview with the same.
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function withResolvedTheme(int $tenantId, array $row): array
+    {
+        if ($this->themes !== null) {
+            /** @var array<string, mixed>|null $theme */
+            $theme = is_array($row['theme'] ?? null) ? $row['theme'] : null;
+            $row['resolvedTheme'] = $this->themes->resolve($tenantId, $theme, (string) $row['kind']);
+        }
+
+        return $row;
     }
 
     public function create(Request $request): Response
@@ -232,7 +258,9 @@ final class DocumentSourcesApiHandler
             )->withHeaders(['ETag' => self::etag($current['draft_version'])]);
         }
 
-        return Response::json(['data' => $this->repo->findById($id, $tenantId)])
+        $saved = $this->repo->findById($id, $tenantId);
+
+        return Response::json(['data' => $saved !== null ? $this->withResolvedTheme($tenantId, $saved) : null])
             ->withHeaders(['ETag' => self::etag($version)]);
     }
 
@@ -328,7 +356,7 @@ final class DocumentSourcesApiHandler
             $callerId,
             $row,
             (string) $row['kind'],
-            ['page' => $row['page'], 'blocks' => $row['blocks'], 'own_fields' => $row['own_fields'], 'title' => (string) $row['title']],
+            ['page' => $row['page'], 'blocks' => $row['blocks'], 'own_fields' => $row['own_fields'], 'title' => (string) $row['title'], 'theme' => $row['theme'] ?? null],
             JsonBody::parsed($request),
         );
     }
@@ -369,7 +397,7 @@ final class DocumentSourcesApiHandler
             $callerId,
             $row,
             'letter',
-            ['page' => $published['page'], 'blocks' => $published['blocks'], 'own_fields' => $published['own_fields'], 'title' => $published['title']],
+            ['page' => $published['page'], 'blocks' => $published['blocks'], 'own_fields' => $published['own_fields'], 'title' => $published['title'], 'theme' => $published['theme']],
             JsonBody::parsed($request),
         );
     }
@@ -378,7 +406,7 @@ final class DocumentSourcesApiHandler
      * A personal, unpublished draft of the caller's with this content.
      *
      * @param array<string, mixed> $row     The original.
-     * @param array{page: mixed, blocks: mixed, own_fields: mixed, title: string} $content
+     * @param array{page: mixed, blocks: mixed, own_fields: mixed, title: string, theme: mixed} $content
      * @param array<string, mixed> $body    The request: an optional `title`.
      */
     private function personalCopy(int $tenantId, int $callerId, array $row, string $kind, array $content, array $body): Response
@@ -398,13 +426,17 @@ final class DocumentSourcesApiHandler
             'record_type'         => $row['record_type'],
             'blocks'              => $content['blocks'],
             'own_fields'          => $content['own_fields'] !== [] ? $content['own_fields'] : null,
+            'theme'               => is_array($content['theme']) ? $content['theme'] : null,
             'scope'               => DocumentAccessPolicy::SCOPE_PERSONAL,
             'required_permission' => null,
             'created_by'          => $callerId,
             'owner_ou_id'         => null,
         ]);
 
-        return Response::json(['data' => $this->repo->findById($id, $tenantId)], 201)->withHeaders(['ETag' => self::etag(1)]);
+        $created = $this->repo->findById($id, $tenantId);
+
+        return Response::json(['data' => $created !== null ? $this->withResolvedTheme($tenantId, $created) : null], 201)
+            ->withHeaders(['ETag' => self::etag(1)]);
     }
 
     /**
@@ -498,8 +530,53 @@ final class DocumentSourcesApiHandler
             }
             $fields['blocks'] = $blocks;
         }
+        if (array_key_exists('theme', $body)) {
+            // The document's theme (editor M4d, E.44): a ref and overrides of
+            // the print colour and letterhead only. A ref the workspace doesn't
+            // have still saves; it resolves to the next default and the
+            // publish check names it.
+            $theme = $body['theme'];
+            if ($theme !== null) {
+                $problem = self::themeProblem($theme);
+                if ($problem !== null) {
+                    return Response::error($problem, 422);
+                }
+                /** @var array<string, mixed> $theme */
+                if (is_array($theme['overrides'] ?? null)) {
+                    /** @var array<string, mixed> $overrides */
+                    $overrides = $theme['overrides'];
+                    $theme['overrides'] = DocumentThemeTokens::normalize($overrides);
+                }
+            }
+            $fields['theme'] = $theme;
+        }
 
         return $fields;
+    }
+
+    /** Why a document's `theme` is invalid, or null when it is valid. */
+    private static function themeProblem(mixed $theme): ?string
+    {
+        if (!is_array($theme) || ($theme !== [] && array_is_list($theme))) {
+            return 'theme must be an object { ref?, overrides? } or null';
+        }
+        foreach (array_keys($theme) as $key) {
+            if (!in_array($key, ['ref', 'overrides'], true)) {
+                return "theme.{$key} is not allowed; theme takes ref and overrides";
+            }
+        }
+        if (array_key_exists('ref', $theme) && $theme['ref'] !== null
+            && (!is_string($theme['ref']) || !DocumentThemeRef::isValid($theme['ref']))) {
+            return 'theme.ref must be a theme ref such as whity.standard or tenant.<key>';
+        }
+        if (array_key_exists('overrides', $theme) && $theme['overrides'] !== null) {
+            $errors = DocumentThemeTokens::errors($theme['overrides'], overridesOnly: true);
+            if ($errors !== []) {
+                return 'theme.overrides: ' . implode(' ', $errors);
+            }
+        }
+
+        return null;
     }
 
     /**

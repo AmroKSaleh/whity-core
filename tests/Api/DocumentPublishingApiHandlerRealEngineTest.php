@@ -143,7 +143,7 @@ final class DocumentPublishingApiHandlerRealEngineTest extends TestCase
     public function testFieldsListTheRecordTypeOwnGroupFirstThenCompanyAndToday(): void
     {
         $this->settings->setTenant(self::TENANT, SettingsRegistry::BILLING_SELLER_NAME, 'Example Bakery');
-        $this->settings->setTenant(self::TENANT, SettingsRegistry::DOCUMENTS_PRINT_COLOR, '#B74C05');
+        $this->settings->setTenant(self::TENANT, SettingsRegistry::BILLING_SELLER_TAX_ID, '0123456');
 
         $res = $this->handler->fields($this->request('GET', '/api/document-fields?recordType=document', self::VIEWER));
         self::assertSame(200, $res->getStatusCode(), $res->getBody());
@@ -154,7 +154,9 @@ final class DocumentPublishingApiHandlerRealEngineTest extends TestCase
         self::assertTrue($data['groups'][1]['items'][2]['required'], 'the company tax number is fiscal, so required');
         self::assertSame('29 October 2026', $data['groups'][2]['items'][0]['sample']);
         self::assertSame('Example Bakery', $data['letterhead']['name']);
-        self::assertSame('#B74C05', $data['accent']);
+        // The print colour comes with each document now (resolvedTheme, editor M4d).
+        self::assertArrayNotHasKey('accent', $data);
+        self::assertSame(['address' => null, 'taxId' => '0123456', 'phone' => null, 'email' => null], $data['letterhead_parts']);
 
         $none = $this->data($this->handler->fields($this->request('GET', '/api/document-fields', self::VIEWER)));
         self::assertSame(['Company', 'Today'], array_column($none['groups'], 'group'), 'no record type: only the shared groups');

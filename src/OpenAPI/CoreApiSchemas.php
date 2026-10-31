@@ -127,6 +127,7 @@ final class CoreApiSchemas
             self::subscriptionRoutes(),
             self::featureRoutes(),
             self::documentSourceRoutes(),
+            self::documentThemeRoutes(),
             self::documentRecordRoutes(),
             self::documentRoutingRoutes(),
             self::documentQrRoutes(),
@@ -5610,6 +5611,8 @@ final class CoreApiSchemas
                 'updated_by' => self::int(true),
                 'starter_key' => self::str(true) + ['description' => 'Which of Whity\'s starters this is, or null for anything a person made'],
                 'legacy_template_id' => self::int(true) + ['description' => 'The old Document designer template this was converted from (migration 165), or null'],
+                'theme' => ['nullable' => true, 'allOf' => [SchemaBuilder::ref('DocumentThemeRef')], 'description' => 'The document\'s own theme choice: a ref and overrides of the print colour and letterhead. Null follows the workspace defaults.'],
+                'resolvedTheme' => SchemaBuilder::ref('ResolvedDocumentTheme'),
                 'created_at' => self::str(),
                 'updated_at' => self::str(),
             ], ['id', 'tenant_id', 'kind', 'title', 'lang', 'default_view', 'full_width', 'draft_version', 'scope', 'created_at', 'updated_at']),
@@ -5627,6 +5630,8 @@ final class CoreApiSchemas
                 'page' => ['type' => 'object', 'nullable' => true, 'additionalProperties' => true],
                 'blocks' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true]],
                 'own_fields' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentOwnField')],
+                'theme' => ['nullable' => true, 'allOf' => [SchemaBuilder::ref('DocumentThemeRef')], 'description' => 'The document\'s own theme choice when it was published, or null.'],
+                'theme_resolved' => ['nullable' => true, 'allOf' => [SchemaBuilder::ref('ResolvedDocumentTheme')], 'description' => 'The theme frozen when this version was published, which printing it uses; null for versions published before themes.'],
                 'published_by' => self::int(true),
                 'published_at' => self::str(),
             ], ['version', 'title', 'blocks', 'own_fields', 'published_at'])),
@@ -5689,18 +5694,24 @@ final class CoreApiSchemas
                         'name' => self::str(),
                         'lines' => ['type' => 'array', 'items' => self::str()],
                     ], ['name', 'lines']),
-                    'accent' => self::str(true) + ['description' => 'The tenant print colour as #RRGGBB, or null for the brand colour'],
-                ], ['record_types', 'groups', 'letterhead']),
+                    'letterhead_parts' => self::object([
+                        'address' => self::str(true) + ['description' => 'The workspace address on one line, or null when none is set'],
+                        'taxId' => self::str(true) + ['description' => 'The workspace tax number, or null when none is set'],
+                        'phone' => self::str(true) + ['description' => 'The workspace phone number, or null when none is set'],
+                        'email' => self::str(true) + ['description' => 'The workspace email address, or null when none is set'],
+                    ], ['address', 'taxId', 'phone', 'email']) + ['description' => 'Every letterhead line by its theme name, so the editor shows the lines the document\'s theme lists. The print colour comes with the document (resolvedTheme).'],
+                ], ['record_types', 'groups', 'letterhead', 'letterhead_parts']),
             ], ['data']),
             'DocumentFieldRecordsResponse' => self::object([
                 'data' => ['type' => 'array', 'items' => self::object(['id' => self::str(), 'label' => self::str()], ['id', 'label'])],
             ], ['data']),
             'DocumentPublishBlocker' => self::object([
-                'kind' => ['type' => 'string', 'enum' => ['open-suggestions', 'missing-plugin', 'block-without-print-view', 'unknown-field']],
+                'kind' => ['type' => 'string', 'enum' => ['open-suggestions', 'missing-plugin', 'block-without-print-view', 'unknown-field', 'theme-unavailable']],
                 'count' => self::int(),
                 'plugin' => self::str(),
                 'blockId' => self::str(),
                 'path' => self::str(),
+                'ref' => self::str() + ['description' => 'With theme-unavailable: the theme the document names that the workspace doesn\'t have'],
             ], ['kind']),
             'DocumentPublishCheckResponse' => self::object([
                 'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentPublishBlocker')],
@@ -5760,7 +5771,120 @@ final class CoreApiSchemas
                 'page' => ['type' => 'object', 'nullable' => true, 'additionalProperties' => true] + ['description' => 'Page setup for the page view and printing: `size` (A4, A5, Letter), `marginMm` and `letterhead`; for a label sheet, `labels` is its grid (columns, rows, size {widthMm, heightMm}, gapMm, gapYMm). Null for none.'],
                 'blocks' => ['type' => 'array', 'items' => ['type' => 'object', 'additionalProperties' => true], 'description' => 'The WhityDocument contract Block[] (docs/design/handoff/editor/whity-document.ts): objects with a unique string id and a string type'],
                 'own_fields' => ['type' => 'array', 'nullable' => true, 'items' => SchemaBuilder::ref('DocumentOwnField'), 'description' => 'A template\'s own fields, for values no record type provides (a CSV column on a label sheet): a list of {key, label, sample?}, at most 50. The editor inserts each as the field `template.<key>`.'],
+                'theme' => [
+                    'type' => 'object',
+                    'nullable' => true,
+                    'additionalProperties' => false,
+                    'properties' => [
+                        'ref' => self::str(true) + ['pattern' => '^[a-z0-9_]{1,40}\.[a-z0-9_]{1,40}$', 'description' => 'The theme, such as whity.standard or tenant.<key>; null or left out follows the workspace defaults. A ref the workspace doesn\'t have still saves, and blocks publishing.'],
+                        'overrides' => self::documentThemeTokens(true) + ['nullable' => true, 'description' => 'This document\'s own print colour and letterhead, over its theme. Only accent and letterhead.'],
+                    ],
+                    'description' => 'The document\'s theme (E.44): { ref?, overrides? }, or null to follow the workspace defaults.',
+                ],
             ], []),
+
+            // ── Document themes (editor M4d; E.44, DOCUMENT-THEMES.md 3, 5) ──
+            // A theme is data, never CSS: a closed token set of enums and
+            // #rrggbb colours, addressed by ref (`whity.standard`, `tenant.<key>`).
+            'DocumentThemeTokens' => self::documentThemeTokens(),
+            'DocumentThemeOverrides' => self::documentThemeTokens(true),
+            'DocumentThemeRef' => [
+                'type' => 'object',
+                'additionalProperties' => false,
+                'properties' => [
+                    'ref' => self::str() + ['description' => 'The theme: whity.standard or tenant.<key>'],
+                    'overrides' => SchemaBuilder::ref('DocumentThemeOverrides'),
+                ],
+            ],
+            'DocumentThemeAdjustment' => self::object([
+                'code' => ['type' => 'string', 'enum' => ['theme_missing', 'base_missing', 'accent_darkened'], 'description' => '`theme_missing`: a ref the workspace doesn\'t have, so the next default was used; `base_missing`: the theme\'s base isn\'t available; `accent_darkened`: the print colour was darkened to read on white'],
+                'token' => self::str() + ['description' => 'What was adjusted: `ref`, `extends` or `accent`'],
+                'from' => self::str() + ['description' => 'The value asked for'],
+                'to' => self::str() + ['description' => 'The value used instead, when there is one'],
+                'message' => self::str() + ['description' => 'What happened, in English'],
+            ], ['code', 'token', 'from', 'message']),
+            'ResolvedDocumentTheme' => self::object([
+                'ref' => self::str() + ['description' => 'The theme actually used, after falling back past any that isn\'t available'],
+                'version' => self::int() + ['description' => 'That theme\'s version; 0 for Whity\'s standard theme'],
+                'hash' => self::str() + ['description' => 'A hash of the ref, version and tokens; unchanged while the theme is'],
+                'tokens' => self::documentThemeTokens(false, true) + ['description' => 'Every token, resolved'],
+                'sources' => ['type' => 'object', 'additionalProperties' => ['type' => 'string'], 'description' => 'Where each token came from, by its path (`accent`, `letterhead.lines`…): a theme ref, `document` for an override, or `branding.main_color`'],
+                'adjustments' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentThemeAdjustment'), 'description' => 'What was changed on the way, such as a print colour darkened to reach 4.5:1 on white'],
+            ], ['ref', 'version', 'hash', 'tokens', 'sources', 'adjustments']),
+            'DocumentTheme' => self::object([
+                'ref' => self::str() + ['description' => 'How documents name it: whity.standard or tenant.<key>'],
+                'scope' => ['type' => 'string', 'enum' => ['system', 'tenant'], 'description' => '`system` for Whity\'s standard theme, `tenant` for the workspace\'s own'],
+                'key' => self::str(),
+                'name' => self::str() + ['description' => 'The English name'],
+                'name_ar' => self::str() + ['description' => 'The Arabic name'],
+                'extends' => self::str(true) + ['description' => 'The theme it builds on: whity.standard, or null for Whity\'s standard theme itself'],
+                'tokens' => SchemaBuilder::ref('DocumentThemeTokens'),
+                'version' => self::int() + ['description' => 'Goes up with every change; 0 for Whity\'s standard theme. The ETag and If-Match value.'],
+                'archived' => self::bool(),
+                'archived_at' => self::str(true),
+                'default_for' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'The workspace defaults that point at it: `workspace` and document kinds such as `label`'],
+                'created_by' => self::int(true),
+                'updated_by' => self::int(true),
+                'created_at' => self::str(),
+                'updated_at' => self::str(),
+                'resolved' => SchemaBuilder::ref('ResolvedDocumentTheme'),
+            ], ['ref', 'scope', 'key', 'name', 'name_ar', 'extends', 'tokens', 'version', 'archived', 'default_for']),
+            'DocumentThemeInput' => self::object([
+                'key' => ['type' => 'string', 'pattern' => '^[a-z0-9_]{1,40}$', 'description' => 'The key: 1 to 40 lower-case letters, digits and underscores. The theme is then tenant.<key>. It can\'t be changed later.'],
+                'name' => ['type' => 'string', 'minLength' => 1, 'maxLength' => 120, 'description' => 'The English name, at most 120 characters.'],
+                'name_ar' => ['type' => 'string', 'minLength' => 1, 'maxLength' => 120, 'description' => 'The Arabic name, at most 120 characters.'],
+                'extends' => self::str(true) + ['description' => 'The theme it builds on. Only whity.standard for now (the default).'],
+                'tokens' => self::documentThemeTokens() + ['description' => 'The values it sets over the theme it extends. Leave a token out to keep the base\'s.'],
+            ], ['key', 'name', 'name_ar']),
+            'DocumentThemePatch' => self::object([
+                'name' => ['type' => 'string', 'minLength' => 1, 'maxLength' => 120, 'description' => 'The English name, at most 120 characters.'],
+                'name_ar' => ['type' => 'string', 'minLength' => 1, 'maxLength' => 120, 'description' => 'The Arabic name, at most 120 characters.'],
+                'extends' => self::str(true) + ['description' => 'The theme it builds on. Only whity.standard for now.'],
+                'tokens' => self::documentThemeTokens() + ['description' => 'The values it sets, replacing the whole token set. Leave a token out to use the base\'s.'],
+            ], []),
+            'DocumentThemeResolveRequest' => self::object([
+                'ref' => self::str(true) + ['pattern' => '^[a-z0-9_]{1,40}\.[a-z0-9_]{1,40}$', 'description' => 'The theme to resolve, such as whity.standard or tenant.<key>. Left out, the workspace default (for the kind, when one is sent).'],
+                'overrides' => self::documentThemeTokens(true) + ['nullable' => true, 'description' => 'A document\'s print colour and letterhead overrides to apply on top. Only accent and letterhead.'],
+                'kind' => ['type' => 'string', 'enum' => ['template', 'letter', 'report', 'note', 'wiki', 'label'], 'description' => 'The document kind, for the workspace default by kind: `template`, `letter`, `report`, `note`, `wiki` or `label`.'],
+            ], []),
+            'DocumentThemeSchema' => self::object([
+                'tokens' => ['type' => 'array', 'items' => self::object([
+                    'key' => self::str() + ['description' => 'The token path: `accent`, `accentOnDark`, `accentUse`, `letterhead.logo` or `letterhead.lines`'],
+                    'type' => ['type' => 'string', 'enum' => ['color', 'enum', 'list']],
+                    'overridable' => self::bool() + ['description' => 'Whether a document may override it'],
+                    'label' => self::str(),
+                    'labelAr' => self::str(),
+                    'description' => self::str(),
+                    'descriptionAr' => self::str(),
+                    'max' => self::int() + ['description' => 'For a list: how many values it takes at most'],
+                    'values' => ['type' => 'array', 'items' => self::object([
+                        'value' => self::str(),
+                        'label' => self::str(),
+                        'labelAr' => self::str(),
+                    ], ['value', 'label', 'labelAr'])],
+                ], ['key', 'type', 'overridable', 'label', 'labelAr'])],
+            ], ['tokens']),
+            'DocumentThemeUsage' => self::object([
+                'drafts' => ['type' => 'array', 'items' => self::object([
+                    'id' => self::int(),
+                    'title' => self::str(),
+                    'kind' => self::str(),
+                ], ['id', 'title', 'kind']), 'description' => 'Documents whose draft names the theme'],
+                'published' => ['type' => 'array', 'items' => self::object([
+                    'id' => self::int(),
+                    'title' => self::str(),
+                    'version' => self::int(),
+                ], ['id', 'title', 'version']), 'description' => 'Templates whose current published version printed with the theme'],
+                'defaults' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'The workspace defaults that point at it: `workspace` and document kinds'],
+            ], ['drafts', 'published', 'defaults']),
+            'DocumentThemeListResponse' => self::object([
+                'data' => ['type' => 'array', 'items' => SchemaBuilder::ref('DocumentTheme')],
+                'meta' => self::object(['total' => self::int()], ['total']),
+            ], ['data', 'meta']),
+            'DocumentThemeResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentTheme')),
+            'DocumentThemeSchemaResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentThemeSchema')),
+            'DocumentThemeUsageResponse' => self::dataEnvelope(SchemaBuilder::ref('DocumentThemeUsage')),
+            'ResolvedDocumentThemeResponse' => self::dataEnvelope(SchemaBuilder::ref('ResolvedDocumentTheme')),
             // The FEATURE catalogue (#feature-flags). Three booleans per row on
             // purpose: "off" is not one condition, and an operator switch and a
             // missing entitlement need different actions from different people.
@@ -11459,6 +11583,221 @@ final class CoreApiSchemas
                 ] + self::authErrors(),
             ]),
         ];
+    }
+
+    /**
+     * Document themes (editor M4d; E.44, DOCUMENT-THEMES.md 5).
+     *
+     * Reads use documents:read, writes the workspace's own themes with
+     * documents:themes. A theme is addressed by its ref: `whity.standard`
+     * (Whity's own, read-only) or `tenant.<key>`. Every operation sits in the
+     * `core.documents.themes` MCP toolset (discoverable, reached through
+     * search and call). Workspace theme writes are `allow` for agents
+     * (DOCUMENT-THEMES.md 6): they can be undone and a published template
+     * keeps its frozen theme, so nothing more is declared. A document's own
+     * theme is set through PUT /api/document-sources/{id}/draft.
+     *
+     * @return list<array{method: string, path: string, requiredRole: ?string, requiredPermission: ?string, schema: array<string, mixed>}>
+     */
+    private static function documentThemeRoutes(): array
+    {
+        $mcp = ['toolset' => 'core.documents.themes'];
+
+        return [
+            self::permissionRoute('GET', '/api/document-themes', 'documents:read', [
+                'summary' => 'List the document themes the workspace can use',
+                'description' =>
+                    'Whity\'s standard theme and the workspace\'s own themes (plugin themes come later). Each '
+                    . 'says which workspace defaults point at it in default_for: `workspace` and document kinds.',
+                'tags' => ['documents'],
+                'mcp' => $mcp,
+                'parameters' => [
+                    self::queryParam('scope', 'string', 'Only themes of this scope: `system` (Whity\'s standard theme) or `tenant` (the workspace\'s own). Anything else is a 422. Without it, both.'),
+                    self::queryParam('archived', 'string', 'Send `1` or `true` to list the workspace\'s archived themes instead of its active ones.'),
+                ],
+                'responses' => [
+                    200 => self::jsonResponse('The themes', 'DocumentThemeListResponse'),
+                    400 => self::errorResponse('Tenant context is required'),
+                    422 => self::errorResponse('Unknown scope'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/document-themes/schema', 'documents:read', [
+                'summary' => 'Describe the values a document theme can set',
+                'description' =>
+                    'The closed token set with each token\'s type, allowed values, whether a document may '
+                    . 'override it, and English and Arabic labels, so forms are built from one source.',
+                'tags' => ['documents'],
+                'mcp' => $mcp,
+                'responses' => [
+                    200 => self::jsonResponse('The token schema', 'DocumentThemeSchemaResponse'),
+                    400 => self::errorResponse('Tenant context is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/document-themes/resolve', 'documents:read', [
+                'summary' => 'Resolve the theme a document would print with',
+                'description' =>
+                    'For a live preview. Reads only. The ref (else the workspace default for the kind, else the '
+                    . 'workspace default, else Whity\'s standard theme) with the overrides on top, and what was '
+                    . 'adjusted on the way, such as a print colour darkened to read on white.',
+                'tags' => ['documents'],
+                'mcp' => $mcp,
+                'request' => 'DocumentThemeResolveRequest',
+                'responses' => [
+                    200 => self::jsonResponse('The resolved theme', 'ResolvedDocumentThemeResponse'),
+                    400 => self::errorResponse('Tenant context is required'),
+                    422 => self::errorResponse('Invalid ref, overrides or kind'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/document-themes', 'documents:themes', [
+                'summary' => 'Create a workspace document theme',
+                'description' =>
+                    'It extends Whity\'s standard theme and is addressed as `tenant.<key>`. Answers 201 with '
+                    . 'ETag "1", the theme\'s version.',
+                'tags' => ['documents'],
+                'mcp' => $mcp,
+                'request' => 'DocumentThemeInput',
+                'responses' => [
+                    201 => self::jsonResponse('The created theme; its ETag is its version', 'DocumentThemeResponse'),
+                    400 => self::errorResponse('Tenant context is required'),
+                    409 => self::errorResponse('A theme with this key already exists'),
+                    422 => self::errorResponse('Validation failed, or the system tenant, which has no workspace themes'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/document-themes/{ref:[a-z0-9_]{1,40}\.[a-z0-9_]{1,40}}', 'documents:read', [
+                'summary' => 'Get one document theme with how it resolves',
+                'description' =>
+                    'Its definition and, in resolved, the values it prints with in this workspace. A workspace '
+                    . 'theme answers with ETag "<version>"; send it as If-Match to change the theme.',
+                'tags' => ['documents'],
+                'mcp' => $mcp,
+                'responses' => [
+                    200 => self::jsonResponse('The theme', 'DocumentThemeResponse'),
+                    400 => self::errorResponse('Tenant context is required'),
+                    404 => self::errorResponse('Theme not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('PATCH', '/api/document-themes/{ref:[a-z0-9_]{1,40}\.[a-z0-9_]{1,40}}', 'documents:themes', [
+                'summary' => 'Change a workspace document theme',
+                'description' =>
+                    'Send If-Match with the theme\'s version (its ETag): without it the answer is 428, and when '
+                    . 'someone changed the theme in between it is 409 with the current version in '
+                    . 'details.version. Only the fields sent change; tokens replaces the whole token set. '
+                    . 'Published templates keep the theme they were published with until a person publishes '
+                    . 'them again. Whity\'s standard theme can\'t be changed.',
+                'tags' => ['documents'],
+                'mcp' => $mcp,
+                'request' => 'DocumentThemePatch',
+                'responses' => [
+                    200 => self::jsonResponse('The changed theme; its ETag is the new version', 'DocumentThemeResponse'),
+                    400 => self::errorResponse('Tenant context is required'),
+                    404 => self::errorResponse('Theme not found'),
+                    409 => self::errorResponse('The theme changed since this edit was made, or it is Whity\'s standard theme'),
+                    422 => self::errorResponse('Validation failed, nothing to change, or the system tenant'),
+                    428 => self::errorResponse('If-Match with the theme\'s version is required'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('DELETE', '/api/document-themes/{ref:[a-z0-9_]{1,40}\.[a-z0-9_]{1,40}}', 'documents:themes', [
+                'summary' => 'Delete a workspace document theme nobody uses',
+                'description' =>
+                    'Only a theme no draft names, no published version printed with and no workspace default '
+                    . 'points at. Otherwise the answer is 409 with where it is used in details.usage; archive '
+                    . 'it instead.',
+                'tags' => ['documents'],
+                'mcp' => $mcp,
+                'responses' => [
+                    204 => ['description' => 'Theme deleted'],
+                    400 => self::errorResponse('Tenant context is required'),
+                    404 => self::errorResponse('Theme not found'),
+                    409 => self::errorResponse('The theme is in use, or it is Whity\'s standard theme'),
+                    422 => self::errorResponse('The system tenant has no workspace themes'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('GET', '/api/document-themes/{ref:[a-z0-9_]{1,40}\.[a-z0-9_]{1,40}}/usage', 'documents:read', [
+                'summary' => 'Show where a document theme is used',
+                'description' => 'The drafts that name it, the published versions printed with it, and the workspace defaults that point at it.',
+                'tags' => ['documents'],
+                'mcp' => $mcp,
+                'responses' => [
+                    200 => self::jsonResponse('Where the theme is used', 'DocumentThemeUsageResponse'),
+                    400 => self::errorResponse('Tenant context is required'),
+                    404 => self::errorResponse('Theme not found'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/document-themes/{ref:[a-z0-9_]{1,40}\.[a-z0-9_]{1,40}}/archive', 'documents:themes', [
+                'summary' => 'Archive a workspace document theme',
+                'description' =>
+                    'It leaves the list but keeps working where it is already used. A document that names an '
+                    . 'archived theme still resolves it. Restore it with POST …/restore.',
+                'tags' => ['documents'],
+                'mcp' => $mcp,
+                'responses' => [
+                    200 => self::jsonResponse('The archived theme', 'DocumentThemeResponse'),
+                    400 => self::errorResponse('Tenant context is required'),
+                    404 => self::errorResponse('Theme not found'),
+                    409 => self::errorResponse('Whity\'s standard theme can\'t be archived'),
+                    422 => self::errorResponse('The system tenant has no workspace themes'),
+                ] + self::authErrors(),
+            ]),
+            self::permissionRoute('POST', '/api/document-themes/{ref:[a-z0-9_]{1,40}\.[a-z0-9_]{1,40}}/restore', 'documents:themes', [
+                'summary' => 'Restore an archived workspace document theme',
+                'tags' => ['documents'],
+                'mcp' => $mcp,
+                'responses' => [
+                    200 => self::jsonResponse('The restored theme', 'DocumentThemeResponse'),
+                    400 => self::errorResponse('Tenant context is required'),
+                    404 => self::errorResponse('Theme not found'),
+                    409 => self::errorResponse('Whity\'s standard theme can\'t be archived or restored'),
+                    422 => self::errorResponse('The system tenant has no workspace themes'),
+                ] + self::authErrors(),
+            ]),
+        ];
+    }
+
+    /**
+     * A document theme's token set (DocumentThemeTokens), closed: every value
+     * is an enum or a #rrggbb colour. With $overridesOnly, only what a
+     * document may override (accent and letterhead). With $complete, every
+     * key is present, as a resolved theme has them.
+     *
+     * Inlined into request bodies as well as registered as components, because
+     * MCP tool input schemas don't resolve `$ref`s.
+     *
+     * @return array<string, mixed>
+     */
+    private static function documentThemeTokens(bool $overridesOnly = false, bool $complete = false): array
+    {
+        $color = ['type' => 'string', 'pattern' => '^#[0-9A-Fa-f]{6}$'];
+        $letterhead = [
+            'type' => 'object',
+            'additionalProperties' => false,
+            'description' => 'The letterhead: which logo, and which workspace lines print under the name.',
+            'properties' => [
+                'logo' => ['type' => 'string', 'enum' => ['wide', 'square', 'none'], 'description' => 'Which logo the letterhead shows: `wide`, `square` or `none`.'],
+                'lines' => [
+                    'type' => 'array',
+                    'maxItems' => 4,
+                    'uniqueItems' => true,
+                    'items' => ['type' => 'string', 'enum' => ['address', 'taxId', 'phone', 'email']],
+                    'description' => 'The workspace lines printed under the name, in this order, without repeats: up to four of `address`, `taxId`, `phone`, `email`.',
+                ],
+            ],
+        ];
+        $properties = [
+            'accent' => $color + ['description' => 'The print colour as #rrggbb: the document title, and headings with accentUse `title-and-headings`. Defaults to the workspace main colour.'],
+        ];
+        if (!$overridesOnly) {
+            $properties['accentOnDark'] = $color + ['description' => 'The title colour on screen in dark mode, as #rrggbb. Never printed. Derived from accent when not set.'];
+            $properties['accentUse'] = ['type' => 'string', 'enum' => ['title', 'title-and-headings'], 'description' => 'Where the print colour is used: `title` only, or `title-and-headings` (H1 to H3 too).'];
+        }
+        $properties['letterhead'] = $letterhead;
+
+        $schema = ['type' => 'object', 'additionalProperties' => false, 'properties' => $properties];
+        if ($complete) {
+            $schema['required'] = array_keys($properties);
+            $schema['properties']['letterhead']['required'] = ['logo', 'lines'];
+        }
+
+        return $schema;
     }
 
     /**

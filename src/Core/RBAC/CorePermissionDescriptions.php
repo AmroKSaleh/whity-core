@@ -110,6 +110,7 @@ final class CorePermissionDescriptions
         CorePermissions::DOCUMENTS_PUBLISH            => 'Publish a template/block tenant-wide or global, or set its required-permission tag',
         CorePermissions::DOCUMENTS_RENDER             => 'Preview a template as a PDF through Whity Render, and print label sheets; nothing is stored',
         CorePermissions::DOCUMENTS_ISSUE              => 'Issue a document from a template: the record, its QR code and its PDF, and correct it',
+        CorePermissions::DOCUMENTS_THEMES             => "Create, edit and archive the workspace's document themes, and choose its default theme",
         CorePermissions::DOCUMENTS_READ_ALL           => 'See every issued document in the tenant, not only the ones you raised',
         CorePermissions::DOCUMENTS_ROUTE              => 'Put an issued document into circulation and choose the steps it follows',
         CorePermissions::SECURITY_MANAGE              => 'Set the tenant two-factor policy — who must enrol, and by when',

@@ -6,6 +6,7 @@ namespace Whity\Core\Settings;
 
 use DateTimeZone;
 use Whity\Core\Document\Routing\RouteQuorum;
+use Whity\Core\Document\Theme\DocumentThemeRef;
 use Whity\Core\Identity\InvitationService;
 
 /**
@@ -348,11 +349,15 @@ final class SettingsRegistry
     // never attempts the internal HTTP call) when off.
     public const DOCUMENTS_RENDER_ENABLED = 'documents.render_enabled';
 
-    // The tenant's print colour (stage 6, `--doc-accent`): a printed document's
-    // title and its field underlines in the editor's page view. A #RRGGBB hex,
-    // or empty for the brand colour. Tenant-overridable: each tenant prints as
-    // itself.
-    public const DOCUMENTS_PRINT_COLOR = 'documents.print_color';
+    // The workspace's default document theme (editor M4d, E.44): a theme ref,
+    // `whity.standard` or `tenant.<key>`. A document that names no theme of its
+    // own uses the default for its kind (DOCUMENTS_THEME_BY_KIND), then this.
+    // Replaces documents.print_color, which migration 173 moved into the
+    // workspace theme. Tenant-overridable; written with documents:themes.
+    public const DOCUMENTS_THEME = 'documents.theme';
+    // Per-kind defaults over DOCUMENTS_THEME: a JSON object of document kind
+    // => theme ref, e.g. {"label":"tenant.labels"}. Empty for none.
+    public const DOCUMENTS_THEME_BY_KIND = 'documents.theme_by_kind';
 
     // Render batch limits (ADR 0012): per-tenant-overridable ceilings so an
     // operator can tune them without a code deploy, "no hardcoded values" per
@@ -992,7 +997,8 @@ final class SettingsRegistry
         // container) — opt-in, not opt-out. A sovereign deploy that never runs
         // the `render` compose profile stays disabled here regardless.
         self::DOCUMENTS_RENDER_ENABLED => 'false',
-        self::DOCUMENTS_PRINT_COLOR => '',
+        self::DOCUMENTS_THEME => 'whity.standard',
+        self::DOCUMENTS_THEME_BY_KIND => '',
         self::DOCUMENTS_RENDER_MAX_ROWS => '500',
         self::DOCUMENTS_RENDER_MAX_PAGES => '2000',
         // 2 MiB.
@@ -1373,7 +1379,8 @@ final class SettingsRegistry
             self::LICENSING_BILLING_BASIS => self::validateEnum($key, $value),
             self::SEATS_COUNT_INVITED => self::validateBoolean($value, self::SEATS_COUNT_INVITED),
             self::MAIL_BRAND_COLOR => self::validateHexColor($value),
-            self::DOCUMENTS_PRINT_COLOR => $value === '' ? null : self::validateHexColor($value, self::DOCUMENTS_PRINT_COLOR),
+            self::DOCUMENTS_THEME => DocumentThemeRef::isValid($value) ? null : self::DOCUMENTS_THEME . ' must be a theme ref such as whity.standard or tenant.<key>.',
+            self::DOCUMENTS_THEME_BY_KIND => $value === '' ? null : DocumentThemeRef::validateByKind($value),
             self::MAIL_SMTP_HOST,
             self::MAIL_SMTP_USERNAME,
             self::MAIL_FROM_NAME,

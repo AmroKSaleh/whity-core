@@ -83,6 +83,7 @@ final class CoreTables
         'document_routes' => '112_create_document_routing.php',
         'document_source_files' => '161_create_document_source_files.php',
         'document_source_versions' => '162_create_document_source_versions.php',
+        'document_themes' => '170_create_document_themes.php',
         'plugin_manifest_versions' => '164_create_tenant_plugin_manifests.php',
         'tenant_plugins' => '164_create_tenant_plugin_manifests.php',
         'tenant_plugin_permissions' => '164_create_tenant_plugin_manifests.php',

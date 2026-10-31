@@ -100,8 +100,9 @@ final class DocumentIssuing
     /**
      * A one-off document's draft (a letter, a report), frozen as a version so
      * the issued document records exactly what it said and a correction
-     * reprints it. A draft that matches its last version is not frozen again.
-     * Null when the draft moved on while this ran.
+     * reprints it, with the theme it printed in (editor M4d). A draft that
+     * matches its last version, in the same resolved theme, is not frozen
+     * again. Null when the draft moved on while this ran.
      *
      * @param array<string, mixed> $source The `document_sources` row, with blocks.
      * @return array<string, mixed>|null
@@ -109,15 +110,17 @@ final class DocumentIssuing
     public function freeze(int $tenantId, int $callerId, array $source): ?array
     {
         $last = $this->published($tenantId, $source);
+        $theme = $this->print->theme($tenantId, $source['theme'] ?? null, (string) $source['kind']);
         // Compared without key order: PostgreSQL's JSONB stores object keys in its own order.
         if ($last !== null
             && $last['title'] === (string) $source['title']
             && self::canonical($last['page']) === self::canonical($source['page'])
             && self::canonical($last['blocks']) === self::canonical($source['blocks'])
-            && self::canonical($last['own_fields']) === self::canonical($source['own_fields'] ?? [])) {
+            && self::canonical($last['own_fields']) === self::canonical($source['own_fields'] ?? [])
+            && ($last['theme_resolved']['hash'] ?? null) === $theme['hash']) {
             return $last;
         }
-        $version = $this->versions->publish((int) $source['id'], $tenantId, (int) $source['draft_version'], $callerId);
+        $version = $this->versions->publish((int) $source['id'], $tenantId, (int) $source['draft_version'], $callerId, $theme);
 
         return $version === null ? null : $this->versions->find((int) $source['id'], $tenantId, $version);
     }
@@ -391,6 +394,8 @@ final class DocumentIssuing
             ['title' => (string) $version['title'], 'lang' => (string) $source['lang'], 'page' => $version['page'], 'blocks' => $version['blocks']],
             $recordLabel,
             $values,
+            // The theme frozen with the version: an issue and a correction print alike.
+            $this->print->versionTheme($tenantId, $version, (string) $source['kind']),
         );
         $stamp = $this->stamp($tenantId, $callerId, (int) $document['id'], $effective);
         if ($stamp !== null) {

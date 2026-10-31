@@ -240,10 +240,11 @@ final class RouteCatalogueCompletenessTest extends TestCase
 
     /**
      * Strip inline regex constraints ({id:\d+} → {id}) so live-router and
-     * catalogue paths can be compared by structure alone.
+     * catalogue paths can be compared by structure alone. A constraint may
+     * carry {n} / {n,m} quantifiers, as Router::pathToPattern() accepts.
      */
     private function normalizePath(string $path): string
     {
-        return (string) preg_replace('/\{(\w+):[^}]+\}/', '{$1}', $path);
+        return (string) preg_replace('/\{(\w+):(?:[^{}]|\{\d+(?:,\d*)?\})+\}/', '{$1}', $path);
     }
 }

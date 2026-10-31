@@ -10923,6 +10923,1102 @@
                 ]
             }
         },
+        "/api/v1/document-themes": {
+            "get": {
+                "operationId": "get_api_v1_document_themes",
+                "summary": "List the document themes the workspace can use",
+                "tags": [
+                    "documents"
+                ],
+                "description": "Whity's standard theme and the workspace's own themes (plugin themes come later). Each says which workspace defaults point at it in default_for: `workspace` and document kinds.",
+                "parameters": [
+                    {
+                        "name": "scope",
+                        "in": "query",
+                        "required": false,
+                        "description": "Only themes of this scope: `system` (Whity's standard theme) or `tenant` (the workspace's own). Anything else is a 422. Without it, both.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "archived",
+                        "in": "query",
+                        "required": false,
+                        "description": "Send `1` or `true` to list the workspace's archived themes instead of its active ones.",
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The themes",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentThemeListResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Tenant context is required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Unknown scope",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "operationId": "post_api_v1_document_themes",
+                "summary": "Create a workspace document theme",
+                "tags": [
+                    "documents"
+                ],
+                "description": "It extends Whity's standard theme and is addressed as `tenant.<key>`. Answers 201 with ETag \"1\", the theme's version.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DocumentThemeInput"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "The created theme; its ETag is its version",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentThemeResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Tenant context is required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "A theme with this key already exists",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed, or the system tenant, which has no workspace themes",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/document-themes/resolve": {
+            "post": {
+                "operationId": "post_api_v1_document_themes_resolve",
+                "summary": "Resolve the theme a document would print with",
+                "tags": [
+                    "documents"
+                ],
+                "description": "For a live preview. Reads only. The ref (else the workspace default for the kind, else the workspace default, else Whity's standard theme) with the overrides on top, and what was adjusted on the way, such as a print colour darkened to read on white.",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DocumentThemeResolveRequest"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The resolved theme",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/ResolvedDocumentThemeResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Tenant context is required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Invalid ref, overrides or kind",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/document-themes/schema": {
+            "get": {
+                "operationId": "get_api_v1_document_themes_schema",
+                "summary": "Describe the values a document theme can set",
+                "tags": [
+                    "documents"
+                ],
+                "description": "The closed token set with each token's type, allowed values, whether a document may override it, and English and Arabic labels, so forms are built from one source.",
+                "responses": {
+                    "200": {
+                        "description": "The token schema",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentThemeSchemaResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Tenant context is required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/document-themes/{ref}": {
+            "delete": {
+                "operationId": "delete_api_v1_document_themes_ref",
+                "summary": "Delete a workspace document theme nobody uses",
+                "tags": [
+                    "documents"
+                ],
+                "description": "Only a theme no draft names, no published version printed with and no workspace default points at. Otherwise the answer is 409 with where it is used in details.usage; archive it instead.",
+                "parameters": [
+                    {
+                        "name": "ref",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "Theme deleted"
+                    },
+                    "400": {
+                        "description": "Tenant context is required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Theme not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The theme is in use, or it is Whity's standard theme",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "The system tenant has no workspace themes",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "get": {
+                "operationId": "get_api_v1_document_themes_ref",
+                "summary": "Get one document theme with how it resolves",
+                "tags": [
+                    "documents"
+                ],
+                "description": "Its definition and, in resolved, the values it prints with in this workspace. A workspace theme answers with ETag \"<version>\"; send it as If-Match to change the theme.",
+                "parameters": [
+                    {
+                        "name": "ref",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The theme",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentThemeResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Tenant context is required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Theme not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "patch": {
+                "operationId": "patch_api_v1_document_themes_ref",
+                "summary": "Change a workspace document theme",
+                "tags": [
+                    "documents"
+                ],
+                "description": "Send If-Match with the theme's version (its ETag): without it the answer is 428, and when someone changed the theme in between it is 409 with the current version in details.version. Only the fields sent change; tokens replaces the whole token set. Published templates keep the theme they were published with until a person publishes them again. Whity's standard theme can't be changed.",
+                "parameters": [
+                    {
+                        "name": "ref",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "$ref": "#/components/schemas/DocumentThemePatch"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "The changed theme; its ETag is the new version",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentThemeResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Tenant context is required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Theme not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "The theme changed since this edit was made, or it is Whity's standard theme",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Validation failed, nothing to change, or the system tenant",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "428": {
+                        "description": "If-Match with the theme's version is required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/document-themes/{ref}/archive": {
+            "post": {
+                "operationId": "post_api_v1_document_themes_ref_archive",
+                "summary": "Archive a workspace document theme",
+                "tags": [
+                    "documents"
+                ],
+                "description": "It leaves the list but keeps working where it is already used. A document that names an archived theme still resolves it. Restore it with POST \u2026/restore.",
+                "parameters": [
+                    {
+                        "name": "ref",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The archived theme",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentThemeResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Tenant context is required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Theme not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Whity's standard theme can't be archived",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "The system tenant has no workspace themes",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/document-themes/{ref}/restore": {
+            "post": {
+                "operationId": "post_api_v1_document_themes_ref_restore",
+                "summary": "Restore an archived workspace document theme",
+                "tags": [
+                    "documents"
+                ],
+                "parameters": [
+                    {
+                        "name": "ref",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The restored theme",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentThemeResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Tenant context is required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Theme not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Whity's standard theme can't be archived or restored",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "The system tenant has no workspace themes",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/document-themes/{ref}/usage": {
+            "get": {
+                "operationId": "get_api_v1_document_themes_ref_usage",
+                "summary": "Show where a document theme is used",
+                "tags": [
+                    "documents"
+                ],
+                "description": "The drafts that name it, the published versions printed with it, and the workspace defaults that point at it.",
+                "parameters": [
+                    {
+                        "name": "ref",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Where the theme is used",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/DocumentThemeUsageResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Tenant context is required",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Missing or invalid authentication",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "403": {
+                        "description": "Insufficient permissions",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Theme not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "405": {
+                        "description": "Method not allowed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/Error"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/document-verifications/{token}": {
             "get": {
                 "operationId": "get_api_v1_document_verifications_token",
@@ -41308,16 +42404,44 @@
                                     "lines"
                                 ]
                             },
-                            "accent": {
-                                "type": "string",
-                                "nullable": true,
-                                "description": "The tenant print colour as #RRGGBB, or null for the brand colour"
+                            "letterhead_parts": {
+                                "type": "object",
+                                "properties": {
+                                    "address": {
+                                        "type": "string",
+                                        "nullable": true,
+                                        "description": "The workspace address on one line, or null when none is set"
+                                    },
+                                    "taxId": {
+                                        "type": "string",
+                                        "nullable": true,
+                                        "description": "The workspace tax number, or null when none is set"
+                                    },
+                                    "phone": {
+                                        "type": "string",
+                                        "nullable": true,
+                                        "description": "The workspace phone number, or null when none is set"
+                                    },
+                                    "email": {
+                                        "type": "string",
+                                        "nullable": true,
+                                        "description": "The workspace email address, or null when none is set"
+                                    }
+                                },
+                                "required": [
+                                    "address",
+                                    "taxId",
+                                    "phone",
+                                    "email"
+                                ],
+                                "description": "Every letterhead line by its theme name, so the editor shows the lines the document's theme lists. The print colour comes with the document (resolvedTheme)."
                             }
                         },
                         "required": [
                             "record_types",
                             "groups",
-                            "letterhead"
+                            "letterhead",
+                            "letterhead_parts"
                         ]
                     }
                 },
@@ -41449,7 +42573,8 @@
                             "open-suggestions",
                             "missing-plugin",
                             "block-without-print-view",
-                            "unknown-field"
+                            "unknown-field",
+                            "theme-unavailable"
                         ]
                     },
                     "count": {
@@ -41463,6 +42588,10 @@
                     },
                     "path": {
                         "type": "string"
+                    },
+                    "ref": {
+                        "type": "string",
+                        "description": "With theme-unavailable: the theme the document names that the workspace doesn't have"
                     }
                 },
                 "required": [
@@ -42003,6 +43132,18 @@
                         "nullable": true,
                         "description": "The old Document designer template this was converted from (migration 165), or null"
                     },
+                    "theme": {
+                        "nullable": true,
+                        "allOf": [
+                            {
+                                "$ref": "#/components/schemas/DocumentThemeRef"
+                            }
+                        ],
+                        "description": "The document's own theme choice: a ref and overrides of the print colour and letterhead. Null follows the workspace defaults."
+                    },
+                    "resolvedTheme": {
+                        "$ref": "#/components/schemas/ResolvedDocumentTheme"
+                    },
                     "created_at": {
                         "type": "string"
                     },
@@ -42189,6 +43330,64 @@
                             "$ref": "#/components/schemas/DocumentOwnField"
                         },
                         "description": "A template's own fields, for values no record type provides (a CSV column on a label sheet): a list of {key, label, sample?}, at most 50. The editor inserts each as the field `template.<key>`."
+                    },
+                    "theme": {
+                        "type": "object",
+                        "nullable": true,
+                        "additionalProperties": false,
+                        "properties": {
+                            "ref": {
+                                "type": "string",
+                                "nullable": true,
+                                "pattern": "^[a-z0-9_]{1,40}\\.[a-z0-9_]{1,40}$",
+                                "description": "The theme, such as whity.standard or tenant.<key>; null or left out follows the workspace defaults. A ref the workspace doesn't have still saves, and blocks publishing."
+                            },
+                            "overrides": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                    "accent": {
+                                        "type": "string",
+                                        "pattern": "^#[0-9A-Fa-f]{6}$",
+                                        "description": "The print colour as #rrggbb: the document title, and headings with accentUse `title-and-headings`. Defaults to the workspace main colour."
+                                    },
+                                    "letterhead": {
+                                        "type": "object",
+                                        "additionalProperties": false,
+                                        "description": "The letterhead: which logo, and which workspace lines print under the name.",
+                                        "properties": {
+                                            "logo": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "wide",
+                                                    "square",
+                                                    "none"
+                                                ],
+                                                "description": "Which logo the letterhead shows: `wide`, `square` or `none`."
+                                            },
+                                            "lines": {
+                                                "type": "array",
+                                                "maxItems": 4,
+                                                "uniqueItems": true,
+                                                "items": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                        "address",
+                                                        "taxId",
+                                                        "phone",
+                                                        "email"
+                                                    ]
+                                                },
+                                                "description": "The workspace lines printed under the name, in this order, without repeats: up to four of `address`, `taxId`, `phone`, `email`."
+                                            }
+                                        }
+                                    }
+                                },
+                                "nullable": true,
+                                "description": "This document's own print colour and letterhead, over its theme. Only accent and letterhead."
+                            }
+                        },
+                        "description": "The document's theme (E.44): { ref?, overrides? }, or null to follow the workspace defaults."
                     }
                 }
             },
@@ -42365,6 +43564,24 @@
                                     "$ref": "#/components/schemas/DocumentOwnField"
                                 }
                             },
+                            "theme": {
+                                "nullable": true,
+                                "allOf": [
+                                    {
+                                        "$ref": "#/components/schemas/DocumentThemeRef"
+                                    }
+                                ],
+                                "description": "The document's own theme choice when it was published, or null."
+                            },
+                            "theme_resolved": {
+                                "nullable": true,
+                                "allOf": [
+                                    {
+                                        "$ref": "#/components/schemas/ResolvedDocumentTheme"
+                                    }
+                                ],
+                                "description": "The theme frozen when this version was published, which printing it uses; null for versions published before themes."
+                            },
                             "published_by": {
                                 "type": "integer",
                                 "nullable": true
@@ -42425,6 +43642,667 @@
                 "required": [
                     "key",
                     "description"
+                ]
+            },
+            "DocumentTheme": {
+                "type": "object",
+                "properties": {
+                    "ref": {
+                        "type": "string",
+                        "description": "How documents name it: whity.standard or tenant.<key>"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "enum": [
+                            "system",
+                            "tenant"
+                        ],
+                        "description": "`system` for Whity's standard theme, `tenant` for the workspace's own"
+                    },
+                    "key": {
+                        "type": "string"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "The English name"
+                    },
+                    "name_ar": {
+                        "type": "string",
+                        "description": "The Arabic name"
+                    },
+                    "extends": {
+                        "type": "string",
+                        "nullable": true,
+                        "description": "The theme it builds on: whity.standard, or null for Whity's standard theme itself"
+                    },
+                    "tokens": {
+                        "$ref": "#/components/schemas/DocumentThemeTokens"
+                    },
+                    "version": {
+                        "type": "integer",
+                        "description": "Goes up with every change; 0 for Whity's standard theme. The ETag and If-Match value."
+                    },
+                    "archived": {
+                        "type": "boolean"
+                    },
+                    "archived_at": {
+                        "type": "string",
+                        "nullable": true
+                    },
+                    "default_for": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "The workspace defaults that point at it: `workspace` and document kinds such as `label`"
+                    },
+                    "created_by": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "updated_by": {
+                        "type": "integer",
+                        "nullable": true
+                    },
+                    "created_at": {
+                        "type": "string"
+                    },
+                    "updated_at": {
+                        "type": "string"
+                    },
+                    "resolved": {
+                        "$ref": "#/components/schemas/ResolvedDocumentTheme"
+                    }
+                },
+                "required": [
+                    "ref",
+                    "scope",
+                    "key",
+                    "name",
+                    "name_ar",
+                    "extends",
+                    "tokens",
+                    "version",
+                    "archived",
+                    "default_for"
+                ]
+            },
+            "DocumentThemeAdjustment": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "enum": [
+                            "theme_missing",
+                            "base_missing",
+                            "accent_darkened"
+                        ],
+                        "description": "`theme_missing`: a ref the workspace doesn't have, so the next default was used; `base_missing`: the theme's base isn't available; `accent_darkened`: the print colour was darkened to read on white"
+                    },
+                    "token": {
+                        "type": "string",
+                        "description": "What was adjusted: `ref`, `extends` or `accent`"
+                    },
+                    "from": {
+                        "type": "string",
+                        "description": "The value asked for"
+                    },
+                    "to": {
+                        "type": "string",
+                        "description": "The value used instead, when there is one"
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "What happened, in English"
+                    }
+                },
+                "required": [
+                    "code",
+                    "token",
+                    "from",
+                    "message"
+                ]
+            },
+            "DocumentThemeInput": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "pattern": "^[a-z0-9_]{1,40}$",
+                        "description": "The key: 1 to 40 lower-case letters, digits and underscores. The theme is then tenant.<key>. It can't be changed later."
+                    },
+                    "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120,
+                        "description": "The English name, at most 120 characters."
+                    },
+                    "name_ar": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120,
+                        "description": "The Arabic name, at most 120 characters."
+                    },
+                    "extends": {
+                        "type": "string",
+                        "nullable": true,
+                        "description": "The theme it builds on. Only whity.standard for now (the default)."
+                    },
+                    "tokens": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "accent": {
+                                "type": "string",
+                                "pattern": "^#[0-9A-Fa-f]{6}$",
+                                "description": "The print colour as #rrggbb: the document title, and headings with accentUse `title-and-headings`. Defaults to the workspace main colour."
+                            },
+                            "accentOnDark": {
+                                "type": "string",
+                                "pattern": "^#[0-9A-Fa-f]{6}$",
+                                "description": "The title colour on screen in dark mode, as #rrggbb. Never printed. Derived from accent when not set."
+                            },
+                            "accentUse": {
+                                "type": "string",
+                                "enum": [
+                                    "title",
+                                    "title-and-headings"
+                                ],
+                                "description": "Where the print colour is used: `title` only, or `title-and-headings` (H1 to H3 too)."
+                            },
+                            "letterhead": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "description": "The letterhead: which logo, and which workspace lines print under the name.",
+                                "properties": {
+                                    "logo": {
+                                        "type": "string",
+                                        "enum": [
+                                            "wide",
+                                            "square",
+                                            "none"
+                                        ],
+                                        "description": "Which logo the letterhead shows: `wide`, `square` or `none`."
+                                    },
+                                    "lines": {
+                                        "type": "array",
+                                        "maxItems": 4,
+                                        "uniqueItems": true,
+                                        "items": {
+                                            "type": "string",
+                                            "enum": [
+                                                "address",
+                                                "taxId",
+                                                "phone",
+                                                "email"
+                                            ]
+                                        },
+                                        "description": "The workspace lines printed under the name, in this order, without repeats: up to four of `address`, `taxId`, `phone`, `email`."
+                                    }
+                                }
+                            }
+                        },
+                        "description": "The values it sets over the theme it extends. Leave a token out to keep the base's."
+                    }
+                },
+                "required": [
+                    "key",
+                    "name",
+                    "name_ar"
+                ]
+            },
+            "DocumentThemeListResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DocumentTheme"
+                        }
+                    },
+                    "meta": {
+                        "type": "object",
+                        "properties": {
+                            "total": {
+                                "type": "integer"
+                            }
+                        },
+                        "required": [
+                            "total"
+                        ]
+                    }
+                },
+                "required": [
+                    "data",
+                    "meta"
+                ]
+            },
+            "DocumentThemeOverrides": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "accent": {
+                        "type": "string",
+                        "pattern": "^#[0-9A-Fa-f]{6}$",
+                        "description": "The print colour as #rrggbb: the document title, and headings with accentUse `title-and-headings`. Defaults to the workspace main colour."
+                    },
+                    "letterhead": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "description": "The letterhead: which logo, and which workspace lines print under the name.",
+                        "properties": {
+                            "logo": {
+                                "type": "string",
+                                "enum": [
+                                    "wide",
+                                    "square",
+                                    "none"
+                                ],
+                                "description": "Which logo the letterhead shows: `wide`, `square` or `none`."
+                            },
+                            "lines": {
+                                "type": "array",
+                                "maxItems": 4,
+                                "uniqueItems": true,
+                                "items": {
+                                    "type": "string",
+                                    "enum": [
+                                        "address",
+                                        "taxId",
+                                        "phone",
+                                        "email"
+                                    ]
+                                },
+                                "description": "The workspace lines printed under the name, in this order, without repeats: up to four of `address`, `taxId`, `phone`, `email`."
+                            }
+                        }
+                    }
+                }
+            },
+            "DocumentThemePatch": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120,
+                        "description": "The English name, at most 120 characters."
+                    },
+                    "name_ar": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 120,
+                        "description": "The Arabic name, at most 120 characters."
+                    },
+                    "extends": {
+                        "type": "string",
+                        "nullable": true,
+                        "description": "The theme it builds on. Only whity.standard for now."
+                    },
+                    "tokens": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "accent": {
+                                "type": "string",
+                                "pattern": "^#[0-9A-Fa-f]{6}$",
+                                "description": "The print colour as #rrggbb: the document title, and headings with accentUse `title-and-headings`. Defaults to the workspace main colour."
+                            },
+                            "accentOnDark": {
+                                "type": "string",
+                                "pattern": "^#[0-9A-Fa-f]{6}$",
+                                "description": "The title colour on screen in dark mode, as #rrggbb. Never printed. Derived from accent when not set."
+                            },
+                            "accentUse": {
+                                "type": "string",
+                                "enum": [
+                                    "title",
+                                    "title-and-headings"
+                                ],
+                                "description": "Where the print colour is used: `title` only, or `title-and-headings` (H1 to H3 too)."
+                            },
+                            "letterhead": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "description": "The letterhead: which logo, and which workspace lines print under the name.",
+                                "properties": {
+                                    "logo": {
+                                        "type": "string",
+                                        "enum": [
+                                            "wide",
+                                            "square",
+                                            "none"
+                                        ],
+                                        "description": "Which logo the letterhead shows: `wide`, `square` or `none`."
+                                    },
+                                    "lines": {
+                                        "type": "array",
+                                        "maxItems": 4,
+                                        "uniqueItems": true,
+                                        "items": {
+                                            "type": "string",
+                                            "enum": [
+                                                "address",
+                                                "taxId",
+                                                "phone",
+                                                "email"
+                                            ]
+                                        },
+                                        "description": "The workspace lines printed under the name, in this order, without repeats: up to four of `address`, `taxId`, `phone`, `email`."
+                                    }
+                                }
+                            }
+                        },
+                        "description": "The values it sets, replacing the whole token set. Leave a token out to use the base's."
+                    }
+                }
+            },
+            "DocumentThemeRef": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "ref": {
+                        "type": "string",
+                        "description": "The theme: whity.standard or tenant.<key>"
+                    },
+                    "overrides": {
+                        "$ref": "#/components/schemas/DocumentThemeOverrides"
+                    }
+                }
+            },
+            "DocumentThemeResolveRequest": {
+                "type": "object",
+                "properties": {
+                    "ref": {
+                        "type": "string",
+                        "nullable": true,
+                        "pattern": "^[a-z0-9_]{1,40}\\.[a-z0-9_]{1,40}$",
+                        "description": "The theme to resolve, such as whity.standard or tenant.<key>. Left out, the workspace default (for the kind, when one is sent)."
+                    },
+                    "overrides": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "accent": {
+                                "type": "string",
+                                "pattern": "^#[0-9A-Fa-f]{6}$",
+                                "description": "The print colour as #rrggbb: the document title, and headings with accentUse `title-and-headings`. Defaults to the workspace main colour."
+                            },
+                            "letterhead": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "description": "The letterhead: which logo, and which workspace lines print under the name.",
+                                "properties": {
+                                    "logo": {
+                                        "type": "string",
+                                        "enum": [
+                                            "wide",
+                                            "square",
+                                            "none"
+                                        ],
+                                        "description": "Which logo the letterhead shows: `wide`, `square` or `none`."
+                                    },
+                                    "lines": {
+                                        "type": "array",
+                                        "maxItems": 4,
+                                        "uniqueItems": true,
+                                        "items": {
+                                            "type": "string",
+                                            "enum": [
+                                                "address",
+                                                "taxId",
+                                                "phone",
+                                                "email"
+                                            ]
+                                        },
+                                        "description": "The workspace lines printed under the name, in this order, without repeats: up to four of `address`, `taxId`, `phone`, `email`."
+                                    }
+                                }
+                            }
+                        },
+                        "nullable": true,
+                        "description": "A document's print colour and letterhead overrides to apply on top. Only accent and letterhead."
+                    },
+                    "kind": {
+                        "type": "string",
+                        "enum": [
+                            "template",
+                            "letter",
+                            "report",
+                            "note",
+                            "wiki",
+                            "label"
+                        ],
+                        "description": "The document kind, for the workspace default by kind: `template`, `letter`, `report`, `note`, `wiki` or `label`."
+                    }
+                }
+            },
+            "DocumentThemeResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/DocumentTheme"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "DocumentThemeSchema": {
+                "type": "object",
+                "properties": {
+                    "tokens": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": {
+                                    "type": "string",
+                                    "description": "The token path: `accent`, `accentOnDark`, `accentUse`, `letterhead.logo` or `letterhead.lines`"
+                                },
+                                "type": {
+                                    "type": "string",
+                                    "enum": [
+                                        "color",
+                                        "enum",
+                                        "list"
+                                    ]
+                                },
+                                "overridable": {
+                                    "type": "boolean",
+                                    "description": "Whether a document may override it"
+                                },
+                                "label": {
+                                    "type": "string"
+                                },
+                                "labelAr": {
+                                    "type": "string"
+                                },
+                                "description": {
+                                    "type": "string"
+                                },
+                                "descriptionAr": {
+                                    "type": "string"
+                                },
+                                "max": {
+                                    "type": "integer",
+                                    "description": "For a list: how many values it takes at most"
+                                },
+                                "values": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "value": {
+                                                "type": "string"
+                                            },
+                                            "label": {
+                                                "type": "string"
+                                            },
+                                            "labelAr": {
+                                                "type": "string"
+                                            }
+                                        },
+                                        "required": [
+                                            "value",
+                                            "label",
+                                            "labelAr"
+                                        ]
+                                    }
+                                }
+                            },
+                            "required": [
+                                "key",
+                                "type",
+                                "overridable",
+                                "label",
+                                "labelAr"
+                            ]
+                        }
+                    }
+                },
+                "required": [
+                    "tokens"
+                ]
+            },
+            "DocumentThemeSchemaResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/DocumentThemeSchema"
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "DocumentThemeTokens": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "accent": {
+                        "type": "string",
+                        "pattern": "^#[0-9A-Fa-f]{6}$",
+                        "description": "The print colour as #rrggbb: the document title, and headings with accentUse `title-and-headings`. Defaults to the workspace main colour."
+                    },
+                    "accentOnDark": {
+                        "type": "string",
+                        "pattern": "^#[0-9A-Fa-f]{6}$",
+                        "description": "The title colour on screen in dark mode, as #rrggbb. Never printed. Derived from accent when not set."
+                    },
+                    "accentUse": {
+                        "type": "string",
+                        "enum": [
+                            "title",
+                            "title-and-headings"
+                        ],
+                        "description": "Where the print colour is used: `title` only, or `title-and-headings` (H1 to H3 too)."
+                    },
+                    "letterhead": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "description": "The letterhead: which logo, and which workspace lines print under the name.",
+                        "properties": {
+                            "logo": {
+                                "type": "string",
+                                "enum": [
+                                    "wide",
+                                    "square",
+                                    "none"
+                                ],
+                                "description": "Which logo the letterhead shows: `wide`, `square` or `none`."
+                            },
+                            "lines": {
+                                "type": "array",
+                                "maxItems": 4,
+                                "uniqueItems": true,
+                                "items": {
+                                    "type": "string",
+                                    "enum": [
+                                        "address",
+                                        "taxId",
+                                        "phone",
+                                        "email"
+                                    ]
+                                },
+                                "description": "The workspace lines printed under the name, in this order, without repeats: up to four of `address`, `taxId`, `phone`, `email`."
+                            }
+                        }
+                    }
+                }
+            },
+            "DocumentThemeUsage": {
+                "type": "object",
+                "properties": {
+                    "drafts": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "integer"
+                                },
+                                "title": {
+                                    "type": "string"
+                                },
+                                "kind": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "id",
+                                "title",
+                                "kind"
+                            ]
+                        },
+                        "description": "Documents whose draft names the theme"
+                    },
+                    "published": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "integer"
+                                },
+                                "title": {
+                                    "type": "string"
+                                },
+                                "version": {
+                                    "type": "integer"
+                                }
+                            },
+                            "required": [
+                                "id",
+                                "title",
+                                "version"
+                            ]
+                        },
+                        "description": "Templates whose current published version printed with the theme"
+                    },
+                    "defaults": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "The workspace defaults that point at it: `workspace` and document kinds"
+                    }
+                },
+                "required": [
+                    "drafts",
+                    "published",
+                    "defaults"
+                ]
+            },
+            "DocumentThemeUsageResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/DocumentThemeUsage"
+                    }
+                },
+                "required": [
+                    "data"
                 ]
             },
             "DocumentTrailEvent": {
@@ -48980,6 +50858,122 @@
                         "items": {
                             "$ref": "#/components/schemas/RelationshipType"
                         }
+                    }
+                },
+                "required": [
+                    "data"
+                ]
+            },
+            "ResolvedDocumentTheme": {
+                "type": "object",
+                "properties": {
+                    "ref": {
+                        "type": "string",
+                        "description": "The theme actually used, after falling back past any that isn't available"
+                    },
+                    "version": {
+                        "type": "integer",
+                        "description": "That theme's version; 0 for Whity's standard theme"
+                    },
+                    "hash": {
+                        "type": "string",
+                        "description": "A hash of the ref, version and tokens; unchanged while the theme is"
+                    },
+                    "tokens": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "accent": {
+                                "type": "string",
+                                "pattern": "^#[0-9A-Fa-f]{6}$",
+                                "description": "The print colour as #rrggbb: the document title, and headings with accentUse `title-and-headings`. Defaults to the workspace main colour."
+                            },
+                            "accentOnDark": {
+                                "type": "string",
+                                "pattern": "^#[0-9A-Fa-f]{6}$",
+                                "description": "The title colour on screen in dark mode, as #rrggbb. Never printed. Derived from accent when not set."
+                            },
+                            "accentUse": {
+                                "type": "string",
+                                "enum": [
+                                    "title",
+                                    "title-and-headings"
+                                ],
+                                "description": "Where the print colour is used: `title` only, or `title-and-headings` (H1 to H3 too)."
+                            },
+                            "letterhead": {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "description": "The letterhead: which logo, and which workspace lines print under the name.",
+                                "properties": {
+                                    "logo": {
+                                        "type": "string",
+                                        "enum": [
+                                            "wide",
+                                            "square",
+                                            "none"
+                                        ],
+                                        "description": "Which logo the letterhead shows: `wide`, `square` or `none`."
+                                    },
+                                    "lines": {
+                                        "type": "array",
+                                        "maxItems": 4,
+                                        "uniqueItems": true,
+                                        "items": {
+                                            "type": "string",
+                                            "enum": [
+                                                "address",
+                                                "taxId",
+                                                "phone",
+                                                "email"
+                                            ]
+                                        },
+                                        "description": "The workspace lines printed under the name, in this order, without repeats: up to four of `address`, `taxId`, `phone`, `email`."
+                                    }
+                                },
+                                "required": [
+                                    "logo",
+                                    "lines"
+                                ]
+                            }
+                        },
+                        "required": [
+                            "accent",
+                            "accentOnDark",
+                            "accentUse",
+                            "letterhead"
+                        ],
+                        "description": "Every token, resolved"
+                    },
+                    "sources": {
+                        "type": "object",
+                        "additionalProperties": {
+                            "type": "string"
+                        },
+                        "description": "Where each token came from, by its path (`accent`, `letterhead.lines`\u2026): a theme ref, `document` for an override, or `branding.main_color`"
+                    },
+                    "adjustments": {
+                        "type": "array",
+                        "items": {
+                            "$ref": "#/components/schemas/DocumentThemeAdjustment"
+                        },
+                        "description": "What was changed on the way, such as a print colour darkened to reach 4.5:1 on white"
+                    }
+                },
+                "required": [
+                    "ref",
+                    "version",
+                    "hash",
+                    "tokens",
+                    "sources",
+                    "adjustments"
+                ]
+            },
+            "ResolvedDocumentThemeResponse": {
+                "type": "object",
+                "properties": {
+                    "data": {
+                        "$ref": "#/components/schemas/ResolvedDocumentTheme"
                     }
                 },
                 "required": [

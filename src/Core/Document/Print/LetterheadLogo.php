@@ -16,8 +16,10 @@ use Whity\Storage\StorageException;
  * editor's page view shows the same logo through TenantLogo; this puts it on
  * the PDF too.
  *
- * The wide logo is preferred, then the square one, each resolved tenant →
- * global like the rest of the branding. No logo, an unreadable object, a type
+ * The document theme chooses which (`letterhead.logo`, editor M4d): the wide
+ * logo, then the square one if there is no wide one; the square logo, then the
+ * wide one; or none. Each is resolved tenant → global like the rest of the
+ * branding. No logo, an unreadable object, a type
  * Whity Render doesn't draw or one too big for its image limit all answer null:
  * the letterhead then prints the name alone rather than failing the render.
  */
@@ -35,10 +37,17 @@ final class LetterheadLogo
     ) {
     }
 
-    public function dataUri(int $tenantId): ?string
+    /** @param string $choice the theme's `letterhead.logo`: wide, square or none */
+    public function dataUri(int $tenantId, string $choice = 'wide'): ?string
     {
+        if ($choice === 'none') {
+            return null;
+        }
         $effective = $this->settings->effective($tenantId);
-        foreach ([SettingsRegistry::BRANDING_LOGO_WIDE, SettingsRegistry::BRANDING_LOGO_SQUARE] as $key) {
+        $order = $choice === 'square'
+            ? [SettingsRegistry::BRANDING_LOGO_SQUARE, SettingsRegistry::BRANDING_LOGO_WIDE]
+            : [SettingsRegistry::BRANDING_LOGO_WIDE, SettingsRegistry::BRANDING_LOGO_SQUARE];
+        foreach ($order as $key) {
             $storageKey = trim((string) ($effective[$key] ?? ''));
             if ($storageKey === '') {
                 continue;
