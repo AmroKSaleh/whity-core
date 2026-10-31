@@ -134,6 +134,16 @@ const nextConfig: NextConfig = {
    */
   generateBuildId: async () => buildCommit,
   /**
+   * `next build` type-checks against tsconfig.build.json, which leaves out
+   * Storybook (`.storybook/` and `*.stories.tsx`) (WHIT-720). Storybook isn't
+   * part of the app, and its Arabic helper imports `database/i18n`, which the
+   * web image's build context does not contain. `tsc --noEmit` in CI still
+   * checks the stories through tsconfig.json.
+   */
+  typescript: {
+    tsconfigPath: "tsconfig.build.json",
+  },
+  /**
    * Statically replaced at BUILD time — deliberately not runtime env. See
    * lib/build-info.ts for why the distinction is the whole feature.
    */
