@@ -39,6 +39,11 @@ jest.mock('@/lib/api/client', () => ({
   },
 }));
 
+// The branding main colour refreshes the server layout after a save.
+jest.mock('next/navigation', () => ({
+  useRouter: () => ({ refresh: jest.fn() }),
+}));
+
 const addToast = jest.fn();
 jest.mock('@/lib/toast-context', () => ({
   useToast: () => ({ addToast }),
