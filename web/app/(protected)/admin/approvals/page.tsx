@@ -26,7 +26,7 @@ import { ApprovalQueue, type ApprovalQueueItem } from '@whity-org/ui/approval-qu
 import { AgentActivity } from '@whity-org/ui/agent-activity';
 import { EmptyState } from '@whity-org/ui/empty-state';
 import { useTranslation } from '@whity-org/features/i18n';
-import { parseWireDate } from '@whity-org/features/datetime';
+import { useDateDisplay } from '@whity-org/features/datetime';
 import { AdminHeader } from '@/components/admin/admin-header';
 import { WAITING_CHANGED_EVENT } from '@/lib/waiting-changed';
 import { useAuth } from '@/lib/auth-context';
@@ -44,18 +44,12 @@ import {
 } from '@/components/agents/proposals';
 import { EditProposalDialog } from './edit-proposal-dialog';
 
-/**
- * Times on the timeline: the viewer's local time, 24-hour, Western digits in
- * both languages. `parseWireDate` reads the server's zone-less timestamps as
- * the UTC they are stored in.
- */
-function clock(value: string): string {
-  const date = parseWireDate(value);
-  return date === null ? '' : date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
-}
-
 export default function ApprovalsPage() {
   const t = useTranslation('admin');
+  const dates = useDateDisplay();
+  // Times through the shared date display: local, and nothing at all when the
+  // workspace hides dates.
+  const clock = (value: string): string => dates.time(value) ?? '';
   const { apiClient } = useAuth();
   const { addToast } = useToast();
   const [tab, setTab] = useState('waiting');

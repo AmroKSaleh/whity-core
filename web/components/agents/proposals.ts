@@ -117,7 +117,7 @@ export function proposalActivity(
       actor: agent,
       onBehalfOf: you,
       text: words.asked.replace('{summary}', proposal.summary),
-      time: time(proposal.createdAt),
+      timeLabel: time(proposal.createdAt),
       dateTime: proposal.createdAt,
       tool: proposal.tool,
     });
@@ -128,7 +128,7 @@ export function proposalActivity(
         actor: you,
         actorKind: 'person',
         text: (proposal.status === 'approved' ? words.approved : words.declined).replace('{summary}', proposal.summary),
-        time: time(proposal.decidedAt),
+        timeLabel: time(proposal.decidedAt),
         dateTime: proposal.decidedAt,
       });
     }
