@@ -199,7 +199,7 @@ These are the building blocks for everything Whity Render prints. They were show
 | --- | --- | --- |
 | 6.1 | Margins | 16 mm on all sides of an A4 page, leaving 178 mm of content width. US Letter and A5 follow the same rules. |
 | 6.2 | Letterhead | Tenant logo, address and tax number at the start side; title, number and date at the end side. |
-| 6.3 | Tenant colour | Used on the document title only. Everything else is ink, so documents print and fax cleanly. |
+| 6.3 | Tenant colour | Used on the document title only. Everything else is ink, so documents print and fax cleanly. A theme may extend it to headings (E.45, 31 Oct 2026). |
 | 6.4 | Languages | Either language can lead, chosen per customer: Arabic with English labels (layout mirrors) or English with Arabic labels. Latin values inside Arabic are isolated with bdi. |
 
 ### Inside the document
@@ -379,6 +379,10 @@ A Notion-, Gutenberg- and Google Docs–inspired editor for whity-core's Documen
 | E.41 | QR code block | A Whity block: a value or a merge field as a QR, with an optional caption. Distinct from the document's verification QR in the footer (6.7), which stays automatic. Asked and decided 29 Oct 2026. |
 | E.42 | Maths block | A block (and an inline `math` node) for formulas in TeX, rendered with KaTeX on screen and in print. Group "Basic". Asked and decided 29 Oct 2026. |
 | E.43 | Label sheets | A document kind `label`: a sheet (A4, Letter) divided into a fixed grid of labels, each one the same blocks with fields; Print fills one label per record or per row of an uploaded CSV. It opens in the page view and never in the continuous view. Replaces the canvas mode's labels and certificates; a certificate is a one-label sheet. Asked and decided 29 Oct 2026. |
+| E.44 | Document themes | A document's look comes from a theme: Whity's standard theme, a plugin's, or the workspace's own, which a document can override for the print colour and the letterhead only. No personal themes. A theme is a closed set of values (print colour, letterhead logo and lines, and the options in E.45-E.47), never CSS; everything else follows stage 6 and E.33. Inheritance: Whity standard, then a plugin theme, then the workspace theme, then the document. The print colour defaults to the workspace main colour (2.8). A published template keeps the theme it was published with until it's published again (as E.38). See `DOCUMENT-THEMES.md`. Asked and decided 31 Oct 2026. |
+| E.45 | Accent on headings | A theme option, off by default: Heading 1-3 in the print colour as well as the title. This relaxes 6.3 ("title only") for themes that choose it; the owner's decision, against the recommendation to keep 6.3. Asked and decided 31 Oct 2026. |
+| E.46 | Title face | A theme option: the document title in Readex Pro 600 (default, 3.1 and E.35) or in Noto Sans 600 (Noto Sans Arabic 600 in Arabic). Product screens still never use Readex Pro. Asked and decided 31 Oct 2026. |
+| E.47 | Large print | A theme option: an 11pt body in print with headings scaled by the same steps as 6.5 and E.33; Arabic stays at 100% of the Latin size (3.7a). Asked and decided 31 Oct 2026. |
 
 Parts: 1 shell (locked 29 Oct, cards EditorShell) · 2 canvas (locked 29 Oct, cards EditorShell, EditorPageView) · 3 blocks (locked 29 Oct, cards EditorBlocks, EditorBlockChrome) · 3b plugin and saved blocks (locked 29 Oct, card EditorCustomBlocks) · 4 inline (locked 29 Oct, card EditorInline) · 5 inserting (locked 29 Oct, card EditorInsert) · 6 collaboration (locked 29 Oct, card EditorCollab) · 7 agents (locked 29 Oct, card EditorAgents) · 8 typography (locked 29 Oct, card EditorType). All parts locked 29 Oct 2026; compiled into version 2.2. E.40–E.43 added on 29 Oct 2026 with the engineering survey (M0), when the editor was chosen to replace both modes of the existing Document designer; they have no cards yet.
 
