@@ -39,8 +39,17 @@ final class DocumentSourceStarterSeeder implements TenantProvisioningStep
         $this->seedForTenant($tenantId);
     }
 
-    /** @return int How many starters were added. */
-    public function seedForTenant(int $tenantId): int
+    /**
+     * Add the starters a tenant doesn't have yet.
+     *
+     * Provisioning a tenant must not fail on its starters, so by default a
+     * failure is logged and the tenant goes on without them. A migration
+     * passes `$strict`: there a failure has to stop the upgrade, or every
+     * workspace ends up with no starters and nobody is told (WHIT-803).
+     *
+     * @return int How many starters were added.
+     */
+    public function seedForTenant(int $tenantId, bool $strict = false): int
     {
         $added = 0;
         try {
@@ -59,6 +68,9 @@ final class DocumentSourceStarterSeeder implements TenantProvisioningStep
                 $added++;
             }
         } catch (\Throwable $e) {
+            if ($strict) {
+                throw new \RuntimeException("Seeding the editor starters failed for tenant {$tenantId}: " . $e->getMessage(), 0, $e);
+            }
             $this->logger?->error('Seeding the editor starters failed', [
                 'event'     => 'documents.source_starter_seed_failed',
                 'tenant_id' => $tenantId,

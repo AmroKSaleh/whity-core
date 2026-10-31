@@ -62,7 +62,8 @@ class IssueDocumentsFromSourcesAndDropDesigner
         $tenants->execute([':system' => self::SYSTEM_TENANT_ID]);
         $errors = [];
         foreach ($tenants->fetchAll(PDO::FETCH_COLUMN) as $tenantId) {
-            $starters->seedForTenant((int) $tenantId);
+            // Strict: a starter that can't be written stops the upgrade (WHIT-803).
+            $starters->seedForTenant((int) $tenantId, strict: true);
             $summary = $migrator->migrateTenant((int) $tenantId);
             foreach ($summary['errors'] as $error) {
                 $errors[] = "tenant {$tenantId}, {$error}";

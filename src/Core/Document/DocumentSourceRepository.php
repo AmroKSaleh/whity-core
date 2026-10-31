@@ -82,18 +82,33 @@ final class DocumentSourceRepository
      *              scope?: string, required_permission?: ?string, created_by: ?int, owner_ou_id?: ?int,
      *              own_fields?: ?list<array<string, string>>, starter_key?: ?string, legacy_template_id?: ?int,
      *              theme?: ?array<string, mixed>} $rec
+     * Columns a later migration added are written only when the record sets
+     * them. Migration 165 seeds the starters and converts old templates
+     * through this method on a schema that doesn't have them yet (WHIT-803:
+     * `theme` comes with migration 171), so a column added here must stay out
+     * of the INSERT unless it is given.
+     *
      * @return int The new row id.
      */
     public function create(int $tenantId, array $rec): int
     {
+        // Added after migration 165 (see above): only when set.
+        $later = [];
+        if (isset($rec['theme'])) {
+            $later['theme'] = $this->encode($rec['theme']);
+        }
+        $laterColumns = $later === [] ? '' : ', ' . implode(', ', array_keys($later));
+        $laterValues = $later === [] ? '' : ', :' . implode(', :', array_keys($later));
+
         $stmt = $this->db->prepare(
             'INSERT INTO document_sources
-                 (tenant_id, kind, title, lang, default_view, full_width, page, record_type, blocks, own_fields, theme, draft_version,
-                  scope, required_permission, created_by, owner_ou_id, updated_by, starter_key, legacy_template_id, created_at, updated_at)
-             VALUES (:tenant_id, :kind, :title, :lang, :default_view, :full_width, :page, :record_type, :blocks, :own_fields, :theme, 1,
-                  :scope, :required_permission, :created_by, :owner_ou_id, :updated_by, :starter_key, :legacy_template_id, NOW(), NOW())'
+                 (tenant_id, kind, title, lang, default_view, full_width, page, record_type, blocks, own_fields, draft_version,
+                  scope, required_permission, created_by, owner_ou_id, updated_by, starter_key, legacy_template_id, created_at, updated_at' . $laterColumns . ')
+             VALUES (:tenant_id, :kind, :title, :lang, :default_view, :full_width, :page, :record_type, :blocks, :own_fields, 1,
+                  :scope, :required_permission, :created_by, :owner_ou_id, :updated_by, :starter_key, :legacy_template_id, NOW(), NOW()' . $laterValues . ')'
         );
-        $stmt->execute([
+        $params = array_combine(array_map(static fn (string $c): string => ':' . $c, array_keys($later)), array_values($later));
+        $stmt->execute($params + [
             ':tenant_id'           => $tenantId,
             ':kind'                => $rec['kind'],
             ':title'               => $rec['title'],
@@ -104,7 +119,6 @@ final class DocumentSourceRepository
             ':record_type'         => $rec['record_type'] ?? null,
             ':blocks'              => $this->encode($rec['blocks']),
             ':own_fields'          => isset($rec['own_fields']) ? $this->encode($rec['own_fields']) : null,
-            ':theme'               => isset($rec['theme']) ? $this->encode($rec['theme']) : null,
             ':scope'               => $rec['scope'] ?? DocumentAccessPolicy::SCOPE_PERSONAL,
             ':required_permission' => $rec['required_permission'] ?? null,
             ':created_by'          => $rec['created_by'],
